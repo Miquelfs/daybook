@@ -1,0 +1,10 @@
+garminconnect
+python-dotenv
+pandas
+requests
+fastapi
+uvicorn[standard]
+pydantic
+scipy
+numpy
+tqdm

@@ -1,0 +1,32 @@
+# secrets & config
+.env
+.env.*
+
+# databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# data landing zones (local only, never committed)
+data/raw/
+data/backups/
+
+# node / next.js
+node_modules/
+.next/
+.vercel/
+
+# OS
+.DS_Store
+Thumbs.db
