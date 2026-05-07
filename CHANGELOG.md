@@ -52,3 +52,35 @@ Phase 1 — Spine: **in progress**
 Next: FastAPI backend `/day/{date}` + `/range` endpoints; then Next.js Today view
 
 ---
+
+## 2026-05-07 — Locations import + FastAPI backend + Questionnaire
+
+### Added (Locations)
+- Copied `locations.db` (14 MB) from miquelOS into `infrastructure/db/` — already geocoded, 19,676 visits, 20,465 movements, 4,058 place names, 2014 → 2026
+- Copied `data/raw/locations/location-history.json` (38 MB) as source-of-truth raw backup
+- `domains/locations/locations_query.py` — read-only query helpers: `visits_for_date`, `movements_for_date`, `location_summary_for_date`, `on_this_day_locations`
+- `domains/locations/__init__.py`
+
+### Added (FastAPI backend)
+- `infrastructure/api/main.py` — FastAPI app, CORS for localhost:3000, binds 127.0.0.1:8000
+- `infrastructure/api/db.py` — per-request SQLite connection dependency injection
+- `infrastructure/api/routers/days.py` — `GET /days/today`, `GET /days/{date}`, `GET /days?start=&end=`, `PATCH /days/{date}`
+- `infrastructure/api/routers/insights.py` — `GET /insights/on-this-day/{date}` (functional), `/streaks` + `/correlations` (stubs)
+- `infrastructure/api/routers/questionnaire.py` — `GET /questionnaire/today`, `GET /questionnaire/{date}`
+- `infrastructure/api/models/day.py` — Pydantic models: `DayDetail`, `DaySummary`, `DayPatch`, `SleepData`, `DailyStatsData`, `HRVData`, `ActivityData`, `LocationSummary`, `LocationVisit`, `DaySubjective`
+- `infrastructure/api/questionnaire/questions.py` — 6 core questions (always shown) + 30 rotating reflective questions (deterministic by date hash). Design informed by Whoop journal (yes/no behaviors) but more reflective and long-form.
+- `infrastructure/api/run.sh` — dev launcher: activates venv, runs uvicorn with --reload
+
+### Verified (all curl-tested)
+- `GET /` → health + version
+- `GET /days/today` → full envelope with sleep (7h45m, score 91), HRV 94ms, daily stats, empty visits (today not yet in locations.db)
+- `GET /days?start=2026-05-01&end=2026-05-07` → range with cities (Palma), steps, activity counts
+- `PATCH /days/2026-05-07` with energy/mood/stress → persisted and returned
+- `GET /questionnaire/today` → 6 core + 1 rotating question
+- `GET /insights/on-this-day/2026-05-07` → historical same-day data back to 2010
+
+### Status
+Phase 1 — Spine: **in progress**
+Next: Next.js Today view + Day Detail view
+
+---
