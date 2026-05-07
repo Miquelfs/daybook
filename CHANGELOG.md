@@ -84,3 +84,43 @@ Phase 1 — Spine: **in progress**
 Next: Next.js Today view + Day Detail view
 
 ---
+
+## 2026-05-07 — Next.js frontend (Phase 1 complete)
+
+### Added
+- `infrastructure/web/` — Next.js 16 (App Router, TypeScript, Tailwind CSS)
+- **Stack**: TanStack Query for client-side mutations, date-fns, lucide-react
+- **Design**: dark zinc palette (`#09090B` bg), amber accent (`#F59E0B`), generous whitespace, field-notes aesthetic
+
+### Pages
+- `/` — Today: server component fetches `/days/today`; sections: Morning Brief, Movement, Reflection, On This Day (Phase 2 placeholder)
+- `/day/[date]` — Day Detail: identical shape + location visit strip when data exists
+- `/timeline` — vertical infinite-scroll list, grouped by month, click → `/day/[date]`
+
+### Components
+- `DayHeader` — date hero with ← prev / Timeline / next → navigation, tomorrow disabled when future
+- `MorningBrief` — sleep duration (accent), HRV, body battery range, RHR in 2×4 grid; secondary pills for score, deep%, SpO₂, stress
+- `MovementBlock` — steps + active calories header, activity rows with icon/name/duration/distance/HR
+- `Questionnaire` — client component; 4 sliders (energy/mood/stress/sleep quality), free-text notes, rotating question input; auto-saves on blur with 800ms debounce; shows ✓ Saved / spinner
+- `Slider` — custom range input with amber fill, labelled endpoints, live numeric readout
+- `DayCard` — timeline row: date + weekday, mood emoji, one-line preview, HRV column, duty day badge
+
+### Infrastructure
+- `app/providers.tsx` — TanStack Query `QueryClientProvider`
+- `lib/api.ts` — typed API client (`api.today()`, `api.day()`, `api.range()`, `api.patch()`, `api.questionnaire()`) + formatting helpers (fmtDuration, fmtDistance, moodEmoji, activityIcon)
+- `tailwind.config.ts` — custom palette, no default Next.js colours
+- `.env.local` — `NEXT_PUBLIC_API_URL=http://localhost:8000`
+
+### Verified
+- `npm run build` — clean, zero TypeScript errors
+- `GET /` renders Morning Brief, Movement, Reflection
+- `GET /day/2026-05-01` renders with Locations strip (Palma visits)
+- `GET /timeline` renders with "All days" + "Load more"
+
+### Status
+**Phase 1 — Spine: COMPLETE**
+Done when: open the web app every evening, see today's Garmin data, fill out the questionnaire, scrub backwards. ✓
+
+Next (Phase 2 — Brain): Google Takeout location import, Notion expenses, aviation logbook, correlation engine, "On This Day" widget
+
+---
