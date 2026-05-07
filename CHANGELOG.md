@@ -118,6 +118,35 @@ Next: Next.js Today view + Day Detail view
 - `GET /timeline` renders with "All days" + "Load more"
 
 ### Status
+Phase 1 — Spine: **in progress**
+Next: orchestration layer
+
+---
+
+## 2026-05-07 — Orchestration, ADRs, migration doc, and Garmin live sync
+
+### Added
+- `Makefile` — all orchestration targets: `setup`, `db-init`, `sync-garmin`, `sync-garmin-full`, `api`, `web`, `dev`, `verify`, `backup`, `clean-pyc`, `help`
+- `.env.example` — template with Garmin credentials, timezone, API host/port
+- `infrastructure/scripts/daily_sync.sh` — cron-ready Garmin pull for yesterday; logs to `logs/daily_sync_YYYY-MM-DD.log`, errors to `logs/errors.log`
+- `infrastructure/scripts/backup.sh` — gzip snapshot of all `.db` files, keeps last 30, prunes older
+- `infrastructure/scripts/sync_log_tail.py` — helper for `make verify` (last 10 sync_log entries)
+- `docs/DECISIONS.md` — ADR-001 (SQLite), ADR-002 (FastAPI+Next.js vs Grafana), ADR-003 (Mac-first/Pi-later)
+- `docs/MIGRATION.md` — Raspberry Pi 3 migration checklist (placeholder, 7 sections)
+- `README.md` — full rewrite: 5-minute quickstart, daily routine, key commands table, project layout, architecture paragraph, docs index
+
+### Fixed
+- `domains/health/garmin/garmin_client.py` — rewrote to use garminconnect's `login(tokenstore=dir)` pattern instead of garth `.loads()`. Copied miquelOS token directory to `data/raw/garmin_session/` — live Garmin sync now works without credentials in `.env`.
+
+### Verified (full `make` chain)
+- `make setup` ✓ — .env created, deps installed
+- `make db-init` ✓ — schema intact, spine unchanged
+- `make sync-garmin` ✓ — authenticated via tokenstore, 0 new records (all pre-loaded)
+- `make verify` ✓ — 5,971 sleep/stats rows, 206 HRV, 350 activities, 0 gaps/orphans
+- `make backup` ✓ — daybook.db (2.2M gz) + locations.db (3.2M gz) snapshotted
+- `make dev` + `curl localhost:3000` ✓ — Morning Brief · Movement · Reflection all rendering
+
+### Status
 **Phase 1 — Spine: COMPLETE**
 Done when: open the web app every evening, see today's Garmin data, fill out the questionnaire, scrub backwards. ✓
 

@@ -1,6 +1,8 @@
-# secrets & config
+# secrets & config — never commit real secrets
 .env
-.env.*
+.env.local
+.env.*.local
+# .env.example is committed intentionally (template, no real values)
 
 # databases
 *.db
