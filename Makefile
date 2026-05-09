@@ -8,7 +8,7 @@ VENV  := $(ROOT)/.venv
 PY    := $(VENV)/bin/python
 WEB   := $(ROOT)/infrastructure/web
 
-.PHONY: setup db-init sync-garmin sync-garmin-full api web dev verify backup clean-pyc help
+.PHONY: setup db-init sync-garmin sync-garmin-full api web dev kill verify backup clean-pyc help
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -65,14 +65,37 @@ web:
 	cd $(WEB) && npm run dev
 
 dev:
-	@echo "==> Starting API + Web concurrently..."
-	@$(MAKE) api & API_PID=$$!; \
-	sleep 2; \
-	$(MAKE) web & WEB_PID=$$!; \
-	echo "API pid=$$API_PID  Web pid=$$WEB_PID"; \
-	echo "Press Ctrl-C to stop both."; \
-	trap "kill $$API_PID $$WEB_PID 2>/dev/null" INT TERM; \
+	@echo "==> Starting API + Web..."
+	@$(MAKE) kill 2>/dev/null; true
+	@$(VENV)/bin/uvicorn infrastructure.api.main:app \
+		--host 127.0.0.1 --port 8000 --reload \
+		--reload-dir infrastructure/api \
+		--reload-dir domains \
+		--reload-dir infrastructure/db & \
+	API_PID=$$!; \
+	echo "    API pid=$$API_PID — waiting for it to accept connections..."; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		sleep 1; \
+		curl -sf http://127.0.0.1:8000/ >/dev/null 2>&1 && break; \
+		echo "    waiting... ($$i/10)"; \
+	done; \
+	echo "    API ready."; \
+	cd $(WEB) && npm run dev & WEB_PID=$$!; \
+	cd $(ROOT); \
+	echo "    Web pid=$$WEB_PID"; \
+	echo ""; \
+	echo "  API → http://127.0.0.1:8000"; \
+	echo "  Web → http://localhost:3000"; \
+	echo ""; \
+	echo "  Ctrl-C to stop both."; \
+	trap "echo ''; echo 'Stopping...'; kill $$API_PID $$WEB_PID 2>/dev/null; wait $$API_PID $$WEB_PID 2>/dev/null; true" INT TERM; \
 	wait
+
+kill:
+	@echo "==> Killing any processes on ports 8000 and 3000..."
+	@lsof -ti:8000 | xargs kill -9 2>/dev/null; true
+	@lsof -ti:3000 | xargs kill -9 2>/dev/null; true
+	@echo "    Done"
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 
@@ -112,7 +135,8 @@ help:
 	@echo "  make sync-garmin-full  Pull full Garmin history (first run only)"
 	@echo "  make api               Start FastAPI dev server (port 8000)"
 	@echo "  make web               Start Next.js dev server (port 3000)"
-	@echo "  make dev               Start both servers"
+	@echo "  make dev               Start both servers (waits for API before web)"
+	@echo "  make kill              Kill anything on ports 8000 and 3000"
 	@echo "  make verify            Print coverage + gap report for all domains"
 	@echo "  make backup            Snapshot databases to data/backups/"
 	@echo "  make clean-pyc         Remove __pycache__ directories"

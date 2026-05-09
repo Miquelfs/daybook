@@ -4,25 +4,23 @@ import { MorningBrief } from "@/components/MorningBrief";
 import { MovementBlock } from "@/components/MovementBlock";
 import { Questionnaire } from "@/components/Questionnaire";
 import { SectionLabel } from "@/components/MorningBrief";
+import { ApiOffline } from "@/components/ApiOffline";
 import { format } from "date-fns";
 
 export default async function TodayPage() {
   const day = await api.today().catch(() => null);
+  const today = format(new Date(), "yyyy-MM-dd");
 
   if (!day) {
     return (
-      <main className="max-w-2xl mx-auto px-4 py-10">
-        <p className="text-[#52525B]">
-          Cannot reach the Daybook API. Is it running?{" "}
-          <code className="text-xs bg-[#18181B] px-2 py-0.5 rounded">
-            bash infrastructure/api/run.sh
-          </code>
-        </p>
+      <main className="max-w-2xl mx-auto px-4 pb-20">
+        <DayHeader date={today} />
+        <div className="mt-10">
+          <ApiOffline />
+        </div>
       </main>
     );
   }
-
-  const today = format(new Date(), "yyyy-MM-dd");
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20">
