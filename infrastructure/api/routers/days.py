@@ -29,6 +29,12 @@ def _today() -> str:
 def _require_day(conn: sqlite3.Connection, date_str: str) -> sqlite3.Row:
     row = conn.execute("SELECT * FROM days WHERE date=?", (date_str,)).fetchone()
     if row is None:
+        # Auto-create a spine row for any valid date rather than 404ing.
+        # This handles days that postdate the last backfill run.
+        conn.execute("INSERT OR IGNORE INTO days (date) VALUES (?)", (date_str,))
+        conn.commit()
+        row = conn.execute("SELECT * FROM days WHERE date=?", (date_str,)).fetchone()
+    if row is None:
         raise HTTPException(status_code=404, detail=f"No data for date {date_str}")
     return row
 

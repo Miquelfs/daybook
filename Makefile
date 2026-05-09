@@ -54,7 +54,7 @@ sync-garmin-full:
 
 api:
 	@echo "==> Starting FastAPI on http://127.0.0.1:8000 ..."
-	$(VENV)/bin/uvicorn infrastructure.api.main:app \
+	@exec $(VENV)/bin/uvicorn infrastructure.api.main:app \
 		--host 127.0.0.1 --port 8000 --reload \
 		--reload-dir infrastructure/api \
 		--reload-dir domains \
@@ -67,6 +67,7 @@ web:
 dev:
 	@echo "==> Starting API + Web..."
 	@$(MAKE) kill 2>/dev/null; true
+	@$(PY) -m infrastructure.db.backfill_days --start-date 2010-01-01 2>/dev/null
 	@$(VENV)/bin/uvicorn infrastructure.api.main:app \
 		--host 127.0.0.1 --port 8000 --reload \
 		--reload-dir infrastructure/api \
