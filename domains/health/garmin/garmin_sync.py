@@ -221,6 +221,16 @@ def sync_activities(client, conn, start: str, end: str, force: bool) -> int:
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
+def _last_synced_date(conn) -> date:
+    """Return the most recent date present in ALL per-day health tables."""
+    dates = []
+    for table in ("sleep", "daily_stats"):
+        row = conn.execute(f"SELECT MAX(date) FROM {table}").fetchone()
+        if row and row[0]:
+            dates.append(date.fromisoformat(row[0]))
+    return min(dates) if dates else date(2015, 1, 1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync Garmin data into daybook.db")
     parser.add_argument("--start-date", default=None)
@@ -231,12 +241,21 @@ def main() -> None:
     args = parser.parse_args()
 
     today = date.today()
-    yesterday = today - timedelta(days=1)
 
     if args.full_history:
         start = date(2015, 1, 1)
+    elif args.start_date:
+        start = date.fromisoformat(args.start_date)
     else:
-        start = date.fromisoformat(args.start_date) if args.start_date else yesterday
+        # Default: pick up from the day after the last synced date.
+        # This means the first run after a gap automatically fills it.
+        conn_probe = get_connection()
+        last = _last_synced_date(conn_probe)
+        conn_probe.close()
+        start = last + timedelta(days=1)
+        if start > today:
+            print("Already up to date.", file=sys.stderr)
+            return
 
     end = date.fromisoformat(args.end_date) if args.end_date else today
     types = [t.strip() for t in args.types.split(",")]
