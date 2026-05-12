@@ -59,7 +59,8 @@ export function LocationMap({ geojson }: Props) {
       // ── 1. Draw one continuous line through all LineString segment points ───
       const allLatlngs: [number, number][] = geojson.features.flatMap((f) => {
         if (f.geometry.type === "LineString") {
-          return f.geometry.coordinates.map(([lng, lat]): [number, number] => [lat, lng]);
+          const coords = f.geometry.coordinates as [number, number][];
+          return coords.map(([lng, lat]): [number, number] => [lat, lng]);
         }
         // Point features contribute their single coordinate to the path
         const [lng, lat] = f.geometry.coordinates as [number, number];

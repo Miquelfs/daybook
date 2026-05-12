@@ -34,9 +34,10 @@ from pathlib import Path
 ROOT    = Path(__file__).parents[2]
 DB_PATH = ROOT / "infrastructure" / "db" / "locations.db"
 
-DWELL_RADIUS_M    = 80   # max displacement from anchor to still count as "stopped"
+DWELL_RADIUS_M    = 200  # max displacement from anchor to still count as "stopped"
 DWELL_MIN_MINUTES = 3    # minimum time at an anchor to be a "stop" vs passing through
 MOVE_SPEED_MS     = 0.8  # m/s — above this between consecutive points = moving, reset anchor
+SPARSE_GAP_MINUTES = 60  # if gap between pings > this, treat as separate stops regardless
 NOMINATIM_URL     = "https://nominatim.openstreetmap.org/reverse"
 USER_AGENT        = "daybook-personal/1.0 (personal data project)"
 
@@ -156,22 +157,26 @@ def _detect_segments(points: list[dict]) -> list[dict]:
         dist_from_prev = _haversine_m(prev["lat"], prev["lng"], pt["lat"], pt["lng"])
         elapsed_s = (_ts(pt) - _ts(prev)).total_seconds()
         speed_ms = dist_from_prev / elapsed_s if elapsed_s > 0 else 0
+        gap_minutes = elapsed_s / 60
 
         dist_from_anchor = _haversine_m(anchor["lat"], anchor["lng"], pt["lat"], pt["lng"])
 
         if speed_ms >= MOVE_SPEED_MS:
             # Device is actively moving — flush current cluster and start fresh
-            # so the path is preserved as many small segments rather than one blob.
             seg = _flush_cluster(cluster)
             if seg:
                 segments.append(seg)
             cluster = [pt]
             anchor = pt
         elif dist_from_anchor <= DWELL_RADIUS_M:
-            # Still near the anchor — same stop cluster.
+            # Still near the anchor — same stop cluster, even across large gaps.
+            cluster.append(pt)
+        elif gap_minutes > SPARSE_GAP_MINUTES and dist_from_anchor <= DWELL_RADIUS_M * 3:
+            # Sparse pings: large time gap but still in the same neighbourhood —
+            # treat as continued stay rather than a separate trip.
             cluster.append(pt)
         else:
-            # Moved away from anchor but not at running speed — new cluster.
+            # Moved away from anchor — new cluster.
             seg = _flush_cluster(cluster)
             if seg:
                 segments.append(seg)

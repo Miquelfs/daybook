@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from infrastructure.api.db_money import get_money_db
 from infrastructure.api.models.money import (
     CategoryBudget, CategoryMeta, MerchantSuggestion, MoneyMeta,
-    MonthSummary, TransactionCreate, TransactionOut, TransactionPatch,
+    MonthHistory, MonthSummary, SavingsStreak, TrendsData,
+    TransactionCreate, TransactionOut, TransactionPatch,
 )
 from domains.money.money_config import (
     CATEGORY_EMOJI, EXPENSE_CATEGORIES, classify, get_budget_for_month,
@@ -310,4 +311,91 @@ def month_summary(
         days_in_month=dim,
         velocity=round(overall_vel, 2),
         categories=categories,
+    )
+
+
+# ── Trends ────────────────────────────────────────────────────────────────────
+
+from domains.money.money_config import MONTHLY_SAVINGS_GOAL  # noqa: E402
+
+
+@router.get("/trends", response_model=TrendsData)
+def get_trends(
+    conn: DB,
+    months: int = Query(12, ge=1, le=60, description="How many completed months to include"),
+):
+    """Historical month-by-month spending, income, savings, and streak data."""
+    today = date.today()
+    current_month = today.strftime("%Y-%m")
+
+    # Gather all distinct months with data, excluding current (incomplete) month
+    month_rows = conn.execute(
+        """
+        SELECT strftime('%Y-%m', date) AS month,
+               COALESCE(SUM(CASE WHEN transaction_type='Expense' THEN ABS(amount) ELSE 0 END), 0) AS spent,
+               COALESCE(SUM(CASE WHEN transaction_type='Income'  THEN amount         ELSE 0 END), 0) AS income
+        FROM   transactions
+        WHERE  deleted_at IS NULL
+          AND  strftime('%Y-%m', date) < ?
+        GROUP BY month
+        ORDER BY month DESC
+        LIMIT ?
+        """,
+        (current_month, months),
+    ).fetchall()
+
+    history: list[MonthHistory] = []
+    for r in month_rows:
+        m = r["month"]
+        spent = round(r["spent"], 2)
+        income = round(r["income"], 2)
+        savings = round(income - spent, 2)
+        savings_rate = round(savings / income, 4) if income > 0 else 0.0
+        budget = get_budget_for_month(m)
+        total_budget = sum(budget.values())
+        on_budget = savings >= MONTHLY_SAVINGS_GOAL
+        history.append(MonthHistory(
+            month=m,
+            total_spent=spent,
+            total_income=income,
+            savings=savings,
+            savings_rate=savings_rate,
+            total_budget=round(total_budget, 2),
+            on_budget=on_budget,
+        ))
+
+    # Savings streak (consecutive months on budget, most-recent first)
+    current_streak = 0
+    for h in history:
+        if h.on_budget:
+            current_streak += 1
+        else:
+            break
+
+    best_streak = 0
+    run = 0
+    for h in history:
+        if h.on_budget:
+            run += 1
+            best_streak = max(best_streak, run)
+        else:
+            run = 0
+
+    success_count = sum(1 for h in history if h.on_budget)
+    success_rate = round(success_count / len(history), 4) if history else 0.0
+
+    avg_spent = round(sum(h.total_spent for h in history) / len(history), 2) if history else 0.0
+    avg_income = round(sum(h.total_income for h in history) / len(history), 2) if history else 0.0
+    avg_savings_rate = round(sum(h.savings_rate for h in history) / len(history), 4) if history else 0.0
+
+    return TrendsData(
+        months=list(reversed(history)),  # chronological order for charts
+        savings_streak=SavingsStreak(
+            current_streak=current_streak,
+            best_streak=best_streak,
+            success_rate=success_rate,
+        ),
+        avg_monthly_spent=avg_spent,
+        avg_monthly_income=avg_income,
+        avg_savings_rate=avg_savings_rate,
     )

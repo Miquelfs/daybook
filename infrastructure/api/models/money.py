@@ -72,3 +72,27 @@ class MoneyMeta(BaseModel):
     categories: list[CategoryMeta]
     accounts: list[str]
     defaults: dict[str, str]    # {"account": "...", "category": "..."}
+
+
+class MonthHistory(BaseModel):
+    month: str
+    total_spent: float
+    total_income: float
+    savings: float
+    savings_rate: float         # 0-1
+    total_budget: float
+    on_budget: bool             # savings >= MONTHLY_SAVINGS_GOAL
+
+
+class SavingsStreak(BaseModel):
+    current_streak: int
+    best_streak: int
+    success_rate: float         # 0-1, months on budget / total months
+
+
+class TrendsData(BaseModel):
+    months: list[MonthHistory]
+    savings_streak: SavingsStreak
+    avg_monthly_spent: float
+    avg_monthly_income: float
+    avg_savings_rate: float

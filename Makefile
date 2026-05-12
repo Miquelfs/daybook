@@ -8,7 +8,10 @@ VENV  := $(ROOT)/.venv
 PY    := $(VENV)/bin/python
 WEB   := $(ROOT)/infrastructure/web
 
-.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-notion sync-notion-full import-tracks geocode-tracks api web dev prod kill verify backup clean-pyc help
+.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-notion sync-notion-full import-tracks geocode-tracks api web dev prod kill verify backup clean-pyc deploy help
+
+PI_HOST ?= pi@daybook-pi
+PI_DIR  ?= ~/daybook
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -165,6 +168,32 @@ verify:
 backup:
 	@bash $(ROOT)/infrastructure/scripts/backup.sh
 
+# ── Deploy to Pi ──────────────────────────────────────────────────────────────
+
+deploy:
+	@echo "==> Syncing code to $(PI_HOST):$(PI_DIR) ..."
+	rsync -av --delete \
+		--exclude='.git' \
+		--exclude='.next' \
+		--exclude='node_modules' \
+		--exclude='__pycache__' \
+		--exclude='*.pyc' \
+		--exclude='.venv' \
+		--exclude='data/' \
+		--exclude='infrastructure/db/*.db' \
+		$(ROOT)/ $(PI_HOST):$(PI_DIR)/
+	@echo "==> Copying .env.local to Pi ..."
+	scp $(WEB)/.env.local $(PI_HOST):$(PI_DIR)/infrastructure/web/.env.local
+	@echo "==> Installing deps on Pi ..."
+	ssh $(PI_HOST) "cd $(PI_DIR)/infrastructure/web && npm install --include=dev --silent"
+	@echo "==> Building frontend on Pi ..."
+	ssh $(PI_HOST) "cd $(PI_DIR)/infrastructure/web && npm run build"
+	@echo "==> Restarting API on Pi ..."
+	ssh $(PI_HOST) "pkill -f uvicorn; sleep 1; cd $(PI_DIR) && nohup .venv/bin/uvicorn infrastructure.api.main:app --host 0.0.0.0 --port 8000 > /tmp/api.log 2>&1 &"
+	@echo "==> Restarting web on Pi ..."
+	ssh $(PI_HOST) "pkill -f 'next start'; sleep 2; cd $(PI_DIR)/infrastructure/web && nohup npm start > /tmp/web.log 2>&1 &"
+	@echo "==> Deploy complete. Check http://daybook-pi:3000"
+
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 
 clean-pyc:
@@ -198,4 +227,5 @@ help:
 	@echo "  make verify            Print coverage + gap report for all domains"
 	@echo "  make backup            Snapshot databases to data/backups/"
 	@echo "  make clean-pyc         Remove __pycache__ directories"
+	@echo "  make deploy            Rsync code to Pi, build frontend, restart services"
 	@echo ""

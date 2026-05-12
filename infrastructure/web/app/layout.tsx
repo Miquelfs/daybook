@@ -31,8 +31,8 @@ export default function RootLayout({
     >
       <body className="min-h-full bg-[#09090B] text-[#FAFAFA] antialiased">
         <Providers>
-          <div className="pb-16">{children}</div>
           <BottomNav />
+          <div className="pt-11">{children}</div>
         </Providers>
       </body>
     </html>

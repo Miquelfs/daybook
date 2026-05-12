@@ -18,6 +18,16 @@ from infrastructure.api.routers import money
 VERSION = "0.1.0"
 ROOT = Path(__file__).parents[2]
 
+# Load .env from repo root so CORS_ORIGINS, TZ, etc. are available
+# without having to prefix every `nohup` command with env vars.
+_env_file = ROOT / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
+
 app = FastAPI(
     title="Daybook API",
     version=VERSION,

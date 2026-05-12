@@ -20,22 +20,22 @@ export function BottomNav() {
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#27272A] bg-[#09090B]/95 backdrop-blur-sm pb-safe">
-      <div className="flex items-center justify-around max-w-2xl mx-auto">
+    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-[#27272A] bg-[#09090B]/95 backdrop-blur-sm">
+      <div className="flex items-center justify-center gap-1 max-w-2xl mx-auto px-4 h-11">
         {tabs.map(({ href, label, icon: Icon }) => {
           const active = isActive(href);
           return (
             <Link
               key={href}
               href={href}
-              className={`flex flex-col items-center gap-1 px-4 py-3 text-[10px] uppercase tracking-widest transition-colors ${
+              title={label}
+              className={`flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${
                 active
-                  ? "text-[#F59E0B]"
-                  : "text-[#52525B] hover:text-[#A1A1AA]"
+                  ? "text-[#F59E0B] bg-[#F59E0B]/10"
+                  : "text-[#52525B] hover:text-[#A1A1AA] hover:bg-[#18181B]"
               }`}
             >
-              <Icon size={20} strokeWidth={active ? 2 : 1.5} />
-              {label}
+              <Icon size={18} strokeWidth={active ? 2 : 1.5} />
             </Link>
           );
         })}

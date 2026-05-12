@@ -1,4 +1,9 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const BASE =
+  (typeof window === "undefined"
+    ? process.env.API_INTERNAL_URL
+    : undefined) ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8000";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
@@ -87,6 +92,30 @@ export type CategoryBudget = {
   status: string;
 };
 
+export type MonthHistory = {
+  month: string;
+  total_spent: number;
+  total_income: number;
+  savings: number;
+  savings_rate: number;
+  total_budget: number;
+  on_budget: boolean;
+};
+
+export type SavingsStreak = {
+  current_streak: number;
+  best_streak: number;
+  success_rate: number;
+};
+
+export type TrendsData = {
+  months: MonthHistory[];
+  savings_streak: SavingsStreak;
+  avg_monthly_spent: number;
+  avg_monthly_income: number;
+  avg_savings_rate: number;
+};
+
 export type MonthSummary = {
   month: string;
   total_spent: number;
@@ -137,6 +166,12 @@ export const moneyApi = {
 
   monthSummary: (month?: string) =>
     get<MonthSummary>(`/money/summary/month${month ? `?month=${month}` : ""}`),
+
+  trends: (months?: number) =>
+    get<TrendsData>(`/money/trends${months ? `?months=${months}` : ""}`),
+
+  syncNotion: () =>
+    post<{ status: string }>("/sync/notion", {}),
 };
 
 // ── Display helpers ───────────────────────────────────────────────────────────
