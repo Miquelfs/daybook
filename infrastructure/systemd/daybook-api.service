@@ -1,0 +1,16 @@
+[Unit]
+Description=Daybook FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/daybook
+EnvironmentFile=/home/pi/daybook/.env
+ExecStart=/home/pi/daybook/.venv/bin/uvicorn infrastructure.api.main:app \
+    --host 0.0.0.0 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

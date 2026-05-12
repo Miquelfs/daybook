@@ -222,13 +222,13 @@ def sync_activities(client, conn, start: str, end: str, force: bool) -> int:
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def _last_synced_date(conn) -> date:
-    """Return the most recent date present in ALL per-day health tables."""
+    """Return the most recent date present in any per-day health table."""
     dates = []
     for table in ("sleep", "daily_stats"):
         row = conn.execute(f"SELECT MAX(date) FROM {table}").fetchone()
         if row and row[0]:
             dates.append(date.fromisoformat(row[0]))
-    return min(dates) if dates else date(2015, 1, 1)
+    return max(dates) if dates else date(2015, 1, 1)
 
 
 def main() -> None:

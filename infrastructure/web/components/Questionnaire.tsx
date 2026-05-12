@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { DaySubjective } from "@/lib/api";
 import { Slider } from "./Slider";
@@ -21,11 +21,64 @@ type Draft = {
   notes: string;
   daily_answer: string;
   daily_question: string;
+  alcohol: number | null;
+  social: boolean | null;
+  outdoors: boolean | null;
 };
 
-export function Questionnaire({ date, initial }: Props) {
-  const qc = useQueryClient();
+function Toggle({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean | null;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!(value ?? false))}
+      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
+        value
+          ? "border-[#F59E0B] bg-[#F59E0B]/10 text-[#F59E0B]"
+          : "border-[#27272A] bg-[#18181B] text-[#52525B] hover:text-[#A1A1AA]"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
 
+function AlcoholPicker({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (v: number) => void;
+}) {
+  const options = [0, 1, 2, 3, 4, 5];
+  return (
+    <div className="flex gap-2">
+      {options.map((n) => (
+        <button
+          key={n}
+          type="button"
+          onClick={() => onChange(n)}
+          className={`w-9 h-9 rounded-lg border text-sm font-medium transition-colors ${
+            value === n
+              ? "border-[#F59E0B] bg-[#F59E0B]/10 text-[#F59E0B]"
+              : "border-[#27272A] bg-[#18181B] text-[#52525B] hover:text-[#A1A1AA]"
+          }`}
+        >
+          {n}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function Questionnaire({ date, initial }: Props) {
   const { data: q } = useQuery({
     queryKey: ["questionnaire", date],
     queryFn: () => api.questionnaire(date),
@@ -39,6 +92,9 @@ export function Questionnaire({ date, initial }: Props) {
     notes: initial.notes ?? "",
     daily_answer: initial.daily_answer ?? "",
     daily_question: initial.daily_question ?? q?.rotating.text ?? "",
+    alcohol: (initial as DaySubjective & { alcohol?: number | null }).alcohol ?? null,
+    social: (initial as DaySubjective & { social?: boolean | null }).social ?? null,
+    outdoors: (initial as DaySubjective & { outdoors?: boolean | null }).outdoors ?? null,
   });
 
   const [saved, setSaved] = useState(false);
@@ -51,12 +107,14 @@ export function Questionnaire({ date, initial }: Props) {
         mood: patch.mood ?? undefined,
         stress: patch.stress ?? undefined,
         sleep_quality: patch.sleep_quality ?? undefined,
-        notes: patch.notes || undefined,
-        daily_answer: patch.daily_answer || undefined,
+        notes: patch.notes,
+        daily_answer: patch.daily_answer,
         daily_question: patch.daily_question || q?.rotating.text || undefined,
+        alcohol: patch.alcohol ?? undefined,
+        social: patch.social ?? undefined,
+        outdoors: patch.outdoors ?? undefined,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["day", date] });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     },
@@ -117,6 +175,37 @@ export function Questionnaire({ date, initial }: Props) {
           hint="How did last night feel — before you look at the data?"
         />
 
+        {/* Quick toggles */}
+        <div className="flex flex-col gap-3">
+          <label className="text-sm font-medium text-[#FAFAFA]">Today</label>
+          <div className="flex flex-wrap gap-2">
+            <Toggle
+              label="🌿 Outdoors"
+              value={draft.outdoors}
+              onChange={(v) => update("outdoors", v)}
+            />
+            <Toggle
+              label="👥 Social"
+              value={draft.social}
+              onChange={(v) => update("social", v)}
+            />
+          </div>
+        </div>
+
+        {/* Alcohol */}
+        <div className="flex flex-col gap-3">
+          <label className="text-sm font-medium text-[#FAFAFA]">
+            Drinks{" "}
+            <span className="text-[#52525B] font-normal text-xs">
+              (0 = none)
+            </span>
+          </label>
+          <AlcoholPicker
+            value={draft.alcohol}
+            onChange={(v) => update("alcohol", v)}
+          />
+        </div>
+
         {/* Notes */}
         <div className="flex flex-col gap-2">
           <label className="text-sm font-medium text-[#FAFAFA]">Notes</label>
@@ -125,7 +214,6 @@ export function Questionnaire({ date, initial }: Props) {
             placeholder="Anything worth remembering about today…"
             value={draft.notes}
             onChange={(e) => update("notes", e.target.value)}
-            onBlur={() => save(draft)}
             className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-4 py-3 text-sm text-[#FAFAFA] placeholder:text-[#52525B] resize-none focus:outline-none focus:border-[#F59E0B] transition-colors"
           />
         </div>
@@ -141,7 +229,6 @@ export function Questionnaire({ date, initial }: Props) {
             placeholder="One sentence…"
             value={draft.daily_answer}
             onChange={(e) => update("daily_answer", e.target.value)}
-            onBlur={() => save(draft)}
             className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-4 py-3 text-sm text-[#FAFAFA] placeholder:text-[#52525B] focus:outline-none focus:border-[#F59E0B] transition-colors"
           />
         </div>

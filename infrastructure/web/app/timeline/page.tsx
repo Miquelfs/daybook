@@ -26,6 +26,8 @@ export default function TimelinePage() {
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    isError,
+    error,
   } = useInfiniteQuery({
     queryKey: ["timeline"],
     queryFn: ({ pageParam = 0 }) => {
@@ -63,6 +65,13 @@ export default function TimelinePage() {
       </header>
 
       <div className="mt-6">
+        {isError && (
+          <div className="border border-red-900 bg-red-950/30 rounded-lg px-4 py-4 text-sm text-red-400 mb-4">
+            <p className="font-medium mb-1">Could not load timeline</p>
+            <p className="text-xs text-red-600 font-mono">{String(error)}</p>
+            <p className="text-xs text-red-700 mt-2">Check that the API is reachable and NEXT_PUBLIC_API_URL is set correctly in the build.</p>
+          </div>
+        )}
         {isLoading ? (
           <div className="flex flex-col gap-2">
             {Array.from({ length: 10 }).map((_, i) => (

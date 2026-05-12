@@ -38,11 +38,11 @@ It's also the system I want to use every day. A place to look back. A place to n
 
 **A correlation engine.** Surface patterns I'd never spot manually: HRV vs. duty days, mood vs. travel, spending vs. social activity, sleep vs. crossing time zones.
 
-**A memory machine.** "On this day" three years ago. The photos I took. The flight I flew. The café I ate at. The mood I logged.
+**A memory machine.** "On this day" three years ago. The photos I took. The flight I flew. The restaurant I ate at. The mood I logged.
 
 **A reflection prompt.** A 30-second evening ritual. Energy, mood, stress, plus one rotating question. Builds a corpus of self-knowledge over years.
 
-**An aviation-aware second brain.** I'm a pilot. My life has unusual rhythms. No tool on the market understands that. Daybook will: layover detection, fatigue tracking, time zone load, duty-day patterns.
+**An aviation-aware second brain.** I'm a pilot. My life has unusual rhythms. No tool on the market understands that. Daybook will help me identify fatigue tracking, time zone load, duty-day patterns.
 
 **A natural language interface.** Eventually: *"show me weekends I cycled and felt good."* Initially: structured search and filters. Later: local LLM over my own data.
 
@@ -158,27 +158,32 @@ daybook/
 
 ## Roadmap
 
-### Phase 1 — Spine (weeks 1–4)
+### Phase 1 — Spine ✅ COMPLETE (2026-05-07)
 The foundation. Get one full pipeline working end-to-end.
 
-- Project scaffold, venv, environment config
-- SQLite schema for days, health, activities
-- Garmin sync: full historical pull + daily incremental
-- FastAPI backend with `/day/{date}` and `/range` endpoints
-- Next.js Today view + Day Detail view
-- Evening questionnaire (energy, mood, stress, free text, rotating question)
+- ✅ Project scaffold, venv, environment config
+- ✅ SQLite schema for days, health, activities
+- ✅ Garmin sync: full historical pull + daily incremental (5,971 days, auto-syncs on Today page load)
+- ✅ FastAPI backend with `/day/{date}`, `/range`, PATCH endpoints
+- ✅ Next.js Today view + Day Detail view + Timeline
+- ✅ Evening questionnaire (energy, mood, stress, free text, rotating question)
+- ✅ Makefile orchestration (setup, dev, sync, backup, verify)
 
-**Done when:** I can open the web app every evening, see today's Garmin data, fill out the questionnaire, and scrub backwards through my life day by day.
-
-### Phase 2 — Brain (weeks 5–8)
+### Phase 2 — Brain (weeks 5–8) 🔄 IN PROGRESS
 Add the other major domains and start surfacing intelligence.
 
-- Google Takeout location import + Day-view location strip
-- Notion expense import + native expense entry on the web app
-- Aviation logbook CSV import + Day-view flight strip
-- Correlation engine (weekly batch job, Pearson correlations, significance tests)
-- Anomaly detection for daily metrics
-- "On this day" widget on Today view
+- ✅ GPS track import (22,408 segments from Google Maps Timeline 2013–2026)
+- ✅ Leaflet day-view map (polyline + named stops)
+- ✅ Overland iOS live location ingestion (`POST /locations/ingest/overland`)
+- ✅ World heatmap + `/explore` page (country/city stats, year filter)
+- ✅ Finance domain: `money.db`, Notion sync CLI, 7 API endpoints, expense entry bottom sheet, `/money` budget page
+- ✅ `DaySpendSummary` wired into Today + Day Detail
+- ⏳ Notion history import (credentials configured; run `make sync-notion-full`)
+- ⏳ Background geocoding (~8% complete; `caffeinate -i python -m domains.locations.geocode_tracks`)
+- ⏳ Aviation logbook CSV import + Day-view flight strip
+- ⏳ Correlation engine (weekly batch job, Pearson correlations, significance tests)
+- ⏳ Anomaly detection for daily metrics
+- ⏳ "On this day" widget on Today view
 
 **Done when:** Today view shows everything about today, every domain. Insights tab shows real correlations from my data.
 
@@ -188,10 +193,10 @@ The features that make it personal and reflective.
 - Decision log
 - Custom tags + tag-based correlations
 - Streaks (smart, contextual)
-- Yearly map / location heatmap
 - Photo metadata sync (read-only)
 - Weekly/monthly review email generation
-- PWA install on phone, Tailscale remote access
+- ✅ Yearly location heatmap (`/explore` with year filter) — pulled forward from Phase 3
+- **PWA install on phone + Tailscale remote access** — see `docs/PHONE_SETUP.md`
 
 **Done when:** I voluntarily open this every morning and every evening. It feels like a tool I trust.
 

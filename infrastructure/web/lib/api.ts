@@ -1,4 +1,11 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// On the server: API_INTERNAL_URL (localhost) takes precedence.
+// On the client: NEXT_PUBLIC_API_URL is baked in at build time.
+const BASE =
+  (typeof window === "undefined"
+    ? process.env.API_INTERNAL_URL
+    : undefined) ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8000";
 
 export type SleepData = {
   duration_seconds: number | null;
@@ -63,6 +70,9 @@ export type DaySubjective = {
   duty_day: boolean;
   away_from_base: boolean;
   timezone_offset: number | null;
+  alcohol: number | null;
+  social: boolean | null;
+  outdoors: boolean | null;
 };
 
 export type DayDetail = {
@@ -117,6 +127,9 @@ export type DayPatch = Partial<{
   tags: string;
   duty_day: boolean;
   away_from_base: boolean;
+  alcohol: number;
+  social: boolean;
+  outdoors: boolean;
 }>;
 
 async function get<T>(path: string): Promise<T> {
@@ -125,6 +138,33 @@ async function get<T>(path: string): Promise<T> {
   return res.json();
 }
 
+export type GeoFeature = {
+  type: "Feature";
+  geometry:
+    | { type: "LineString"; coordinates: [number, number][] }
+    | { type: "Point"; coordinates: [number, number] };
+  properties: {
+    segment_start: string;
+    segment_end: string;
+    place_name: string | null;
+    semantic_type: string | null;
+    city: string | null;
+    country: string | null;
+  };
+};
+
+export type TracksGeoJSON = {
+  type: "FeatureCollection";
+  features: GeoFeature[];
+};
+
+export type HeatmapData = {
+  points: [number, number, number][];   // [lat, lng, weight]
+  countries: { country: string; days: number }[];
+  cities: { city: string; country: string; days: number }[];
+  years: string[];
+};
+
 export const api = {
   day: (date: string) => get<DayDetail>(`/days/${date}`),
   today: () => get<DayDetail>("/days/today"),
@@ -132,6 +172,13 @@ export const api = {
     get<DaySummary[]>(`/days?start=${start}&end=${end}`),
   questionnaire: (date: string) =>
     get<Questionnaire>(`/questionnaire/${date}`),
+  tracks: (date: string) => get<TracksGeoJSON>(`/locations/tracks/${date}`),
+  heatmap: (year?: number) =>
+    get<HeatmapData>(`/locations/heatmap${year ? `?year=${year}` : ""}`),
+
+  syncGarmin: async (): Promise<void> => {
+    await fetch(`${BASE}/sync/garmin`, { method: "POST", cache: "no-store" }).catch(() => {});
+  },
 
   patch: async (date: string, body: DayPatch): Promise<DayDetail> => {
     const res = await fetch(`${BASE}/days/${date}`, {

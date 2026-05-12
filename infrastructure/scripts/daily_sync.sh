@@ -2,7 +2,7 @@
 # daily_sync.sh — run via cron every morning to pull the previous day's Garmin data.
 #
 # Suggested crontab entry (edit with: crontab -e):
-#   0 7 * * * cd /Users/miquelfarre/Desktop/daybook && ./infrastructure/scripts/daily_sync.sh
+#   0 7 * * * cd ~/daybook && ./infrastructure/scripts/daily_sync.sh
 #
 # To install: make the script executable once:
 #   chmod +x infrastructure/scripts/daily_sync.sh
@@ -42,12 +42,22 @@ fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 
-# Garmin: yesterday only (today's data often incomplete until morning)
-log "Syncing Garmin (yesterday)..."
 cd "$ROOT"
+
+# Garmin: auto-detect start from last synced date so gaps are filled automatically.
+# On a normal day this picks up yesterday; after a gap it catches up.
+log "Syncing Garmin (auto catch-up)..."
 python -m domains.health.garmin.garmin_sync \
-  --start-date "$(date -v-1d '+%Y-%m-%d' 2>/dev/null || date -d 'yesterday' '+%Y-%m-%d')" \
-  --end-date "$(date -v-1d '+%Y-%m-%d' 2>/dev/null || date -d 'yesterday' '+%Y-%m-%d')" \
+  >> "$LOG_FILE" 2>&1
+
+# Overland: process any raw GPS points received since last run.
+log "Processing Overland GPS points..."
+python -m domains.locations.overland_process \
+  >> "$LOG_FILE" 2>&1
+
+# Notion: incremental finance sync (last 90 days).
+log "Syncing Notion finance..."
+python -m domains.money.notion_sync \
   >> "$LOG_FILE" 2>&1
 
 log "=== daily_sync done ==="

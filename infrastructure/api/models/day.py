@@ -71,6 +71,9 @@ class DaySubjective(BaseModel):
     duty_day: bool = False
     away_from_base: bool = False
     timezone_offset: int | None = None
+    alcohol: int | None = Field(None, ge=0, le=10)   # drinks (0 = none)
+    social: bool | None = None                         # was social today
+    outdoors: bool | None = None                       # meaningful time outside
 
 
 class DaySummary(BaseModel):
@@ -114,3 +117,6 @@ class DayPatch(BaseModel):
     duty_day: bool | None = None
     away_from_base: bool | None = None
     timezone_offset: int | None = None
+    alcohol: int | None = Field(None, ge=0, le=10)
+    social: bool | None = None
+    outdoors: bool | None = None

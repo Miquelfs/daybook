@@ -4,6 +4,8 @@ import { MorningBrief } from "@/components/MorningBrief";
 import { MovementBlock } from "@/components/MovementBlock";
 import { Questionnaire } from "@/components/Questionnaire";
 import { SectionLabel } from "@/components/MorningBrief";
+import { LocationMap } from "@/components/LocationMap";
+import { DaySpendSummary } from "@/components/money/DaySpendSummary";
 import { notFound } from "next/navigation";
 
 interface Props {
@@ -13,10 +15,12 @@ interface Props {
 export default async function DayPage({ params }: Props) {
   const { date } = await params;
 
-  // Basic format guard before hitting API
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) notFound();
 
-  const day = await api.day(date).catch(() => null);
+  const [day, tracks] = await Promise.all([
+    api.day(date).catch(() => null),
+    api.tracks(date).catch(() => ({ type: "FeatureCollection" as const, features: [] })),
+  ]);
   if (!day) notFound();
 
   return (
@@ -32,33 +36,28 @@ export default async function DayPage({ params }: Props) {
 
         <MovementBlock activities={day.activities} stats={day.daily_stats} />
 
-        <Questionnaire date={date} initial={day.subjective} />
+        <DaySpendSummary date={date} />
 
-        {/* Location strip */}
-        {day.visits.length > 0 && (
-          <section>
-            <SectionLabel>Locations</SectionLabel>
-            <div className="flex flex-col gap-1.5">
+        <section>
+          <SectionLabel>Where I was</SectionLabel>
+          {day.visits.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
               {day.visits.map((v, i) => (
-                <div
+                <span
                   key={i}
-                  className="flex items-center gap-3 text-sm"
+                  className="text-xs px-2 py-1 rounded-full bg-[#18181B] border border-[#27272A] text-[#A1A1AA]"
                 >
-                  <span className="text-[#52525B] text-xs w-5 text-right">{i + 1}</span>
-                  <span className="text-[#A1A1AA]">
-                    {v.place_name ?? v.city ?? "Unknown place"}
-                  </span>
-                  {v.city && v.place_name !== v.city && (
-                    <span className="text-[#52525B] text-xs">{v.city}</span>
-                  )}
-                  {v.semantic_type && (
-                    <span className="ml-auto text-xs text-[#3F3F46]">{v.semantic_type}</span>
-                  )}
-                </div>
+                  {v.place_name ?? v.city ?? "Unknown"}
+                  {v.city && v.place_name && v.place_name !== v.city ? ` · ${v.city}` : ""}
+                  {v.semantic_type ? ` (${v.semantic_type})` : ""}
+                </span>
               ))}
             </div>
-          </section>
-        )}
+          )}
+          <LocationMap geojson={tracks} />
+        </section>
+
+        <Questionnaire date={date} initial={day.subjective} />
       </div>
     </main>
   );

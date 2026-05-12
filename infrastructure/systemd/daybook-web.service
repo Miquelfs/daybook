@@ -1,0 +1,16 @@
+[Unit]
+Description=Daybook Next.js frontend
+After=network.target daybook-api.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/daybook/infrastructure/web
+Environment=NODE_ENV=production
+EnvironmentFile=/home/pi/daybook/.env
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

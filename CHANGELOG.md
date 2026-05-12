@@ -153,3 +153,78 @@ Done when: open the web app every evening, see today's Garmin data, fill out the
 Next (Phase 2 — Brain): Google Takeout location import, Notion expenses, aviation logbook, correlation engine, "On This Day" widget
 
 ---
+
+## 2026-05-10 — GPS tracks, heatmap, Overland ingestion, Explore page
+
+### Added (Locations domain)
+- `domains/locations/import_tracks.py` — imports Google Maps Timeline `timelinePath` JSON entries into `tracks` table; parses `geo:lat,lng` strings; optional Nominatim geocoding
+- `domains/locations/geocode_tracks.py` — background geocoder for `tracks` table; 1.1 sec/request Nominatim rate limit; `--limit`, `--force` flags; `caffeinate`-friendly for overnight runs
+- `domains/locations/overland_process.py` — dwell detection (80m radius, 3-min minimum = stop); haversine distance; zoom-18 Nominatim for venue names; marks source points `processed=1`
+- `domains/locations/locations_query.py` (extended) — `tracks_for_date()` enriched: joins `visits` + `place_names` by time overlap to return `place_name`, `semantic_type`, `city`, `country`
+
+### Added (API)
+- `infrastructure/api/routers/locations.py` — `GET /locations/heatmap?year=`, `GET /locations/tracks/{date}`, `POST /locations/ingest/overland` (Overland iOS endpoint; Bearer token auth; null-island filter; background processing)
+- Added `POST /sync/garmin` endpoint to `main.py` — triggers incremental Garmin sync in background
+
+### Added (Frontend)
+- `infrastructure/web/components/LocationMap.tsx` — Leaflet polyline map with white halo + blue line; orange named-stop dots; grey transition dots; deduplicated stop legend; StrictMode double-init fix
+- `infrastructure/web/components/HeatMap.tsx` — leaflet.heat world heatmap; script-tag loading pattern (required for `window.L` global); blue→purple→amber→red gradient
+- `infrastructure/web/app/explore/page.tsx` — `/explore` page: year-filter pills, world heatmap, country list with flag + proportion bar, top-20 cities ranked by days
+- `infrastructure/web/components/SyncOnLoad.tsx` — fires `POST /sync/garmin` silently on Today page mount
+
+### Added (navigation)
+- `DayHeader.tsx` — Globe icon → `/explore` link; Wallet icon → `/money` link
+- `/explore` page — `← Timeline` back link
+
+### Fixed
+- Leaflet "Map container already initialized" error in React StrictMode — local `destroyed` boolean + `_leaflet_id` deletion before re-init
+- Null-island (lat=0, lng=0) GPS points filtered at ingest and deleted from DB
+- Track segment coordinates now continuous (single polyline, not disconnected dots)
+
+### Data state
+- 22,408 GPS track segments in `tracks` table (Google Maps Timeline 2013–2026)
+- ~1,700/19,271 geocoded as of Phase 2 start (background geocoder running)
+- Overland iOS app configured and receiving live location data
+
+### Status
+**Phase 2 — Brain: in progress**
+
+---
+
+## 2026-05-11 — Finance domain: money.db, Notion sync, expense entry UI
+
+### Added (Finance domain — Phase 2a complete)
+- `infrastructure/db/money_schema.sql` — `transactions`, `budgets`, `money_sync_log` tables; soft-delete pattern; source='local'|'notion' to protect hand-edited rows from Notion re-sync
+- `infrastructure/db/money_connection.py` — WAL-mode SQLite connection to `money.db`
+- `domains/money/__init__.py`
+- `domains/money/money_config.py` — classification constants ported from Notion dashboard: `BUDGET_VERSIONS` (€2,660/month budget seeded), `INCOME_CATEGORIES`, `SPECIAL_CATEGORIES`, `CATEGORY_EMOJI`, `classify()`, `get_budget_for_month()`
+- `domains/money/money_db.py` — `init_money_db()` + `seed_budgets()` (11 category budgets seeded for 2025-09 onward)
+- `domains/money/notion_sync.py` — full Notion import CLI: `--full-history`, `--since YYYY-MM-DD`, `--dry-run`, `--force`; source='local' protection; logs to `money_sync_log`
+- `infrastructure/api/db_money.py` — FastAPI dependency for money.db
+- `infrastructure/api/models/money.py` — Pydantic models: `TransactionCreate`, `TransactionOut`, `TransactionPatch`, `MonthSummary`, `CategoryBudget`, `MerchantSuggestion`, `MoneyMeta`
+- `infrastructure/api/routers/money.py` — 7 endpoints: `POST /money/transactions`, `GET /money/transactions`, `PATCH /money/transactions/{id}`, `DELETE /money/transactions/{id}`, `GET /money/autocomplete/merchants`, `GET /money/meta`, `GET /money/summary/month`
+- Added `POST /sync/notion` to `main.py` — incremental background Notion sync
+
+### Added (Frontend)
+- `infrastructure/web/lib/money-api.ts` — typed fetch helpers + `Transaction`, `MonthSummary`, `MoneyMeta` types; `fmtAmount()`, `isExpense()` helpers
+- `infrastructure/web/components/money/CategoryPills.tsx` — tap-to-select pill grid with emoji; `CATEGORY_EMOJI` constant
+- `infrastructure/web/components/money/AddExpenseSheet.tsx` — 3-step bottom sheet (amount → category → merchant + autocomplete + account selector); CSS-only slide animation; `useMutation` → `POST /money/transactions`
+- `infrastructure/web/components/money/DaySpendSummary.tsx` — daily spend widget wired into Today + Day Detail pages; shows total + transaction list + "+ Add" button; silently hides if money.db not initialized
+- `infrastructure/web/components/money/MonthBudgetBar.tsx` — per-category progress bar; blue=OK, amber=over pace, red=over budget
+- `infrastructure/web/app/money/page.tsx` — `/money` page: 3 overview cards (spent/budget/remaining), velocity progress bars, category budget bars, recent transactions list
+
+### Bootstrapped
+- `money.db` initialized: 3 tables created, 11 budget rows seeded
+- `.env` populated with live Notion credentials
+
+### Verified (smoke-tested)
+- `GET /money/meta` → 10 expense categories with correct emojis ✓
+- `GET /money/summary/month?month=2026-05` → €2,660 total budget, day 11/31 ✓
+- `POST /money/transactions` → creates local expense with correct sign (−€3.50), UUID, classification ✓
+- `npx tsc --noEmit` → zero TypeScript errors ✓
+
+### Status
+**Phase 2 — Brain: in progress**
+Next: `make sync-notion-full` to import full Notion history; phone PWA setup via Tailscale; country name English fix propagating from geocoder
+
+---

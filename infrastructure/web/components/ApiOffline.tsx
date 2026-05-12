@@ -11,9 +11,7 @@ export function ApiOffline() {
   useEffect(() => {
     const id = setInterval(async () => {
       try {
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/`
-        );
+        const res = await fetch("/api/health");
         if (res.ok) {
           clearInterval(id);
           router.refresh();

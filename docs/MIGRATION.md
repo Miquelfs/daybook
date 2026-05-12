@@ -1,81 +1,169 @@
 # Raspberry Pi 3 Migration Guide
 
-**Status: TODO — placeholder. Complete after Phase 1 is used daily for two weeks.**
+**Status: Ready to execute** — Phase 1 complete, Pi has Phase 0 (Docker, Tailscale, Pi-hole, Unbound) already running.
 
-This document will track the steps to migrate Daybook from Mac (development + production) to a Raspberry Pi 3 as a permanently-on home server accessible via Tailscale.
-
----
-
-## Prerequisites (before starting)
-
-- [ ] Phase 1 is stable and used daily for at least two weeks
-- [ ] Raspberry Pi 3 running Raspberry Pi OS Lite (64-bit if possible, else 32-bit ARMv7)
-- [ ] Pi is on home LAN, has a static IP or mDNS hostname
-- [ ] Tailscale installed on both Pi and phone
-- [ ] SSH key-based access to Pi from Mac
+Architecture after migration: iPhone/Mac → Tailscale → Pi (FastAPI :8000 + Next.js :3000 + SQLite) — Mac no longer needs to be on.
 
 ---
 
-## Migration checklist
+## Prerequisites
 
-### 1. Prepare the Pi
+- [x] Phase 1 stable on Mac
+- [x] Pi running Pi OS Lite 64-bit (Bookworm) with Docker + Tailscale (Phase 0 complete)
+- [x] SSH key-based access to Pi from Mac
+- [ ] Pi's Tailscale IP noted: run `ssh pi@daybook-pi.local tailscale ip -4`
 
-- [ ] `sudo apt update && sudo apt upgrade -y`
-- [ ] Install Python 3.11+ (`deadsnakes` PPA or compile from source if needed)
-- [ ] Install Node.js 20+ (via `nvm` or NodeSource repo)
-- [ ] Install Docker + Docker Compose (for future containerisation)
-- [ ] Install Tailscale: `curl -fsSL https://tailscale.com/install.sh | sh`
+---
 
-### 2. Copy the data
+## Phase A — Prepare Pi (~15 min, one-time)
 
-- [ ] `rsync -avz daybook/ pi@raspberrypi.local:~/daybook/` (exclude `.venv`, `node_modules`, `.next`)
-- [ ] Verify `infrastructure/db/daybook.db` and `locations.db` arrived intact
-- [ ] Verify `data/raw/garmin/` raw payloads arrived
+```bash
+ssh pi@daybook-pi.local
 
-### 3. Re-bootstrap on Pi
+# Verify Python 3.11+ (Bookworm ships with it):
+python3 --version
 
-- [ ] `make setup` — creates venv, installs Python deps, installs npm deps
-- [ ] `make db-init` — verifies schema is intact
-- [ ] `make verify` — confirms row counts match Mac
+# Install Node.js 20+ via NodeSource:
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
-### 4. Configure Garmin sync
+# Verify:
+node --version   # expect v20+
+npm --version
+```
 
-- [ ] Copy `data/raw/garmin_session/` tokenstore to Pi
-- [ ] Test: `make sync-garmin`
-- [ ] Add crontab entry on Pi: `0 7 * * * cd ~/daybook && ./infrastructure/scripts/daily_sync.sh`
+---
 
-### 5. Configure servers as services
+## Phase B — Build on Mac, rsync to Pi
 
-- [ ] Create `systemd` unit for FastAPI (`infrastructure/docker/daybook-api.service`)
-- [ ] Create `systemd` unit for Next.js (`infrastructure/docker/daybook-web.service`)
-- [ ] OR write a `docker-compose.yml` in `infrastructure/docker/` and run via Docker
+```bash
+# On Mac — build Next.js first (Pi doesn't have enough RAM for npm run build):
+cd /Users/miquelfarre/Desktop/daybook/infrastructure/web
+npm run build
 
-### 6. Tailscale remote access
+# Rsync code (exclude platform-specific and gitignored dirs):
+rsync -avz --progress \
+  --exclude='.venv' \
+  --exclude='node_modules' \
+  --exclude='.git' \
+  --exclude='data/raw/garmin/' \
+  --exclude='data/backups/' \
+  /Users/miquelfarre/Desktop/daybook/ \
+  pi@daybook-pi.local:~/daybook/
 
-- [ ] Confirm Pi appears in Tailscale admin at `https://login.tailscale.com/admin/machines`
-- [ ] On phone: install Tailscale, add to same network
-- [ ] Set `NEXT_PUBLIC_API_URL` to `http://<tailscale-ip>:8000` in `.env.local`
-- [ ] Access `http://<tailscale-ip>:3000` from phone browser
-- [ ] Test PWA install (Phase 3)
+# Copy Garmin tokenstore (avoids re-login on Pi):
+rsync -avz \
+  /Users/miquelfarre/Desktop/daybook/data/raw/garmin_session/ \
+  pi@daybook-pi.local:~/daybook/data/raw/garmin_session/
 
-### 7. Backup
+# Copy databases:
+rsync -avz \
+  /Users/miquelfarre/Desktop/daybook/infrastructure/db/daybook.db \
+  /Users/miquelfarre/Desktop/daybook/infrastructure/db/locations.db \
+  /Users/miquelfarre/Desktop/daybook/infrastructure/db/money.db \
+  pi@daybook-pi.local:~/daybook/infrastructure/db/
+```
 
-- [ ] Configure `make backup` cron on Pi: `0 2 * * * cd ~/daybook && make backup`
-- [ ] Test restore from backup
+---
+
+## Phase C — Bootstrap on Pi
+
+```bash
+ssh pi@daybook-pi.local
+cd ~/daybook
+
+# Python virtual environment + deps:
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# Node deps — fresh ARM64 install (do NOT copy Mac's node_modules):
+cd infrastructure/web && npm install --production && cd ../..
+
+# Create .env from example, then edit:
+cp .env.example .env
+nano .env
+# Set these values (replace 100.x.x.x with Pi's actual Tailscale IP):
+#   CORS_ORIGINS=http://localhost:3000,http://100.x.x.x:3000
+#   NEXT_PUBLIC_API_URL=http://100.x.x.x:8000
+
+# Verify databases arrived intact:
+make verify
+```
+
+---
+
+## Phase D — systemd services (auto-start on boot)
+
+```bash
+sudo cp ~/daybook/infrastructure/systemd/daybook-api.service /etc/systemd/system/
+sudo cp ~/daybook/infrastructure/systemd/daybook-web.service /etc/systemd/system/
+
+sudo systemctl daemon-reload
+sudo systemctl enable daybook-api daybook-web
+sudo systemctl start daybook-api daybook-web
+
+# Check status:
+sudo systemctl status daybook-api
+sudo systemctl status daybook-web
+
+# Smoke test:
+curl http://localhost:8000/    # → {"status":"ok"}
+curl -I http://localhost:3000/ # → HTTP 200
+```
+
+**Log access:**
+```bash
+journalctl -u daybook-api -f    # API logs
+journalctl -u daybook-web -f    # Web logs
+```
+
+---
+
+## Phase E — Cron jobs
+
+```bash
+crontab -e
+# Add:
+0 7 * * * cd /home/pi/daybook && ./infrastructure/scripts/daily_sync.sh
+0 2 * * * cd /home/pi/daybook && make backup
+```
+
+---
+
+## Phase F — Phone access
+
+1. iPhone: open Tailscale and verify it's connected.
+2. Safari → `http://100.x.x.x:3000` (Pi's Tailscale IP) → Today view should load.
+3. Share → Add to Home Screen → install as PWA.
+4. Test: submit questionnaire, add expense, verify Garmin data shows.
+
+---
+
+## Phase G — Ongoing updates (Mac → Pi)
+
+When you change code on the Mac:
+
+```bash
+# On Mac: rebuild frontend if any web/ files changed:
+cd infrastructure/web && npm run build && cd ../..
+
+# Push to Pi:
+rsync -avz --progress \
+  --exclude='.venv' --exclude='node_modules' --exclude='.git' \
+  --exclude='data/' \
+  /Users/miquelfarre/Desktop/daybook/ \
+  pi@daybook-pi.local:~/daybook/
+
+# On Pi: restart services:
+ssh pi@daybook-pi.local "sudo systemctl restart daybook-api daybook-web"
+```
 
 ---
 
 ## Notes
 
-- The Pi 3 has 1 GB RAM. Next.js `npm run build` requires ~512 MB — build on Mac and copy `.next/` to Pi, or use `npm run start` after building.
-- SQLite WAL mode is already enabled in `connection.py`.
-- If the Pi 3 is too slow for Next.js SSR, consider serving a static export (`next export`) and running only the FastAPI backend on Pi.
-- All raw payloads are in `data/raw/` — if the Pi runs out of space, move them to an external drive and symlink.
-
----
-
-## References
-
-- Tailscale docs: https://tailscale.com/kb/
-- Raspberry Pi headless setup: https://www.raspberrypi.com/documentation/computers/configuration.html
-- systemd service files: https://www.freedesktop.org/software/systemd/man/systemd.service.html
+- **Next.js build on Mac**: Pi 3 has 1 GB RAM; `npm run build` needs ~512 MB. Always build on Mac and copy `.next/`.
+- **SQLite WAL mode**: already enabled in `connection.py` — concurrent reads during sync are safe.
+- **Raw garmin payloads** (`data/raw/garmin/`): 38 MB of JSON, excluded from rsync to save time. If Pi runs out of space these can stay on Mac or go to an external drive + symlink.
+- **Updating databases**: for large data migrations, copy the `.db` files manually. For daily data, systemd + cron handles it automatically.
+- **Static export fallback**: if Pi 3 struggles with Next.js SSR, run `npm run build && npm run export` on Mac, copy `out/` to Pi, and serve with `python3 -m http.server 3000`. FastAPI stays the same.

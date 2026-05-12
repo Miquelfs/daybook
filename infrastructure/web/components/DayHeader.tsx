@@ -1,7 +1,7 @@
 "use client";
 
 import { format, parseISO, addDays, subDays, isToday } from "date-fns";
-import { ChevronLeft, ChevronRight, List } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
 interface Props {
@@ -27,14 +27,6 @@ export function DayHeader({ date }: Props) {
           <span className="hidden sm:inline">
             {format(subDays(d, 1), "MMM d")}
           </span>
-        </Link>
-
-        <Link
-          href="/timeline"
-          className="flex items-center gap-1.5 text-xs text-[#A1A1AA] hover:text-[#FAFAFA] transition-colors uppercase tracking-widest"
-        >
-          <List size={14} />
-          Timeline
         </Link>
 
         {isFuture ? (

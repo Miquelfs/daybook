@@ -12,7 +12,7 @@ from infrastructure.api.models.day import (
     LocationVisit, SleepData,
 )
 from domains.locations.locations_query import (
-    location_summary_for_date, visits_for_date,
+    location_data_for_date, _location_summary_with_conn, _conn as _loc_conn,
 )
 
 router = APIRouter(prefix="/days", tags=["days"])
@@ -52,6 +52,9 @@ def _subjective(row: sqlite3.Row) -> DaySubjective:
         duty_day=bool(row["duty_day"]),
         away_from_base=bool(row["away_from_base"]),
         timezone_offset=row["timezone_offset"],
+        alcohol=row["alcohol"] if "alcohol" in row.keys() else None,
+        social=bool(row["social"]) if "social" in row.keys() and row["social"] is not None else None,
+        outdoors=bool(row["outdoors"]) if "outdoors" in row.keys() and row["outdoors"] is not None else None,
     )
 
 
@@ -133,8 +136,7 @@ def get_day(date_str: str, conn: Annotated[sqlite3.Connection, Depends(get_db)])
 
     row = _require_day(conn, date_str)
 
-    loc_summary = location_summary_for_date(date_str)
-    loc_visits = visits_for_date(date_str)
+    loc_summary, loc_visits = location_data_for_date(date_str)
 
     return DayDetail(
         date=date_str,
@@ -165,6 +167,7 @@ def get_range(
         (start, end),
     ).fetchall()
 
+    loc_conn = _loc_conn()
     results = []
     for row in days_rows:
         d = row["date"]
@@ -172,7 +175,7 @@ def get_range(
         stats_row = conn.execute("SELECT steps, resting_hr FROM daily_stats WHERE date=?", (d,)).fetchone()
         hrv_row = conn.execute("SELECT last_night_avg FROM hrv WHERE date=?", (d,)).fetchone()
         act_count = conn.execute("SELECT COUNT(*) FROM activities WHERE date=?", (d,)).fetchone()[0]
-        loc = location_summary_for_date(d)
+        loc = _location_summary_with_conn(loc_conn, d)
 
         results.append(DaySummary(
             date=d,
@@ -189,6 +192,7 @@ def get_range(
             away_from_base=bool(row["away_from_base"]),
         ))
 
+    loc_conn.close()
     return results
 
 
