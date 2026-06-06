@@ -6,7 +6,7 @@ Usage (from daybook/ root):
     python -m domains.health.garmin.garmin_sync [options]
 
 Options:
-    --start-date YYYY-MM-DD   default: yesterday
+    --start-date YYYY-MM-DD   default: day after last synced date
     --end-date   YYYY-MM-DD   default: today
     --full-history            set start-date to 2015-01-01
     --types sleep,daily_stats,hrv,activities   default: all
@@ -17,7 +17,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 _ROOT = Path(__file__).parents[3]   # daybook/
@@ -43,9 +43,10 @@ def _parse_sleep(raw: dict, d: str) -> dict | None:
         "light_seconds": dto.get("lightSleepSeconds"),
         "rem_seconds": dto.get("remSleepSeconds"),
         "awake_seconds": dto.get("awakeSleepSeconds"),
-        "avg_hrv": dto.get("avgSleepStress"),      # proxy; true HRV in hrv table
+        "avg_hrv": dto.get("avgSleepStress"),
         "avg_spo2": dto.get("averageSpO2Value"),
-        "score": dto.get("sleepScores", {}).get("overall", {}).get("value") if isinstance(dto.get("sleepScores"), dict) else None,
+        "score": dto.get("sleepScores", {}).get("overall", {}).get("value")
+                 if isinstance(dto.get("sleepScores"), dict) else None,
     }
 
 
@@ -81,18 +82,33 @@ def _parse_hrv(raw: dict | list, d: str) -> dict | None:
 def _parse_activity(raw: dict) -> dict:
     start = raw.get("startTimeGMT") or raw.get("startTimeLocal", "")
     d = start[:10] if start else ""
+    native_id = str(raw.get("activityId", ""))
+    act_type = raw.get("activityType", {})
+    if isinstance(act_type, dict):
+        act_type = act_type.get("typeKey")
+
+    # Speed: Garmin returns m/s directly in averageSpeed
+    avg_speed = raw.get("averageSpeed")
+
     return {
-        "activity_id": str(raw.get("activityId", "")),
+        "id": f"garmin_{native_id}",
         "date": d,
-        "type": raw.get("activityType", {}).get("typeKey") if isinstance(raw.get("activityType"), dict) else raw.get("activityType"),
+        "source": "garmin",
+        "activity_type": act_type,
         "name": raw.get("activityName"),
         "start_time": start,
         "duration_seconds": int(raw.get("duration", 0) or 0),
+        "moving_time_seconds": int(raw.get("movingDuration", 0) or 0),
         "distance_meters": raw.get("distance"),
-        "avg_hr": raw.get("averageHR"),
-        "max_hr": raw.get("maxHR"),
+        "elevation_gain_meters": raw.get("elevationGain"),
+        "avg_heart_rate": raw.get("averageHR"),
+        "max_heart_rate": raw.get("maxHR"),
+        "avg_speed_mps": avg_speed,
+        "avg_power_watts": raw.get("avgPower"),
         "calories": raw.get("calories"),
-        "elevation_gain": raw.get("elevationGain"),
+        "training_stress_score": raw.get("trainingStressScore"),
+        "start_lat": raw.get("startLatitude"),
+        "start_lng": raw.get("startLongitude"),
     }
 
 
@@ -111,6 +127,22 @@ def _log(conn, source: str, data_type: str, status: str, records: int = 0, error
     )
 
 
+def _update_sync_status(conn, source: str, success: bool, records: int = 0, error: str | None = None) -> None:
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn.execute(
+        """
+        INSERT INTO sync_status (source, last_attempt_at, last_success_at, last_error, records_synced)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(source) DO UPDATE SET
+            last_attempt_at = excluded.last_attempt_at,
+            last_success_at = CASE WHEN ? THEN excluded.last_success_at ELSE last_success_at END,
+            last_error      = excluded.last_error,
+            records_synced  = excluded.records_synced
+        """,
+        (source, now, now if success else None, error, records, success),
+    )
+
+
 # ─── Sync functions ──────────────────────────────────────────────────────────
 
 def sync_sleep(client, conn, d: str, force: bool) -> int:
@@ -125,10 +157,13 @@ def sync_sleep(client, conn, d: str, force: bool) -> int:
         parsed = _parse_sleep(raw, d)
         if parsed:
             conn.execute(
-                "INSERT OR REPLACE INTO sleep (date, duration_seconds, deep_seconds, light_seconds, rem_seconds, awake_seconds, avg_hrv, avg_spo2, score, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (parsed["date"], parsed["duration_seconds"], parsed["deep_seconds"], parsed["light_seconds"],
-                 parsed["rem_seconds"], parsed["awake_seconds"], parsed["avg_hrv"], parsed["avg_spo2"],
-                 parsed["score"], json.dumps(raw)),
+                """INSERT OR REPLACE INTO sleep
+                   (date, duration_seconds, deep_seconds, light_seconds, rem_seconds,
+                    awake_seconds, avg_hrv, avg_spo2, score, raw_payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (parsed["date"], parsed["duration_seconds"], parsed["deep_seconds"],
+                 parsed["light_seconds"], parsed["rem_seconds"], parsed["awake_seconds"],
+                 parsed["avg_hrv"], parsed["avg_spo2"], parsed["score"], json.dumps(raw)),
             )
         _log(conn, "garmin", "sleep", "ok", 1 if parsed else 0)
         return 1 if parsed else 0
@@ -150,10 +185,13 @@ def sync_daily_stats(client, conn, d: str, force: bool) -> int:
         parsed = _parse_daily_stats(raw, d)
         if parsed:
             conn.execute(
-                "INSERT OR REPLACE INTO daily_stats (date, steps, active_calories, total_calories, resting_hr, stress_avg, body_battery_low, body_battery_high, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (parsed["date"], parsed["steps"], parsed["active_calories"], parsed["total_calories"],
-                 parsed["resting_hr"], parsed["stress_avg"], parsed["body_battery_low"],
-                 parsed["body_battery_high"], json.dumps(raw)),
+                """INSERT OR REPLACE INTO daily_stats
+                   (date, steps, active_calories, total_calories, resting_hr,
+                    stress_avg, body_battery_low, body_battery_high, raw_payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (parsed["date"], parsed["steps"], parsed["active_calories"],
+                 parsed["total_calories"], parsed["resting_hr"], parsed["stress_avg"],
+                 parsed["body_battery_low"], parsed["body_battery_high"], json.dumps(raw)),
             )
         _log(conn, "garmin", "daily_stats", "ok", 1 if parsed else 0)
         return 1 if parsed else 0
@@ -175,8 +213,11 @@ def sync_hrv(client, conn, d: str, force: bool) -> int:
         parsed = _parse_hrv(raw, d)
         if parsed:
             conn.execute(
-                "INSERT OR REPLACE INTO hrv (date, last_night_avg, weekly_avg, status, raw_json) VALUES (?, ?, ?, ?, ?)",
-                (parsed["date"], parsed["last_night_avg"], parsed["weekly_avg"], parsed["status"], json.dumps(raw)),
+                """INSERT OR REPLACE INTO hrv
+                   (date, last_night_avg, weekly_avg, status, raw_payload)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (parsed["date"], parsed["last_night_avg"], parsed["weekly_avg"],
+                 parsed["status"], json.dumps(raw)),
             )
         _log(conn, "garmin", "hrv", "ok", 1 if parsed else 0)
         return 1 if parsed else 0
@@ -186,7 +227,57 @@ def sync_hrv(client, conn, d: str, force: bool) -> int:
         return 0
 
 
-def sync_activities(client, conn, start: str, end: str, force: bool) -> int:
+def _fetch_activity_polyline(client, native_id: str) -> str | None:
+    """Fetch GPS polyline for a single activity. Returns Google-encoded polyline or None."""
+    try:
+        # GPX gives us a track we can encode; some Garmin activities expose a
+        # pre-encoded polyline directly via the activity details endpoint.
+        details = client.get_activity(native_id)
+        # garminconnect returns the activity summary dict from get_activity
+        # The polyline may be in summarizedActivitiesExport or direct field
+        if isinstance(details, dict):
+            poly = details.get("polylineEncoded") or details.get("encodedPolyline")
+            if poly:
+                return poly
+        return None
+    except Exception:
+        return None
+
+
+def _fetch_and_store_streams(client, conn, activity_id_full: str, native_id: str) -> None:
+    """Fetch per-second streams and store in activity_streams."""
+    # garminconnect exposes get_activity_splits and get_activity_hr_in_timezones
+    # but the most reliable stream data comes from get_activity_details
+    try:
+        details = client.get_activity_details(native_id, max_chart_size=2000)
+        if not details or not isinstance(details, dict):
+            return
+        metrics = details.get("activityDetailMetrics") or []
+        if not metrics:
+            return
+
+        # metrics is a list of {metrics: [{metricsType, value}, ...], startTimeGMT, ...}
+        # Flatten into per-stream arrays
+        streams: dict[str, list] = {}
+        for point in metrics:
+            for m in point.get("metrics", []):
+                mt = m.get("metricsType", "").lower()
+                val = m.get("value")
+                streams.setdefault(mt, []).append(val)
+
+        for stream_type, values in streams.items():
+            if not values:
+                continue
+            conn.execute(
+                """INSERT OR REPLACE INTO activity_streams (activity_id, stream_type, data_json)
+                   VALUES (?, ?, ?)""",
+                (activity_id_full, stream_type, json.dumps(values)),
+            )
+    except Exception as e:
+        print(f"    WARN streams {native_id}: {e}", file=sys.stderr)
+
+
+def sync_activities(client, conn, start: str, end: str, force: bool, fetch_streams: bool = False) -> int:
     try:
         raw_list = client.get_activities_by_date(start, end)
         if not raw_list:
@@ -197,18 +288,52 @@ def sync_activities(client, conn, start: str, end: str, force: bool) -> int:
         count = 0
         for raw in raw_list:
             parsed = _parse_activity(raw)
-            if not parsed["activity_id"]:
+            if not parsed["id"] or not parsed["date"]:
                 continue
+
+            activity_id = parsed["id"]
+            native_id = str(raw.get("activityId", ""))
+
             if not force:
-                row = conn.execute("SELECT activity_id FROM activities WHERE activity_id=?", (parsed["activity_id"],)).fetchone()
+                row = conn.execute("SELECT id FROM activities WHERE id=?", (activity_id,)).fetchone()
                 if row:
                     continue
+
+            # Fetch polyline for activities that have GPS
+            polyline = None
+            has_gps = raw.get("hasPolyline") or raw.get("startLatitude") is not None
+            if has_gps and native_id:
+                polyline = _fetch_activity_polyline(client, native_id)
+                if polyline:
+                    time.sleep(RATE_LIMIT_SLEEP)
+
             conn.execute(
-                "INSERT OR REPLACE INTO activities (activity_id, date, type, name, start_time, duration_seconds, distance_meters, avg_hr, max_hr, calories, elevation_gain, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (parsed["activity_id"], parsed["date"], parsed["type"], parsed["name"], parsed["start_time"],
-                 parsed["duration_seconds"], parsed["distance_meters"], parsed["avg_hr"], parsed["max_hr"],
-                 parsed["calories"], parsed["elevation_gain"], json.dumps(raw)),
+                """INSERT OR REPLACE INTO activities
+                   (id, date, source, activity_type, name, start_time,
+                    duration_seconds, moving_time_seconds, distance_meters,
+                    elevation_gain_meters, avg_heart_rate, max_heart_rate,
+                    avg_speed_mps, avg_power_watts, calories,
+                    training_stress_score, polyline, start_lat, start_lng,
+                    raw_payload, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                           strftime('%Y-%m-%dT%H:%M:%SZ','now'))""",
+                (
+                    activity_id, parsed["date"], parsed["source"],
+                    parsed["activity_type"], parsed["name"], parsed["start_time"],
+                    parsed["duration_seconds"], parsed["moving_time_seconds"],
+                    parsed["distance_meters"], parsed["elevation_gain_meters"],
+                    parsed["avg_heart_rate"], parsed["max_heart_rate"],
+                    parsed["avg_speed_mps"], parsed["avg_power_watts"],
+                    parsed["calories"], parsed["training_stress_score"],
+                    polyline, parsed["start_lat"], parsed["start_lng"],
+                    json.dumps(raw),
+                ),
             )
+
+            if fetch_streams and native_id:
+                _fetch_and_store_streams(client, conn, activity_id, native_id)
+                time.sleep(RATE_LIMIT_SLEEP)
+
             count += 1
 
         _log(conn, "garmin", "activities", "ok", count)
@@ -238,6 +363,8 @@ def main() -> None:
     parser.add_argument("--full-history", action="store_true")
     parser.add_argument("--types", default=",".join(ALL_TYPES))
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--streams", action="store_true",
+                        help="Also fetch per-second activity streams (slower)")
     args = parser.parse_args()
 
     today = date.today()
@@ -247,15 +374,12 @@ def main() -> None:
     elif args.start_date:
         start = date.fromisoformat(args.start_date)
     else:
-        # Default: pick up from the day after the last synced date.
-        # This means the first run after a gap automatically fills it.
         conn_probe = get_connection()
         last = _last_synced_date(conn_probe)
         conn_probe.close()
         start = last + timedelta(days=1)
         if start > today:
-            print("Already up to date.", file=sys.stderr)
-            return
+            start = today
 
     end = date.fromisoformat(args.end_date) if args.end_date else today
     types = [t.strip() for t in args.types.split(",")]
@@ -264,41 +388,57 @@ def main() -> None:
 
     client = get_client()
     conn = get_connection()
+    total_records = 0
+    sync_error = None
 
-    totals = {t: 0 for t in types}
+    try:
+        totals = {t: 0 for t in types}
 
-    # Activities: one API call covers the whole range
-    if "activities" in types:
-        print(f"  activities {start} → {end}", file=sys.stderr)
-        totals["activities"] = sync_activities(client, conn, str(start), str(end), args.force)
-        conn.commit()
-        time.sleep(RATE_LIMIT_SLEEP)
-
-    # Per-day types
-    per_day = [t for t in types if t != "activities"]
-    if per_day:
-        d = start
-        while d <= end:
-            ds = d.isoformat()
-            print(f"  {ds}", file=sys.stderr, end="")
-            for t in per_day:
-                if t == "sleep":
-                    n = sync_sleep(client, conn, ds, args.force)
-                elif t == "daily_stats":
-                    n = sync_daily_stats(client, conn, ds, args.force)
-                elif t == "hrv":
-                    n = sync_hrv(client, conn, ds, args.force)
-                else:
-                    n = 0
-                totals[t] += n
-                print(f"  {t}={n}", file=sys.stderr, end="")
-                time.sleep(RATE_LIMIT_SLEEP)
-
+        if "activities" in types:
+            print(f"  activities {start} → {end}", file=sys.stderr)
+            totals["activities"] = sync_activities(
+                client, conn, str(start), str(end), args.force, fetch_streams=args.streams
+            )
+            total_records += totals["activities"]
             conn.commit()
-            print("", file=sys.stderr)
-            d += timedelta(days=1)
+            time.sleep(RATE_LIMIT_SLEEP)
 
-    conn.close()
+        per_day = [t for t in types if t != "activities"]
+        if per_day:
+            d = start
+            while d <= end:
+                ds = d.isoformat()
+                force_day = args.force or (d == today)
+                print(f"  {ds}", file=sys.stderr, end="")
+                for t in per_day:
+                    if t == "sleep":
+                        n = sync_sleep(client, conn, ds, force_day)
+                    elif t == "daily_stats":
+                        n = sync_daily_stats(client, conn, ds, force_day)
+                    elif t == "hrv":
+                        n = sync_hrv(client, conn, ds, force_day)
+                    else:
+                        n = 0
+                    totals[t] += n
+                    total_records += n
+                    print(f"  {t}={n}", file=sys.stderr, end="")
+                    time.sleep(RATE_LIMIT_SLEEP)
+
+                conn.commit()
+                print("", file=sys.stderr)
+                d += timedelta(days=1)
+
+        _update_sync_status(conn, "garmin", success=True, records=total_records)
+        conn.commit()
+
+    except Exception as e:
+        sync_error = str(e)
+        _update_sync_status(conn, "garmin", success=False, error=sync_error)
+        conn.commit()
+        raise
+    finally:
+        conn.close()
+
     print("\nDone.", file=sys.stderr)
     for t, n in totals.items():
         print(f"  {t}: {n} records", file=sys.stderr)

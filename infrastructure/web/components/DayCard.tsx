@@ -15,9 +15,6 @@ export function DayCard({ day }: Props) {
   if (day.sleep_duration_seconds)
     preview.push(`Slept ${fmtDuration(day.sleep_duration_seconds)}`);
   if (day.steps) preview.push(`${day.steps.toLocaleString()} steps`);
-  if (day.activity_count > 0)
-    preview.push(`${day.activity_count} activit${day.activity_count === 1 ? "y" : "ies"}`);
-  if (day.cities.length > 0) preview.push(day.cities[0]);
 
   return (
     <Link
@@ -48,8 +45,17 @@ export function DayCard({ day }: Props) {
         ) : (
           <p className="text-sm text-[#52525B]">No data logged</p>
         )}
-        {day.duty_day && (
-          <p className="text-xs text-[#F59E0B] mt-0.5">✈ Duty day</p>
+        {(day.cities.length > 0 || day.duty_day || day.activity_count > 0 || day.flight_count > 0) && (
+          <p className="text-xs text-[#52525B] mt-0.5 flex items-center gap-2 flex-wrap">
+            {day.cities.length > 0 && <span>📍 {day.cities[0]}</span>}
+            {day.activity_count > 0 && (
+              <span>{day.activity_count} activit{day.activity_count === 1 ? "y" : "ies"}</span>
+            )}
+            {day.flight_count > 0 && (
+              <span className="text-sky-400">✈ {day.flight_count} sector{day.flight_count > 1 ? "s" : ""}</span>
+            )}
+            {day.duty_day && day.flight_count === 0 && <span className="text-[#F59E0B]">✈ Duty</span>}
+          </p>
         )}
       </div>
 
@@ -61,6 +67,11 @@ export function DayCard({ day }: Props) {
             {Math.round(day.hrv_last_night)}
           </p>
         </div>
+      )}
+
+      {/* Photo dot */}
+      {day.photo_path && (
+        <div className="shrink-0 w-1.5 h-1.5 rounded-full bg-[#F59E0B] mt-2" title="Photo logged" />
       )}
     </Link>
   );

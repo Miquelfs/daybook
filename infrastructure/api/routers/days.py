@@ -1,16 +1,23 @@
 import sqlite3
 from datetime import date, datetime
+from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse
 
 from infrastructure.api.db import get_db
 from infrastructure.api.models.day import (
     ActivityData, DayDetail, DayPatch, DaySummary,
-    DailyStatsData, DaySubjective, HRVData, LocationSummary,
+    DailyStatsData, DaySubjective, DayTagSummary, HRVData, LocationSummary,
     LocationVisit, SleepData,
 )
+from pydantic import BaseModel
+
+
+class CompanionsBody(BaseModel):
+    contact_ids: list[int]
 from domains.locations.locations_query import (
     location_data_for_date, _location_summary_with_conn, _conn as _loc_conn,
 )
@@ -18,6 +25,8 @@ from domains.locations.locations_query import (
 router = APIRouter(prefix="/days", tags=["days"])
 
 TIMEZONE = "Europe/Madrid"   # TODO: move to .env / config
+PHOTOS_DIR = Path(__file__).parents[3] / "data" / "photos"
+PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -55,6 +64,7 @@ def _subjective(row: sqlite3.Row) -> DaySubjective:
         alcohol=row["alcohol"] if "alcohol" in row.keys() else None,
         social=bool(row["social"]) if "social" in row.keys() and row["social"] is not None else None,
         outdoors=bool(row["outdoors"]) if "outdoors" in row.keys() and row["outdoors"] is not None else None,
+        mood_note=row["mood_note"] if "mood_note" in row.keys() else None,
     )
 
 
@@ -100,20 +110,66 @@ def _hrv(conn: sqlite3.Connection, date_str: str) -> HRVData | None:
     )
 
 
+def _companions(conn: sqlite3.Connection, date_str: str) -> list[str]:
+    rows = conn.execute(
+        """SELECT c.name FROM day_companions dc
+           JOIN contacts c ON c.id = dc.contact_id
+           WHERE dc.date = ? ORDER BY c.name""",
+        (date_str,),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def _day_tags(conn: sqlite3.Connection, date_str: str) -> list[DayTagSummary]:
+    rows = conn.execute(
+        """
+        SELECT dt.tag_id, t.slug, t.name, t.icon, t.category, t.color, dt.note
+        FROM day_tags dt
+        JOIN tags t ON t.id = dt.tag_id
+        WHERE dt.date = ?
+        ORDER BY t.category, t.name
+        """,
+        (date_str,),
+    ).fetchall()
+    return [
+        DayTagSummary(
+            tag_id=r["tag_id"], slug=r["slug"], name=r["name"],
+            icon=r["icon"], category=r["category"], color=r["color"], note=r["note"],
+        )
+        for r in rows
+    ]
+
+
 def _activities(conn: sqlite3.Connection, date_str: str) -> list[ActivityData]:
-    rows = conn.execute("SELECT * FROM activities WHERE date=?", (date_str,)).fetchall()
+    # Exclude strava-only rows that have a garmin counterpart on the same date/time.
+    # Garmin rows with strava_id set already carry Strava enrichment (polyline, segments).
+    rows = conn.execute(
+        """SELECT * FROM activities
+           WHERE date=?
+             AND NOT (source='strava' AND EXISTS (
+               SELECT 1 FROM activities g
+               WHERE g.date = activities.date
+                 AND g.source = 'garmin'
+                 AND g.strava_id = CAST(SUBSTR(activities.id, 8) AS TEXT)
+             ))
+           ORDER BY start_time""",
+        (date_str,)
+    ).fetchall()
     return [
         ActivityData(
-            activity_id=r["activity_id"],
-            type=r["type"],
+            id=r["id"],
+            source=r["source"],
+            strava_id=r["strava_id"],
+            activity_type=r["activity_type"],
             name=r["name"],
             start_time=r["start_time"],
             duration_seconds=r["duration_seconds"],
             distance_meters=r["distance_meters"],
-            avg_hr=r["avg_hr"],
-            max_hr=r["max_hr"],
+            elevation_gain_meters=r["elevation_gain_meters"],
+            avg_heart_rate=r["avg_heart_rate"],
+            max_heart_rate=r["max_heart_rate"],
             calories=r["calories"],
-            elevation_gain=r["elevation_gain"],
+            has_polyline=bool(r["polyline"]),
         )
         for r in rows
     ]
@@ -138,6 +194,9 @@ def get_day(date_str: str, conn: Annotated[sqlite3.Connection, Depends(get_db)])
 
     loc_summary, loc_visits = location_data_for_date(date_str)
 
+    photo_path = row["photo_path"] if "photo_path" in row.keys() else None
+    photo_url = f"/photos/{photo_path}" if photo_path else None
+
     return DayDetail(
         date=date_str,
         subjective=_subjective(row),
@@ -147,6 +206,9 @@ def get_day(date_str: str, conn: Annotated[sqlite3.Connection, Depends(get_db)])
         activities=_activities(conn, date_str),
         location=LocationSummary(**loc_summary),
         visits=[LocationVisit(**v) for v in loc_visits],
+        companions=_companions(conn, date_str),
+        photo_url=photo_url,
+        tags=_day_tags(conn, date_str),
     )
 
 
@@ -174,9 +236,28 @@ def get_range(
         sleep_row = conn.execute("SELECT duration_seconds FROM sleep WHERE date=?", (d,)).fetchone()
         stats_row = conn.execute("SELECT steps, resting_hr FROM daily_stats WHERE date=?", (d,)).fetchone()
         hrv_row = conn.execute("SELECT last_night_avg FROM hrv WHERE date=?", (d,)).fetchone()
-        act_count = conn.execute("SELECT COUNT(*) FROM activities WHERE date=?", (d,)).fetchone()[0]
+        act_count = conn.execute(
+            """SELECT COUNT(*) FROM activities
+               WHERE date=?
+                 AND NOT (source='strava' AND EXISTS (
+                   SELECT 1 FROM activities g
+                   WHERE g.date = activities.date
+                     AND g.source = 'garmin'
+                     AND g.strava_id = CAST(SUBSTR(activities.id, 8) AS TEXT)
+                 ))""",
+            (d,)
+        ).fetchone()[0]
         loc = _location_summary_with_conn(loc_conn, d)
+        flight_count = conn.execute(
+            "SELECT COUNT(*) FROM flights WHERE date=?", (d,)
+        ).fetchone()[0]
 
+        tag_slugs = [
+            r[0] for r in conn.execute(
+                "SELECT t.slug FROM day_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.date=? ORDER BY t.category, t.name",
+                (d,),
+            ).fetchall()
+        ]
         results.append(DaySummary(
             date=d,
             energy=row["energy"],
@@ -187,9 +268,15 @@ def get_range(
             resting_hr=stats_row["resting_hr"] if stats_row else None,
             hrv_last_night=hrv_row["last_night_avg"] if hrv_row else None,
             activity_count=act_count,
+            flight_count=flight_count,
             cities=loc["cities"],
             duty_day=bool(row["duty_day"]),
             away_from_base=bool(row["away_from_base"]),
+            daily_question=row["daily_question"],
+            daily_answer=row["daily_answer"],
+            photo_path=row["photo_path"] if "photo_path" in row.keys() else None,
+            tags=row["tags"] if "tags" in row.keys() else None,
+            tags_list=tag_slugs,
         ))
 
     loc_conn.close()
@@ -212,6 +299,7 @@ def patch_day(
         "INSERT OR IGNORE INTO days (date) VALUES (?)", (date_str,)
     )
 
+    # Exclude None (means "not provided") but keep empty strings and False/0
     updates = {k: v for k, v in patch.model_dump().items() if v is not None}
     if not updates:
         return get_day(date_str, conn)
@@ -225,3 +313,69 @@ def patch_day(
     conn.commit()
 
     return get_day(date_str, conn)
+
+
+@router.post("/{date_str}/photo")
+def upload_photo(
+    date_str: str,
+    file: UploadFile,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+):
+    try:
+        date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD")
+
+    import io
+    import pillow_heif
+    import PIL.Image as Image
+    from PIL import ImageOps
+
+    content = file.file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    pillow_heif.register_heif_opener()
+
+    try:
+        img = Image.open(io.BytesIO(content))
+        img = ImageOps.exif_transpose(img)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        jpeg_bytes = buf.getvalue()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image conversion failed: {e}")
+
+    filename = f"{date_str}.jpg"
+    dest = PHOTOS_DIR / filename
+    dest.write_bytes(jpeg_bytes)
+
+    conn.execute("INSERT OR IGNORE INTO days (date) VALUES (?)", (date_str,))
+    conn.execute("UPDATE days SET photo_path = ? WHERE date = ?", (filename, date_str))
+    conn.commit()
+
+    return JSONResponse({"photo_url": f"/photos/{filename}"})
+
+
+@router.post("/{date_str}/companions", response_model=list[str])
+def set_companions(
+    date_str: str,
+    body: CompanionsBody,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+):
+    try:
+        date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD")
+
+    conn.execute("INSERT OR IGNORE INTO days (date) VALUES (?)", (date_str,))
+    conn.execute("DELETE FROM day_companions WHERE date = ?", (date_str,))
+    for cid in body.contact_ids:
+        conn.execute(
+            "INSERT OR IGNORE INTO day_companions (date, contact_id) VALUES (?,?)",
+            (date_str, cid),
+        )
+    conn.commit()
+    return _companions(conn, date_str)

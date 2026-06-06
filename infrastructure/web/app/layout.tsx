@@ -29,6 +29,9 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
+      <head>
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      </head>
       <body className="min-h-full bg-[#09090B] text-[#FAFAFA] antialiased">
         <Providers>
           <BottomNav />

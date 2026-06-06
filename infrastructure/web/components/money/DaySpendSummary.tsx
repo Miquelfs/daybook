@@ -30,7 +30,10 @@ export function DaySpendSummary({ date }: Props) {
   if (!meta) return null;
 
   const expenses = transactions.filter(isExpense);
+  const incomes = transactions.filter((t) => !isExpense(t));
   const totalSpent = expenses.reduce((s, t) => s + Math.abs(t.amount), 0);
+  const totalIncome = incomes.reduce((s, t) => s + t.amount, 0);
+  const net = totalIncome - totalSpent;
 
   return (
     <>
@@ -47,7 +50,7 @@ export function DaySpendSummary({ date }: Props) {
           </button>
         </div>
 
-        {expenses.length === 0 ? (
+        {transactions.length === 0 ? (
           <div className="border border-dashed border-[#27272A] rounded-lg px-4 py-5 text-center">
             <p className="text-sm text-[#52525B]">No expenses today</p>
             <button
@@ -63,11 +66,13 @@ export function DaySpendSummary({ date }: Props) {
             {/* Total */}
             <div className="flex items-center justify-between mb-1">
               <span className="text-sm text-[#71717A]">Total spent</span>
-              <span className="text-sm font-semibold text-[#FAFAFA]">{fmtAmount(totalSpent)}</span>
+              <span className={`text-sm font-semibold ${net >= 0 ? "text-[#22C55E]" : "text-[#FAFAFA]"}`}>
+                {net >= 0 ? "+" : ""}{fmtAmount(Math.abs(net))}
+              </span>
             </div>
 
-            {/* Transaction list */}
-            {expenses.map((t) => (
+            {/* Transaction list — all transactions, correct sign */}
+            {transactions.map((t) => (
               <TransactionRow key={t.id} t={t} />
             ))}
           </div>
@@ -88,12 +93,13 @@ export function DaySpendSummary({ date }: Props) {
 
 function TransactionRow({ t }: { t: Transaction }) {
   const emoji = CATEGORY_EMOJI[t.category ?? ""] ?? "💳";
+  const isPositive = t.amount >= 0;
   return (
     <div className="flex items-center gap-3 py-1.5">
       <span className="text-base w-6 text-center shrink-0">{emoji}</span>
       <span className="text-sm text-[#D4D4D8] flex-1 truncate">{t.name}</span>
-      <span className="text-sm tabular-nums text-[#A1A1AA] shrink-0">
-        -{fmtAmount(t.amount)}
+      <span className={`text-sm tabular-nums shrink-0 ${isPositive ? "text-[#22C55E]" : "text-[#A1A1AA]"}`}>
+        {isPositive ? "+" : "-"}{fmtAmount(t.amount)}
       </span>
     </div>
   );

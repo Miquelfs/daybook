@@ -57,7 +57,7 @@ It's also the system I want to use every day. A place to look back. A place to n
 - **Money.** Notion expenses (existing, imported). Native expense entry replacing Notion input over time. Categories, merchants, recurring expenses, budgets.
 - **Aviation.** Flight logbook ingestion. Type ratings, medical, recurrency tracking. Layover and duty-day awareness.
 - **Personal.** Obsidian vault as long-form notes. Daily questionnaire. Decision log. Tags. Free-form journal entries.
-- **Memory.** Photo metadata (dates + locations only, not the photos themselves). On-this-day surfacing. Yearly review artifacts.
+- **Memory.** Photo. On-this-day surfacing. Yearly review artifacts.
 - **Audio.** Voice memos transcribed locally via Whisper. Searchable across years.
 - **Insights.** Correlation engine. Anomaly detection. Streaks. Weekly/monthly/yearly review summaries.
 
@@ -169,46 +169,104 @@ The foundation. Get one full pipeline working end-to-end.
 - ✅ Evening questionnaire (energy, mood, stress, free text, rotating question)
 - ✅ Makefile orchestration (setup, dev, sync, backup, verify)
 
-### Phase 2 — Brain (weeks 5–8) 🔄 IN PROGRESS
+### Phase 2 — Brain ✅ COMPLETE (2026-05-15)
 Add the other major domains and start surfacing intelligence.
 
 - ✅ GPS track import (22,408 segments from Google Maps Timeline 2013–2026)
 - ✅ Leaflet day-view map (polyline + named stops)
 - ✅ Overland iOS live location ingestion (`POST /locations/ingest/overland`)
 - ✅ World heatmap + `/explore` page (country/city stats, year filter)
-- ✅ Finance domain: `money.db`, Notion sync CLI, 7 API endpoints, expense entry bottom sheet, `/money` budget page
-- ✅ `DaySpendSummary` wired into Today + Day Detail
-- ⏳ Notion history import (credentials configured; run `make sync-notion-full`)
-- ⏳ Background geocoding (~8% complete; `caffeinate -i python -m domains.locations.geocode_tracks`)
+- ✅ Finance domain: `money.db`, Notion sync, 13 API endpoints, full analytics suite
+- ✅ Transaction entry, inline editing (name/sign/amount/category/account), deletion
+- ✅ `/money/overview` — burn rate, daily projections, budget alerts
+- ✅ `/money/trends` — savings streak, forecast, charts, anomaly detection, CSV export
+- ✅ `/money/portfolio` — net worth, investment vs liquid, account classification
+- ✅ `/money/category/[cat]` — per-category drill-down with transaction history
+- ✅ Hourly cron: Garmin + Overland + Notion sync running autonomously on Pi
+- ✅ Pi production deployment: systemd services (auto-start, auto-restart), `make deploy` pipeline
+- ✅ Anomaly detection: large transactions (>3× avg) + category spikes (>1.5× 12-month avg)
+- ⏳ Background geocoding (~8% complete; run `caffeinate -i python -m domains.locations.geocode_tracks`)
 - ⏳ Aviation logbook CSV import + Day-view flight strip
-- ⏳ Correlation engine (weekly batch job, Pearson correlations, significance tests)
-- ⏳ Anomaly detection for daily metrics
+- ⏳ Correlation engine (Pearson correlations across domains)
 - ⏳ "On this day" widget on Today view
 
-**Done when:** Today view shows everything about today, every domain. Insights tab shows real correlations from my data.
+### Phase 2.5 — Daily usability ✅ COMPLETE (2026-05-18)
+Make it something worth opening every single day.
 
-### Phase 3 — Self (weeks 9–12)
-The features that make it personal and reflective.
+- ✅ **Photo of the day** — upload from phone gallery (HEIC→JPEG conversion), stored on Pi, displayed on Today + all day pages; `/moments` library page
+- ✅ **Questionnaire overhaul** — compact Today pill row (Outdoors, Social, Work, S.I. with rating, Drinks with count); "With" smart autocomplete from history; Past 7 days collapsible
+- ✅ **People tracking** — `with:Name` tags stored per day; autocomplete from 90-day history; foundation for future correlation (who I'm with vs mood/spend/sleep)
+- ✅ **Money sign fix** — reimbursements/income correctly offset daily spending total
+- ✅ **Account color badges** — 12 accounts color-coded to match Notion palette
+- ✅ **Location polish** — max 10 named stops on Today, deduped; dwell thresholds tuned for sparse iPhone tracking days
+- ✅ **Nav bar** — Timeline before Finance; Camera/Moments icon added
+- ✅ Photo dot on Timeline cards when photo is logged
 
-- Decision log
-- Custom tags + tag-based correlations
-- Streaks (smart, contextual)
-- Photo metadata sync (read-only)
-- Weekly/monthly review email generation
-- ✅ Yearly location heatmap (`/explore` with year filter) — pulled forward from Phase 3
-- **PWA install on phone + Tailscale remote access** — see `docs/PHONE_SETUP.md`
+### Phase 3 — Self ✅ COMPLETE (2026-06-05)
+The features that make it personal and reflective over time.
+
+**Implemented (beyond Phase 2.5):**
+- ✅ Aviation logbook — full CSV import (Full.csv / Aerolink), 45+ endpoint API, logbook stats, currency tracking, EASA/Excel/PDF/CSV exports, routes map, analytics (delays, fuel, pax, YoY)
+- ✅ "On this day" — same date in previous years: HRV, mood, location, spend surfaced on Today
+- ✅ Correlation engine — Pearson r across all domains (energy, mood, HRV, steps, spend, screen time, aviation), top correlations, scatter plots, weekly stats, journal search
+- ✅ Books domain — reading log, stats by year/genre/author/language, cover fetching, Goodreads import
+- ✅ Life in Weeks — 90×52 grid, life periods (color-coded, layered), life events with photos
+- ✅ Screen time — iPhone Shortcuts ingest, per-app breakdown, `/screen-time` API
+- ✅ Weather — historical sync via Open-Meteo, condition auto-tagging
+- ✅ Health trends + training analytics — HRV/sleep/stress dashboards, weekly load, personal records, best efforts, Strava integration (segments, segment efforts, polylines)
+- ✅ Tags system — structured day tags with categories, icons, per-day notes
+- ✅ Contacts + companions — people tracking per day (with:Name expanded to full contacts table)
+- ✅ Money enhancements — category detail pages, month navigation, Notion sync button, FAB
 
 **Done when:** I voluntarily open this every morning and every evening. It feels like a tool I trust.
 
-### Phase 4 — Spark (ongoing)
-The advanced features. Build only after Phases 1–3 are stable and used.
+### Phase 4 — Native iOS App 🔄 NEXT (started 2026-06-05)
+Take Daybook from a web app accessed via Tailscale to a native Swift/SwiftUI iOS app installed via Xcode. The Pi remains the single source of truth; the app is a thin client with offline write capabilities.
 
-- Local LLM (Ollama) for natural language search
-- Voice memo recording + Whisper transcription
-- Custom audio note hardware device
-- Migrate hosting to Raspberry Pi 3 server
-- Layover Mode for aviation duty
-- "Was today different?" widget
+Full plan: `.claude/plans/hello-claude-can-you-mutable-parrot.md`
+
+**Phase 4.0 — Foundation:**
+- ⏳ Xcode project scaffold (`com.miquelfarr.daybook`, iOS 17, SwiftUI)
+- ⏳ `DaybookAPIClient` actor, `OfflineQueue` actor, `NWPathMonitor` connectivity
+- ⏳ `NSAppTransportSecurity` for HTTP over Tailscale
+- ⏳ 5-tab navigation: Today, Aviation, Money, Explore, Settings
+
+**Phase 4.1 — Daily Core:**
+- ⏳ Today view (HRV, sleep, steps, body battery, flights, tags)
+- ⏳ Evening questionnaire — offline-capable (CryptoKit MD5, hardcoded questions)
+- ⏳ Photo upload (PHPicker → multipart POST)
+- ⏳ Day detail view (read-only)
+
+**Phase 4.2 — Data Reading:**
+- ⏳ Health trends (Swift Charts)
+- ⏳ Activities list + detail (MapKit polyline)
+- ⏳ Money overview + transactions
+- ⏳ Aviation logbook (read-only) + currency badge
+- ⏳ Books list + stats
+
+**Phase 4.3 — Active Input:**
+- ⏳ Flight logging form with offline queue (replaces needing a laptop at the gate)
+- ⏳ Expense entry FAB with 8-second UX target
+- ⏳ Book logging sheet
+- ⏳ Overland deep link integration
+
+**Phase 4.4 — Insights:**
+- ⏳ Correlations explorer (scatter plot, top correlations)
+- ⏳ Life in Weeks grid (LazyVGrid / Canvas)
+- ⏳ Location heatmap (WKWebView + Leaflet bridge)
+- ⏳ Training dashboard, Timeline, Sync controls in Settings
+
+**Done when:** I log flights from the cockpit without a laptop, fill the questionnaire in bed, and the Pi web app is a secondary interface.
+
+### Phase 5 — Spark (ongoing)
+The advanced features. Build only after Phase 4 is stable and used daily.
+
+- ⏳ Local LLM (Ollama) for natural language search: *"show me weekends I cycled and felt good"*
+- ⏳ Voice memo recording + Whisper transcription
+- ⏳ Aviation duty-day fatigue pattern analysis (HRV vs. duty days, time zone load)
+- ⏳ "Was today different?" widget — automatic anomaly surfacing across all domains
+- ⏳ Custom audio note hardware (Pi Zero 2W + mic + button)
+- ⏳ **Receipt photos + OCR** — attach a photo of a receipt to any transaction; OCR via Tesseract locally; structured parsing for line-item extraction. Enables grocery analytics.
 
 **Done when:** the system is teaching me things about my life I didn't know.
 

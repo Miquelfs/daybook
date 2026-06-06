@@ -1,169 +1,202 @@
-# Raspberry Pi 3 Migration Guide
+# Raspberry Pi Deployment Guide
 
-**Status: Ready to execute** — Phase 1 complete, Pi has Phase 0 (Docker, Tailscale, Pi-hole, Unbound) already running.
+**Status: ✅ LIVE** — Pi is the production server as of 2026-05-15.
 
-Architecture after migration: iPhone/Mac → Tailscale → Pi (FastAPI :8000 + Next.js :3000 + SQLite) — Mac no longer needs to be on.
+Architecture: Mac (dev) → `make deploy` → Pi (FastAPI :8000 + Next.js :3000 + SQLite) ← iPhone/Mac via Tailscale
 
----
-
-## Prerequisites
-
-- [x] Phase 1 stable on Mac
-- [x] Pi running Pi OS Lite 64-bit (Bookworm) with Docker + Tailscale (Phase 0 complete)
-- [x] SSH key-based access to Pi from Mac
-- [ ] Pi's Tailscale IP noted: run `ssh pi@daybook-pi.local tailscale ip -4`
+- Pi Tailscale IP: `100.67.252.76`
+- App URL: `http://100.67.252.76:3000`
+- API URL: `http://100.67.252.76:8000`
 
 ---
 
-## Phase A — Prepare Pi (~15 min, one-time)
+## Daily operations
 
+### Check service status
 ```bash
-ssh pi@daybook-pi.local
-
-# Verify Python 3.11+ (Bookworm ships with it):
-python3 --version
-
-# Install Node.js 20+ via NodeSource:
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Verify:
-node --version   # expect v20+
-npm --version
+sudo systemctl status daybook-api daybook-web --no-pager
 ```
 
----
-
-## Phase B — Build on Mac, rsync to Pi
-
-```bash
-# On Mac — build Next.js first (Pi doesn't have enough RAM for npm run build):
-cd /Users/miquelfarre/Desktop/daybook/infrastructure/web
-npm run build
-
-# Rsync code (exclude platform-specific and gitignored dirs):
-rsync -avz --progress \
-  --exclude='.venv' \
-  --exclude='node_modules' \
-  --exclude='.git' \
-  --exclude='data/raw/garmin/' \
-  --exclude='data/backups/' \
-  /Users/miquelfarre/Desktop/daybook/ \
-  pi@daybook-pi.local:~/daybook/
-
-# Copy Garmin tokenstore (avoids re-login on Pi):
-rsync -avz \
-  /Users/miquelfarre/Desktop/daybook/data/raw/garmin_session/ \
-  pi@daybook-pi.local:~/daybook/data/raw/garmin_session/
-
-# Copy databases:
-rsync -avz \
-  /Users/miquelfarre/Desktop/daybook/infrastructure/db/daybook.db \
-  /Users/miquelfarre/Desktop/daybook/infrastructure/db/locations.db \
-  /Users/miquelfarre/Desktop/daybook/infrastructure/db/money.db \
-  pi@daybook-pi.local:~/daybook/infrastructure/db/
-```
-
----
-
-## Phase C — Bootstrap on Pi
-
-```bash
-ssh pi@daybook-pi.local
-cd ~/daybook
-
-# Python virtual environment + deps:
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-
-# Node deps — fresh ARM64 install (do NOT copy Mac's node_modules):
-cd infrastructure/web && npm install --production && cd ../..
-
-# Create .env from example, then edit:
-cp .env.example .env
-nano .env
-# Set these values (replace 100.x.x.x with Pi's actual Tailscale IP):
-#   CORS_ORIGINS=http://localhost:3000,http://100.x.x.x:3000
-#   NEXT_PUBLIC_API_URL=http://100.x.x.x:8000
-
-# Verify databases arrived intact:
-make verify
-```
-
----
-
-## Phase D — systemd services (auto-start on boot)
-
-```bash
-sudo cp ~/daybook/infrastructure/systemd/daybook-api.service /etc/systemd/system/
-sudo cp ~/daybook/infrastructure/systemd/daybook-web.service /etc/systemd/system/
-
-sudo systemctl daemon-reload
-sudo systemctl enable daybook-api daybook-web
-sudo systemctl start daybook-api daybook-web
-
-# Check status:
-sudo systemctl status daybook-api
-sudo systemctl status daybook-web
-
-# Smoke test:
-curl http://localhost:8000/    # → {"status":"ok"}
-curl -I http://localhost:3000/ # → HTTP 200
-```
-
-**Log access:**
+### View live logs
 ```bash
 journalctl -u daybook-api -f    # API logs
 journalctl -u daybook-web -f    # Web logs
 ```
 
----
-
-## Phase E — Cron jobs
-
+### Restart services (after config change)
 ```bash
-crontab -e
-# Add:
-0 7 * * * cd /home/pi/daybook && ./infrastructure/scripts/daily_sync.sh
-0 2 * * * cd /home/pi/daybook && make backup
+sudo systemctl restart daybook-api daybook-web
+```
+
+### Check cron is running
+```bash
+crontab -l
+# Should show:
+# 0 * * * *  cd ~/daybook && ./infrastructure/scripts/daily_sync.sh ...
+# 0 2 * * *  cd ~/daybook && make backup
+```
+
+### Manual sync
+```bash
+cd ~/daybook
+.venv/bin/python -m domains.health.garmin.garmin_sync   # Garmin
+.venv/bin/python -m domains.money.notion_sync            # Notion
 ```
 
 ---
 
-## Phase F — Phone access
-
-1. iPhone: open Tailscale and verify it's connected.
-2. Safari → `http://100.x.x.x:3000` (Pi's Tailscale IP) → Today view should load.
-3. Share → Add to Home Screen → install as PWA.
-4. Test: submit questionnaire, add expense, verify Garmin data shows.
-
----
-
-## Phase G — Ongoing updates (Mac → Pi)
-
-When you change code on the Mac:
+## Deploying code changes (from Mac)
 
 ```bash
-# On Mac: rebuild frontend if any web/ files changed:
-cd infrastructure/web && npm run build && cd ../..
+make deploy
+```
 
-# Push to Pi:
-rsync -avz --progress \
-  --exclude='.venv' --exclude='node_modules' --exclude='.git' \
-  --exclude='data/' \
-  /Users/miquelfarre/Desktop/daybook/ \
-  pi@daybook-pi.local:~/daybook/
+This runs: rsync → `npm install` → `npm run build` → `sudo systemctl restart daybook-api daybook-web`
 
-# On Pi: restart services:
-ssh pi@daybook-pi.local "sudo systemctl restart daybook-api daybook-web"
+### rsync safety — what is excluded
+The following Pi-only state is never overwritten:
+- `.env` — Pi credentials (Notion token, Garmin password, CORS origins)
+- `infrastructure/db/*.db-wal` / `*.db-shm` — SQLite WAL files
+- `infrastructure/scripts/logs/` — cron log files
+- `nohup.out`
+
+### After Python-only changes (no rebuild needed)
+```bash
+# Just rsync + restart API — skip the frontend build
+rsync -av --exclude='.git' --exclude='.venv' --exclude='node_modules' \
+  --exclude='infrastructure/db/*.db' --exclude='.env' \
+  /Users/miquelfarre/Desktop/daybook/ pi@daybook-pi:~/daybook/
+ssh pi@daybook-pi "sudo systemctl restart daybook-api"
 ```
 
 ---
 
-## Notes
+## Pi environment
 
-- **Next.js build on Mac**: Pi 3 has 1 GB RAM; `npm run build` needs ~512 MB. Always build on Mac and copy `.next/`.
-- **SQLite WAL mode**: already enabled in `connection.py` — concurrent reads during sync are safe.
-- **Raw garmin payloads** (`data/raw/garmin/`): 38 MB of JSON, excluded from rsync to save time. If Pi runs out of space these can stay on Mac or go to an external drive + symlink.
-- **Updating databases**: for large data migrations, copy the `.db` files manually. For daily data, systemd + cron handles it automatically.
-- **Static export fallback**: if Pi 3 struggles with Next.js SSR, run `npm run build && npm run export` on Mac, copy `out/` to Pi, and serve with `python3 -m http.server 3000`. FastAPI stays the same.
+### `.env` on Pi — required keys
+```
+GARMIN_EMAIL=...
+GARMIN_PASSWORD=...
+NOTION_TOKEN=...
+NOTION_DATABASE_ID=...
+OVERLAND_TOKEN=...
+TZ=Europe/Madrid
+CORS_ORIGINS=http://localhost:3000,http://100.67.252.76:3000
+```
+
+### `.env.local` on Pi — frontend build vars
+```
+NEXT_PUBLIC_API_URL=http://100.67.252.76:8000
+API_INTERNAL_URL=http://localhost:8000
+```
+
+**Critical:** `NEXT_PUBLIC_API_URL` must be the Pi's Tailscale IP. It is baked into the Next.js bundle at build time. The browser accesses the app via this URL, so the origin must match for client-side API calls to work (CORS).
+
+**Access the app consistently from `http://100.67.252.76:3000`** — accessing from a different URL (e.g. `192.168.1.20:3000` or `daybook-pi:3000`) will cause client-side fetches to fail because the browser-side URL won't match `NEXT_PUBLIC_API_URL`.
+
+---
+
+## Systemd services
+
+Installed at `/etc/systemd/system/daybook-api.service` and `daybook-web.service`.
+
+Both services:
+- Start automatically on boot (`enabled`)
+- Restart on crash (`Restart=on-failure`, `RestartSec=5`)
+- Load `.env` as environment file
+- Run as user `pi` from `~/daybook`
+
+Passwordless sudo for restarts: `/etc/sudoers.d/daybook`
+
+---
+
+## First-time Pi setup (for reference / disaster recovery)
+
+### A — Prepare Pi
+```bash
+ssh pi@daybook-pi
+
+# Verify Python 3.11+:
+python3 --version
+
+# Install Node.js 20+:
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+### B — Rsync code + databases from Mac
+```bash
+# From Mac:
+rsync -av --exclude='.venv' --exclude='node_modules' --exclude='.git' \
+  --exclude='data/' --exclude='infrastructure/db/*.db' \
+  /Users/miquelfarre/Desktop/daybook/ pi@daybook-pi:~/daybook/
+
+# Copy databases manually:
+scp infrastructure/db/daybook.db pi@daybook-pi:~/daybook/infrastructure/db/
+scp infrastructure/db/locations.db pi@daybook-pi:~/daybook/infrastructure/db/
+scp infrastructure/db/money.db pi@daybook-pi:~/daybook/infrastructure/db/
+
+# Copy Garmin tokenstore:
+rsync -av data/raw/garmin_session/ pi@daybook-pi:~/daybook/data/raw/garmin_session/
+```
+
+### C — Bootstrap on Pi
+```bash
+ssh pi@daybook-pi
+cd ~/daybook
+
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# Create .env with all required keys (see above)
+cp .env.example .env
+nano .env
+
+# Build frontend (Pi has enough RAM for Next.js 16 build):
+cd infrastructure/web
+npm install
+cp /path/to/.env.local .env.local   # with correct Tailscale IP
+npm run build
+cd ../..
+```
+
+### D — Install systemd services
+```bash
+sudo cp ~/daybook/infrastructure/systemd/daybook-api.service /etc/systemd/system/
+sudo cp ~/daybook/infrastructure/systemd/daybook-web.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable daybook-api daybook-web
+sudo systemctl start daybook-api daybook-web
+
+# Verify:
+curl http://localhost:8000/    # → {"status":"ok"}
+curl -I http://localhost:3000/ # → HTTP 200
+```
+
+### E — Install passwordless sudo for deploy
+```bash
+echo 'pi ALL=(ALL) NOPASSWD: /bin/systemctl restart daybook-api, /bin/systemctl restart daybook-web, /bin/systemctl restart daybook-api daybook-web, /bin/systemctl restart daybook-web daybook-api' | sudo tee /etc/sudoers.d/daybook
+```
+
+### F — Install cron
+```bash
+make cron-install
+# Installs: 0 * * * * (hourly Garmin + Overland + Notion sync)
+# Also add daily backup manually:
+(crontab -l; echo "0 2 * * * cd ~/daybook && make backup") | crontab -
+```
+
+### G — Phone access
+1. Open Tailscale on iPhone — verify connected
+2. Safari → `http://100.67.252.76:3000` → app loads
+3. Share → Add to Home Screen → PWA installed
+4. See `docs/PHONE_SETUP.md` for full setup
+
+---
+
+## Known constraints
+
+- **Build on Pi**: Pi 4 (4 GB RAM) can run `npm run build` fine. Pi 3 (1 GB) may need to build on Mac and scp `.next/` to Pi.
+- **SQLite WAL mode**: enabled — concurrent reads during sync are safe, no locking issues.
+- **Raw Garmin payloads** (`data/raw/garmin/`): ~38 MB JSON, excluded from rsync. Stays on Mac.
+- **Geocoding**: background job (`make geocode-tracks`) is ~8% complete. Run overnight: `caffeinate -i make geocode-tracks`.

@@ -1,0 +1,786 @@
+"use client";
+
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { format, parseISO } from "date-fns";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+} from "recharts";
+import {
+  PlaneTakeoff, PlaneLanding, Moon, Clock, Globe, Plus,
+  Shield, TrendingUp, Award, ChevronRight, Download, MapPin, List,
+  BarChart2, Flag, Compass, Plane, Fuel, Users, Layers, AlertTriangle,
+} from "lucide-react";
+import dynamic from "next/dynamic";
+import Link from "next/link";
+import { api, type FlightSummary } from "@/lib/api";
+import { AddFlightSheet } from "@/components/aviation/AddFlightSheet";
+
+const FlightRouteMap = dynamic(
+  () => import("@/components/aviation/FlightRouteMap").then(m => m.FlightRouteMap),
+  { ssr: false, loading: () => <div className="h-96 bg-[#18181B] rounded-lg animate-pulse" /> }
+);
+
+type Tab = "overview" | "logbook" | "map" | "stats";
+type CodeMode = "icao" | "iata";
+
+const TODAY = new Date().toISOString().slice(0, 10);
+const PAGE_SIZE = 30;
+
+const EASA_COLS = [
+  "Date", "Dep", "Dep Time", "Arr", "Arr Time", "Model", "Reg",
+  "SP SE", "SP ME", "MP", "Total", "PIC Name",
+  "T/O D", "T/O N", "Ldg D", "Ldg N",
+  "Night", "IFR", "PIC", "CoPilot", "Dual", "Instr",
+  "FSTD Date", "FSTD Type", "FSTD Total", "Remarks",
+];
+
+const BASE_API = (typeof window === "undefined"
+  ? process.env.API_INTERNAL_URL
+  : undefined) ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+// Fill all years from first Aerolink entry (2018) through today
+const ALL_YEARS = Array.from(
+  { length: new Date().getFullYear() - 2018 + 1 },
+  (_, i) => String(2018 + i)
+);
+
+// Operator colour logic based on source + operator field
+function operatorColor(f: FlightSummary): { dot: string; badge: string; label: string } {
+  if (f.is_sim) return { dot: "#A78BFA", badge: "bg-violet-900/40 text-violet-300", label: "SIM" };
+  if (f.source === "aerolink") return { dot: "#A78BFA", badge: "bg-violet-900/40 text-violet-300", label: "Aerolink" };
+  const op = (f.operator || "").toLowerCase();
+  if (op.includes("norwegian") || f.source === "norwegian")
+    return { dot: "#EF4444", badge: "bg-red-900/40 text-red-300", label: "Norwegian" };
+  if (op.includes("ryanair") || f.source === "full_csv")
+    return { dot: "#3B82F6", badge: "bg-blue-900/40 text-blue-300", label: "Ryanair" };
+  return { dot: "#71717A", badge: "bg-[#27272A] text-[#71717A]", label: f.operator || "Manual" };
+}
+
+function hToHHMM(hours: number): string {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function secToHHMM(seconds: number | null | undefined): string {
+  if (!seconds) return "—";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return m > 0 ? `${h}:${String(m).padStart(2, "0")}` : `${h}:00`;
+}
+
+function routeCode(icao: string | null, iata: string | null, mode: CodeMode): string {
+  if (mode === "iata") return iata || icao || "?";
+  return icao || iata || "?";
+}
+
+function fmt(n: number | null | undefined, unit = ""): string {
+  if (n == null) return "—";
+  return n.toLocaleString() + (unit ? " " + unit : "");
+}
+
+function StatCard({ label, value, sub, icon }: { label: string; value: string | number; sub?: string; icon?: React.ReactNode }) {
+  return (
+    <div className="bg-[#18181B] rounded-lg p-4">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs text-[#71717A]">{label}</p>
+        {icon && <span className="text-[#52525B]">{icon}</span>}
+      </div>
+      <p className="text-2xl font-semibold text-[#FAFAFA] tabular-nums">{value}</p>
+      {sub && <p className="text-xs text-[#52525B] mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+function AnalyticCard({ label, value, sub, accent }: { label: string; value: string | number; sub?: string; accent?: string }) {
+  return (
+    <div className="bg-[#18181B] rounded-lg p-3">
+      <p className="text-xs text-[#71717A] mb-1">{label}</p>
+      <p className={`text-base font-semibold tabular-nums ${accent || "text-[#FAFAFA]"}`}>{value}</p>
+      {sub && <p className="text-xs text-[#52525B] mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+function SectionTitle({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      {icon && <span className="text-[#52525B]">{icon}</span>}
+      <p className="text-sm font-medium text-[#FAFAFA]">{children}</p>
+    </div>
+  );
+}
+
+// Operator legend pill
+function OpPill({ label, color }: { label: string; color: string }) {
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-[#A1A1AA]">
+      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+      {label}
+    </span>
+  );
+}
+
+export default function AviationPage() {
+  const [addOpen, setAddOpen] = useState(false);
+  const [selectedYear, setSelectedYear] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("overview");
+  const [easaPage, setEasaPage] = useState(0);
+  const [roleFilter, setRoleFilter] = useState<string>("");
+  const [yearFilter, setYearFilter] = useState<string>("");
+  const [codeMode, setCodeMode] = useState<CodeMode>("icao");
+  const [flightLimit, setFlightLimit] = useState(10);
+  const [mapYear, setMapYear] = useState<string>("");
+
+  const { data: stats } = useQuery({
+    queryKey: ["flightStats"],
+    queryFn: () => api.flightStats(),
+  });
+
+  const { data: analytics } = useQuery({
+    queryKey: ["flightAnalytics"],
+    queryFn: () => api.flightAnalytics(),
+    enabled: tab === "stats",
+  });
+
+  const { data: currency } = useQuery({
+    queryKey: ["flightCurrency"],
+    queryFn: () => api.flightCurrency(),
+  });
+
+  const { data: routes = [] } = useQuery({
+    queryKey: ["flightRoutes", mapYear],
+    queryFn: () => api.flightRoutes(mapYear || undefined),
+    enabled: tab === "map",
+  });
+
+  const { data: airportVisits = [] } = useQuery({
+    queryKey: ["flightAirports", mapYear],
+    queryFn: () => api.flightAirports(mapYear || undefined),
+    enabled: tab === "map",
+  });
+
+  const { data: allFlights = [] } = useQuery({
+    queryKey: ["flights", "all"],
+    queryFn: () => api.flights({}),
+  });
+
+  const tot = stats?.totals;
+
+  // Fill missing years with 0 for chart
+  const yearMap = new globalThis.Map((stats?.by_year ?? []).map(y => [y.year, y]));
+  const yearsWithGaps = ALL_YEARS.map(yr => yearMap.get(yr) ?? {
+    year: yr, sectors: 0, block_hours: 0, pic_hours: 0, sic_hours: 0, night_hours: 0, takeoffs: 0, landings: 0,
+  });
+
+  const monthData = selectedYear
+    ? stats?.by_month.filter(m => m.month.startsWith(selectedYear)) ?? []
+    : [];
+
+  const isExpiringSoon = currency?.next_expiry_date
+    ? new Date(currency.next_expiry_date) <= new Date(Date.now() + 30 * 86400000)
+    : false;
+
+  const filteredFlights = allFlights.filter(f => {
+    if (roleFilter && f.crew_role !== roleFilter) return false;
+    if (yearFilter && !f.date.startsWith(yearFilter)) return false;
+    return true;
+  }).slice().reverse(); // newest first
+
+  const shownFlights = filteredFlights.slice(0, flightLimit);
+  const hasMore = filteredFlights.length > flightLimit;
+
+  const easaPageSize = 50;
+  const easaTotalPages = Math.ceil(allFlights.length / easaPageSize);
+  const easaSlice = allFlights.slice(easaPage * easaPageSize, (easaPage + 1) * easaPageSize);
+
+  const tabCls = (t: Tab) =>
+    `px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap ${tab === t
+      ? "text-sky-400 border-b-2 border-sky-400"
+      : "text-[#71717A] hover:text-[#A1A1AA]"}`;
+
+  const uniqueYears = Array.from(new Set(allFlights.map(f => f.date.slice(0, 4)))).sort().reverse();
+
+  const CodeToggle = () => (
+    <div className="flex items-center bg-[#18181B] border border-[#27272A] rounded-lg p-0.5">
+      <button className={`px-2 py-0.5 text-xs rounded-md transition-colors ${codeMode === "icao" ? "bg-sky-600 text-white" : "text-[#71717A]"}`}
+        onClick={() => setCodeMode("icao")}>ICAO</button>
+      <button className={`px-2 py-0.5 text-xs rounded-md transition-colors ${codeMode === "iata" ? "bg-sky-600 text-white" : "text-[#71717A]"}`}
+        onClick={() => setCodeMode("iata")}>IATA</button>
+    </div>
+  );
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 pt-4 pb-24">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-lg font-semibold text-[#FAFAFA]">Logbook</h1>
+        <button onClick={() => setAddOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white text-sm rounded-lg transition-colors">
+          <Plus size={14} />Add Flight
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-[#27272A] mb-6 overflow-x-auto">
+        <button className={tabCls("overview")} onClick={() => setTab("overview")}>
+          <span className="flex items-center gap-1.5"><List size={13} />Overview</span>
+        </button>
+        <button className={tabCls("logbook")} onClick={() => setTab("logbook")}>
+          <span className="flex items-center gap-1.5"><BarChart2 size={13} />EASA Logbook</span>
+        </button>
+        <button className={tabCls("map")} onClick={() => setTab("map")}>
+          <span className="flex items-center gap-1.5"><MapPin size={13} />Routes Map</span>
+        </button>
+        <button className={tabCls("stats")} onClick={() => setTab("stats")}>
+          <span className="flex items-center gap-1.5"><TrendingUp size={13} />Analytics</span>
+        </button>
+      </div>
+
+      {/* ── OVERVIEW ── */}
+      {tab === "overview" && (
+        <>
+          {tot && (
+            <div className="grid grid-cols-2 gap-3 mb-3 sm:grid-cols-4">
+              <StatCard label="Total Block" value={hToHHMM(tot.block_hours)} sub={`${tot.sectors} sectors`} icon={<Clock size={14} />} />
+              <StatCard label="PIC" value={hToHHMM(tot.pic_hours)} sub={`SIC ${hToHHMM(tot.sic_hours)}`} icon={<Award size={14} />} />
+              <StatCard label="Night" value={hToHHMM(tot.night_hours)} sub={`${((tot.night_hours / (tot.block_hours || 1)) * 100).toFixed(0)}% of total`} icon={<Moon size={14} />} />
+              <StatCard label="Airports" value={stats.airports_visited} sub={`${stats.countries_visited} countries`} icon={<Globe size={14} />} />
+            </div>
+          )}
+
+          {tot && tot.sim_sessions > 0 && (
+            <div className="flex items-center gap-3 bg-[#18181B] border border-[#27272A] rounded-lg px-4 py-3 mb-6">
+              <Layers size={16} className="text-violet-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-[#71717A]">FSTD / Simulator</p>
+                <p className="text-base font-semibold text-violet-300 tabular-nums">{hToHHMM(tot.sim_hours)}</p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className="text-xs text-[#52525B]">{tot.sim_sessions} session{tot.sim_sessions !== 1 ? "s" : ""}</p>
+                <p className="text-xs text-[#3F3F46]">not counted in block</p>
+              </div>
+            </div>
+          )}
+
+          {tot && (
+            <div className="grid grid-cols-4 gap-2 mb-6">
+              {[
+                { label: "T/O Day", value: tot.takeoffs_day, icon: <PlaneTakeoff size={12} /> },
+                { label: "T/O Night", value: tot.takeoffs_night, icon: <PlaneTakeoff size={12} /> },
+                { label: "Ldg Day", value: tot.landings_day, icon: <PlaneLanding size={12} /> },
+                { label: "Ldg Night", value: tot.landings_night, icon: <PlaneLanding size={12} /> },
+              ].map(({ label, value, icon }) => (
+                <div key={label} className="bg-[#18181B] rounded-lg p-3 text-center">
+                  <div className="flex items-center justify-center gap-1 text-[#52525B] mb-1">{icon}</div>
+                  <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">{value}</p>
+                  <p className="text-xs text-[#71717A]">{label}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {currency && (
+            <div className={`rounded-lg p-4 mb-6 border ${isExpiringSoon ? "bg-amber-950/30 border-amber-700" : "bg-[#18181B] border-[#27272A]"}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <Shield size={14} className={isExpiringSoon ? "text-amber-400" : "text-sky-400"} />
+                <p className="text-sm font-medium text-[#FAFAFA]">90-Day Currency</p>
+                {currency.next_expiry_date && (
+                  <span className={`ml-auto text-xs ${isExpiringSoon ? "text-amber-400" : "text-[#52525B]"}`}>
+                    Expires {format(parseISO(currency.next_expiry_date), "dd MMM yyyy")}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">{currency.takeoffs_landings_90d}</p>
+                  <p className="text-xs text-[#71717A]">T/O + Ldg</p>
+                </div>
+                <div>
+                  <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">{currency.night_takeoffs_90d + currency.night_landings_90d}</p>
+                  <p className="text-xs text-[#71717A]">Night ops</p>
+                </div>
+                <div>
+                  <p className={`text-xl font-semibold tabular-nums ${currency.takeoffs_landings_90d >= 3 ? "text-green-400" : "text-red-400"}`}>
+                    {currency.takeoffs_landings_90d >= 3 ? "Current" : "NOT current"}
+                  </p>
+                  <p className="text-xs text-[#71717A]">Status</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Annual chart */}
+          {yearsWithGaps.length > 0 && (
+            <div className="bg-[#18181B] rounded-lg p-4 mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium text-[#FAFAFA]">Hours by Year</p>
+                <TrendingUp size={14} className="text-[#52525B]" />
+              </div>
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={yearsWithGaps} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <XAxis dataKey="year" tick={{ fill: "#71717A", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#71717A", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ background: "#18181B", border: "1px solid #27272A", borderRadius: 8 }}
+                    labelStyle={{ color: "#FAFAFA" }}
+                    formatter={(v, name) => [hToHHMM(Number(v ?? 0)), name === "block_hours" ? "Block" : name === "pic_hours" ? "PIC" : "SIC"]}
+                  />
+                  <Bar dataKey="block_hours" fill="#38BDF8" radius={[3, 3, 0, 0]} name="block_hours">
+                    {yearsWithGaps.map((y) => (
+                      <Cell key={y.year} fill={selectedYear === y.year ? "#0EA5E9" : "#38BDF8"}
+                        className="cursor-pointer"
+                        onClick={() => setSelectedYear(selectedYear === y.year ? null : y.year)}
+                      />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="pic_hours" fill="#A78BFA" radius={[3, 3, 0, 0]} name="pic_hours" />
+                </BarChart>
+              </ResponsiveContainer>
+              {selectedYear && <p className="text-xs text-sky-400 mt-1 text-center">Showing {selectedYear} · click bar to deselect</p>}
+            </div>
+          )}
+
+          {selectedYear && monthData.length > 0 && (
+            <div className="bg-[#18181B] rounded-lg p-4 mb-6">
+              <p className="text-sm font-medium text-[#FAFAFA] mb-3">Monthly — {selectedYear}</p>
+              <ResponsiveContainer width="100%" height={130}>
+                <BarChart data={monthData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <XAxis dataKey="month" tickFormatter={m => m.slice(5)} tick={{ fill: "#71717A", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#71717A", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: "#18181B", border: "1px solid #27272A", borderRadius: 8 }} formatter={(v) => [hToHHMM(Number(v ?? 0)), "Block"]} />
+                  <Bar dataKey="block_hours" fill="#38BDF8" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Flights list */}
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <p className="text-sm font-medium text-[#FAFAFA] mr-auto">Flights</p>
+              <CodeToggle />
+              <select className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]"
+                value={yearFilter} onChange={e => { setYearFilter(e.target.value); setFlightLimit(10); }}>
+                <option value="">All years</option>
+                {uniqueYears.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <select className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]"
+                value={roleFilter} onChange={e => { setRoleFilter(e.target.value); setFlightLimit(10); }}>
+                <option value="">All roles</option>
+                <option value="pic">PIC</option>
+                <option value="first_officer">SIC</option>
+              </select>
+            </div>
+
+            {/* Operator legend */}
+            <div className="flex items-center gap-3 mb-2 flex-wrap">
+              <OpPill label="Ryanair" color="#3B82F6" />
+              <OpPill label="Norwegian" color="#EF4444" />
+              <OpPill label="Aerolink / Training" color="#A78BFA" />
+              <OpPill label="Manual" color="#71717A" />
+            </div>
+
+            <div className="space-y-1">
+              {shownFlights.map((f: FlightSummary) => (
+                <FlightRow key={f.id} flight={f} codeMode={codeMode} />
+              ))}
+              {filteredFlights.length === 0 && (
+                <p className="text-sm text-[#52525B] text-center py-4">No flights match the filter.</p>
+              )}
+            </div>
+
+            {hasMore && (
+              <button className="mt-3 w-full py-2 text-xs text-[#71717A] hover:text-[#A1A1AA] border border-[#27272A] rounded-lg transition-colors"
+                onClick={() => setFlightLimit(l => l + PAGE_SIZE)}>
+                Show {Math.min(PAGE_SIZE, filteredFlights.length - flightLimit)} more of {filteredFlights.length} flights
+              </button>
+            )}
+            {!hasMore && filteredFlights.length > 10 && (
+              <p className="mt-2 text-center text-xs text-[#52525B]">All {filteredFlights.length} flights shown</p>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── EASA LOGBOOK ── */}
+      {tab === "logbook" && (
+        <div>
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            <p className="text-sm text-[#71717A]">{allFlights.length} entries · page {easaPage + 1}/{easaTotalPages}</p>
+            <div className="ml-auto flex gap-2">
+              <a href={`${BASE_API}/flights/export/easa`} download="logbook_easa.csv"
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] rounded-lg text-xs text-[#A1A1AA] transition-colors">
+                <Download size={12} />EASA CSV
+              </a>
+              <a href={`${BASE_API}/flights/export/excel`} download="logbook.xlsx"
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] rounded-lg text-xs text-[#A1A1AA] transition-colors">
+                <Download size={12} />Excel
+              </a>
+              <a href={`${BASE_API}/flights/export/pdf`} download="logbook.pdf"
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] rounded-lg text-xs text-[#A1A1AA] transition-colors">
+                <Download size={12} />PDF
+              </a>
+            </div>
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-[#27272A]">
+            <table className="text-xs min-w-max">
+              <thead className="bg-[#18181B] sticky top-0">
+                <tr>{EASA_COLS.map(col => (
+                  <th key={col} className="px-2 py-2 text-left text-[#71717A] font-medium whitespace-nowrap border-b border-[#27272A]">{col}</th>
+                ))}</tr>
+              </thead>
+              <tbody>
+                {easaSlice.map((f, i) => {
+                  const isPIC = f.crew_role === "pic";
+                  const isSim = f.is_sim;
+                  const rowCls = isSim ? "bg-amber-950/20" : isPIC ? "bg-violet-950/20" : i % 2 === 0 ? "bg-transparent" : "bg-[#18181B]/40";
+                  const depTime = f.off_block_utc ? f.off_block_utc.slice(11, 16) : "";
+                  const arrTime = f.on_block_utc ? f.on_block_utc.slice(11, 16) : "";
+                  const picTime = isSim ? "" : secToHHMM(f.pic_seconds);
+                  const sicTime = isSim ? "" : secToHHMM(f.sic_seconds);
+                  const mpTime = isSim ? "" : secToHHMM(f.block_seconds);
+                  const nightTime = isSim ? "" : secToHHMM(f.night_seconds);
+                  const picName = isSim ? "" : isPIC ? "M. FARRÉ" : "";
+                  return (
+                    <tr key={f.id} className={`${rowCls} hover:bg-[#27272A]/40 transition-colors`}>
+                      <td className="px-2 py-1.5 text-[#A1A1AA] whitespace-nowrap">{f.date}</td>
+                      <td className="px-2 py-1.5 font-mono text-[#FAFAFA]">{f.dep_icao || "—"}</td>
+                      <td className="px-2 py-1.5 text-[#71717A] tabular-nums">{depTime}</td>
+                      <td className="px-2 py-1.5 font-mono text-[#FAFAFA]">{f.arr_icao || "—"}</td>
+                      <td className="px-2 py-1.5 text-[#71717A] tabular-nums">{arrTime}</td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA]">{f.aircraft_type || ""}</td>
+                      <td className="px-2 py-1.5 text-[#71717A] font-mono">{f.aircraft_reg || ""}</td>
+                      <td className="px-2 py-1.5 text-[#52525B]"></td>
+                      <td className="px-2 py-1.5 text-[#52525B]"></td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{mpTime}</td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{mpTime}</td>
+                      <td className="px-2 py-1.5 text-[#71717A]">{picName}</td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{isSim ? "" : (f.takeoffs_day || "")}</td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{isSim ? "" : (f.takeoffs_night || "")}</td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{isSim ? "" : (f.landings_day || "")}</td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{isSim ? "" : (f.landings_night || "")}</td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{nightTime}</td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{mpTime}</td>
+                      <td className="px-2 py-1.5 text-violet-300 tabular-nums">{picTime}</td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{sicTime}</td>
+                      <td className="px-2 py-1.5 text-[#52525B]"></td>
+                      <td className="px-2 py-1.5 text-[#52525B]"></td>
+                      <td className="px-2 py-1.5 text-amber-400">{isSim ? f.date : ""}</td>
+                      <td className="px-2 py-1.5 text-amber-300">{isSim ? (f.aircraft_type || "") : ""}</td>
+                      <td className="px-2 py-1.5 text-amber-400 tabular-nums">{isSim ? secToHHMM(f.block_seconds) : ""}</td>
+                      <td className="px-2 py-1.5 text-[#71717A] max-w-xs truncate"></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {easaTotalPages > 1 && (
+            <div className="flex items-center justify-center gap-4 mt-4">
+              <button onClick={() => setEasaPage(p => Math.max(0, p - 1))} disabled={easaPage === 0}
+                className="px-3 py-1.5 text-xs bg-[#18181B] border border-[#27272A] rounded-lg text-[#A1A1AA] disabled:opacity-40">Previous</button>
+              <span className="text-xs text-[#52525B]">{easaPage + 1} / {easaTotalPages}</span>
+              <button onClick={() => setEasaPage(p => Math.min(easaTotalPages - 1, p + 1))} disabled={easaPage === easaTotalPages - 1}
+                className="px-3 py-1.5 text-xs bg-[#18181B] border border-[#27272A] rounded-lg text-[#A1A1AA] disabled:opacity-40">Next</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ROUTES MAP ── */}
+      {tab === "map" && (
+        <div>
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <CodeToggle />
+            <select className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]"
+              value={mapYear} onChange={e => setMapYear(e.target.value)}>
+              <option value="">All years</option>
+              {uniqueYears.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          {routes.length > 0
+            ? <FlightRouteMap routes={routes} airports={airportVisits} height="440px" basesIcao={["LIME", "GCTS", "LELL", "LEPA"]} codeMode={codeMode} />
+            : <div className="h-40 flex items-center justify-center text-[#52525B] text-sm">No route data for selected year.</div>
+          }
+          {routes.slice(0, 10).length > 0 && (
+            <div className="bg-[#18181B] rounded-lg p-4 mt-4">
+              <p className="text-sm font-medium text-[#FAFAFA] mb-3">Top Routes</p>
+              <div className="space-y-2">
+                {routes.slice(0, 10).map(r => (
+                  <div key={`${r.dep_icao}-${r.arr_icao}`} className="flex items-center justify-between text-sm">
+                    <span className="text-[#FAFAFA] font-mono text-xs">
+                      {routeCode(r.dep_icao, r.dep_iata, codeMode)} → {routeCode(r.arr_icao, r.arr_iata, codeMode)}
+                    </span>
+                    <span className="text-[#71717A] tabular-nums text-xs">{r.count}× · {hToHHMM(r.total_block_hours)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ANALYTICS ── */}
+      {tab === "stats" && analytics && (
+        <div className="space-y-5">
+
+          {/* Records grid */}
+          <div>
+            <SectionTitle icon={<Award size={14} />}>Records</SectionTitle>
+            <div className="grid grid-cols-2 gap-3">
+              {analytics.longest_flight && (
+                <AnalyticCard label="Longest Flight" accent="text-sky-400"
+                  value={hToHHMM((analytics.longest_flight.block_seconds || 0) / 3600)}
+                  sub={`${analytics.longest_flight.dep_icao} → ${analytics.longest_flight.arr_icao} · ${analytics.longest_flight.date}`} />
+              )}
+              {analytics.shortest_flight && (
+                <AnalyticCard label="Shortest Flight"
+                  value={hToHHMM((analytics.shortest_flight.block_seconds || 0) / 3600)}
+                  sub={`${analytics.shortest_flight.dep_icao} → ${analytics.shortest_flight.arr_icao} · ${analytics.shortest_flight.date}`} />
+              )}
+              {analytics.top_route && (
+                <AnalyticCard label="Most Flown Route" accent="text-sky-400"
+                  value={`${analytics.top_route.dep_icao} → ${analytics.top_route.arr_icao}`}
+                  sub={`${analytics.top_route.cnt} sectors · ${hToHHMM(analytics.top_route.total_hours)}`} />
+              )}
+              {analytics.busiest_month && (
+                <AnalyticCard label="Busiest Month"
+                  value={analytics.busiest_month.month}
+                  sub={`${analytics.busiest_month.sectors} sectors · ${hToHHMM(analytics.busiest_month.block_hours)}`} />
+              )}
+              {analytics.top_airport && (
+                <AnalyticCard label="Most Visited Airport" accent="text-amber-400"
+                  value={analytics.top_airport.iata || analytics.top_airport.icao}
+                  sub={`${analytics.top_airport.city || ""} · ${analytics.top_airport.visits} visits`} />
+              )}
+            </div>
+          </div>
+
+          {/* Countries — map-style grid */}
+          {analytics.countries.length > 0 && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Flag size={14} className="text-[#52525B]" />
+                <p className="text-sm font-medium text-[#FAFAFA]">Countries</p>
+                <span className="ml-auto text-xs bg-sky-900/40 text-sky-400 px-2 py-0.5 rounded-full font-medium">{analytics.countries.length}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
+                {analytics.countries.map(c => (
+                  <div key={c} className="flex items-center gap-1.5 bg-[#09090B] rounded-lg px-2 py-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0" />
+                    <span className="text-xs text-[#A1A1AA] truncate">{c}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Top destinations */}
+          {analytics.top_destinations.length > 0 && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <SectionTitle icon={<Compass size={14} />}>Top Destinations</SectionTitle>
+              {analytics.top_destinations.map((d, i) => (
+                <div key={d.arr_icao} className="flex items-center gap-3 py-1.5 border-b border-[#27272A] last:border-0">
+                  <span className="text-xs text-[#52525B] w-4">{i + 1}</span>
+                  <span className="font-mono text-[#FAFAFA] text-sm">{d.arr_iata || d.arr_icao}</span>
+                  {d.city && <span className="text-[#71717A] text-xs">{d.city}, {d.country || ""}</span>}
+                  <span className="ml-auto text-[#52525B] text-xs tabular-nums">{d.visits}×</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Passengers */}
+          {analytics.pax_stats && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <SectionTitle icon={<Users size={14} />}>Passengers</SectionTitle>
+              <div className="grid grid-cols-3 gap-3">
+                <AnalyticCard label="Total carried" value={fmt(analytics.pax_stats.total_pax)} accent="text-sky-400" />
+                <AnalyticCard label="Avg per flight" value={fmt(analytics.pax_stats.avg_pax)} />
+                <AnalyticCard label="Busiest flight" value={fmt(analytics.pax_stats.max_pax) + " pax"} />
+              </div>
+              <p className="text-xs text-[#52525B] mt-2">Based on {analytics.pax_stats.flights_with_pax} flights with pax data</p>
+            </div>
+          )}
+
+          {/* Fuel */}
+          {analytics.fuel_stats && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <SectionTitle icon={<Fuel size={14} />}>Fuel</SectionTitle>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <AnalyticCard label="Total burned" value={fmt(analytics.fuel_stats.total_burn_kg, "kg")} accent="text-orange-400" />
+                <AnalyticCard label="Avg burn / flight" value={fmt(analytics.fuel_stats.avg_burn_kg, "kg")} />
+                <AnalyticCard label="Avg uplift" value={fmt(analytics.fuel_stats.avg_uplift_kg, "kg")} />
+              </div>
+              {analytics.burn_by_type.length > 0 && (
+                <>
+                  <p className="text-xs text-[#52525B] mb-2">Burn efficiency by aircraft</p>
+                  {analytics.burn_by_type.map(b => (
+                    <div key={b.aircraft_type} className="flex items-center justify-between py-1 border-b border-[#27272A] last:border-0 text-xs">
+                      <span className="text-[#A1A1AA]">{b.aircraft_type}</span>
+                      <span className="text-[#71717A]">{fmt(b.avg_burn_kg)} kg avg</span>
+                      {b.kg_per_nm && <span className="text-[#52525B]">{b.kg_per_nm} kg/NM</span>}
+                    </div>
+                  ))}
+                </>
+              )}
+              <p className="text-xs text-[#52525B] mt-2">Based on {analytics.fuel_stats.flights_with_fuel} flights with fuel data</p>
+            </div>
+          )}
+
+          {/* Delays */}
+          {analytics.delay_stats && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <SectionTitle icon={<AlertTriangle size={14} />}>Delays</SectionTitle>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <AnalyticCard label="Delayed flights" value={fmt(analytics.delay_stats.delayed_flights)} accent="text-amber-400" />
+                <AnalyticCard label="Avg delay" value={`${fmt(analytics.delay_stats.avg_delay_min)} min`} />
+                <AnalyticCard label="Max delay" value={`${fmt(analytics.delay_stats.max_delay_min)} min`} />
+              </div>
+              <p className="text-xs text-[#52525B] mb-2">
+                Total delay time: {hToHHMM((analytics.delay_stats.total_delay_min || 0) / 60)}
+              </p>
+              {analytics.delay_by_code.length > 0 && (
+                <>
+                  <p className="text-xs text-[#52525B] mb-2">Top delay codes</p>
+                  {analytics.delay_by_code.map((d: { delay_code: string; cnt: number; avg_min: number }) => (
+                    <div key={d.delay_code} className="flex items-center justify-between py-1 border-b border-[#27272A] last:border-0 text-xs">
+                      <span className="text-[#FAFAFA] font-mono w-8">{d.delay_code}</span>
+                      <span className="text-[#71717A]">{d.cnt} flights</span>
+                      <span className="text-[#52525B]">{d.avg_min} min avg</span>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Aircraft types */}
+          {analytics.aircraft_breakdown.length > 0 && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <SectionTitle icon={<Plane size={14} />}>Aircraft Types</SectionTitle>
+              {analytics.aircraft_breakdown.map(a => (
+                <div key={a.aircraft_type} className="flex items-center justify-between py-1.5 border-b border-[#27272A] last:border-0">
+                  <span className="text-[#A1A1AA] text-sm">{a.aircraft_type}</span>
+                  <div className="flex items-center gap-4">
+                    <span className="text-[#52525B] text-xs tabular-nums">{a.sectors} sectors</span>
+                    <span className="text-[#71717A] text-xs tabular-nums w-16 text-right">{hToHHMM(a.block_hours)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Top registrations */}
+          {analytics.top_registrations.length > 0 && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <SectionTitle icon={<Layers size={14} />}>Most Flown Airframes</SectionTitle>
+              {analytics.top_registrations.map((r, i) => (
+                <div key={r.aircraft_reg} className="flex items-center gap-3 py-1.5 border-b border-[#27272A] last:border-0">
+                  <span className="text-xs text-[#52525B] w-4">{i + 1}</span>
+                  <span className="font-mono text-[#FAFAFA] text-sm">{r.aircraft_reg}</span>
+                  {r.aircraft_type && <span className="text-[#52525B] text-xs">{r.aircraft_type}</span>}
+                  <span className="ml-auto text-[#71717A] text-xs tabular-nums">{r.sectors} sectors · {hToHHMM(r.block_hours)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Operators */}
+          {analytics.operators.length > 0 && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <SectionTitle>By Operator / Source</SectionTitle>
+              {analytics.operators.map(o => (
+                <div key={o.op_label} className="flex items-center justify-between py-1.5 border-b border-[#27272A] last:border-0">
+                  <span className="text-[#A1A1AA] text-sm">{o.op_label || "Unknown"}</span>
+                  <div className="flex items-center gap-4">
+                    <span className="text-[#52525B] text-xs">{o.sectors} sectors</span>
+                    <span className="text-[#71717A] text-xs tabular-nums">{hToHHMM(o.block_hours)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Year-over-year chart + table — uses stats.by_year (no sims, all years filled) */}
+          {yearsWithGaps.length > 0 && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <SectionTitle>Year-over-Year</SectionTitle>
+              <ResponsiveContainer width="100%" height={150}>
+                <BarChart data={yearsWithGaps} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <XAxis dataKey="year" tick={{ fill: "#71717A", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#71717A", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ background: "#18181B", border: "1px solid #27272A", borderRadius: 8 }}
+                    formatter={(v, name) => [hToHHMM(Number(v ?? 0)), name === "block_hours" ? "Block" : name === "pic_hours" ? "PIC" : "Night"]}
+                  />
+                  <Bar dataKey="block_hours" fill="#38BDF8" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="pic_hours" fill="#A78BFA" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="night_hours" fill="#1D4ED8" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="flex items-center gap-4 mt-2 mb-3 text-xs text-[#52525B] justify-center">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-sky-400 inline-block" />Block</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-violet-400 inline-block" />PIC</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-700 inline-block" />Night</span>
+              </div>
+              {yearsWithGaps.filter(y => y.sectors > 0).map(y => (
+                <div key={y.year} className="flex items-center justify-between text-xs py-1.5 border-b border-[#27272A] last:border-0">
+                  <span className="text-[#A1A1AA] font-medium w-12">{y.year}</span>
+                  <span className="text-[#52525B]">{y.sectors} sectors</span>
+                  <span className="text-sky-400 tabular-nums">{hToHHMM(y.block_hours)}</span>
+                  <span className="text-violet-400 tabular-nums">{hToHHMM(y.pic_hours)}</span>
+                  <span className="text-blue-400 tabular-nums">{hToHHMM(y.night_hours)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Avg sector duration */}
+          {analytics.avg_sector_by_year.length > 0 && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <SectionTitle>Avg Sector Duration by Year</SectionTitle>
+              {analytics.avg_sector_by_year.map(y => (
+                <div key={y.year} className="flex items-center justify-between text-xs py-1.5 border-b border-[#27272A] last:border-0">
+                  <span className="text-[#A1A1AA]">{y.year}</span>
+                  <span className="text-[#FAFAFA] tabular-nums">{hToHHMM(y.avg_block_hours)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {tab === "stats" && !analytics && (
+        <div className="flex items-center justify-center h-32 text-[#52525B] text-sm">Loading analytics…</div>
+      )}
+
+      <AddFlightSheet date={TODAY} isOpen={addOpen} onClose={() => setAddOpen(false)} />
+    </div>
+  );
+}
+
+function FlightRow({ flight: f, codeMode }: { flight: FlightSummary; codeMode: CodeMode }) {
+  const blockH = f.block_seconds ? (f.block_seconds / 3600).toFixed(1) : "—";
+  const role = f.crew_role === "pic" ? "PIC" : f.crew_role === "first_officer" ? "SIC" : f.crew_role || "—";
+  const dep = routeCode(f.dep_icao, f.dep_iata, codeMode);
+  const arr = routeCode(f.arr_icao, f.arr_iata, codeMode);
+  const { dot, badge } = operatorColor(f);
+
+  return (
+    <Link href={`/aviation/${f.id}`}
+      className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#18181B] transition-colors text-sm group">
+      {/* Operator color dot */}
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: dot }} />
+      <span className="text-[#52525B] text-xs w-20 shrink-0 tabular-nums">{f.date}</span>
+      <span className="text-[#FAFAFA] font-mono text-xs">{dep} → {arr}</span>
+      <span className="text-[#71717A] text-xs ml-auto hidden sm:block">{f.flight_number || ""}</span>
+      <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${f.crew_role === "pic" ? "bg-violet-900/50 text-violet-300" : "bg-[#27272A] text-[#71717A]"}`}>
+        {role}
+      </span>
+      <span className="text-[#A1A1AA] tabular-nums w-10 text-right text-xs">{blockH}h</span>
+      <ChevronRight size={11} className="text-[#52525B] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+    </Link>
+  );
+}

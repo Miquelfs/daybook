@@ -1,20 +1,28 @@
-import { api } from "@/lib/api";
+export const dynamic = "force-dynamic";
+
+import Link from "next/link";
+import { api, moodEmoji } from "@/lib/api";
 import { DayHeader } from "@/components/DayHeader";
 import { MorningBrief } from "@/components/MorningBrief";
 import { MovementBlock } from "@/components/MovementBlock";
 import { Questionnaire } from "@/components/Questionnaire";
 import { SectionLabel } from "@/components/MorningBrief";
 import { ApiOffline } from "@/components/ApiOffline";
-import { LocationMap } from "@/components/LocationMap";
+import { LocationSection } from "@/components/LocationSection";
 import { SyncOnLoad } from "@/components/SyncOnLoad";
 import { DaySpendSummary } from "@/components/money/DaySpendSummary";
-import { format } from "date-fns";
+import { PhotoOfDay } from "@/components/PhotoOfDay";
+import { ScreenTimeBlock } from "@/components/ScreenTimeBlock";
+import { format, subYears, parseISO } from "date-fns";
 
 export default async function TodayPage() {
   const today = format(new Date(), "yyyy-MM-dd");
-  const [day, tracks] = await Promise.all([
+  const oneYearAgo = format(subYears(new Date(), 1), "yyyy-MM-dd");
+
+  const [day, tracks, pastDay] = await Promise.all([
     api.today().catch((e) => { console.error("[TodayPage] api.today() failed:", e?.message ?? e); return null; }),
     api.tracks(today).catch(() => ({ type: "FeatureCollection" as const, features: [] })),
+    api.day(oneYearAgo).catch(() => null),
   ]);
 
   if (!day) {
@@ -41,39 +49,57 @@ export default async function TodayPage() {
           hrv={day.hrv}
         />
 
-        <MovementBlock activities={day.activities} stats={day.daily_stats} />
+        <MovementBlock
+          activities={day.activities}
+          stats={day.daily_stats}
+          screenTimeSlot={<ScreenTimeBlock date={today} />}
+        />
 
         <DaySpendSummary date={today} />
 
         <section>
-          <SectionLabel>Where I was</SectionLabel>
-          {day.visits.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-3">
-              {day.visits.map((v, i) => (
-                <span
-                  key={i}
-                  className="text-xs px-2 py-1 rounded-full bg-[#18181B] border border-[#27272A] text-[#A1A1AA]"
-                >
-                  {v.place_name ?? v.city ?? "Unknown"}
-                  {v.city && v.place_name && v.place_name !== v.city ? ` · ${v.city}` : ""}
-                </span>
-              ))}
-            </div>
-          )}
-          <LocationMap geojson={tracks} />
+          <SectionLabel>Photo of the day</SectionLabel>
+          <PhotoOfDay date={today} initialPhotoUrl={day.photo_url ?? null} />
         </section>
 
-        <Questionnaire date={today} initial={day.subjective} />
+        <section>
+          <SectionLabel>Where I was</SectionLabel>
+          <LocationSection date={today} initialTracks={tracks} editable={true} />
+        </section>
 
-        {/* On this day — Phase 2 */}
+        <Questionnaire date={today} initial={day.subjective} initialTags={day.tags ?? []} initialCompanions={day.companions ?? []} />
+
+        <div className="flex justify-end">
+          <Link href="/journal" className="text-xs text-[#52525B] hover:text-[#A1A1AA] transition-colors">
+            Browse journal →
+          </Link>
+        </div>
+
         <section>
           <SectionLabel>On this day</SectionLabel>
-          <div className="border border-dashed border-[#27272A] rounded-lg px-4 py-6 text-center">
-            <p className="text-sm text-[#52525B]">Coming in Phase 2</p>
-            <p className="text-xs text-[#3F3F46] mt-1">
-              What you were doing on this date in past years
-            </p>
-          </div>
+          {pastDay?.subjective.mood ? (
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 space-y-1">
+              <p className="text-xs text-[#52525B] uppercase tracking-widest">
+                {format(parseISO(oneYearAgo), "d MMM yyyy")}
+              </p>
+              <p className="text-2xl font-semibold text-[#F59E0B]">
+                {moodEmoji(pastDay.subjective.mood)}{" "}
+                <span className="text-lg">{pastDay.subjective.mood}/10</span>
+              </p>
+              {pastDay.subjective.mood_note && (
+                <p className="text-sm text-[#A1A1AA] italic">
+                  &ldquo;{pastDay.subjective.mood_note}&rdquo;
+                </p>
+              )}
+              {pastDay.subjective.notes && (
+                <p className="text-xs text-[#52525B] truncate">{pastDay.subjective.notes}</p>
+              )}
+            </div>
+          ) : (
+            <div className="border border-dashed border-[#27272A] rounded-lg px-4 py-6 text-center">
+              <p className="text-sm text-[#52525B]">No data for this day last year</p>
+            </div>
+          )}
         </section>
       </div>
     </main>

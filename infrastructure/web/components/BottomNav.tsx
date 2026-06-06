@@ -2,13 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, List, Wallet, Globe } from "lucide-react";
+import { CalendarDays, List, Wallet, Globe, Camera, HeartPulse, TrendingUp, PlaneTakeoff } from "lucide-react";
 
 const tabs = [
-  { href: "/",         label: "Today",    icon: CalendarDays },
-  { href: "/timeline", label: "Timeline", icon: List },
-  { href: "/money",    label: "Finance",  icon: Wallet },
-  { href: "/explore",  label: "Explore",  icon: Globe },
+  { href: "/",             label: "Today",    icon: CalendarDays },
+  { href: "/timeline",     label: "Timeline", icon: List },
+  { href: "/moments",      label: "Moments",  icon: Camera },
+  { href: "/money",        label: "Finance",  icon: Wallet },
+  { href: "/health",       label: "Health",   icon: HeartPulse },
+  { href: "/aviation",     label: "Logbook",  icon: PlaneTakeoff },
+  { href: "/correlations", label: "Insights", icon: TrendingUp },
+  { href: "/explore",      label: "Explore",  icon: Globe },
 ];
 
 export function BottomNav() {
@@ -16,6 +20,11 @@ export function BottomNav() {
 
   function isActive(href: string) {
     if (href === "/") return pathname === "/" || pathname.startsWith("/day/");
+    if (href === "/timeline") return pathname.startsWith("/timeline") || pathname.startsWith("/life");
+    if (href === "/money") return pathname.startsWith("/money");
+    if (href === "/health") return pathname.startsWith("/health");
+    if (href === "/aviation") return pathname.startsWith("/aviation");
+    if (href === "/correlations") return pathname.startsWith("/correlations");
     return pathname.startsWith(href);
   }
 

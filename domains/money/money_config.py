@@ -44,6 +44,7 @@ INVESTMENT_ACCOUNTS: dict[str, str] = {
     "BBVA Investment":       "Investment",
     "Accions":               "Investment",
     "Binance":               "Crypto Investment",
+    "Mapfre Inversió":       "Investment",
 }
 
 LIQUID_ACCOUNTS: dict[str, str] = {
@@ -52,6 +53,8 @@ LIQUID_ACCOUNTS: dict[str, str] = {
     "Revolut":                      "Checking",
     "Revolut Flexible Cash Funds":  "Checking",
     "Trade Republic Cash":          "Savings",
+    "Sabadell":                     "Checking",
+    "Cash":                         "Checking",
 }
 
 # ── UI metadata ───────────────────────────────────────────────────────────────
@@ -60,22 +63,31 @@ CATEGORY_EMOJI: dict[str, str] = {
     "Restaurant":    "🍴",
     "Groceries":     "🛒",
     "Transportation": "🚗",
+    "Home":          "🏠",
     "Sports":        "🏋",
+    "Trips":         "✈️",
     "Tech":          "💻",
     "Gifts":         "🎁",
-    "Trips":         "✈️",
-    "Home":          "🏠",
     "Personal":      "🧴",
     "Alert":         "🚨",
+    "Pilot":         "🛩️",
+    "Fun":           "🎉",
+    "Clothes":       "👕",
+    "Barça":         "⚽",
+    "Bizum":         "💸",
+    "Sweets":        "🍬",
+    "Other":         "📦",
     "Income":        "💰",
     "OMYRA":         "📱",
     "Finance":       "📊",
+    "Transfer":      "🔄",
 }
 
 # Ordered list of expense categories shown in entry UI (most-used first)
 EXPENSE_CATEGORIES: list[str] = [
     "Restaurant", "Groceries", "Transportation", "Home",
     "Sports", "Trips", "Tech", "Gifts", "Personal", "Alert",
+    "Pilot", "Fun", "Clothes", "Barça", "Bizum", "Sweets", "Other",
 ]
 
 

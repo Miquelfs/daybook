@@ -44,6 +44,14 @@ source "$VENV/bin/activate"
 
 cd "$ROOT"
 
+# Load .env so STRAVA_CLIENT_ID and other vars are available in cron environment
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env"
+  set +a
+fi
+
 # Garmin: auto-detect start from last synced date so gaps are filled automatically.
 # On a normal day this picks up yesterday; after a gap it catches up.
 log "Syncing Garmin (auto catch-up)..."
@@ -59,5 +67,21 @@ python -m domains.locations.overland_process \
 log "Syncing Notion finance..."
 python -m domains.money.notion_sync \
   >> "$LOG_FILE" 2>&1
+
+# Strava: cross-reference last 7 days of Garmin activities with Strava.
+# Skips gracefully if STRAVA_CLIENT_ID is not set or tokens are missing.
+if [[ -n "${STRAVA_CLIENT_ID:-}" ]]; then
+  log "Syncing Strava enrichment (last 7 days)..."
+  python -m domains.health.strava.strava_sync --days 7 \
+    >> "$LOG_FILE" 2>&1 || log "WARN: Strava sync failed (non-fatal)"
+else
+  log "Skipping Strava sync (STRAVA_CLIENT_ID not set)"
+fi
+
+# Weather: fetch last 3 days so today + yesterday are always covered.
+log "Syncing weather (last 3 days)..."
+YESTERDAY="$(date -d 'yesterday' +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d)"
+python -m domains.weather.weather_sync "$YESTERDAY" "$DATE" \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Weather sync failed (non-fatal)"
 
 log "=== daily_sync done ==="

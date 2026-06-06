@@ -10,10 +10,23 @@ from pathlib import Path
 
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from infrastructure.api.routers import days, insights, questionnaire
 from infrastructure.api.routers import locations
 from infrastructure.api.routers import money
+from infrastructure.api.routers import contacts
+from infrastructure.api.routers import activities
+from infrastructure.api.routers import health
+from infrastructure.api.routers import training
+from infrastructure.api.routers import stats
+from infrastructure.api.routers import tags as tags_module
+from infrastructure.api.routers import correlations as correlations_module
+from infrastructure.api.routers import weather as weather_module
+from infrastructure.api.routers import screen_time as screen_time_module
+from infrastructure.api.routers import books as books_module
+from infrastructure.api.routers import life as life_module
+from infrastructure.api.routers import aviation as aviation_module
 
 VERSION = "0.1.0"
 ROOT = Path(__file__).parents[2]
@@ -49,6 +62,30 @@ app.include_router(insights.router)
 app.include_router(questionnaire.router)
 app.include_router(locations.router)
 app.include_router(money.router)
+app.include_router(contacts.router)
+app.include_router(activities.router)
+app.include_router(health.router)
+app.include_router(training.router)
+app.include_router(stats.router)
+app.include_router(tags_module.tags_router)
+app.include_router(tags_module.day_tags_router)
+app.include_router(correlations_module.router)
+app.include_router(weather_module.router)
+app.include_router(screen_time_module.router)
+app.include_router(books_module.router)
+app.include_router(life_module.router)
+app.include_router(aviation_module.router)
+
+_photos_dir = ROOT / "data" / "photos"
+_photos_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/photos", StaticFiles(directory=str(_photos_dir)), name="photos")
+
+
+@app.on_event("startup")
+def _run_migrations() -> None:
+    """Ensure all DB tables exist. Safe to run on every startup."""
+    from infrastructure.db.migrate_screen_time import run as _migrate_screen_time
+    _migrate_screen_time()
 
 
 @app.get("/")
@@ -89,3 +126,95 @@ def sync_notion(background: BackgroundTasks):
     """Trigger an incremental Notion finance sync in the background."""
     background.add_task(_run_notion_sync)
     return {"status": "started"}
+
+
+def _run_strava_sync() -> None:
+    subprocess.run(
+        [sys.executable, "-m", "domains.health.strava.strava_sync"],
+        cwd=str(ROOT),
+        capture_output=True,
+    )
+
+
+@app.post("/sync/strava")
+def sync_strava(background: BackgroundTasks):
+    """Trigger an incremental Strava enrichment sync in the background."""
+    background.add_task(_run_strava_sync)
+    return {"status": "started"}
+
+
+def _run_aviation_import() -> None:
+    subprocess.run(
+        [sys.executable, "-m", "domains.aviation.importers.full_csv_importer"],
+        cwd=str(ROOT),
+        capture_output=True,
+    )
+
+
+@app.post("/sync/aviation")
+def sync_aviation(background: BackgroundTasks):
+    """Re-import Full.csv into the flights table in the background."""
+    background.add_task(_run_aviation_import)
+    return {"status": "started"}
+
+
+def _run_weather_sync_today() -> None:
+    from datetime import date as _date, timedelta
+    today = _date.today().isoformat()
+    week_ago = (_date.today() - timedelta(days=6)).isoformat()
+    subprocess.run(
+        [sys.executable, "-m", "domains.weather.weather_sync", week_ago, today],
+        cwd=str(ROOT),
+        capture_output=True,
+    )
+
+
+@app.post("/sync/weather")
+def sync_weather(background: BackgroundTasks):
+    """Trigger a weather sync for the past 7 days in the background."""
+    background.add_task(_run_weather_sync_today)
+    return {"status": "started"}
+
+
+@app.get("/sync/status")
+def get_sync_status():
+    """Return last sync attempt/success times for each source."""
+    from infrastructure.db.connection import get_connection as _get_conn
+    conn = _get_conn()
+    rows = conn.execute("SELECT * FROM sync_status ORDER BY source").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.get("/strava/auth-url")
+def strava_auth_url():
+    """Return the Strava OAuth authorization URL for first-time setup."""
+    import os
+    client_id = os.getenv("STRAVA_CLIENT_ID", "")
+    if not client_id:
+        return {"error": "STRAVA_CLIENT_ID not set in .env"}
+    redirect_uri = os.getenv("STRAVA_REDIRECT_URI", "http://localhost:8000/strava/callback")
+    url = (
+        f"https://www.strava.com/oauth/authorize"
+        f"?client_id={client_id}"
+        f"&redirect_uri={redirect_uri}"
+        f"&response_type=code"
+        f"&approval_prompt=auto"
+        f"&scope=activity:read_all"
+    )
+    return {"auth_url": url}
+
+
+@app.get("/strava/callback")
+def strava_callback(code: str):
+    """Exchange OAuth code for tokens. Open this URL in a browser after authorizing."""
+    from domains.health.strava.strava_client import exchange_code
+    try:
+        tokens = exchange_code(code)
+        return {
+            "status": "ok",
+            "message": "Strava tokens saved. You can now run make sync-strava.",
+            "athlete": tokens.get("athlete", {}).get("firstname", ""),
+        }
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}

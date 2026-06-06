@@ -31,16 +31,19 @@ class HRVData(BaseModel):
 
 
 class ActivityData(BaseModel):
-    activity_id: str
-    type: str | None = None
+    id: str
+    source: str = "garmin"
+    strava_id: str | None = None
+    activity_type: str | None = None
     name: str | None = None
     start_time: str | None = None
     duration_seconds: int | None = None
     distance_meters: float | None = None
-    avg_hr: int | None = None
-    max_hr: int | None = None
-    calories: int | None = None
-    elevation_gain: float | None = None
+    elevation_gain_meters: float | None = None
+    avg_heart_rate: float | None = None
+    max_heart_rate: float | None = None
+    calories: float | None = None
+    has_polyline: bool = False
 
 
 class LocationVisit(BaseModel):
@@ -59,6 +62,16 @@ class LocationSummary(BaseModel):
     total_distance_meters: float = 0.0
 
 
+class DayTagSummary(BaseModel):
+    tag_id: int
+    slug: str
+    name: str
+    icon: str | None = None
+    category: str
+    color: str | None = None
+    note: str | None = None
+
+
 class DaySubjective(BaseModel):
     energy: int | None = Field(None, ge=1, le=10)
     mood: int | None = Field(None, ge=1, le=10)
@@ -68,6 +81,7 @@ class DaySubjective(BaseModel):
     daily_question: str | None = None
     daily_answer: str | None = None
     tags: str | None = None
+    mood_note: str | None = None
     duty_day: bool = False
     away_from_base: bool = False
     timezone_offset: int | None = None
@@ -87,9 +101,22 @@ class DaySummary(BaseModel):
     resting_hr: int | None = None
     hrv_last_night: float | None = None
     activity_count: int = 0
+    flight_count: int = 0
     cities: list[str] = []
     duty_day: bool = False
     away_from_base: bool = False
+    daily_question: str | None = None
+    daily_answer: str | None = None
+    photo_path: str | None = None
+    tags: str | None = None
+    tags_list: list[str] = []
+
+
+class ContactOut(BaseModel):
+    id: int
+    name: str
+    emoji: str | None = None
+    group_: str | None = None
 
 
 class DayDetail(BaseModel):
@@ -102,6 +129,9 @@ class DayDetail(BaseModel):
     activities: list[ActivityData] = []
     location: LocationSummary | None = None
     visits: list[LocationVisit] = []
+    companions: list[str] = []
+    photo_url: str | None = None
+    tags: list[DayTagSummary] = []
 
 
 class DayPatch(BaseModel):
@@ -114,6 +144,7 @@ class DayPatch(BaseModel):
     daily_question: str | None = None
     daily_answer: str | None = None
     tags: str | None = None
+    mood_note: str | None = None
     duty_day: bool | None = None
     away_from_base: bool | None = None
     timezone_offset: int | None = None

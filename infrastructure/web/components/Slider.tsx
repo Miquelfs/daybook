@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 interface Props {
   label: string;
   min?: number;
@@ -7,29 +9,33 @@ interface Props {
   value: number | null;
   onChange: (v: number) => void;
   hint?: string;
+  rightLabel?: ReactNode;
 }
 
 const LABELS: Record<string, string[]> = {
   energy: ["Drained", "", "", "", "", "Moderate", "", "", "", "Buzzing"],
   mood: ["Low", "", "", "", "", "Neutral", "", "", "", "Great"],
-  stress: ["None", "", "", "", "", "Moderate", "", "", "", "Max"],
+  stress: ["Calm", "", "", "", "", "Moderate", "", "", "", "Maxed"],
   sleep_quality: ["Terrible", "", "", "", "", "OK", "", "", "", "Perfect"],
 };
 
-export function Slider({ label, min = 1, max = 10, value, onChange, hint }: Props) {
+export function Slider({ label, min = 1, max = 10, value, onChange, hint, rightLabel }: Props) {
   const id = label.toLowerCase().replace(/\s+/g, "-");
   const labelKey = id.replace("-", "_");
   const endpoints = LABELS[labelKey];
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-center justify-between">
         <label htmlFor={id} className="text-sm font-medium text-[#FAFAFA]">
           {label}
         </label>
-        <span className="text-lg font-semibold text-[#F59E0B] tabular-nums w-6 text-right">
-          {value ?? "—"}
-        </span>
+        <div className="flex items-center gap-2">
+          {rightLabel}
+          <span className="text-lg font-semibold text-[#F59E0B] tabular-nums w-6 text-right">
+            {value ?? "—"}
+          </span>
+        </div>
       </div>
 
       {hint && (

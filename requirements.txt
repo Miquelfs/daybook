@@ -4,7 +4,16 @@ pandas
 requests
 fastapi
 uvicorn[standard]
+python-multipart
 pydantic
 scipy
 numpy
 tqdm
+Pillow
+pillow-heif
+stravalib
+polyline
+astral
+xlrd
+reportlab
+openpyxl

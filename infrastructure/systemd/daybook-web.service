@@ -8,6 +8,7 @@ User=pi
 WorkingDirectory=/home/pi/daybook/infrastructure/web
 Environment=NODE_ENV=production
 EnvironmentFile=/home/pi/daybook/.env
+EnvironmentFile=-/home/pi/daybook/infrastructure/web/.env.local
 ExecStart=/usr/bin/npm start
 Restart=on-failure
 RestartSec=5

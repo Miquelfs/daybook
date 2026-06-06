@@ -34,10 +34,10 @@ from pathlib import Path
 ROOT    = Path(__file__).parents[2]
 DB_PATH = ROOT / "infrastructure" / "db" / "locations.db"
 
-DWELL_RADIUS_M    = 200  # max displacement from anchor to still count as "stopped"
+DWELL_RADIUS_M    = 300  # max displacement from anchor to still count as "stopped"
 DWELL_MIN_MINUTES = 3    # minimum time at an anchor to be a "stop" vs passing through
-MOVE_SPEED_MS     = 0.8  # m/s — above this between consecutive points = moving, reset anchor
-SPARSE_GAP_MINUTES = 60  # if gap between pings > this, treat as separate stops regardless
+MOVE_SPEED_MS     = 2.0  # m/s — above this between consecutive points = moving, reset anchor
+SPARSE_GAP_MINUTES = 30  # if gap between pings > this, treat as separate stops regardless
 NOMINATIM_URL     = "https://nominatim.openstreetmap.org/reverse"
 USER_AGENT        = "daybook-personal/1.0 (personal data project)"
 
@@ -190,6 +190,94 @@ def _detect_segments(points: list[dict]) -> list[dict]:
     return segments
 
 
+# ── location_days summary ─────────────────────────────────────────────────────
+
+_LOCATION_DAYS_DDL = """
+CREATE TABLE IF NOT EXISTS location_days (
+    date              TEXT PRIMARY KEY,
+    distance_meters   REAL    NOT NULL DEFAULT 0,
+    unique_places     INTEGER NOT NULL DEFAULT 0,
+    top_place         TEXT,
+    top_place_city    TEXT,
+    computed_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_location_days_date ON location_days(date);
+"""
+
+
+def _ensure_location_days_table(con: sqlite3.Connection) -> None:
+    con.executescript(_LOCATION_DAYS_DDL)
+    con.commit()
+
+
+def _upsert_location_day(con: sqlite3.Connection, date: str) -> None:
+    """Recompute and store the location_days row for a given date."""
+    _ensure_location_days_table(con)
+
+    rows = con.execute(
+        """
+        SELECT segment_start, segment_end, points_json,
+               geocode_name, geocode_city
+        FROM tracks
+        WHERE date = ?
+        ORDER BY segment_start
+        """,
+        (date,),
+    ).fetchall()
+
+    if not rows:
+        return
+
+    # Parse coordinate chains
+    coords_list: list[list[tuple[float, float]]] = []
+    for seg in rows:
+        try:
+            pts = json.loads(seg["points_json"])
+            coords_list.append([(p["lat"], p["lng"]) for p in pts if "lat" in p and "lng" in p])
+        except Exception:
+            coords_list.append([])
+
+    # Segment-chain distance (mirrors LocationSection.tsx computeDistanceM)
+    total_m = 0.0
+    for i, coords in enumerate(coords_list):
+        for j in range(1, len(coords)):
+            total_m += _haversine_m(coords[j-1][0], coords[j-1][1], coords[j][0], coords[j][1])
+        if i < len(coords_list) - 1 and coords and coords_list[i + 1]:
+            end = coords[-1]
+            nxt = coords_list[i + 1][0]
+            total_m += _haversine_m(end[0], end[1], nxt[0], nxt[1])
+
+    # Named places
+    place_durations: dict[str, float] = {}
+    place_city: dict[str, str | None] = {}
+    for seg in rows:
+        name = seg["geocode_name"]
+        if not name:
+            continue
+        try:
+            t0 = datetime.fromisoformat(seg["segment_start"].replace("Z", "+00:00"))
+            t1 = datetime.fromisoformat(seg["segment_end"].replace("Z", "+00:00"))
+            dur = (t1 - t0).total_seconds()
+        except Exception:
+            dur = 0.0
+        place_durations[name] = place_durations.get(name, 0.0) + dur
+        place_city[name] = seg["geocode_city"]
+
+    unique_places = len(place_durations)
+    top_place = max(place_durations, key=lambda k: place_durations[k]) if place_durations else None
+    top_place_city = place_city.get(top_place) if top_place else None
+
+    con.execute(
+        """
+        INSERT OR REPLACE INTO location_days
+            (date, distance_meters, unique_places, top_place, top_place_city, computed_at)
+        VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        """,
+        (date, total_m, unique_places, top_place, top_place_city),
+    )
+    con.commit()
+
+
 # ── Main processing ───────────────────────────────────────────────────────────
 
 def process(date_filter: str | None = None, geocode: bool = True) -> int:
@@ -279,6 +367,9 @@ def process(date_filter: str | None = None, geocode: bool = True) -> int:
             ids,
         )
         con.commit()
+
+        # Recompute location_days summary for this date
+        _upsert_location_day(con, date)
 
     print(f"Done: {created} track segments created.")
     return created

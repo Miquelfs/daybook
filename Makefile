@@ -8,7 +8,7 @@ VENV  := $(ROOT)/.venv
 PY    := $(VENV)/bin/python
 WEB   := $(ROOT)/infrastructure/web
 
-.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-notion sync-notion-full import-tracks geocode-tracks api web dev prod kill verify backup clean-pyc deploy help
+.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-notion sync-notion-full sync-strava sync-strava-full strava-auth import-tracks geocode-tracks aviation-init import-full-csv import-aerolink api web dev prod kill cron-install cron-remove verify backup clean-pyc deploy help
 
 PI_HOST ?= pi@daybook-pi
 PI_DIR  ?= ~/daybook
@@ -67,6 +67,40 @@ sync-notion-full:
 	@echo "==> Syncing Notion finance full history..."
 	$(PY) -m domains.money.notion_sync --full-history
 	@echo "==> Full Notion sync done"
+
+sync-strava:
+	@echo "==> Syncing Strava enrichment (last 30 days)..."
+	$(PY) -m domains.health.strava.strava_sync --days 30
+	@echo "==> Strava sync done"
+
+sync-strava-full:
+	@echo "==> Syncing Strava enrichment (full history, slow)..."
+	$(PY) -m domains.health.strava.strava_sync --full-history
+	@echo "==> Full Strava sync done"
+
+aviation-init:
+	@echo "==> Creating aviation tables and seeding airports..."
+	$(PY) -m infrastructure.db.migrate_aviation
+	@echo "==> Aviation DB ready. Run: make import-full-csv import-aerolink"
+
+import-full-csv:
+	@echo "==> Importing Full.csv (previous airline flights)..."
+	$(PY) -m domains.aviation.importers.full_csv_importer
+	@echo "==> Full.csv import done"
+
+import-aerolink:
+	@echo "==> Importing Aerolink.xls (training + early career)..."
+	$(PY) -m domains.aviation.importers.aerolink_importer
+	@echo "==> Aerolink import done"
+
+strava-auth:
+	@echo "==> Strava OAuth setup"
+	@echo "    1. Open this URL in your browser:"
+	@$(PY) -c "import os; from dotenv import load_dotenv; load_dotenv(); cid=os.getenv('STRAVA_CLIENT_ID',''); redirect=os.getenv('STRAVA_REDIRECT_URI','http://localhost:8000/strava/callback'); print(f'   https://www.strava.com/oauth/authorize?client_id={cid}&redirect_uri={redirect}&response_type=code&approval_prompt=auto&scope=activity:read_all')"
+	@echo "    2. Authorize the app."
+	@echo "    3. You will be redirected to http://localhost:8000/strava/callback?code=XXXX"
+	@echo "       The API server handles token exchange automatically."
+	@echo "    4. Run: make sync-strava"
 
 # ── Location import ───────────────────────────────────────────────────────────
 
@@ -148,8 +182,22 @@ prod:
 
 kill:
 	@echo "==> Killing any processes on ports 8000 and 3000..."
-	@lsof -ti:8000 | xargs kill -9 2>/dev/null; true
-	@lsof -ti:3000 | xargs kill -9 2>/dev/null; true
+	@fuser -k 8000/tcp 2>/dev/null; true
+	@fuser -k 3000/tcp 2>/dev/null; true
+	@echo "    Done"
+
+cron-install:
+	@echo "==> Installing daily sync cron job..."
+	@chmod +x $(ROOT)/infrastructure/scripts/daily_sync.sh
+	@CRON_LINE="0 * * * * cd $(ROOT) && $(ROOT)/infrastructure/scripts/daily_sync.sh >> $(ROOT)/infrastructure/scripts/logs/cron.log 2>&1"; \
+	( crontab -l 2>/dev/null | grep -v "daily_sync.sh"; echo "$$CRON_LINE" ) | crontab -
+	@echo "    Cron job installed: runs daily_sync.sh every hour"
+	@echo "    View with: crontab -l"
+	@echo "    Logs at:   infrastructure/scripts/logs/"
+
+cron-remove:
+	@echo "==> Removing daily sync cron job..."
+	@( crontab -l 2>/dev/null | grep -v "daily_sync.sh" ) | crontab -
 	@echo "    Done"
 
 # ── Quality ───────────────────────────────────────────────────────────────────
@@ -181,6 +229,11 @@ deploy:
 		--exclude='.venv' \
 		--exclude='data/' \
 		--exclude='infrastructure/db/*.db' \
+		--exclude='infrastructure/db/*.db-wal' \
+		--exclude='infrastructure/db/*.db-shm' \
+		--exclude='infrastructure/scripts/logs/' \
+		--exclude='nohup.out' \
+		--exclude='.env' \
 		$(ROOT)/ $(PI_HOST):$(PI_DIR)/
 	@echo "==> Copying .env.local to Pi ..."
 	scp $(WEB)/.env.local $(PI_HOST):$(PI_DIR)/infrastructure/web/.env.local
@@ -188,11 +241,10 @@ deploy:
 	ssh $(PI_HOST) "cd $(PI_DIR)/infrastructure/web && npm install --include=dev --silent"
 	@echo "==> Building frontend on Pi ..."
 	ssh $(PI_HOST) "cd $(PI_DIR)/infrastructure/web && npm run build"
-	@echo "==> Restarting API on Pi ..."
-	ssh $(PI_HOST) "pkill -f uvicorn; sleep 1; cd $(PI_DIR) && nohup .venv/bin/uvicorn infrastructure.api.main:app --host 0.0.0.0 --port 8000 > /tmp/api.log 2>&1 &"
-	@echo "==> Restarting web on Pi ..."
-	ssh $(PI_HOST) "pkill -f 'next start'; sleep 2; cd $(PI_DIR)/infrastructure/web && nohup npm start > /tmp/web.log 2>&1 &"
-	@echo "==> Deploy complete. Check http://daybook-pi:3000"
+	@echo "==> Restarting services on Pi ..."
+	ssh $(PI_HOST) "sudo systemctl restart daybook-api daybook-web"
+	@echo "==> Deploy complete. http://100.67.252.76:3000"
+
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 
@@ -217,6 +269,14 @@ help:
 	@echo "  make money-db-init     Create money.db and seed budgets"
 	@echo "  make sync-notion       Pull last 90 days of Notion finance data"
 	@echo "  make sync-notion-full  Pull full Notion finance history (first run only)"
+	@echo "  make strava-auth       Print Strava OAuth URL for first-time setup"
+	@echo "  make sync-strava       Pull last 30 days of Strava enrichment"
+	@echo "  make sync-strava-full  Pull full Strava history (first run only)"
+	@echo "  make aviation-init     Create aviation tables and seed airports (first run only)"
+	@echo "  make import-full-csv   Import Full.csv from previous airline"
+	@echo "  make import-aerolink   Import Aerolink.xls (training + early career)"
+	@echo "  make cron-install      Install hourly cron job (Garmin + Notion sync)"
+	@echo "  make cron-remove       Remove the hourly sync cron job"
 	@echo "  make import-tracks     Import a location-history JSON: make import-tracks JSON=path/to/file.json"
 	@echo "  make geocode-tracks    Geocode un-geocoded tracks (Nominatim, 1 req/sec)"
 	@echo "  make api               Start FastAPI dev server (port 8000)"

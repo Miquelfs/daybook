@@ -65,24 +65,41 @@ def location_summary_for_date(date: str) -> dict:
 
 
 def _location_summary_with_conn(con: sqlite3.Connection, date: str) -> dict:
-    """Same as location_summary_for_date but reuses an existing connection."""
-    cities_row = con.execute(
+    """Same as location_summary_for_date but reuses an existing connection.
+    Overland tracks (geocode_city) are the primary source; Google visits are fallback."""
+    # Primary: Overland tracks geocoded via Nominatim
+    overland_rows = con.execute(
         """
-        SELECT GROUP_CONCAT(DISTINCT p.city) AS cities
-        FROM   visits v
-        LEFT JOIN place_names p ON p.place_id = v.place_id
-        WHERE  v.date = ?
+        SELECT DISTINCT geocode_city AS city
+        FROM   tracks
+        WHERE  date = ?
+          AND  geocode_city IS NOT NULL
+        ORDER BY segment_start
         """,
         (date,),
-    ).fetchone()
+    ).fetchall()
+
+    cities = [r["city"] for r in overland_rows if r["city"]]
+
+    # Fallback: Google Maps visits (legacy data, pre-Overland)
+    if not cities:
+        cities_row = con.execute(
+            """
+            SELECT GROUP_CONCAT(DISTINCT p.city) AS cities
+            FROM   visits v
+            LEFT JOIN place_names p ON p.place_id = v.place_id
+            WHERE  v.date = ?
+            """,
+            (date,),
+        ).fetchone()
+        cities_raw = cities_row["cities"] if cities_row and cities_row["cities"] else ""
+        cities = [c.strip() for c in cities_raw.split(",") if c.strip()] if cities_raw else []
 
     dist_row = con.execute(
         "SELECT COALESCE(SUM(distance_meters), 0) FROM movements WHERE date = ?",
         (date,),
     ).fetchone()
 
-    cities_raw = cities_row["cities"] if cities_row and cities_row["cities"] else ""
-    cities = [c.strip() for c in cities_raw.split(",") if c.strip()] if cities_raw else []
     return {
         "cities": cities,
         "total_distance_meters": round(dist_row[0] or 0, 1),

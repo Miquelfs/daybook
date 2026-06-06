@@ -38,9 +38,14 @@ export default async function MoneyPage({ searchParams }: Props) {
           <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest">
             ← Today
           </Link>
-          <Link href="/money/trends" className="text-xs text-[#F59E0B] hover:text-[#FCD34D] transition-colors uppercase tracking-widest">
-            Trends →
-          </Link>
+          <div className="flex gap-4">
+            <Link href="/money/portfolio" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest">
+              Portfolio →
+            </Link>
+            <Link href="/money/trends" className="text-xs text-[#F59E0B] hover:text-[#FCD34D] transition-colors uppercase tracking-widest">
+              Trends →
+            </Link>
+          </div>
         </div>
 
         {/* Month navigation */}
@@ -86,7 +91,7 @@ export default async function MoneyPage({ searchParams }: Props) {
       ) : (
         <>
           {/* Overview cards */}
-          <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className={`grid grid-cols-3 gap-3 ${summary.total_income > 0 ? "mb-3" : "mb-6"}`}>
             <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Spent</p>
               <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">
@@ -112,6 +117,29 @@ export default async function MoneyPage({ searchParams }: Props) {
               </p>
             </div>
           </div>
+
+          {/* Income + Savings row */}
+          {summary.total_income > 0 && (
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+                <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Income</p>
+                <p className="text-xl font-semibold text-[#22C55E] tabular-nums">
+                  +{fmtAmount(summary.total_income)}
+                </p>
+              </div>
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+                <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Savings</p>
+                {(() => {
+                  const savings = summary.total_income - summary.total_spent;
+                  return (
+                    <p className={`text-xl font-semibold tabular-nums ${savings >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
+                      {savings >= 0 ? "+" : "−"}{fmtAmount(Math.abs(savings))}
+                    </p>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
 
           {/* Velocity bar: time vs budget */}
           <div className="mb-8 bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">

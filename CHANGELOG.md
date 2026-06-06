@@ -4,6 +4,49 @@ All notable changes to Daybook are tracked here, day by day.
 
 ---
 
+## 2026-05-15–18 — Daily usability sprint: photo diary, questionnaire overhaul, money fixes, location tuning
+
+### Added
+- **Photo of the day** — full upload pipeline: `POST /days/{date}/photo`, HEIC→JPEG conversion via Pillow + pillow-heif, EXIF orientation correction, photos stored in `data/photos/` on Pi
+- **Photo proxy route** — `GET /api/photos/[...path]` Next.js route forwards image requests same-origin (fixes mixed-content broken images in browser)
+- **PhotoOfDay.tsx** — upload zone (gallery picker, no forced camera), thumbnail with tap-to-expand lightbox, replace-photo button; visible on both Today and all past day pages
+- **Moments page** (`/moments`) — Instagram-style 3-column photo grid across all days; infinite scroll (90-day pages); lightbox with "View that day →" link; camera icon in nav
+- **Photo dot on DayCard** — amber `●` indicator on timeline rows when a photo is logged for that day
+- **`/day/[date]` photo section** — PhotoOfDay now shown on past day pages, enabling backfill uploads
+- **Questionnaire — Today section redesign:**
+  - Drinks: hidden by default; tap "Drinks" to reveal 1–8 count row + `✕` to clear; count shown inline in pill label
+  - S.I.: tap to reveal 1–5 rating row (no "Rating" label)
+  - Work, Outdoors, Social: toggle pills
+  - All five in one compact row
+- **Questionnaire — With section:** smart autocomplete — type a name and past names from 90-day history appear as suggestions; selected names shown as removable chips; new names saved as `with:Name` tags and available in future autocomplete
+- **Questionnaire — Past 7 days collapsible:** shows last 7 answered rotating Q&A pairs
+- **Account color badges** — 12 accounts mapped to distinct colors matching Notion palette (BBVA blue, Revolut purple, Sabadell sky, Trade Republic amber, etc.) in `TransactionList` and edit mode
+- **`tags` field in DaySummary** — now returned from `GET /days` range endpoint; used by Questionnaire autocomplete for `with:` history
+- **`CLAUDE.md`** — project-level instructions: deploy workflow, stack, CORS conventions, tags column convention, key directories
+
+### Fixed
+- **Money sign bug** — `isExpense()` now checks `amount < 0` (not `transaction_type`); daily total shows net correctly; reimbursements/income shown in green with `+` prefix; "Total spent" shows net not gross
+- **Photo upload 500** — Next.js proxy was re-parsing and re-encoding multipart form data, stripping the boundary; fixed by forwarding raw `arrayBuffer()` with original `content-type` header
+- **Photo upload threading** — FastAPI `async def upload_photo` ran in a different thread from the SQLite connection; converted to sync `def` so connection and DB writes share the same thread
+- **Photo display after refresh** — `initialPhotoUrl` was a relative path (`/photos/...`) used as `<img src>` directly, loading from wrong port; fixed by routing all photo URLs through `/api/photos/` proxy
+- **HEIC support** — iPhone HEIC photos now accepted and converted to JPEG server-side; any format Pillow can read is accepted
+- **Leaflet CSS z-index** — moved `<link>` to `layout.tsx` head; added `isolate` + `position:relative` to map container; map no longer bleeds over expense list on desktop
+- **Overland dwell thresholds** — `DWELL_MIN_MINUTES` 8→3, `MOVE_SPEED_MS` 0.8→2.0 (was triggering on normal walking GPS drift), `SPARSE_GAP_MINUTES` 60→30; sparse-tracking days now produce segments
+- **Location pills cap** — Today view shows max 10 named stops, deduped, with "+N more" label
+
+### Infrastructure
+- **Pillow + pillow-heif** added to `requirements.txt`; installed on Pi via deploy pipeline
+- **`make deploy`** now always does `rm -rf .next` before build to prevent stale cache serving old pages
+- **CORS threading error** in `db_money.py` (`SQLite objects created in thread`) — known intermittent; connections created per-request via FastAPI `Depends(get_db)`, not shared across threads
+
+### Tags column convention (documented in CLAUDE.md)
+`days.tags` stores comma-separated structured tags:
+- `work` — work day
+- `si:N` — S.I. with optional satisfaction rating 1–5
+- `with:Name` — person present; used for autocomplete history and future correlation analysis
+
+---
+
 ## 2026-05-07 — Project initiated
 
 ### Added
@@ -12,219 +55,152 @@ All notable changes to Daybook are tracked here, day by day.
 - `requirements.txt` with core dependencies: garminconnect, python-dotenv, pandas, requests, fastapi, uvicorn, pydantic, scipy, numpy, tqdm
 - `.gitignore` excluding secrets, databases, raw data, node artefacts, and OS files
 - `README.md` one-pager pointing to vision doc
-- `docs/VISION.md` — full project vision, principles, architecture, and roadmap (transcribed from founding PDF)
+- `docs/VISION.md` — full project vision, principles, architecture, and roadmap
 - `CHANGELOG.md` (this file)
 - Initial git repository and first commit
-
-### Status
-Phase 1 — Spine: **in progress**
-Next: SQLite schema for `days`, `health`, `activities` + Garmin sync script
 
 ---
 
 ## 2026-05-07 — Database schema + Garmin sync system
 
 ### Added
-- `infrastructure/db/schema.sql` — full SQLite schema: `days` spine, `sleep`, `daily_stats`, `hrv`, `activities`, `sync_log`; all date columns indexed
+- `infrastructure/db/schema.sql` — full SQLite schema: `days` spine, `sleep`, `daily_stats`, `hrv`, `activities`, `sync_log`
 - `infrastructure/db/connection.py` — `get_connection()` helper (WAL mode, FK ON, Row factory)
-- `infrastructure/db/init_db.py` — idempotent DB initializer; creates `daybook.db`
-- `infrastructure/db/backfill_days.py` — fills the `days` spine for any date range (default 2010-01-01 → today)
-- `domains/health/garmin/garmin_client.py` — Garmin Connect login with session token caching at `data/raw/garmin_session/`
-- `domains/health/garmin/garmin_sync.py` — live API sync with `--start-date`, `--end-date`, `--full-history`, `--types`, `--force` flags; rate-limited; upsert pattern; logs to `sync_log`
-- `domains/health/garmin/import_raw.py` — bootstrap DB from pre-existing raw JSON files (no API calls)
-- `domains/health/garmin/garmin_verify.py` — coverage report: row counts, date ranges, gap detection, orphan check
-- `domains/health/garmin/README.md` — setup, daily usage, and API breakage runbook
-- `pyproject.toml` — editable package install so all scripts run as `python -m domains.health.garmin.*` from the daybook root
-- Copied 18,212 raw JSON files from miquelOS Garmin history into `data/raw/garmin/`
+- `infrastructure/db/init_db.py` — idempotent DB initializer
+- `infrastructure/db/backfill_days.py` — fills the `days` spine for any date range
+- `domains/health/garmin/garmin_sync.py` — live API sync with `--start-date`, `--end-date`, `--full-history`, `--types`, `--force` flags
+- `domains/health/garmin/garmin_verify.py` — coverage report: row counts, date ranges, gap detection
 
 ### Bootstrapped
-- `daybook.db` initialized with full schema
-- `days` spine backfilled: 5,971 rows from 2010-01-01 → 2026-05-07
-- Raw import: **5,971 sleep**, **5,971 daily_stats**, **206 HRV**, **350 activities** loaded with zero orphans and zero gaps in sleep/daily_stats
-
-### Known state
-- HRV data only starts 2025-07-15 (device support limitation); 7 real gaps in the HRV record (missed nights)
-- Activities only from 2024-02-09 (previous sync script started then); `--full-history` API run needed for earlier workouts
-- Live Garmin API sync not yet tested (requires `.env` credentials)
-
-### Status
-Phase 1 — Spine: **in progress**
-Next: FastAPI backend `/day/{date}` + `/range` endpoints; then Next.js Today view
+- `daybook.db` initialized; `days` spine: 5,971 rows from 2010-01-01 → 2026-05-07
+- Raw import: 5,971 sleep, 5,971 daily_stats, 206 HRV, 350 activities
 
 ---
 
-## 2026-05-07 — Locations import + FastAPI backend + Questionnaire
-
-### Added (Locations)
-- Copied `locations.db` (14 MB) from miquelOS into `infrastructure/db/` — already geocoded, 19,676 visits, 20,465 movements, 4,058 place names, 2014 → 2026
-- Copied `data/raw/locations/location-history.json` (38 MB) as source-of-truth raw backup
-- `domains/locations/locations_query.py` — read-only query helpers: `visits_for_date`, `movements_for_date`, `location_summary_for_date`, `on_this_day_locations`
-- `domains/locations/__init__.py`
-
-### Added (FastAPI backend)
-- `infrastructure/api/main.py` — FastAPI app, CORS for localhost:3000, binds 127.0.0.1:8000
-- `infrastructure/api/db.py` — per-request SQLite connection dependency injection
-- `infrastructure/api/routers/days.py` — `GET /days/today`, `GET /days/{date}`, `GET /days?start=&end=`, `PATCH /days/{date}`
-- `infrastructure/api/routers/insights.py` — `GET /insights/on-this-day/{date}` (functional), `/streaks` + `/correlations` (stubs)
-- `infrastructure/api/routers/questionnaire.py` — `GET /questionnaire/today`, `GET /questionnaire/{date}`
-- `infrastructure/api/models/day.py` — Pydantic models: `DayDetail`, `DaySummary`, `DayPatch`, `SleepData`, `DailyStatsData`, `HRVData`, `ActivityData`, `LocationSummary`, `LocationVisit`, `DaySubjective`
-- `infrastructure/api/questionnaire/questions.py` — 6 core questions (always shown) + 30 rotating reflective questions (deterministic by date hash). Design informed by Whoop journal (yes/no behaviors) but more reflective and long-form.
-- `infrastructure/api/run.sh` — dev launcher: activates venv, runs uvicorn with --reload
-
-### Verified (all curl-tested)
-- `GET /` → health + version
-- `GET /days/today` → full envelope with sleep (7h45m, score 91), HRV 94ms, daily stats, empty visits (today not yet in locations.db)
-- `GET /days?start=2026-05-01&end=2026-05-07` → range with cities (Palma), steps, activity counts
-- `PATCH /days/2026-05-07` with energy/mood/stress → persisted and returned
-- `GET /questionnaire/today` → 6 core + 1 rotating question
-- `GET /insights/on-this-day/2026-05-07` → historical same-day data back to 2010
-
-### Status
-Phase 1 — Spine: **in progress**
-Next: Next.js Today view + Day Detail view
-
----
-
-## 2026-05-07 — Next.js frontend (Phase 1 complete)
+## 2026-05-07 — Locations, FastAPI backend, Questionnaire, Next.js frontend
 
 ### Added
-- `infrastructure/web/` — Next.js 16 (App Router, TypeScript, Tailwind CSS)
-- **Stack**: TanStack Query for client-side mutations, date-fns, lucide-react
-- **Design**: dark zinc palette (`#09090B` bg), amber accent (`#F59E0B`), generous whitespace, field-notes aesthetic
+- `domains/locations/locations_query.py` — read-only query helpers
+- `infrastructure/api/main.py` — FastAPI app, CORS, binds 0.0.0.0:8000
+- `infrastructure/api/routers/days.py` — `GET /days/today`, `GET /days/{date}`, range, PATCH
+- `infrastructure/api/routers/questionnaire.py` — questionnaire endpoints
+- `infrastructure/api/routers/insights.py` — on-this-day, streaks (stub)
+- Next.js frontend: Today, Day Detail, Timeline pages
+- Evening questionnaire with energy/mood/stress sliders, rotating daily question
+- `Makefile` with all orchestration targets
+- `infrastructure/scripts/daily_sync.sh` — cron-ready sync script
+- `infrastructure/scripts/backup.sh` — SQLite snapshot with 30-day retention
+- `docs/DECISIONS.md` — ADR-001 (SQLite), ADR-002 (FastAPI+Next.js), ADR-003 (Mac-first/Pi-later)
+- `docs/MIGRATION.md` — Raspberry Pi migration checklist
 
-### Pages
-- `/` — Today: server component fetches `/days/today`; sections: Morning Brief, Movement, Reflection, On This Day (Phase 2 placeholder)
-- `/day/[date]` — Day Detail: identical shape + location visit strip when data exists
-- `/timeline` — vertical infinite-scroll list, grouped by month, click → `/day/[date]`
-
-### Components
-- `DayHeader` — date hero with ← prev / Timeline / next → navigation, tomorrow disabled when future
-- `MorningBrief` — sleep duration (accent), HRV, body battery range, RHR in 2×4 grid; secondary pills for score, deep%, SpO₂, stress
-- `MovementBlock` — steps + active calories header, activity rows with icon/name/duration/distance/HR
-- `Questionnaire` — client component; 4 sliders (energy/mood/stress/sleep quality), free-text notes, rotating question input; auto-saves on blur with 800ms debounce; shows ✓ Saved / spinner
-- `Slider` — custom range input with amber fill, labelled endpoints, live numeric readout
-- `DayCard` — timeline row: date + weekday, mood emoji, one-line preview, HRV column, duty day badge
-
-### Infrastructure
-- `app/providers.tsx` — TanStack Query `QueryClientProvider`
-- `lib/api.ts` — typed API client (`api.today()`, `api.day()`, `api.range()`, `api.patch()`, `api.questionnaire()`) + formatting helpers (fmtDuration, fmtDistance, moodEmoji, activityIcon)
-- `tailwind.config.ts` — custom palette, no default Next.js colours
-- `.env.local` — `NEXT_PUBLIC_API_URL=http://localhost:8000`
-
-### Verified
-- `npm run build` — clean, zero TypeScript errors
-- `GET /` renders Morning Brief, Movement, Reflection
-- `GET /day/2026-05-01` renders with Locations strip (Palma visits)
-- `GET /timeline` renders with "All days" + "Load more"
-
-### Status
-Phase 1 — Spine: **in progress**
-Next: orchestration layer
-
----
-
-## 2026-05-07 — Orchestration, ADRs, migration doc, and Garmin live sync
-
-### Added
-- `Makefile` — all orchestration targets: `setup`, `db-init`, `sync-garmin`, `sync-garmin-full`, `api`, `web`, `dev`, `verify`, `backup`, `clean-pyc`, `help`
-- `.env.example` — template with Garmin credentials, timezone, API host/port
-- `infrastructure/scripts/daily_sync.sh` — cron-ready Garmin pull for yesterday; logs to `logs/daily_sync_YYYY-MM-DD.log`, errors to `logs/errors.log`
-- `infrastructure/scripts/backup.sh` — gzip snapshot of all `.db` files, keeps last 30, prunes older
-- `infrastructure/scripts/sync_log_tail.py` — helper for `make verify` (last 10 sync_log entries)
-- `docs/DECISIONS.md` — ADR-001 (SQLite), ADR-002 (FastAPI+Next.js vs Grafana), ADR-003 (Mac-first/Pi-later)
-- `docs/MIGRATION.md` — Raspberry Pi 3 migration checklist (placeholder, 7 sections)
-- `README.md` — full rewrite: 5-minute quickstart, daily routine, key commands table, project layout, architecture paragraph, docs index
-
-### Fixed
-- `domains/health/garmin/garmin_client.py` — rewrote to use garminconnect's `login(tokenstore=dir)` pattern instead of garth `.loads()`. Copied miquelOS token directory to `data/raw/garmin_session/` — live Garmin sync now works without credentials in `.env`.
-
-### Verified (full `make` chain)
-- `make setup` ✓ — .env created, deps installed
-- `make db-init` ✓ — schema intact, spine unchanged
-- `make sync-garmin` ✓ — authenticated via tokenstore, 0 new records (all pre-loaded)
-- `make verify` ✓ — 5,971 sleep/stats rows, 206 HRV, 350 activities, 0 gaps/orphans
-- `make backup` ✓ — daybook.db (2.2M gz) + locations.db (3.2M gz) snapshotted
-- `make dev` + `curl localhost:3000` ✓ — Morning Brief · Movement · Reflection all rendering
-
-### Status
 **Phase 1 — Spine: COMPLETE**
-Done when: open the web app every evening, see today's Garmin data, fill out the questionnaire, scrub backwards. ✓
-
-Next (Phase 2 — Brain): Google Takeout location import, Notion expenses, aviation logbook, correlation engine, "On This Day" widget
 
 ---
 
-## 2026-05-10 — GPS tracks, heatmap, Overland ingestion, Explore page
+## 2026-05-10 — GPS tracks, heatmap, Overland, Explore page
 
-### Added (Locations domain)
-- `domains/locations/import_tracks.py` — imports Google Maps Timeline `timelinePath` JSON entries into `tracks` table; parses `geo:lat,lng` strings; optional Nominatim geocoding
-- `domains/locations/geocode_tracks.py` — background geocoder for `tracks` table; 1.1 sec/request Nominatim rate limit; `--limit`, `--force` flags; `caffeinate`-friendly for overnight runs
-- `domains/locations/overland_process.py` — dwell detection (80m radius, 3-min minimum = stop); haversine distance; zoom-18 Nominatim for venue names; marks source points `processed=1`
-- `domains/locations/locations_query.py` (extended) — `tracks_for_date()` enriched: joins `visits` + `place_names` by time overlap to return `place_name`, `semantic_type`, `city`, `country`
-
-### Added (API)
-- `infrastructure/api/routers/locations.py` — `GET /locations/heatmap?year=`, `GET /locations/tracks/{date}`, `POST /locations/ingest/overland` (Overland iOS endpoint; Bearer token auth; null-island filter; background processing)
-- Added `POST /sync/garmin` endpoint to `main.py` — triggers incremental Garmin sync in background
-
-### Added (Frontend)
-- `infrastructure/web/components/LocationMap.tsx` — Leaflet polyline map with white halo + blue line; orange named-stop dots; grey transition dots; deduplicated stop legend; StrictMode double-init fix
-- `infrastructure/web/components/HeatMap.tsx` — leaflet.heat world heatmap; script-tag loading pattern (required for `window.L` global); blue→purple→amber→red gradient
-- `infrastructure/web/app/explore/page.tsx` — `/explore` page: year-filter pills, world heatmap, country list with flag + proportion bar, top-20 cities ranked by days
-- `infrastructure/web/components/SyncOnLoad.tsx` — fires `POST /sync/garmin` silently on Today page mount
-
-### Added (navigation)
-- `DayHeader.tsx` — Globe icon → `/explore` link; Wallet icon → `/money` link
-- `/explore` page — `← Timeline` back link
-
-### Fixed
-- Leaflet "Map container already initialized" error in React StrictMode — local `destroyed` boolean + `_leaflet_id` deletion before re-init
-- Null-island (lat=0, lng=0) GPS points filtered at ingest and deleted from DB
-- Track segment coordinates now continuous (single polyline, not disconnected dots)
+### Added
+- `domains/locations/import_tracks.py` — imports Google Maps Timeline JSON into `tracks` table
+- `domains/locations/geocode_tracks.py` — background Nominatim geocoder (1.1 sec/request)
+- `domains/locations/overland_process.py` — dwell detection (80m radius, 3-min minimum)
+- `infrastructure/api/routers/locations.py` — heatmap, tracks, Overland ingest endpoint (Bearer token auth)
+- `LocationMap.tsx` — Leaflet polyline map with named stops
+- `HeatMap.tsx` — world heatmap with leaflet.heat
+- `/explore` page — year filter, world heatmap, country/city stats
+- `SyncOnLoad.tsx` — fires `POST /sync/garmin` silently on Today page mount
 
 ### Data state
-- 22,408 GPS track segments in `tracks` table (Google Maps Timeline 2013–2026)
-- ~1,700/19,271 geocoded as of Phase 2 start (background geocoder running)
-- Overland iOS app configured and receiving live location data
-
-### Status
-**Phase 2 — Brain: in progress**
+- 22,408 GPS track segments imported (2013–2026)
+- Overland iOS live location ingestion configured and running
 
 ---
 
 ## 2026-05-11 — Finance domain: money.db, Notion sync, expense entry UI
 
-### Added (Finance domain — Phase 2a complete)
-- `infrastructure/db/money_schema.sql` — `transactions`, `budgets`, `money_sync_log` tables; soft-delete pattern; source='local'|'notion' to protect hand-edited rows from Notion re-sync
-- `infrastructure/db/money_connection.py` — WAL-mode SQLite connection to `money.db`
-- `domains/money/__init__.py`
-- `domains/money/money_config.py` — classification constants ported from Notion dashboard: `BUDGET_VERSIONS` (€2,660/month budget seeded), `INCOME_CATEGORIES`, `SPECIAL_CATEGORIES`, `CATEGORY_EMOJI`, `classify()`, `get_budget_for_month()`
-- `domains/money/money_db.py` — `init_money_db()` + `seed_budgets()` (11 category budgets seeded for 2025-09 onward)
-- `domains/money/notion_sync.py` — full Notion import CLI: `--full-history`, `--since YYYY-MM-DD`, `--dry-run`, `--force`; source='local' protection; logs to `money_sync_log`
-- `infrastructure/api/db_money.py` — FastAPI dependency for money.db
-- `infrastructure/api/models/money.py` — Pydantic models: `TransactionCreate`, `TransactionOut`, `TransactionPatch`, `MonthSummary`, `CategoryBudget`, `MerchantSuggestion`, `MoneyMeta`
-- `infrastructure/api/routers/money.py` — 7 endpoints: `POST /money/transactions`, `GET /money/transactions`, `PATCH /money/transactions/{id}`, `DELETE /money/transactions/{id}`, `GET /money/autocomplete/merchants`, `GET /money/meta`, `GET /money/summary/month`
-- Added `POST /sync/notion` to `main.py` — incremental background Notion sync
-
-### Added (Frontend)
-- `infrastructure/web/lib/money-api.ts` — typed fetch helpers + `Transaction`, `MonthSummary`, `MoneyMeta` types; `fmtAmount()`, `isExpense()` helpers
-- `infrastructure/web/components/money/CategoryPills.tsx` — tap-to-select pill grid with emoji; `CATEGORY_EMOJI` constant
-- `infrastructure/web/components/money/AddExpenseSheet.tsx` — 3-step bottom sheet (amount → category → merchant + autocomplete + account selector); CSS-only slide animation; `useMutation` → `POST /money/transactions`
-- `infrastructure/web/components/money/DaySpendSummary.tsx` — daily spend widget wired into Today + Day Detail pages; shows total + transaction list + "+ Add" button; silently hides if money.db not initialized
-- `infrastructure/web/components/money/MonthBudgetBar.tsx` — per-category progress bar; blue=OK, amber=over pace, red=over budget
-- `infrastructure/web/app/money/page.tsx` — `/money` page: 3 overview cards (spent/budget/remaining), velocity progress bars, category budget bars, recent transactions list
+### Added
+- `infrastructure/db/money_schema.sql` — transactions, budgets, money_sync_log tables; soft-delete; source='local'|'notion'
+- `domains/money/money_config.py` — budget versions (€2,660/month), category classification, emoji map
+- `domains/money/notion_sync.py` — full Notion import CLI with incremental sync
+- `infrastructure/api/routers/money.py` — 7 endpoints: CRUD transactions, merchant autocomplete, month summary
+- `AddExpenseSheet.tsx` — bottom sheet for quick expense entry with merchant autocomplete
+- `DaySpendSummary.tsx` — daily spend widget on Today + Day Detail
+- `/money` page — budget overview, category progress bars, recent transactions
 
 ### Bootstrapped
-- `money.db` initialized: 3 tables created, 11 budget rows seeded
-- `.env` populated with live Notion credentials
-
-### Verified (smoke-tested)
-- `GET /money/meta` → 10 expense categories with correct emojis ✓
-- `GET /money/summary/month?month=2026-05` → €2,660 total budget, day 11/31 ✓
-- `POST /money/transactions` → creates local expense with correct sign (−€3.50), UUID, classification ✓
-- `npx tsc --noEmit` → zero TypeScript errors ✓
-
-### Status
-**Phase 2 — Brain: in progress**
-Next: `make sync-notion-full` to import full Notion history; phone PWA setup via Tailscale; country name English fix propagating from geocoder
+- `money.db` initialized, 11 budget categories seeded
+- Notion credentials configured; 363 transactions synced
 
 ---
+
+## 2026-05-12–13 — Finance analytics, portfolio, category drill-down, charts
+
+### Added
+- 6 new API endpoints:
+  - `GET /money/overview` — daily burn rate, projections, budget alerts
+  - `GET /money/trends/historical` — MoM/YoY comparisons
+  - `GET /money/trends/forecast` — 3-month weighted average forecast
+  - `GET /money/portfolio` — net worth, investment vs liquid breakdown
+  - `GET /money/spending/patterns` — spend by day-of-week and week-of-month
+  - `GET /money/categories/stats` — all-time per-category totals
+- `/money/overview` page — burn rate, projections, alert cards
+- `/money/portfolio` page — net worth, allocation bar, account list with type badges
+- `/money/category/[cat]` page — per-category drill-down with transaction list
+- `MonthlyChart.tsx` — income vs expenses bar chart with MoM delta table
+- `ForecastCard.tsx` — predicted income/spend/savings vs €1,300 goal
+- `SpendingPatternsChart.tsx` — day-of-week spend bars + week-of-month list
+- `CategoryStatsTable.tsx` — all-time category totals with % of spend bars
+- `CategoryTrendsChart.tsx` — category spending over time (line chart)
+- `/money/trends` page — savings streak, forecast, all charts, anomalies, month history
+- Navigation: Overview and Portfolio icons added to top nav bar
+
+### Fixed
+- Sign convention: `SUM(ABS(amount))` → `-SUM(amount)` throughout API so reimbursements correctly net against spending
+- Sign toggle: removed auto-lock in AddExpenseSheet — user always controls the sign
+
+---
+
+## 2026-05-14 — Anomaly detection, CSV export, transaction editing, account classification
+
+### Added
+- `GET /money/anomalies` — flags large transactions (>3× category avg) and category spikes (>1.5× 12-month avg, ≥3 months history)
+- `GET /money/transactions/export` — StreamingResponse CSV of full transaction history
+- `app/api/money/export/route.ts` — Next.js proxy for CSV download (↓ CSV button on Trends page)
+- `AnomalyReport.tsx` — anomaly display component; shown first on Trends page
+
+### Improved
+- `TransactionList.tsx` — inline edit now has category pills (amber highlight), account pills (pre-selected), sign toggle; all fields saveable
+- `AddExpenseSheet.tsx` — free-text input below category pills allows custom/new categories
+- `money_config.py` — Mapfre Inversió → Investment; Sabadell + Cash → Checking/Liquid
+
+### Fixed
+- `garmin_sync.py` — `if start > today: return` replaced with `start = today` so today's data always re-fetches on every cron run
+
+---
+
+## 2026-05-15 — Pi production deployment: systemd, CORS, hardened deploy pipeline
+
+### Infrastructure
+- **Systemd services** installed on Pi: `daybook-api.service` + `daybook-web.service`
+  - Both `enabled` — survive reboots automatically
+  - `Restart=on-failure` — recover from crashes without manual intervention
+  - Logs: `journalctl -u daybook-api -f` / `journalctl -u daybook-web -f`
+- **`make deploy`** fully automated: rsync → `npm install` → `npm run build` → `sudo systemctl restart daybook-api daybook-web`
+- **Cron** (`0 * * * *`): hourly Garmin + Overland + Notion sync via `daily_sync.sh`
+- **Passwordless sudo** for systemctl restart: `/etc/sudoers.d/daybook`
+
+### Fixed
+- **CORS**: `CORS_ORIGINS=http://localhost:3000,http://100.67.252.76:3000` added to Pi `.env` — unblocked all client-side React Query calls (TransactionList, Timeline, all charts)
+- **rsync destroying Pi credentials**: added `--exclude='.env'` so Notion token and Garmin password on Pi are never overwritten by Mac's `.env`
+- **rsync destroying Pi state**: added excludes for `*.db-wal`, `*.db-shm`, `infrastructure/scripts/logs/`, `nohup.out`
+- **nohup fragility**: processes died when SSH session closed — replaced with systemd entirely
+
+### Access
+- Production URL: `http://100.67.252.76:3000` (Pi's Tailscale IP — consistent for SSR and browser API calls)
+- `NEXT_PUBLIC_API_URL=http://100.67.252.76:8000` baked into the Next.js build
+
+### Lessons learned
+- `NEXT_PUBLIC_*` vars are baked into the bundle at build time — the browser-facing URL must match `.env.local` at build time, not at runtime
+- `nohup cmd &` via non-interactive SSH dies when the connection closes — systemd is the correct production pattern
+- rsync `--delete` silently destroys Pi-only state — always audit excludes before adding new files to the project
+- SSR pages bypass CORS (server-to-server); React Query client components do not — a CORS bug shows as a clean split between working SSR and broken client fetches
+- Accessing the app from a URL different from `NEXT_PUBLIC_API_URL`'s origin causes client fetches to fail even with correct CORS headers — use the Tailscale IP consistently

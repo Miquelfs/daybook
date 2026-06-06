@@ -135,6 +135,26 @@ Overland is a free iOS app that sends your live GPS location to Daybook in the b
    - **Token**: `milolikesbirds` (or whatever is in your `.env` `OVERLAND_TOKEN`)
 3. Enable **Background Location** in iOS Settings → Privacy → Location Services → Overland → Always
 
+### Recommended Overland settings (battery-friendly, meaningful stops only)
+
+These settings balance battery life with useful location data. The goal is capturing meaningful stops (cafés, shops, home) without recording every street corner:
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| Continuous Tracking Mode | **Significant** | Uses iOS significant-change events instead of continuous GPS — major battery saver |
+| Visit Tracking | On | Captures dwell events (when you stay somewhere) |
+| Desired Accuracy | **10m** | Sufficient for stop detection; "Best" drains battery aggressively |
+| Min Distance Between Points | **100m** | Ignores micro-movements; reduces noise |
+| Min Time Between Points | **1m** | No point sending more often than once per minute |
+| Locations per Batch | **100** | Smaller batches, more frequent uploads |
+| Logging Mode | All Data | Required for track segments |
+| Show Background Indicator | Yes | Helps iOS keep the app alive |
+| Pause Updates Automatically | No | Prevents gaps in coverage |
+
+> **Why not "Both" tracking mode?** "Both" (standard + significant) runs the GPS chip continuously, which is the biggest battery drain. "Significant" fires on cell tower changes and is much cheaper while still capturing movement.
+
+The backend dwell detection (300m radius, 8-minute minimum) will cluster the remaining pings into meaningful named stops — typically 5–10 per day for a normal day rather than 50+ street-by-street segments.
+
 Overland will batch-send your location every few minutes. Each batch is processed into GPS tracks and appears on your day map.
 
 ---
