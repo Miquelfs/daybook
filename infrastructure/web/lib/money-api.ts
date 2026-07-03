@@ -244,6 +244,12 @@ export type SpendingPatterns = {
   by_week: WeekSpend[];
 };
 
+export type SubcategoryBreakdown = {
+  subcategory: string;
+  total: number;
+  count: number;
+};
+
 export type CategoryStats = {
   category: string;
   total: number;
@@ -252,6 +258,7 @@ export type CategoryStats = {
   min_tx: number;
   max_tx: number;
   pct_of_total: number;
+  subcategories: SubcategoryBreakdown[];
 };
 
 export type LargeTxAnomaly = {
@@ -275,6 +282,191 @@ export type AnomalyReport = {
   month: string;
   large_transactions: LargeTxAnomaly[];
   category_spikes: CategorySpikeAnomaly[];
+};
+
+// ── Investment portfolio (Track A-I) ─────────────────────────────────────────
+
+export type AssetClass =
+  | "equity_etf" | "stock" | "crypto" | "bond_etf" | "cash" | "commodity";
+
+export type HoldingCreate = {
+  account: string;
+  ticker: string;
+  isin?: string | null;
+  name: string;
+  asset_class: AssetClass;
+  currency?: string;
+  quantity: number;
+  cost_basis_eur?: number | null;
+  first_bought_at?: string | null;
+  notes?: string | null;
+};
+
+export type HoldingPatch = Partial<{
+  quantity: number;
+  cost_basis_eur: number | null;
+  name: string;
+  ticker: string;
+  isin: string | null;
+  asset_class: AssetClass;
+  account: string;
+  notes: string | null;
+  is_active: boolean;
+}>;
+
+export type Holding = {
+  id: string;
+  account: string;
+  ticker: string;
+  isin: string | null;
+  name: string;
+  asset_class: AssetClass;
+  currency: string;
+  quantity: number;
+  cost_basis_eur: number | null;
+  first_bought_at: string | null;
+  notes: string | null;
+  is_active: boolean;
+  current_price_eur: number | null;
+  market_value_eur: number | null;
+  unrealized_pnl_eur: number | null;
+  unrealized_pnl_pct: number | null;
+  day_change_eur: number | null;
+  day_change_pct: number | null;
+  ytd_change_pct: number | null;
+  price_as_of: string | null;
+  allocation_pct: number | null;
+};
+
+export type AllocationSlice = {
+  label: string;
+  value_eur: number;
+  pct: number;
+};
+
+export type Mover = {
+  holding_id: string;
+  ticker: string;
+  name: string;
+  day_change_eur: number;
+  day_change_pct: number;
+};
+
+export type PortfolioOverview = {
+  as_of: string;
+  total_value_eur: number;
+  total_cost_basis_eur: number;
+  total_pnl_eur: number;
+  total_pnl_pct: number;
+  day_change_eur: number;
+  day_change_pct: number;
+  ytd_pnl_eur: number;
+  ytd_pnl_pct: number;
+  allocation_by_class: AllocationSlice[];
+  allocation_by_account: AllocationSlice[];
+  allocation_by_currency: AllocationSlice[];
+  top_movers_up: Mover[];
+  top_movers_down: Mover[];
+  top_holdings: Holding[];
+  holdings_count: number;
+  liquid_accounts: AccountBalance[];
+};
+
+export type PortfolioHistoryPoint = {
+  date: string;
+  total_value_eur: number;
+  invested_eur: number;
+};
+
+export type HoldingHistoryPoint = {
+  date: string;
+  quantity: number;
+  price_eur: number;
+  value_eur: number;
+};
+
+export type PortfolioRange = "1M" | "3M" | "YTD" | "1Y" | "ALL";
+
+export type IsinCandidate = {
+  ticker: string;
+  name: string | null;
+  exchange: string | null;
+  exchange_code: string | null;
+  currency: string | null;
+};
+
+export type IsinLookupResult = {
+  isin: string;
+  candidates: IsinCandidate[];
+};
+
+// ── Recurring Investment Plans (DCA) ─────────────────────────────────────────
+
+export type Cadence = "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
+
+export type InvestmentPlanCreate = {
+  holding_id: string;
+  source_account: string;
+  amount_eur: number;
+  cadence: Cadence;
+  day_of_month?: number | null;
+  day_of_week?: number | null;
+  start_date: string;
+  end_date?: string | null;
+  notes?: string | null;
+};
+
+export type InvestmentPlanPatch = Partial<{
+  amount_eur: number;
+  cadence: Cadence;
+  day_of_month: number | null;
+  day_of_week: number | null;
+  source_account: string;
+  end_date: string | null;
+  next_execution_date: string;
+  is_active: boolean;
+  notes: string | null;
+}>;
+
+export type InvestmentPlan = {
+  id: number;
+  holding_id: string;
+  ticker: string;
+  holding_name: string;
+  holding_account: string;
+  source_account: string;
+  amount_eur: number;
+  cadence: Cadence;
+  day_of_month: number | null;
+  day_of_week: number | null;
+  start_date: string;
+  end_date: string | null;
+  next_execution_date: string;
+  last_executed_at: string | null;
+  is_active: boolean;
+  notes: string | null;
+  total_contributed_eur: number;
+  total_quantity_added: number;
+  executions_count: number;
+  monthly_equivalent_eur: number;
+};
+
+export type PlanExecution = {
+  id: number;
+  plan_id: number;
+  execution_date: string;
+  amount_eur: number;
+  price_eur: number;
+  quantity_added: number;
+  transaction_id: string | null;
+  status: string;
+  notes: string | null;
+  created_at: string;
+};
+
+export type PlanRunResult = {
+  executed: PlanExecution[];
+  dry_run: boolean;
 };
 
 // ── API methods ───────────────────────────────────────────────────────────────
@@ -337,6 +529,55 @@ export const moneyApi = {
 
   portfolio: () =>
     get<PortfolioSummary>("/money/portfolio"),
+
+  portfolioOverview: () =>
+    get<PortfolioOverview>("/money/portfolio/overview"),
+
+  portfolioHoldings: (opts?: { account?: string; asset_class?: AssetClass; include_inactive?: boolean }) => {
+    const p = new URLSearchParams();
+    if (opts?.account) p.set("account", opts.account);
+    if (opts?.asset_class) p.set("asset_class", opts.asset_class);
+    if (opts?.include_inactive) p.set("include_inactive", "true");
+    const qs = p.toString();
+    return get<Holding[]>(`/money/portfolio/holdings${qs ? `?${qs}` : ""}`);
+  },
+
+  portfolioHistory: (range: PortfolioRange = "1Y") =>
+    get<PortfolioHistoryPoint[]>(`/money/portfolio/history?range=${range}`),
+
+  holdingHistory: (id: string, range: PortfolioRange = "1Y") =>
+    get<HoldingHistoryPoint[]>(`/money/portfolio/holding/${encodeURIComponent(id)}/history?range=${range}`),
+
+  createHolding: (body: HoldingCreate) =>
+    proxyPost<Holding>("/api/money/portfolio/holdings", body),
+
+  patchHolding: (id: string, body: HoldingPatch) =>
+    proxyPatch<Holding>(`/api/money/portfolio/holdings/${encodeURIComponent(id)}`, body),
+
+  deleteHolding: (id: string) =>
+    proxyDel(`/api/money/portfolio/holdings/${encodeURIComponent(id)}`),
+
+  isinLookup: (isin: string) =>
+    get<IsinLookupResult>(`/money/portfolio/isin-lookup?isin=${encodeURIComponent(isin)}`),
+
+  // Recurring plans
+  listPlans: (include_inactive = false) =>
+    get<InvestmentPlan[]>(`/money/portfolio/plans${include_inactive ? "?include_inactive=true" : ""}`),
+
+  planExecutions: (planId: number, limit = 100) =>
+    get<PlanExecution[]>(`/money/portfolio/plans/${planId}/executions?limit=${limit}`),
+
+  createPlan: (body: InvestmentPlanCreate) =>
+    proxyPost<InvestmentPlan>("/api/money/portfolio/plans", body),
+
+  patchPlan: (id: number, body: InvestmentPlanPatch) =>
+    proxyPatch<InvestmentPlan>(`/api/money/portfolio/plans/${id}`, body),
+
+  deletePlan: (id: number) =>
+    proxyDel(`/api/money/portfolio/plans/${id}`),
+
+  runDuePlans: (dry_run = false) =>
+    proxyPost<PlanRunResult>(`/api/money/portfolio/plans/run-due${dry_run ? "?dry_run=true" : ""}`, {}),
 
 
   spendingPatterns: (month?: string) =>

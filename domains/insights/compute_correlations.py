@@ -46,6 +46,20 @@ _STATIC_METRICS = [
     "distance_km", "unique_places",
     # Money
     "daily_spend",
+    # Environment
+    "temp_mean", "precipitation", "wind_speed_max",
+    # Health extras
+    "fatigue_score", "hr_daytime_avg", "hr_daytime_peak",
+    # Aviation extras
+    "hr_duty_avg",
+    # Training load (CTL/ATL/TSB)
+    "ctl", "atl", "tsb",
+    # Aerobic efficiency
+    "decoupling_pct", "efficiency_factor",
+    # Garmin physio
+    "vo2max_run", "vo2max_bike", "training_readiness",
+    # Fused fatigue
+    "duty_load",
 ]
 
 # Min usage days for tags / contacts to be included
@@ -222,6 +236,46 @@ def _fetch(conn, key: str, start: str, end: str) -> dict[str, float]:
         except Exception:
             return {}
 
+    # Environment / weather metrics
+    _WEATHER = {
+        "temp_mean":      "temp_mean",
+        "precipitation":  "precipitation",
+        "wind_speed_max": "wind_speed_max",
+    }
+    if key in _WEATHER:
+        col = _WEATHER[key]
+        rows = conn.execute(
+            f"SELECT date, {col} AS val FROM weather "
+            f"WHERE date BETWEEN ? AND ? AND {col} IS NOT NULL",
+            (start, end),
+        ).fetchall()
+        return {r["date"]: float(r["val"]) for r in rows}
+
+    # Fatigue / load index
+    if key == "fatigue_score":
+        rows = conn.execute(
+            "SELECT date, fatigue_score AS val FROM load_index "
+            "WHERE date BETWEEN ? AND ? AND fatigue_score IS NOT NULL",
+            (start, end),
+        ).fetchall()
+        return {r["date"]: float(r["val"]) for r in rows}
+
+    # Intraday HR aggregations
+    _INTRADAY_HR = {
+        "hr_daytime_avg":  ("AVG", "07:00", "22:00"),
+        "hr_daytime_peak": ("MAX", "07:00", "22:00"),
+        "hr_duty_avg":     ("AVG", "06:00", "18:00"),
+    }
+    if key in _INTRADAY_HR:
+        agg, t_from, t_to = _INTRADAY_HR[key]
+        rows = conn.execute(
+            f"SELECT date, {agg}(heart_rate) AS val FROM intraday_hr "
+            f"WHERE date BETWEEN ? AND ? AND time >= ? AND time <= ? "
+            f"GROUP BY date HAVING val IS NOT NULL",
+            (start, end, t_from, t_to),
+        ).fetchall()
+        return {r["date"]: float(r["val"]) for r in rows}
+
     if key in ("distance_km", "unique_places"):
         import sqlite3 as _sq
         col = "distance_meters" if key == "distance_km" else "unique_places"
@@ -236,6 +290,85 @@ def _fetch(conn, key: str, start: str, end: str) -> dict[str, float]:
             ).fetchall()
             loc_conn.close()
             return {r["date"]: float(r["val"]) * scale for r in rows}
+        except Exception:
+            return {}
+
+    # Training load (CTL / ATL / TSB) — combined sport series
+    _TRAINING_LOAD = {"ctl": "ctl", "atl": "atl", "tsb": "tsb"}
+    if key in _TRAINING_LOAD:
+        col = _TRAINING_LOAD[key]
+        try:
+            rows = conn.execute(
+                f"SELECT date, {col} AS val FROM training_load_daily "
+                f"WHERE sport = 'combined' AND date BETWEEN ? AND ? AND {col} IS NOT NULL",
+                (start, end),
+            ).fetchall()
+            return {r["date"]: float(r["val"]) for r in rows}
+        except Exception:
+            return {}
+
+    # Aerobic efficiency metrics — average of recent long aerobic efforts
+    if key == "decoupling_pct":
+        try:
+            rows = conn.execute(
+                """
+                SELECT a.date, AVG(ad.decoupling_pct) AS val
+                FROM activity_detail ad
+                JOIN activities a ON a.id = ad.activity_id
+                WHERE a.date BETWEEN ? AND ?
+                  AND ad.decoupling_pct IS NOT NULL
+                GROUP BY a.date
+                """,
+                (start, end),
+            ).fetchall()
+            return {r["date"]: float(r["val"]) for r in rows}
+        except Exception:
+            return {}
+
+    if key == "efficiency_factor":
+        try:
+            rows = conn.execute(
+                """
+                SELECT a.date, AVG(ad.efficiency_factor) AS val
+                FROM activity_detail ad
+                JOIN activities a ON a.id = ad.activity_id
+                WHERE a.date BETWEEN ? AND ?
+                  AND ad.efficiency_factor IS NOT NULL
+                GROUP BY a.date
+                """,
+                (start, end),
+            ).fetchall()
+            return {r["date"]: float(r["val"]) for r in rows}
+        except Exception:
+            return {}
+
+    # Garmin physiological metrics
+    _GARMIN_PHYSIO = {
+        "vo2max_run":        "vo2max_run",
+        "vo2max_bike":       "vo2max_bike",
+        "training_readiness": "training_readiness_score",
+    }
+    if key in _GARMIN_PHYSIO:
+        col = _GARMIN_PHYSIO[key]
+        try:
+            rows = conn.execute(
+                f"SELECT date, {col} AS val FROM garmin_physio "
+                f"WHERE date BETWEEN ? AND ? AND {col} IS NOT NULL",
+                (start, end),
+            ).fetchall()
+            return {r["date"]: float(r["val"]) for r in rows}
+        except Exception:
+            return {}
+
+    # Fused duty load from load_index
+    if key == "duty_load":
+        try:
+            rows = conn.execute(
+                "SELECT date, duty_load AS val FROM load_index "
+                "WHERE date BETWEEN ? AND ? AND duty_load IS NOT NULL",
+                (start, end),
+            ).fetchall()
+            return {r["date"]: float(r["val"]) for r in rows}
         except Exception:
             return {}
 
@@ -420,7 +553,7 @@ def run(window_days: int = 90, dry_run: bool = False) -> int:
     if dry_run:
         for row in results[:20]:
             direction = "→next" if row["lag"] else "same"
-            new_marker = " ✦NEW" if row["is_new"] else ""
+            new_marker = " NEW" if row["is_new"] else ""
             print(f"  {row['metric_a']:25s} × {row['metric_b']:25s}  r={row['r']:+.3f}  p={row['p_value']:.4f}  n={row['n']}  [{direction}]{new_marker}")
         return len(results)
 

@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
+import { Globe, PersonStanding, Database } from "lucide-react";
 import { api } from "@/lib/api";
 import { MovementCharts } from "@/components/MovementCharts";
 
@@ -35,31 +36,25 @@ export default async function MovementPage({ searchParams }: Props) {
       <div className="flex items-end justify-between mb-6">
         <div>
           <Link
-            href="/timeline"
+            href="/"
             className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest mb-2 inline-block"
           >
-            ← Timeline
+            ← Today
           </Link>
           <h1 className="text-2xl font-semibold tracking-tight">Movement</h1>
           <p className="text-sm text-[#71717A] mt-0.5">
             {year ? `${year} — ` : "All time — "}
             {summary ? `${fmtKm(summary.total_km)} tracked across ${summary.days_tracked} days` : "No data yet"}
           </p>
-          <div className="flex gap-2 mt-3">
-            <Link
-              href="/explore"
-              className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors"
-            >
-              Travel
+          <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mt-3 overflow-x-auto">
+            <Link href="/explore" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
+              <Globe size={13} />Travel
             </Link>
-            <span className="text-xs px-3 py-1.5 rounded-full bg-white text-[#18181B] font-medium">
-              Movement
+            <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#27272A] text-[#FAFAFA] whitespace-nowrap">
+              <PersonStanding size={13} />Movement
             </span>
-            <Link
-              href="/explore/correlations"
-              className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors"
-            >
-              Correlations ✦
+            <Link href="/explore/databases" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
+              <Database size={13} />Databases
             </Link>
           </div>
         </div>

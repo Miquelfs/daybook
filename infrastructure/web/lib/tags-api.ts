@@ -13,6 +13,7 @@ export type Tag = {
   category: string;
   color: string | null;
   is_system: boolean;
+  is_negative: boolean;
   usage_count: number;
 };
 
@@ -76,6 +77,16 @@ export const tagsApi = {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail ?? `createTag failed ${res.status}`);
     }
+    return res.json();
+  },
+
+  updateTag: async (id: number, body: { is_negative?: boolean }): Promise<Tag> => {
+    const res = await fetch(`${PROXY_BASE}/api/tags/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`updateTag failed ${res.status}`);
     return res.json();
   },
 

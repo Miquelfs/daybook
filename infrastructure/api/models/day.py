@@ -85,9 +85,11 @@ class DaySubjective(BaseModel):
     duty_day: bool = False
     away_from_base: bool = False
     timezone_offset: int | None = None
-    alcohol: int | None = Field(None, ge=0, le=10)   # drinks (0 = none)
-    social: bool | None = None                         # was social today
-    outdoors: bool | None = None                       # meaningful time outside
+    gratitude: str | None = None
+    intention: str | None = None
+    learning: str | None = None
+    focus_score: int | None = Field(None, ge=1, le=10)
+    error_log: str | None = None
 
 
 class DaySummary(BaseModel):
@@ -119,6 +121,25 @@ class ContactOut(BaseModel):
     group_: str | None = None
 
 
+class WeatherData(BaseModel):
+    condition: str | None = None
+    temp_min: float | None = None
+    temp_max: float | None = None
+    temp_mean: float | None = None
+    precipitation: float | None = None
+    weather_code: int | None = None
+    wind_speed_max: float | None = None
+
+
+class LoadIndexData(BaseModel):
+    fatigue_score: float | None = None
+    hrv_load: float | None = None
+    sleep_debt: float | None = None
+    tss_load: float | None = None
+    timezone_penalty: float | None = None
+    recovery_status: str | None = None
+
+
 class DayDetail(BaseModel):
     """Full envelope — used for single-day view."""
     date: str
@@ -132,6 +153,8 @@ class DayDetail(BaseModel):
     companions: list[str] = []
     photo_url: str | None = None
     tags: list[DayTagSummary] = []
+    weather: WeatherData | None = None
+    load_index: LoadIndexData | None = None
 
 
 class DayPatch(BaseModel):
@@ -148,6 +171,8 @@ class DayPatch(BaseModel):
     duty_day: bool | None = None
     away_from_base: bool | None = None
     timezone_offset: int | None = None
-    alcohol: int | None = Field(None, ge=0, le=10)
-    social: bool | None = None
-    outdoors: bool | None = None
+    gratitude: str | None = None
+    intention: str | None = None
+    learning: str | None = None
+    focus_score: int | None = Field(None, ge=1, le=10)
+    error_log: str | None = None

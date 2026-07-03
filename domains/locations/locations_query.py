@@ -11,6 +11,20 @@ from pathlib import Path
 
 _DB = Path(__file__).parents[2] / "infrastructure" / "db" / "locations.db"
 
+_CITY_NORM: dict[str, str] = {
+    "Palma de Mallorca": "Palma",
+    "Palma de Mallorca (Palma)": "Palma",
+    "Sigtuna kommun": "Stockholm Arlanda",
+    "San Miguel de Abona": "Tenerife Sur",
+    "Granadilla de Abona": "Tenerife Sur",
+}
+
+
+def _norm_city(city: str | None) -> str | None:
+    if city is None:
+        return None
+    return _CITY_NORM.get(city, city)
+
 
 def _conn() -> sqlite3.Connection:
     con = sqlite3.connect(_DB)
@@ -79,7 +93,7 @@ def _location_summary_with_conn(con: sqlite3.Connection, date: str) -> dict:
         (date,),
     ).fetchall()
 
-    cities = [r["city"] for r in overland_rows if r["city"]]
+    cities = list(dict.fromkeys(_norm_city(r["city"]) for r in overland_rows if r["city"]))
 
     # Fallback: Google Maps visits (legacy data, pre-Overland)
     if not cities:
@@ -93,7 +107,7 @@ def _location_summary_with_conn(con: sqlite3.Connection, date: str) -> dict:
             (date,),
         ).fetchone()
         cities_raw = cities_row["cities"] if cities_row and cities_row["cities"] else ""
-        cities = [c.strip() for c in cities_raw.split(",") if c.strip()] if cities_raw else []
+        cities = [_norm_city(c.strip()) for c in cities_raw.split(",") if c.strip()] if cities_raw else []
 
     dist_row = con.execute(
         "SELECT COALESCE(SUM(distance_meters), 0) FROM movements WHERE date = ?",

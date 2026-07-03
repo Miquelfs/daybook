@@ -25,30 +25,30 @@ LOCATIONS_DB  = ROOT / "infrastructure" / "db" / "locations.db"
 # WMO weather interpretation codes → condition slug
 # https://open-meteo.com/en/docs#weathervariables
 WMO_TO_CONDITION: dict[int, str] = {
-    0: "sunny",    # Clear sky
-    1: "sunny",    # Mainly clear
-    2: "cloudy",   # Partly cloudy
-    3: "cloudy",   # Overcast
-    45: "cloudy",  # Fog
-    48: "cloudy",  # Icy fog
-    51: "rainy",   # Light drizzle
-    53: "rainy",   # Moderate drizzle
-    55: "rainy",   # Dense drizzle
-    61: "rainy",   # Slight rain
-    63: "rainy",   # Moderate rain
-    65: "rainy",   # Heavy rain
-    71: "snowy",   # Slight snow
-    73: "snowy",   # Moderate snow
-    75: "snowy",   # Heavy snow
-    77: "snowy",   # Snow grains
-    80: "rainy",   # Slight rain showers
-    81: "rainy",   # Moderate rain showers
-    82: "rainy",   # Violent rain showers
-    85: "snowy",   # Snow showers
-    86: "snowy",   # Heavy snow showers
-    95: "stormy",  # Thunderstorm
-    96: "stormy",  # Thunderstorm with hail
-    99: "stormy",  # Thunderstorm with heavy hail
+    0: "sunny",        # Clear sky
+    1: "sunny",        # Mainly clear (few clouds)
+    2: "partly_cloudy", # Partly cloudy (scattered clouds)
+    3: "cloudy",       # Overcast (broken / full cover)
+    45: "cloudy",      # Fog
+    48: "cloudy",      # Icy fog
+    51: "rainy",       # Light drizzle
+    53: "rainy",       # Moderate drizzle
+    55: "rainy",       # Dense drizzle
+    61: "rainy",       # Slight rain
+    63: "rainy",       # Moderate rain
+    65: "rainy",       # Heavy rain
+    71: "snowy",       # Slight snow
+    73: "snowy",       # Moderate snow
+    75: "snowy",       # Heavy snow
+    77: "snowy",       # Snow grains
+    80: "rainy",       # Slight rain showers
+    81: "rainy",       # Moderate rain showers
+    82: "rainy",       # Violent rain showers
+    85: "snowy",       # Snow showers
+    86: "snowy",       # Heavy snow showers
+    95: "stormy",      # Thunderstorm
+    96: "stormy",      # Thunderstorm with hail
+    99: "stormy",      # Thunderstorm with heavy hail
 }
 
 
@@ -66,47 +66,85 @@ def _get_loc_conn() -> sqlite3.Connection:
     return conn
 
 
-def _wakeup_coords(date_str: str) -> tuple[float, float] | None:
-    """Return (lat, lon) of the first GPS point recorded on date_str from Overland."""
-    loc = _get_loc_conn()
-    # First point of the day from raw Overland pings
-    row = loc.execute(
-        """SELECT lat, lng FROM overland_locations
-           WHERE date = ?
-           ORDER BY recorded_at ASC
-           LIMIT 1""",
-        (date_str,),
-    ).fetchone()
-    loc.close()
-    if row:
-        return float(row["lat"]), float(row["lng"])
+def _midday_coords(date_str: str) -> tuple[float, float] | None:
+    """
+    Return the most representative (lat, lon) for a date: the GPS point
+    closest to local noon (12:00), falling back to the median-position point,
+    then any available point.
 
-    # Fallback: first point in tracks table (from points_json)
+    Using noon instead of wake-up avoids the common case where the user wakes
+    at home (cloudy) but spends most of the day outdoors or in a different city.
+    """
     loc = _get_loc_conn()
-    row = loc.execute(
-        """SELECT points_json FROM tracks
+
+    # Strategy 1: Overland pings — pick the reading closest to 12:00 local
+    rows = loc.execute(
+        """SELECT lat, lng, recorded_at FROM overland_locations
            WHERE date = ?
-           ORDER BY segment_start ASC
-           LIMIT 1""",
+           ORDER BY recorded_at ASC""",
         (date_str,),
-    ).fetchone()
+    ).fetchall()
     loc.close()
-    if row:
-        pts = json.loads(row["points_json"])
+
+    if rows:
+        noon_str = "12:00:00"
+        best = min(
+            rows,
+            key=lambda r: _time_distance(
+                (r["recorded_at"] or date_str + "T00:00:00")[11:19],
+                noon_str,
+            ),
+        )
+        return float(best["lat"]), float(best["lng"])
+
+    # Strategy 2: tracks table — pick the point from the segment closest to noon
+    loc = _get_loc_conn()
+    track_rows = loc.execute(
+        """SELECT points_json, segment_start FROM tracks
+           WHERE date = ?
+           ORDER BY segment_start ASC""",
+        (date_str,),
+    ).fetchall()
+    loc.close()
+
+    if track_rows:
+        noon_str = "12:00:00"
+        best_row = min(
+            track_rows,
+            key=lambda r: abs(_time_distance(
+                (r["segment_start"] or date_str + "T00:00:00")[11:19],
+                noon_str,
+            )),
+        )
+        pts = json.loads(best_row["points_json"])
         if pts:
-            return float(pts[0]["lat"]), float(pts[0]["lng"])
+            mid = pts[len(pts) // 2]  # midpoint of segment
+            return float(mid["lat"]), float(mid["lng"])
+
     return None
 
 
+def _time_distance(t1: str, t2: str) -> int:
+    """Return absolute seconds between two HH:MM:SS strings."""
+    def _to_s(t: str) -> int:
+        parts = t[:8].split(":")
+        if len(parts) < 2:
+            return 0
+        h, m = int(parts[0]), int(parts[1])
+        s = int(parts[2]) if len(parts) > 2 else 0
+        return h * 3600 + m * 60 + s
+    return abs(_to_s(t1) - _to_s(t2))
+
+
 def _find_coords_for_date(date_str: str, all_dates: list[str]) -> tuple[float, float] | None:
-    """Get coords for date, falling back to nearest previous date that has data."""
-    coords = _wakeup_coords(date_str)
+    """Get coords for date (using midday GPS), falling back to nearest previous date."""
+    coords = _midday_coords(date_str)
     if coords:
         return coords
     # Walk backwards through the date list to find the last known location
     idx = all_dates.index(date_str) if date_str in all_dates else -1
     for i in range(idx - 1, -1, -1):
-        coords = _wakeup_coords(all_dates[i])
+        coords = _midday_coords(all_dates[i])
         if coords:
             print(f"  ! No GPS for {date_str}, using coords from {all_dates[i]}")
             return coords
@@ -181,7 +219,7 @@ def _auto_tag(conn: sqlite3.Connection, date_str: str, condition: str) -> None:
     if not tag_row:
         return
     # Remove any previous weather condition tags for this date first
-    weather_slugs = list(WMO_TO_CONDITION.values())
+    weather_slugs = list(set(WMO_TO_CONDITION.values()))
     placeholders = ",".join("?" * len(weather_slugs))
     conn.execute(
         f"""DELETE FROM day_tags WHERE date=? AND tag_id IN (

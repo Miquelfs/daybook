@@ -81,6 +81,16 @@ _STATIC_CATALOG: dict[str, dict] = {
     "flight_night_hours":{"label": "Night hours flown", "unit": "hours",   "category": "aviation", "_type": "flight_agg", "agg": "SUM", "col": "night_seconds",  "scale": 1/3600},
     # Money (reads from money.db)
     "daily_spend":       {"label": "Daily spend",       "unit": "€",       "category": "money",    "_type": "money_spend"},
+    # Load Index (Horizon 1)
+    "fatigue_score":     {"label": "Fatigue load",      "unit": "0-100",   "category": "health",   "_type": "simple", "table": "load_index", "col": "fatigue_score"},
+    # Weather
+    "temp_mean":         {"label": "Temperature (mean)", "unit": "°C",     "category": "environment", "_type": "simple", "table": "weather", "col": "temp_mean"},
+    "precipitation":     {"label": "Precipitation",      "unit": "mm",     "category": "environment", "_type": "simple", "table": "weather", "col": "precipitation"},
+    "wind_speed_max":    {"label": "Wind speed",         "unit": "km/h",   "category": "environment", "_type": "simple", "table": "weather", "col": "wind_speed_max"},
+    # Intraday HR
+    "hr_daytime_avg":    {"label": "Daytime HR avg",     "unit": "bpm",    "category": "health",      "_type": "intraday_hr_agg", "agg": "AVG", "time_from": "07:00", "time_to": "22:00"},
+    "hr_daytime_peak":   {"label": "Daytime HR peak",    "unit": "bpm",    "category": "health",      "_type": "intraday_hr_agg", "agg": "MAX", "time_from": "07:00", "time_to": "22:00"},
+    "hr_duty_avg":       {"label": "Duty-window HR avg", "unit": "bpm",    "category": "aviation",    "_type": "intraday_hr_agg", "agg": "AVG", "time_from": "06:00", "time_to": "18:00"},
 }
 
 # Candidates for /correlations/top (avoids N² explosion with tags/people)
@@ -92,6 +102,9 @@ _TOP_CANDIDATES = [
     "screen_total", "screen_unlocks",
     "distance_km", "unique_places",
     "daily_spend",
+    "fatigue_score",
+    "temp_mean", "precipitation",
+    "hr_daytime_avg", "hr_daytime_peak", "hr_duty_avg",
 ]
 
 _WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -263,6 +276,18 @@ def _fetch_metric(conn: sqlite3.Connection, key: str, start: str, end: str) -> d
             (start, end),
         ).fetchall()
         return {r["date"]: (r["val"] or 0) * scale for r in rows if r["val"] is not None and r["val"] > 0}
+
+    if t == "intraday_hr_agg":
+        agg = meta["agg"]
+        time_from = meta["time_from"]
+        time_to   = meta["time_to"]
+        rows = conn.execute(
+            f"SELECT date, {agg}(heart_rate) AS val FROM intraday_hr "
+            f"WHERE date BETWEEN ? AND ? AND time >= ? AND time <= ? "
+            f"GROUP BY date",
+            (start, end, time_from, time_to),
+        ).fetchall()
+        return {r["date"]: float(r["val"]) for r in rows if r["val"] is not None}
 
     if t == "money_spend":
         try:

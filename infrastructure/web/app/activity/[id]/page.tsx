@@ -1,9 +1,11 @@
 import { api, fmtDuration, fmtDistance, fmtPace, activityIcon } from "@/lib/api";
-import type { ActivityDetail } from "@/lib/api";
+import type { ActivityDetail, ActivityComputedMetrics } from "@/lib/api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ActivityMap } from "@/components/ActivityMap";
 import { ActivityCharts } from "@/components/ActivityCharts";
+import { ActivityNotes } from "@/components/ActivityNotes";
+import { ActivitySplitsChart } from "@/components/ActivitySplitsChart";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -22,6 +24,119 @@ function StatBlock({ label, value }: { label: string; value: string | null }) {
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">{children}</p>
+  );
+}
+
+function decouplingColor(pct: number): string {
+  if (pct < 5) return "text-emerald-400";
+  if (pct < 8) return "text-amber-400";
+  return "text-rose-400";
+}
+
+function decouplingLabel(pct: number): string {
+  if (pct < 5) return "Durable";
+  if (pct < 8) return "Borderline";
+  return "High drift";
+}
+
+function ifColor(v: number): string {
+  if (v < 0.75) return "text-blue-400";
+  if (v <= 0.85) return "text-amber-400";
+  return "text-rose-400";
+}
+
+function viColor(v: number): string {
+  if (v < 1.05) return "text-emerald-400";
+  if (v <= 1.15) return "text-amber-400";
+  return "text-rose-400";
+}
+
+function PerformanceSection({ computed }: { computed: ActivityComputedMetrics }) {
+  const hasDecoupling = computed.decoupling_pct !== null;
+  const hasEF = computed.efficiency_factor !== null;
+  const hasTE = computed.garmin_aerobic_te !== null;
+  const hasPower = computed.normalized_power_w !== null;
+  const hasIF = computed.intensity_factor !== null;
+  const hasVI = computed.variability_index !== null;
+
+  if (!hasDecoupling && !hasEF && !hasTE && !hasPower) return null;
+
+  return (
+    <section className="mb-8">
+      <SectionLabel>Performance</SectionLabel>
+      <div className="grid grid-cols-3 gap-4">
+        {/* Aerobic decoupling */}
+        {hasDecoupling && (() => {
+          const pct = computed.decoupling_pct!;
+          return (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-[#52525B] uppercase tracking-widest">Decoupling</span>
+              <span className={`text-xl font-semibold tabular-nums ${decouplingColor(pct)}`}>
+                {pct.toFixed(1)}%
+              </span>
+              <span className={`text-xs ${decouplingColor(pct)}`}>{decouplingLabel(pct)}</span>
+            </div>
+          );
+        })()}
+
+        {/* Efficiency factor */}
+        {hasEF && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-[#52525B] uppercase tracking-widest">EF</span>
+            <span className="text-xl font-semibold tabular-nums">
+              {computed.efficiency_factor!.toFixed(3)}
+            </span>
+            <span className="text-xs text-[#52525B]">speed/HR</span>
+          </div>
+        )}
+
+        {/* Garmin Training Effect */}
+        {hasTE && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-[#52525B] uppercase tracking-widest">Training Effect</span>
+            <span className="text-xl font-semibold tabular-nums">
+              {computed.garmin_aerobic_te!.toFixed(1)}
+            </span>
+            <span className="text-xs text-[#52525B]">
+              aerobic
+              {computed.garmin_anaerobic_te !== null
+                ? ` · ${computed.garmin_anaerobic_te.toFixed(1)} anaerobic`
+                : ""}
+            </span>
+          </div>
+        )}
+
+        {/* Power metrics row — only if NP exists */}
+        {hasPower && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-[#52525B] uppercase tracking-widest">Norm. Power</span>
+            <span className="text-xl font-semibold tabular-nums">
+              {Math.round(computed.normalized_power_w!)} W
+            </span>
+          </div>
+        )}
+
+        {hasIF && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-[#52525B] uppercase tracking-widest">Int. Factor</span>
+            <span className={`text-xl font-semibold tabular-nums ${ifColor(computed.intensity_factor!)}`}>
+              {computed.intensity_factor!.toFixed(2)}
+            </span>
+            <span className="text-xs text-[#52525B]">NP / FTP</span>
+          </div>
+        )}
+
+        {hasVI && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-[#52525B] uppercase tracking-widest">Variability</span>
+            <span className={`text-xl font-semibold tabular-nums ${viColor(computed.variability_index!)}`}>
+              {computed.variability_index!.toFixed(2)}
+            </span>
+            <span className="text-xs text-[#52525B]">pacing smoothness</span>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -93,6 +208,14 @@ export default async function ActivityPage({ params }: Props) {
       {/* Activity stream charts */}
       <ActivityCharts activityId={decodedId} activityType={activity.activity_type} />
 
+      {/* Splits */}
+      {activity.splits && activity.splits.length > 0 && (
+        <section className="mb-8">
+          <SectionLabel>Splits</SectionLabel>
+          <ActivitySplitsChart splits={activity.splits} activityType={activity.activity_type} />
+        </section>
+      )}
+
       {/* Key stats */}
       <section className="mb-8">
         <SectionLabel>Stats</SectionLabel>
@@ -108,6 +231,9 @@ export default async function ActivityPage({ params }: Props) {
           <StatBlock label="Power" value={activity.avg_power_watts ? `${activity.avg_power_watts} W` : null} />
         </div>
       </section>
+
+      {/* Performance metrics (EF, decoupling, NP/IF/VI) */}
+      {activity.computed && <PerformanceSection computed={activity.computed} />}
 
       {/* Segment efforts */}
       {activity.segment_efforts.length > 0 && (
@@ -141,6 +267,16 @@ export default async function ActivityPage({ params }: Props) {
           </div>
         </section>
       )}
+
+      {/* Notes & rating */}
+      <section className="mb-8">
+        <SectionLabel>How it felt</SectionLabel>
+        <ActivityNotes
+          activityId={decodedId}
+          initialNotes={activity.user_notes ?? null}
+          initialRating={activity.user_rating ?? null}
+        />
+      </section>
     </main>
   );
 }

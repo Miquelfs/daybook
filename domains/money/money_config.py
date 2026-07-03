@@ -9,17 +9,18 @@ No pandas dependency; plain Python only.
 
 BUDGET_VERSIONS: dict[str, dict[str, float]] = {
     "2025-09": {
-        "Restaurant":    450,
-        "Groceries":     350,
-        "Transportation": 250,
-        "Sports":        150,
-        "Tech":           35,
-        "Gifts":         100,
-        "Trips":         300,
-        "Home":         1000,
-        "OMYRA":          10,
-        "Personal":       10,
-        "Alert":           5,
+        "Restaurant":         450,
+        "Food & Beverages":   100,
+        "Groceries":          350,
+        "Transportation":     250,
+        "Sports":             150,
+        "Tech":                35,
+        "Gifts":              100,
+        "Trips":              300,
+        "Home":              1000,
+        "OMYRA":               10,
+        "Personal":            10,
+        "Alert":                5,
     }
 }
 
@@ -33,9 +34,7 @@ SPECIAL_CATEGORIES: set[str] = {"Account Setup", "Transfer"}
 FINANCE_CATEGORIES: set[str] = {"Finance"}
 
 # Notion occasionally uses legacy category names; map them before classifying
-CATEGORY_MAPPING: dict[str, str] = {
-    "Food and Beverages": "Restaurant",
-}
+CATEGORY_MAPPING: dict[str, str] = {}
 
 # ── Account classification ─────────────────────────────────────────────────────
 
@@ -60,15 +59,16 @@ LIQUID_ACCOUNTS: dict[str, str] = {
 # ── UI metadata ───────────────────────────────────────────────────────────────
 
 CATEGORY_EMOJI: dict[str, str] = {
-    "Restaurant":    "🍴",
-    "Groceries":     "🛒",
+    "Restaurant":       "🍴",
+    "Food & Beverages": "🥤",
+    "Groceries":        "🛒",
     "Transportation": "🚗",
     "Home":          "🏠",
     "Sports":        "🏋",
     "Trips":         "✈️",
     "Tech":          "💻",
     "Gifts":         "🎁",
-    "Personal":      "🧴",
+    "Personal":      "😊",
     "Alert":         "🚨",
     "Pilot":         "🛩️",
     "Fun":           "🎉",
@@ -85,7 +85,7 @@ CATEGORY_EMOJI: dict[str, str] = {
 
 # Ordered list of expense categories shown in entry UI (most-used first)
 EXPENSE_CATEGORIES: list[str] = [
-    "Restaurant", "Groceries", "Transportation", "Home",
+    "Restaurant", "Food & Beverages", "Groceries", "Transportation", "Home",
     "Sports", "Trips", "Tech", "Gifts", "Personal", "Alert",
     "Pilot", "Fun", "Clothes", "Barça", "Bizum", "Sweets", "Other",
 ]

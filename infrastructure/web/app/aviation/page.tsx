@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
@@ -8,8 +8,9 @@ import {
 } from "recharts";
 import {
   PlaneTakeoff, PlaneLanding, Moon, Clock, Globe, Plus,
-  Shield, TrendingUp, Award, ChevronRight, Download, MapPin, List,
-  BarChart2, Flag, Compass, Plane, Fuel, Users, Layers, AlertTriangle,
+  Shield, TrendingUp, Award, ChevronRight, Download,
+  Flag, Compass, Plane, Fuel, Users, Layers, AlertTriangle,
+  List, BarChart2, MapPin, CalendarDays, X, User,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -112,6 +113,31 @@ function SectionTitle({ icon, children }: { icon?: React.ReactNode; children: Re
   );
 }
 
+const AIRCRAFT_ALIASES: Record<string, string> = {
+  "Boeing 737 MAX 8-200": "Boeing 737 MAX 8",
+  "Boeing 737-8AS": "Boeing 737-800",
+};
+
+function shortAircraftType(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return AIRCRAFT_ALIASES[raw] ?? raw;
+}
+
+// Format a stored pic_name:
+// - 6-letter crew code (e.g. "ALEOLU") → kept as-is
+// - "Firstname Lastname" → "F.LASTNAME"
+function formatPicName(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const s = raw.trim();
+  // 6-letter all-alpha crew code (Ryanair format) — display as-is
+  if (/^[A-Za-z]{6}$/.test(s)) return s.toUpperCase();
+  const parts = s.split(/\s+/);
+  if (parts.length === 1) return parts[0].toUpperCase();
+  const initial = parts[0][0].toUpperCase();
+  const surname = parts.slice(1).join(" ").toUpperCase();
+  return `${initial}.${surname}`;
+}
+
 // Operator legend pill
 function OpPill({ label, color }: { label: string; color: string }) {
   return (
@@ -122,8 +148,15 @@ function OpPill({ label, color }: { label: string; color: string }) {
   );
 }
 
+type LookupKind = "airport" | "aircraft" | "captain";
+type LookupPanel = { kind: LookupKind; query: string } | null;
+
 export default function AviationPage() {
   const [addOpen, setAddOpen] = useState(false);
+  const [regSearch, setRegSearch] = useState("");
+  const regInputRef = useRef<HTMLInputElement>(null);
+  const [airportSearch, setAirportSearch] = useState("");
+  const [captainSearch, setCaptainSearch] = useState("");
   const [selectedYear, setSelectedYear] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [easaPage, setEasaPage] = useState(0);
@@ -132,6 +165,7 @@ export default function AviationPage() {
   const [codeMode, setCodeMode] = useState<CodeMode>("icao");
   const [flightLimit, setFlightLimit] = useState(10);
   const [mapYear, setMapYear] = useState<string>("");
+  const [lookup, setLookup] = useState<LookupPanel>(null);
 
   const { data: stats } = useQuery({
     queryKey: ["flightStats"],
@@ -166,6 +200,24 @@ export default function AviationPage() {
     queryFn: () => api.flights({}),
   });
 
+  const { data: airportData, isLoading: airportLoading } = useQuery({
+    queryKey: ["airportFlights", lookup?.query],
+    queryFn: () => api.airportFlights(lookup!.query),
+    enabled: lookup?.kind === "airport" && !!lookup.query,
+  });
+
+  const { data: aircraftData, isLoading: aircraftLoading } = useQuery({
+    queryKey: ["aircraftHistory", lookup?.query],
+    queryFn: () => api.aircraftHistory(lookup!.query),
+    enabled: lookup?.kind === "aircraft" && !!lookup.query,
+  });
+
+  const { data: captainData, isLoading: captainLoading } = useQuery({
+    queryKey: ["captainHistory", lookup?.query],
+    queryFn: () => api.captainHistory(lookup!.query),
+    enabled: lookup?.kind === "captain" && !!lookup.query,
+  });
+
   const tot = stats?.totals;
 
   // Fill missing years with 0 for chart
@@ -196,9 +248,9 @@ export default function AviationPage() {
   const easaSlice = allFlights.slice(easaPage * easaPageSize, (easaPage + 1) * easaPageSize);
 
   const tabCls = (t: Tab) =>
-    `px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap ${tab === t
-      ? "text-sky-400 border-b-2 border-sky-400"
-      : "text-[#71717A] hover:text-[#A1A1AA]"}`;
+    `flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-colors ${tab === t
+      ? "bg-[#27272A] text-[#FAFAFA]"
+      : "text-[#52525B] hover:text-[#A1A1AA]"}`;
 
   const uniqueYears = Array.from(new Set(allFlights.map(f => f.date.slice(0, 4)))).sort().reverse();
 
@@ -212,30 +264,29 @@ export default function AviationPage() {
   );
 
   return (
-    <div className="max-w-2xl mx-auto px-4 pt-4 pb-24">
+    <div className="max-w-2xl mx-auto px-4 pt-8 pb-24">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-lg font-semibold text-[#FAFAFA]">Logbook</h1>
-        <button onClick={() => setAddOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white text-sm rounded-lg transition-colors">
-          <Plus size={14} />Add Flight
-        </button>
+      <div className="mb-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Today</Link>
+            <h1 className="text-2xl font-semibold tracking-tight">Logbook</h1>
+            <p className="text-sm text-[#71717A] mt-0.5">Flights, routes & EASA hours</p>
+          </div>
+          <button onClick={() => setAddOpen(true)}
+            className="mt-1 flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded-lg transition-colors">
+            <Plus size={13} />Add Flight
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-[#27272A] mb-6 overflow-x-auto">
-        <button className={tabCls("overview")} onClick={() => setTab("overview")}>
-          <span className="flex items-center gap-1.5"><List size={13} />Overview</span>
-        </button>
-        <button className={tabCls("logbook")} onClick={() => setTab("logbook")}>
-          <span className="flex items-center gap-1.5"><BarChart2 size={13} />EASA Logbook</span>
-        </button>
-        <button className={tabCls("map")} onClick={() => setTab("map")}>
-          <span className="flex items-center gap-1.5"><MapPin size={13} />Routes Map</span>
-        </button>
-        <button className={tabCls("stats")} onClick={() => setTab("stats")}>
-          <span className="flex items-center gap-1.5"><TrendingUp size={13} />Analytics</span>
-        </button>
+      <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mb-6 overflow-x-auto">
+        <button className={tabCls("overview")} onClick={() => setTab("overview")}><List size={13} />Overview</button>
+        <button className={tabCls("logbook")} onClick={() => setTab("logbook")}><BarChart2 size={13} />EASA</button>
+        <button className={tabCls("map")} onClick={() => setTab("map")}><MapPin size={13} />Routes</button>
+        <button className={tabCls("stats")} onClick={() => setTab("stats")}><TrendingUp size={13} />Analytics</button>
+        <Link href="/aviation/roster" className={tabCls("roster" as Tab)}><CalendarDays size={13} />Roster</Link>
       </div>
 
       {/* ── OVERVIEW ── */}
@@ -361,6 +412,67 @@ export default function AviationPage() {
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               <p className="text-sm font-medium text-[#FAFAFA] mr-auto">Flights</p>
               <CodeToggle />
+              {/* Aircraft registration lookup */}
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  const q = regSearch.trim().toUpperCase();
+                  if (q) setLookup({ kind: "aircraft", query: q });
+                }}
+                className="flex items-center gap-1"
+                title="Look up an aircraft by registration"
+              >
+                <input
+                  ref={regInputRef}
+                  className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA] placeholder-[#52525B] focus:outline-none focus:border-violet-500 w-24 font-mono uppercase"
+                  placeholder="9H-QAE…"
+                  value={regSearch}
+                  onChange={e => setRegSearch(e.target.value.toUpperCase())}
+                />
+                <button type="submit" className="px-2 py-1 bg-[#27272A] hover:bg-[#3F3F46] rounded-lg text-xs text-[#A1A1AA] transition-colors">
+                  <Plane size={11} />
+                </button>
+              </form>
+              {/* Airport ICAO lookup */}
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  const q = airportSearch.trim().toUpperCase();
+                  if (q) setLookup({ kind: "airport", query: q });
+                }}
+                className="flex items-center gap-1"
+                title="Look up an airport by ICAO"
+              >
+                <input
+                  className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA] placeholder-[#52525B] focus:outline-none focus:border-sky-500 w-20 font-mono uppercase"
+                  placeholder="LEPA…"
+                  value={airportSearch}
+                  onChange={e => setAirportSearch(e.target.value.toUpperCase())}
+                />
+                <button type="submit" className="px-2 py-1 bg-[#27272A] hover:bg-[#3F3F46] rounded-lg text-xs text-[#A1A1AA] transition-colors">
+                  <MapPin size={11} />
+                </button>
+              </form>
+              {/* Captain lookup */}
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  const q = captainSearch.trim();
+                  if (q) setLookup({ kind: "captain", query: q });
+                }}
+                className="flex items-center gap-1"
+                title="Look up a captain"
+              >
+                <input
+                  className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA] placeholder-[#52525B] focus:outline-none focus:border-amber-500 w-24 font-mono"
+                  placeholder="ALEOLU…"
+                  value={captainSearch}
+                  onChange={e => setCaptainSearch(e.target.value)}
+                />
+                <button type="submit" className="px-2 py-1 bg-[#27272A] hover:bg-[#3F3F46] rounded-lg text-xs text-[#A1A1AA] transition-colors">
+                  <User size={11} />
+                </button>
+              </form>
               <select className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]"
                 value={yearFilter} onChange={e => { setYearFilter(e.target.value); setFlightLimit(10); }}>
                 <option value="">All years</option>
@@ -409,7 +521,7 @@ export default function AviationPage() {
         <div>
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             <p className="text-sm text-[#71717A]">{allFlights.length} entries · page {easaPage + 1}/{easaTotalPages}</p>
-            <div className="ml-auto flex gap-2">
+            <div className="ml-auto flex gap-2 flex-wrap">
               <a href={`${BASE_API}/flights/export/easa`} download="logbook_easa.csv"
                 className="flex items-center gap-1 px-2.5 py-1.5 bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] rounded-lg text-xs text-[#A1A1AA] transition-colors">
                 <Download size={12} />EASA CSV
@@ -418,9 +530,13 @@ export default function AviationPage() {
                 className="flex items-center gap-1 px-2.5 py-1.5 bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] rounded-lg text-xs text-[#A1A1AA] transition-colors">
                 <Download size={12} />Excel
               </a>
-              <a href={`${BASE_API}/flights/export/pdf`} download="logbook.pdf"
+              <a href={`${BASE_API}/flights/export/pdf`} download="logbook_dark.pdf"
                 className="flex items-center gap-1 px-2.5 py-1.5 bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] rounded-lg text-xs text-[#A1A1AA] transition-colors">
                 <Download size={12} />PDF
+              </a>
+              <a href={`${BASE_API}/flights/export/pdf?theme=light`} download="logbook.pdf"
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-gray-100 border border-gray-300 rounded-lg text-xs text-gray-700 transition-colors">
+                <Download size={12} />PDF Light
               </a>
             </div>
           </div>
@@ -436,27 +552,47 @@ export default function AviationPage() {
                   const isPIC = f.crew_role === "pic";
                   const isSim = f.is_sim;
                   const rowCls = isSim ? "bg-amber-950/20" : isPIC ? "bg-violet-950/20" : i % 2 === 0 ? "bg-transparent" : "bg-[#18181B]/40";
-                  const depTime = f.off_block_utc ? f.off_block_utc.slice(11, 16) : "";
-                  const arrTime = f.on_block_utc ? f.on_block_utc.slice(11, 16) : "";
+                  const depTime = f.off_block_utc ? (f.off_block_utc.length > 5 ? f.off_block_utc.slice(11, 16) : f.off_block_utc) : "";
+                  const arrTime = f.on_block_utc ? (f.on_block_utc.length > 5 ? f.on_block_utc.slice(11, 16) : f.on_block_utc) : "";
                   const picTime = isSim ? "" : secToHHMM(f.pic_seconds);
                   const sicTime = isSim ? "" : secToHHMM(f.sic_seconds);
                   const mpTime = isSim ? "" : secToHHMM(f.block_seconds);
                   const nightTime = isSim ? "" : secToHHMM(f.night_seconds);
-                  const picName = isSim ? "" : isPIC ? "M. FARRÉ" : "";
+                  // PIC Name column: always the captain/commander of the flight.
+                  // School solo flights (pic_name empty, is_pic) → "M. FARRÉ" (SELF).
+                  // All airline flights → captain crew code / name from pic_name field.
+                  const picName = isSim
+                    ? ""
+                    : f.pic_name
+                    ? formatPicName(f.pic_name)
+                    : isPIC
+                    ? "M. FARRÉ"
+                    : "";
                   return (
                     <tr key={f.id} className={`${rowCls} hover:bg-[#27272A]/40 transition-colors`}>
                       <td className="px-2 py-1.5 text-[#A1A1AA] whitespace-nowrap">{f.date}</td>
-                      <td className="px-2 py-1.5 font-mono text-[#FAFAFA]">{f.dep_icao || "—"}</td>
+                      <td className="px-2 py-1.5 font-mono">
+                        {f.dep_icao ? <button onClick={() => setLookup({ kind: "airport", query: f.dep_icao! })} className="text-[#FAFAFA] hover:text-sky-400 transition-colors">{f.dep_icao}</button> : "—"}
+                      </td>
                       <td className="px-2 py-1.5 text-[#71717A] tabular-nums">{depTime}</td>
-                      <td className="px-2 py-1.5 font-mono text-[#FAFAFA]">{f.arr_icao || "—"}</td>
+                      <td className="px-2 py-1.5 font-mono">
+                        {f.arr_icao ? <button onClick={() => setLookup({ kind: "airport", query: f.arr_icao! })} className="text-[#FAFAFA] hover:text-sky-400 transition-colors">{f.arr_icao}</button> : "—"}
+                      </td>
                       <td className="px-2 py-1.5 text-[#71717A] tabular-nums">{arrTime}</td>
-                      <td className="px-2 py-1.5 text-[#A1A1AA]">{f.aircraft_type || ""}</td>
-                      <td className="px-2 py-1.5 text-[#71717A] font-mono">{f.aircraft_reg || ""}</td>
+                      <td className="px-2 py-1.5 text-[#A1A1AA]">{shortAircraftType(f.aircraft_type)}</td>
+                      <td className="px-2 py-1.5 font-mono">
+                        {f.aircraft_reg ? <button onClick={() => setLookup({ kind: "aircraft", query: f.aircraft_reg! })} className="text-[#71717A] hover:text-violet-400 transition-colors">{f.aircraft_reg}</button> : ""}
+                      </td>
                       <td className="px-2 py-1.5 text-[#52525B]"></td>
                       <td className="px-2 py-1.5 text-[#52525B]"></td>
                       <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{mpTime}</td>
                       <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{mpTime}</td>
-                      <td className="px-2 py-1.5 text-[#71717A]">{picName}</td>
+                      <td className={`px-2 py-1.5 font-mono text-xs`}>
+                        {picName && f.pic_name
+                          ? <button onClick={() => setLookup({ kind: "captain", query: f.pic_name! })} className={`hover:underline ${isPIC ? "text-violet-300" : "text-[#A1A1AA]"}`}>{picName}</button>
+                          : <span className={isPIC ? "text-violet-300" : "text-[#A1A1AA]"}>{picName}</span>
+                        }
+                      </td>
                       <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{isSim ? "" : (f.takeoffs_day || "")}</td>
                       <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{isSim ? "" : (f.takeoffs_night || "")}</td>
                       <td className="px-2 py-1.5 text-[#A1A1AA] tabular-nums">{isSim ? "" : (f.landings_day || "")}</td>
@@ -582,12 +718,12 @@ export default function AviationPage() {
             <div className="bg-[#18181B] rounded-lg p-4">
               <SectionTitle icon={<Compass size={14} />}>Top Destinations</SectionTitle>
               {analytics.top_destinations.map((d, i) => (
-                <div key={d.arr_icao} className="flex items-center gap-3 py-1.5 border-b border-[#27272A] last:border-0">
+                <button key={d.arr_icao} onClick={() => setLookup({ kind: "airport", query: d.arr_icao })} className="w-full flex items-center gap-3 py-1.5 border-b border-[#27272A] last:border-0 hover:bg-[#27272A]/30 -mx-2 px-2 rounded transition-colors">
                   <span className="text-xs text-[#52525B] w-4">{i + 1}</span>
-                  <span className="font-mono text-[#FAFAFA] text-sm">{d.arr_iata || d.arr_icao}</span>
+                  <span className="font-mono text-[#FAFAFA] text-sm hover:text-sky-400 transition-colors">{d.arr_iata || d.arr_icao}</span>
                   {d.city && <span className="text-[#71717A] text-xs">{d.city}, {d.country || ""}</span>}
                   <span className="ml-auto text-[#52525B] text-xs tabular-nums">{d.visits}×</span>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -678,12 +814,12 @@ export default function AviationPage() {
             <div className="bg-[#18181B] rounded-lg p-4">
               <SectionTitle icon={<Layers size={14} />}>Most Flown Airframes</SectionTitle>
               {analytics.top_registrations.map((r, i) => (
-                <div key={r.aircraft_reg} className="flex items-center gap-3 py-1.5 border-b border-[#27272A] last:border-0">
+                <button key={r.aircraft_reg} onClick={() => setLookup({ kind: "aircraft", query: r.aircraft_reg })} className="w-full flex items-center gap-3 py-1.5 border-b border-[#27272A] last:border-0 hover:bg-[#27272A]/30 -mx-2 px-2 rounded transition-colors">
                   <span className="text-xs text-[#52525B] w-4">{i + 1}</span>
                   <span className="font-mono text-[#FAFAFA] text-sm">{r.aircraft_reg}</span>
                   {r.aircraft_type && <span className="text-[#52525B] text-xs">{r.aircraft_type}</span>}
                   <span className="ml-auto text-[#71717A] text-xs tabular-nums">{r.sectors} sectors · {hToHHMM(r.block_hours)}</span>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -757,6 +893,195 @@ export default function AviationPage() {
       )}
 
       <AddFlightSheet date={TODAY} isOpen={addOpen} onClose={() => setAddOpen(false)} />
+
+      {/* Inline lookup panel — slide in from bottom */}
+      {lookup && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setLookup(null)} />
+          <div className="relative w-full max-w-2xl max-h-[85vh] flex flex-col bg-[#09090B] border border-[#27272A] rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl">
+            {/* Panel header */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-[#27272A] flex-shrink-0">
+              {lookup.kind === "airport" && <MapPin size={15} className="text-sky-400" />}
+              {lookup.kind === "aircraft" && <Plane size={15} className="text-violet-400" />}
+              {lookup.kind === "captain" && <User size={15} className="text-amber-400" />}
+              <span className="font-mono text-sm text-[#FAFAFA] font-medium">{lookup.query}</span>
+              <button onClick={() => setLookup(null)} className="ml-auto text-[#52525B] hover:text-[#A1A1AA] transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Panel body */}
+            <div className="overflow-y-auto flex-1 p-4">
+              {/* Airport panel */}
+              {lookup.kind === "airport" && (
+                airportLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-sky-500" />
+                  </div>
+                ) : !airportData ? (
+                  <p className="text-[#71717A] text-sm text-center py-10">No flights found for <span className="font-mono text-[#FAFAFA]">{lookup.query}</span>.</p>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-base font-semibold text-[#FAFAFA]">{airportData.name}</p>
+                      <p className="text-xs text-[#71717A]">{[airportData.city, airportData.country].filter(Boolean).join(", ")}</p>
+                      {airportData.iata && <p className="text-xs text-[#52525B] font-mono">{airportData.icao} / {airportData.iata}</p>}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: "Movements", value: String(airportData.total_movements) },
+                        { label: "Departures", value: String(airportData.departures) },
+                        { label: "Arrivals", value: String(airportData.arrivals) },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-center">
+                          <p className="text-lg font-semibold tabular-nums">{value}</p>
+                          <p className="text-xs text-[#52525B] mt-0.5">{label}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-1">
+                      {(airportData.flights as Record<string, unknown>[]).map((f, i) => {
+                        const dep = (f.dep_icao as string) || "—";
+                        const arr = (f.arr_icao as string) || "—";
+                        const isDepHere = dep === lookup.query;
+                        const other = isDepHere ? arr : dep;
+                        const block = secToHHMM((f.block_seconds as number) || 0);
+                        const isPIC = (f.crew_role as string) === "pic";
+                        const acft = shortAircraftType(f.aircraft_type as string);
+                        return (
+                          <Link key={i} href={`/aviation/${f.id}`}
+                            className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#18181B] transition-colors text-xs"
+                            onClick={() => setLookup(null)}
+                          >
+                            <span className="text-[#52525B] w-20 shrink-0 tabular-nums">{f.date as string}</span>
+                            <span className="flex items-center gap-1 text-[#FAFAFA] font-mono">
+                              {isDepHere
+                                ? <><PlaneTakeoff size={10} className="text-sky-500" />{other}</>
+                                : <><PlaneLanding size={10} className="text-emerald-500" />{other}</>}
+                            </span>
+                            <span className="text-[#52525B] ml-auto">{acft}</span>
+                            <span className="text-[#A1A1AA] tabular-nums">{block}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-xs ${isPIC ? "bg-violet-950/50 text-violet-300" : "bg-[#27272A] text-[#71717A]"}`}>
+                              {isPIC ? "PIC" : "FO"}
+                            </span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )
+              )}
+
+              {/* Aircraft panel */}
+              {lookup.kind === "aircraft" && (
+                aircraftLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-violet-500" />
+                  </div>
+                ) : !aircraftData ? (
+                  <p className="text-[#71717A] text-sm text-center py-10">No flights found for <span className="font-mono text-[#FAFAFA]">{lookup.query}</span>.</p>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-base font-semibold text-[#FAFAFA] font-mono">{aircraftData.registration}</p>
+                      <p className="text-xs text-[#71717A]">{shortAircraftType(aircraftData.aircraft_type)}</p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: "Flights", value: String(aircraftData.total_flights) },
+                        { label: "Block time", value: secToHHMM(aircraftData.total_block_seconds) },
+                        { label: "First flight", value: aircraftData.first_flight },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-center">
+                          <p className="text-lg font-semibold tabular-nums">{value}</p>
+                          <p className="text-xs text-[#52525B] mt-0.5">{label}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-1">
+                      {(aircraftData.flights as Record<string, unknown>[]).map((f, i) => {
+                        const dep = (f.dep_icao as string) || "—";
+                        const arr = (f.arr_icao as string) || "—";
+                        const block = secToHHMM((f.block_seconds as number) || 0);
+                        const isPIC = (f.crew_role as string) === "pic";
+                        return (
+                          <Link key={i} href={`/aviation/${f.id}`}
+                            className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#18181B] transition-colors text-xs"
+                            onClick={() => setLookup(null)}
+                          >
+                            <span className="text-[#52525B] w-20 shrink-0 tabular-nums">{f.date as string}</span>
+                            <span className="text-[#FAFAFA] font-mono">{dep} → {arr}</span>
+                            <span className="text-[#A1A1AA] tabular-nums ml-auto">{block}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-xs ${isPIC ? "bg-violet-950/50 text-violet-300" : "bg-[#27272A] text-[#71717A]"}`}>
+                              {isPIC ? "PIC" : "FO"}
+                            </span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )
+              )}
+
+              {/* Captain panel */}
+              {lookup.kind === "captain" && (
+                captainLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-amber-500" />
+                  </div>
+                ) : !captainData ? (
+                  <p className="text-[#71717A] text-sm text-center py-10">No flights found with captain <span className="text-[#FAFAFA]">{lookup.query}</span>.</p>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-base font-semibold text-[#FAFAFA]">{formatPicName(captainData.name)}</p>
+                      <p className="text-xs text-[#71717A] font-mono">{captainData.name}</p>
+                      {captainData.aircraft_types.length > 0 && (
+                        <p className="text-xs text-[#52525B] mt-1">{captainData.aircraft_types.map(shortAircraftType).join(" · ")}</p>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: "Flights", value: String(captainData.total_flights) },
+                        { label: "Block time", value: secToHHMM(captainData.total_block_seconds) },
+                        { label: "First flight", value: captainData.first_flight },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-center">
+                          <p className="text-lg font-semibold tabular-nums">{value}</p>
+                          <p className="text-xs text-[#52525B] mt-0.5">{label}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-1">
+                      {(captainData.flights as Record<string, unknown>[]).map((f, i) => {
+                        const dep = (f.dep_icao as string) || "—";
+                        const arr = (f.arr_icao as string) || "—";
+                        const block = secToHHMM((f.block_seconds as number) || 0);
+                        const isPIC = (f.crew_role as string) === "pic";
+                        const acft = shortAircraftType(f.aircraft_type as string);
+                        return (
+                          <Link key={i} href={`/aviation/${f.id}`}
+                            className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#18181B] transition-colors text-xs"
+                            onClick={() => setLookup(null)}
+                          >
+                            <span className="text-[#52525B] w-20 shrink-0 tabular-nums">{f.date as string}</span>
+                            <span className="text-[#FAFAFA] font-mono">{dep} → {arr}</span>
+                            <span className="text-[#52525B] ml-auto">{acft}</span>
+                            <span className="text-[#A1A1AA] tabular-nums">{block}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-xs ${isPIC ? "bg-violet-950/50 text-violet-300" : "bg-[#27272A] text-[#71717A]"}`}>
+                              {isPIC ? "PIC" : "FO"}
+                            </span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

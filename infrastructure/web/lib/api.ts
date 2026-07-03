@@ -52,6 +52,8 @@ export type Activity = {
   max_heart_rate: number | null;
   calories: number | null;
   has_polyline: boolean;
+  user_notes: string | null;
+  user_rating: number | null;
 };
 
 export type ActivityStreams = {
@@ -65,6 +67,34 @@ export type ActivityStreams = {
   available: string[];
 };
 
+export type ActivityComputedMetrics = {
+  normalized_power_w: number | null;
+  intensity_factor: number | null;
+  variability_index: number | null;
+  efficiency_factor: number | null;
+  decoupling_pct: number | null;
+  relative_effort: number | null;
+  hr_tss: number | null;
+  zones_json: string | null;
+  garmin_aerobic_te: number | null;
+  garmin_anaerobic_te: number | null;
+  garmin_activity_load: number | null;
+};
+
+export type ActivitySplit = {
+  split_index: number;
+  type: string | null;
+  distance_m: number | null;
+  time_s: number | null;
+  avg_pace_s_per_km: number | null;
+  gap_s_per_km: number | null;
+  avg_hr: number | null;
+  avg_power_w: number | null;
+  avg_cadence: number | null;
+  elev_gain_m: number | null;
+  avg_grade: number | null;
+};
+
 export type ActivityDetail = Activity & {
   moving_time_seconds: number | null;
   avg_speed_mps: number | null;
@@ -74,6 +104,8 @@ export type ActivityDetail = Activity & {
   start_lng: number | null;
   polyline: string | null;
   segment_efforts: SegmentEffort[];
+  computed: ActivityComputedMetrics | null;
+  splits: ActivitySplit[];
 };
 
 export type SegmentEffort = {
@@ -129,9 +161,30 @@ export type DaySubjective = {
   duty_day: boolean;
   away_from_base: boolean;
   timezone_offset: number | null;
-  alcohol: number | null;
-  social: boolean | null;
-  outdoors: boolean | null;
+  gratitude: string | null;
+  intention: string | null;
+  learning: string | null;
+  focus_score: number | null;
+  error_log: string | null;
+};
+
+export type WeatherData = {
+  condition: string | null;
+  temp_min: number | null;
+  temp_max: number | null;
+  temp_mean: number | null;
+  precipitation: number | null;
+  weather_code: number | null;
+  wind_speed_max: number | null;
+};
+
+export type LoadIndexData = {
+  fatigue_score: number | null;
+  hrv_load: number | null;
+  sleep_debt: number | null;
+  tss_load: number | null;
+  timezone_penalty: number | null;
+  recovery_status: string | null;
 };
 
 export type DayDetail = {
@@ -146,6 +199,8 @@ export type DayDetail = {
   companions: string[];
   photo_url: string | null;
   tags: DayTagSummary[];
+  weather: WeatherData | null;
+  load_index: LoadIndexData | null;
 };
 
 export type Contact = {
@@ -203,9 +258,11 @@ export type DayPatch = Partial<{
   mood_note: string;
   duty_day: boolean;
   away_from_base: boolean;
-  alcohol: number;
-  social: boolean;
-  outdoors: boolean;
+  gratitude: string;
+  intention: string;
+  learning: string;
+  focus_score: number;
+  error_log: string;
 }>;
 
 // ─── Aviation types ───────────────────────────────────────────────────────────
@@ -223,6 +280,7 @@ export type FlightSummary = {
   aircraft_type: string | null;
   operator: string | null;
   crew_role: string | null;
+  pic_name: string | null;
   off_block_utc: string | null;
   on_block_utc: string | null;
   block_seconds: number | null;
@@ -236,6 +294,7 @@ export type FlightSummary = {
   landings_day: number;
   landings_night: number;
   is_sim: boolean;
+  landing_rating: number | null;
 };
 
 export type AirportInfo = {
@@ -271,6 +330,7 @@ export type FlightDetail = FlightSummary & {
   delay_code: string | null;
   delay_reason: string | null;
   notes: string | null;
+  remarks: string | null;
   dep_airport: AirportInfo | null;
   arr_airport: AirportInfo | null;
 };
@@ -549,12 +609,144 @@ export type TopPlace = {
   total_hours: number;
 };
 
+export type CityStay = {
+  city: string;
+  country: string;
+  first_date: string;
+  last_date: string;
+  days: number;
+};
+
+export type PlaceDate = {
+  date: string;
+  city: string | null;
+  country: string | null;
+  mood: number | null;
+  energy: number | null;
+  mood_note: string | null;
+};
+
+// ─── Restaurants types ────────────────────────────────────────────────────────
+
+export type Restaurant = {
+  id: number;
+  name: string;
+  date_visited: string | null;
+  city: string | null;
+  country: string | null;
+  cuisine: string | null;
+  rating_mf: number | null;
+  rating_ad: number | null;
+  companions: string | null;
+  google_maps_url: string | null;
+  notes: string | null;
+  trip_context: string | null;
+  source: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RestaurantStats = {
+  total: number;
+  by_year: Record<string, number>;
+  by_cuisine: Record<string, number>;
+  by_country: Record<string, number>;
+  by_city: { city: string; country: string; count: number }[];
+  avg_rating_mf: number | null;
+  avg_rating_ad: number | null;
+  top_rated: { id: number; name: string; city: string | null; country: string | null; cuisine: string | null; rating_mf: number; rating_ad: number | null }[];
+};
+
+export type RestaurantIn = {
+  name: string;
+  date_visited?: string;
+  city?: string;
+  country?: string;
+  cuisine?: string;
+  rating_mf?: number;
+  rating_ad?: number;
+  companions?: string;
+  google_maps_url?: string;
+  notes?: string;
+  trip_context?: string;
+};
+
+export type Decision = {
+  id: string;
+  date: string;
+  description: string;
+  expected_outcome: string | null;
+  confidence: number | null;
+  horizon_date: string | null;
+  actual_outcome: string | null;
+  outcome_score: number | null;
+  created_at: string;
+  resolved_at: string | null;
+};
+
+export type DecisionCreate = {
+  date: string;
+  description: string;
+  expected_outcome?: string;
+  confidence?: number;
+  horizon_date?: string;
+};
+
+export type DecisionResolve = {
+  actual_outcome: string;
+  outcome_score?: number;
+};
+
 export type MovementStats = {
   yearly: { year: string; total_km: number; avg_km: number; max_km: number; days_with_data: number }[];
   monthly: { month: string; total_km: number; avg_km: number; days_with_data: number }[];
   weekly: { week: string; week_start: string; total_km: number; days_with_data: number }[];
   top_days: { date: string; km: number; unique_places: number; top_place: string | null; top_place_city: string | null }[];
   summary: { total_km: number; avg_km_per_day: number; max_km: number; days_tracked: number } | Record<string, never>;
+};
+
+export type PantryItem = {
+  id: string;
+  mercadona_id: string | null;
+  name: string;
+  unit: string | null;
+  category: string | null;
+  is_active: number;
+  created_at: string;
+  latest_price: number | null;
+  price_date: string | null;
+};
+
+export type PricePoint = {
+  date: string;
+  price_eur: number;
+  unit_price: number | null;
+  store: string;
+};
+
+export type GroceryPurchase = {
+  id: string;
+  date: string;
+  total_eur: number | null;
+  store: string;
+  source: string;
+  item_count: number;
+};
+
+export type MealPlanMeal = {
+  day: string;
+  name: string;
+  ingredients: { name: string; qty: string; estimated_eur: number }[];
+  meal_cost_eur: number;
+  notes?: string;
+};
+
+export type MealPlan = {
+  plan_id: string;
+  week_start: string;
+  meals: MealPlanMeal[];
+  total_estimated_eur: number;
+  shopping_list: { name: string; qty: string; estimated_eur: number }[];
 };
 
 export const api = {
@@ -569,6 +761,10 @@ export const api = {
     get<HeatmapData>(`/locations/heatmap${year ? `?year=${year}` : ""}`),
   topPlaces: (year?: number) =>
     get<TopPlace[]>(`/locations/top-places?limit=30${year ? `&year=${year}` : ""}`),
+  cityTimeline: (year?: number) =>
+    get<CityStay[]>(`/locations/city-timeline${year ? `?year=${year}` : ""}`),
+  placeDates: (place: string, year?: number) =>
+    get<PlaceDate[]>(`/locations/place-dates?place=${encodeURIComponent(place)}${year ? `&year=${year}` : ""}`),
   movementStats: (year?: number) =>
     get<MovementStats>(`/locations/movement/stats${year ? `?year=${year}` : ""}`),
 
@@ -645,7 +841,7 @@ export const api = {
     return res.json();
   },
 
-  patchFlight: async (id: string, body: Partial<FlightIn & { notes: string; ifr_seconds: number }>): Promise<FlightSummary> => {
+  patchFlight: async (id: string, body: Partial<FlightIn & { notes: string; remarks: string; ifr_seconds: number; landing_rating: number }>): Promise<FlightSummary> => {
     const res = await fetch(`${PROXY_BASE}/api/flights/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -660,6 +856,89 @@ export const api = {
     if (!res.ok) throw new Error(`deleteFlight failed ${res.status}`);
   },
 
+  flightCaptains: () =>
+    get<{ raw: string; display: string }[]>("/flights/captains").catch(() => []),
+
+  captainHistory: (name: string) =>
+    get<{
+      name: string;
+      total_flights: number;
+      total_block_seconds: number;
+      first_flight: string;
+      last_flight: string;
+      aircraft_types: string[];
+      flights: Record<string, unknown>[];
+    }>(`/flights/captains/${encodeURIComponent(name)}`).catch(() => null),
+
+  airportFlights: (icao: string) =>
+    get<{
+      icao: string;
+      iata: string | null;
+      name: string | null;
+      city: string | null;
+      country: string | null;
+      latitude: number | null;
+      longitude: number | null;
+      total_movements: number;
+      departures: number;
+      arrivals: number;
+      total_block_seconds: number;
+      first_visit: string | null;
+      last_visit: string | null;
+      flights: Record<string, unknown>[];
+    }>(`/flights/airports/${encodeURIComponent(icao)}/flights`).catch(() => null),
+
+  aircraftHistory: (reg: string) =>
+    get<{
+      registration: string;
+      aircraft_type: string | null;
+      total_flights: number;
+      total_block_seconds: number;
+      first_flight: string;
+      last_flight: string;
+      flights: Record<string, unknown>[];
+    }>(`/flights/aircraft/${encodeURIComponent(reg)}`).catch(() => null),
+
+  // ─── Restaurants ────────────────────────────────────────────────────────────
+
+  restaurants: (params?: { year?: number; date?: string; city?: string; country?: string; cuisine?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.date) q.set("date", params.date);
+    else if (params?.year) q.set("year", String(params.year));
+    if (params?.city) q.set("city", params.city);
+    if (params?.country) q.set("country", params.country);
+    if (params?.cuisine) q.set("cuisine", params.cuisine);
+    const qs = q.toString();
+    return get<Restaurant[]>(`/restaurants${qs ? `?${qs}` : ""}`);
+  },
+  restaurantStats: (year?: number) =>
+    get<RestaurantStats>(`/restaurants/stats${year ? `?year=${year}` : ""}`),
+
+  createRestaurant: async (body: RestaurantIn): Promise<Restaurant> => {
+    const res = await fetch(`${PROXY_BASE}/api/restaurants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`createRestaurant failed ${res.status}`);
+    return res.json();
+  },
+
+  patchRestaurant: async (id: number, body: Partial<RestaurantIn>): Promise<Restaurant> => {
+    const res = await fetch(`${PROXY_BASE}/api/restaurants/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`patchRestaurant failed ${res.status}`);
+    return res.json();
+  },
+
+  deleteRestaurant: async (id: number): Promise<void> => {
+    const res = await fetch(`${PROXY_BASE}/api/restaurants/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`deleteRestaurant failed ${res.status}`);
+  },
+
   // ─── Life in Weeks ──────────────────────────────────────────────────────────
 
   lifeProfile: () => get<LifeProfile>("/life/profile"),
@@ -667,6 +946,20 @@ export const api = {
   lifePeriods: () => get<LifePeriod[]>("/life/periods"),
   lifeEvents: () => get<LifeEvent[]>("/life/events"),
   lifeEventsOnThisDay: (date: string) => get<LifeEvent[]>(`/life/events/on-this-day?date=${date}`),
+
+  // ─── Sleep ──────────────────────────────────────────────────────────────────
+  sleepSummary: (days = 30) =>
+    get<Record<string, number | null>>(`/health/sleep/summary?days=${days}`),
+  sleepStages: (days = 60) =>
+    get<Record<string, number | null>[]>(`/health/sleep/stages?days=${days}`),
+  sleepCorrelations: (days = 90) =>
+    get<{ correlations: { metric_a: string; metric_b: string; lag: number; r: number | null; n: number }[] }>(`/health/sleep/correlations?days=${days}`),
+
+  // ─── AI ─────────────────────────────────────────────────────────────────────
+  morningBrief: (date: string) =>
+    get<{ date: string; brief: string | null; available: boolean }>(`/ai/morning-brief/${date}`),
+  aiStatus: () =>
+    get<{ ollama_available: boolean; ollama_host: string; model_fast: string; model_default: string }>("/ai/status"),
 
   upsertProfile: async (body: { birthdate: string; display_name?: string }): Promise<LifeProfile> => {
     const res = await fetch(`${PROXY_BASE}/api/life/profile`, {
@@ -726,6 +1019,82 @@ export const api = {
   deleteEvent: async (id: number): Promise<void> => {
     const res = await fetch(`${PROXY_BASE}/api/life/events/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`deleteEvent failed ${res.status}`);
+  },
+
+  // ─── Decisions (Horizon 3) ──────────────────────────────────────────────────
+
+  decisions: (day?: string) =>
+    get<Decision[]>(`/decisions${day ? `?day=${day}` : ""}`),
+  pendingDecisions: () => get<Decision[]>("/decisions/pending"),
+
+  createDecision: async (body: DecisionCreate): Promise<Decision> => {
+    const res = await fetch(`${PROXY_BASE}/api/decisions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`createDecision failed ${res.status}`);
+    return res.json();
+  },
+
+  resolveDecision: async (id: string, body: DecisionResolve): Promise<Decision> => {
+    const res = await fetch(`${PROXY_BASE}/api/decisions/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`resolveDecision failed ${res.status}`);
+    return res.json();
+  },
+
+  deleteDecision: async (id: string): Promise<void> => {
+    const res = await fetch(`${PROXY_BASE}/api/decisions/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`deleteDecision failed ${res.status}`);
+  },
+
+  // ─── Groceries ────────────────────────────────────────────────────────────
+
+  pantryItems: (activeOnly = true) =>
+    get<PantryItem[]>(`/groceries/pantry?active_only=${activeOnly}`),
+
+  addPantryItem: async (body: { name: string; mercadona_id?: string; unit?: string; category?: string }): Promise<PantryItem> => {
+    const res = await fetch(`${PROXY_BASE}/api/groceries/pantry`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`addPantryItem failed ${res.status}`);
+    return res.json();
+  },
+
+  deletePantryItem: async (itemId: string): Promise<void> => {
+    const res = await fetch(`${PROXY_BASE}/api/groceries/pantry/${itemId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`deletePantryItem failed ${res.status}`);
+  },
+
+  priceHistory: (itemId: string, days = 90) =>
+    get<{ item: PantryItem; history: PricePoint[] }>(`/groceries/prices/${itemId}/history?days=${days}`),
+
+  syncPrices: async (): Promise<{ synced: number; skipped: number; errors: number }> => {
+    const res = await fetch(`${PROXY_BASE}/api/groceries/prices/sync`, { method: "POST" });
+    if (!res.ok) throw new Error(`syncPrices failed ${res.status}`);
+    return res.json();
+  },
+
+  groceryPurchases: (month?: string) =>
+    get<GroceryPurchase[]>(`/groceries/purchases${month ? `?month=${month}` : ""}`),
+
+  latestMealPlan: () =>
+    get<{ plan: MealPlan | null }>("/groceries/meal-plan/latest"),
+
+  generateMealPlan: async (body: { meals: number; budget_eur: number; constraints?: string }): Promise<MealPlan> => {
+    const res = await fetch(`${PROXY_BASE}/api/groceries/meal-plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`generateMealPlan failed ${res.status}`);
+    return res.json();
   },
 };
 

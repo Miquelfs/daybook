@@ -20,6 +20,36 @@ def _sec_to_hhmm(seconds: int | None) -> str:
     return f"{h}:{m:02d}"
 
 
+def _extract_hhmm(value: str | None) -> str:
+    """Extract HH:MM from either 'HH:MM' or ISO 'YYYY-MM-DDTHH:MM[:SS]'."""
+    if not value:
+        return ""
+    # ISO datetime: take characters 11-16
+    if len(value) > 5:
+        return value[11:16]
+    return value
+
+
+def _format_pic_name(raw: str | None, is_pic: bool) -> str:
+    """
+    PIC name column: always the captain/commander.
+    - If pic_name is set → format it (crew code kept as-is; full name → F.SURNAME)
+    - Solo school flights (no pic_name, is_pic) → 'SELF'
+    """
+    if raw:
+        s = raw.strip()
+        # 6-letter airline crew code → keep as-is
+        if len(s) == 6 and s.isalpha():
+            return s.upper()
+        parts = s.split()
+        if len(parts) == 1:
+            return parts[0].upper()
+        return f"{parts[0][0].upper()}.{' '.join(parts[1:]).upper()}"
+    if is_pic:
+        return "SELF"
+    return ""
+
+
 def generate_easa_csv(conn: sqlite3.Connection) -> str:
     rows = conn.execute("""
         SELECT f.*,
@@ -41,13 +71,9 @@ def generate_easa_csv(conn: sqlite3.Connection) -> str:
     writer.writerow(EASA_COLUMNS)
 
     for r in rows:
-        # Departure/arrival time from off_block/on_block (UTC stored, show as-is)
-        dep_time = ""
-        arr_time = ""
-        if r["off_block_utc"]:
-            dep_time = r["off_block_utc"][11:16]  # HH:MM from ISO
-        if r["on_block_utc"]:
-            arr_time = r["on_block_utc"][11:16]
+        # Departure/arrival time — stored as ISO datetime or plain HH:MM
+        dep_time = _extract_hhmm(r["off_block_utc"])
+        arr_time = _extract_hhmm(r["on_block_utc"])
 
         dep_place = r["dep_icao"] or r["dep_iata"] or ""
         arr_place = r["arr_icao"] or r["arr_iata"] or ""
@@ -65,8 +91,7 @@ def generate_easa_csv(conn: sqlite3.Connection) -> str:
         # For multi-pilot ops (airline), IFR time = block time (always IFR-rated operations)
         ifr_time = total_time if mp_time else _sec_to_hhmm(r["ifr_seconds"])
 
-        # Name of PIC: if we're PIC, use "SELF"; else blank (other crew)
-        name_of_pic = "SELF" if r["crew_role"] == "pic" else ""
+        name_of_pic = _format_pic_name(r["pic_name"], r["crew_role"] == "pic")
 
         writer.writerow([
             r["date"],              # Date
@@ -94,7 +119,7 @@ def generate_easa_csv(conn: sqlite3.Connection) -> str:
             "",                     # FSTD Date
             "",                     # FSTD Type
             "",                     # FSTD Total
-            r["notes"] or "",       # Remarks
+            r["remarks"] if "remarks" in r.keys() and r["remarks"] else (r["notes"] or ""),  # Remarks
         ])
 
     # FSTD / Simulator rows

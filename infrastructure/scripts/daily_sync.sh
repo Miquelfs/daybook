@@ -54,8 +54,8 @@ fi
 
 # Garmin: auto-detect start from last synced date so gaps are filled automatically.
 # On a normal day this picks up yesterday; after a gap it catches up.
-log "Syncing Garmin (auto catch-up)..."
-python -m domains.health.garmin.garmin_sync \
+log "Syncing Garmin (auto catch-up, with streams)..."
+python -m domains.health.garmin.garmin_sync --streams \
   >> "$LOG_FILE" 2>&1
 
 # Overland: process any raw GPS points received since last run.
@@ -63,10 +63,7 @@ log "Processing Overland GPS points..."
 python -m domains.locations.overland_process \
   >> "$LOG_FILE" 2>&1
 
-# Notion: incremental finance sync (last 90 days).
-log "Syncing Notion finance..."
-python -m domains.money.notion_sync \
-  >> "$LOG_FILE" 2>&1
+# Notion sync removed — money data now entered via iOS app directly.
 
 # Strava: cross-reference last 7 days of Garmin activities with Strava.
 # Skips gracefully if STRAVA_CLIENT_ID is not set or tokens are missing.
@@ -83,5 +80,57 @@ log "Syncing weather (last 3 days)..."
 YESTERDAY="$(date -d 'yesterday' +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d)"
 python -m domains.weather.weather_sync "$YESTERDAY" "$DATE" \
   >> "$LOG_FILE" 2>&1 || log "WARN: Weather sync failed (non-fatal)"
+
+# Intraday HR: fetch continuous heart rate readings for yesterday.
+log "Syncing intraday heart rate..."
+python -m domains.health.garmin.intraday_hr_sync \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Intraday HR sync failed (non-fatal)"
+
+# Load Index: compute fatigue composite for yesterday (Horizon 1).
+log "Computing Load Index..."
+python -m domains.health.compute_load_index \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Load Index compute failed (non-fatal)"
+
+# Roster tags: auto-apply flew/standby/ground_duty tags from the duty roster.
+log "Syncing roster tags..."
+python -m domains.aviation.roster_tag_sync \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Roster tag sync failed (non-fatal)"
+
+# Activity detail sync: fetch splits, Garmin TE, physio metrics for new activities.
+log "Syncing Garmin activity details + physio (last 7 days)..."
+python -m domains.health.garmin.garmin_activity_detail_sync --days 7 \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Activity detail sync failed (non-fatal)"
+
+# Compute per-activity metrics: NP, IF, EF, decoupling, MMP curves.
+log "Computing per-activity metrics (last 7 days)..."
+python -m domains.health.compute_activity_metrics --days 7 \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Activity metrics compute failed (non-fatal)"
+
+# CTL/ATL/TSB: update fitness & freshness for all sports.
+log "Computing training load (CTL/ATL/TSB)..."
+python -m domains.health.compute_training_load \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Training load compute failed (non-fatal)"
+
+# Correlations: recompute snapshot so the Discover tab stays fresh.
+log "Computing correlation snapshot..."
+python -m domains.insights.compute_correlations \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Correlation snapshot failed (non-fatal)"
+
+# Portfolio price sync: fetch yesterday's closes for all active holdings via yfinance.
+log "Syncing portfolio prices..."
+python -m domains.money.price_sync \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Price sync failed (non-fatal)"
+
+# Recurring investment plans (DCA): execute any plans whose next date has arrived.
+# Uses today's cached price. Idempotent — safe to run repeatedly.
+log "Executing due investment plans..."
+python -m domains.money.plan_executor \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Plan executor failed (non-fatal)"
+
+# AI: morning brief + daily health narratives (requires Ollama on HP at OLLAMA_HOST).
+# Runs last so all data is fresh. Skips gracefully if Ollama is unreachable.
+log "Generating AI morning brief..."
+python -m domains.ai.morning_brief --date "$DATE" \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Morning brief generation failed (non-fatal)"
 
 log "=== daily_sync done ==="

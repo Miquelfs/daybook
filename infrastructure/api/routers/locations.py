@@ -37,6 +37,26 @@ _COUNTRY_EN: dict[str, str] = {
     "Россия": "Russia",
     "日本": "Japan",
     "中国": "China",
+    # Scandinavian local names (appear when Overland tracks are geocoded there)
+    "Norge": "Norway",
+    "Danmark": "Denmark",
+    "Sverige": "Sweden",
+    "Suomi / Finland": "Finland",
+    "Deutschland": "Germany",
+    "Italia": "Italy",
+    "Frankreich": "France",
+    "Norwegen": "Norway",
+}
+
+# Normalize city names that Nominatim returns inconsistently
+_CITY_NORM: dict[str, str] = {
+    "Palma de Mallorca": "Palma",
+    "Palma de Mallorca (Palma)": "Palma",
+    # Sigtuna kommun is the municipality — keep as Stockholm Arlanda for clarity
+    "Sigtuna kommun": "Stockholm Arlanda",
+    # Tenerife airport municipalities — both map to the airport area
+    "San Miguel de Abona": "Tenerife Sur",
+    "Granadilla de Abona": "Tenerife Sur",
 }
 
 
@@ -44,6 +64,12 @@ def _en(country: str | None) -> str | None:
     if country is None:
         return None
     return _COUNTRY_EN.get(country, country)
+
+
+def _norm_city(city: str | None) -> str | None:
+    if city is None:
+        return None
+    return _CITY_NORM.get(city, city)
 
 
 def _conn() -> sqlite3.Connection:
@@ -63,51 +89,78 @@ def get_heatmap(year: int | None = None):
     """
     con = _conn()
 
-    year_clause = "AND substr(v.date,1,4) = ?" if year else ""
+    year_clause_v = "AND substr(v.date,1,4) = ?" if year else ""
+    year_clause_t = "AND substr(t.date,1,4) = ?" if year else ""
     params: tuple = (str(year),) if year else ()
 
-    # Raw heat points from visits (best coverage, 2014-present)
+    # Heat points: visits (Google Maps legacy) + Overland tracks midpoints
     points = con.execute(
         f"""
-        SELECT v.lat, v.lng, COALESCE(v.probability, 0.5) as w
-        FROM   visits v
-        WHERE  v.lat IS NOT NULL AND v.lng IS NOT NULL
-               AND v.lat != 0 AND v.lng != 0
-               {year_clause}
+        SELECT lat, lng, w FROM (
+            SELECT v.lat, v.lng, COALESCE(v.probability, 0.5) as w
+            FROM   visits v
+            WHERE  v.lat IS NOT NULL AND v.lng IS NOT NULL
+                   AND v.lat != 0 AND v.lng != 0
+                   {year_clause_v}
+            UNION ALL
+            SELECT json_extract(t.points_json, '$[0].lat') as lat,
+                   json_extract(t.points_json, '$[0].lng') as lng,
+                   0.4 as w
+            FROM   tracks t
+            WHERE  t.geocode_city IS NOT NULL
+                   {year_clause_t}
+        )
+        WHERE lat IS NOT NULL AND lng IS NOT NULL
         """,
-        params,
+        params + params,
     ).fetchall()
 
-    # Country rollup
+    # Country rollup: visits + tracks
     countries = con.execute(
         f"""
-        SELECT p.country, COUNT(DISTINCT substr(v.date,1,10)) as days
-        FROM   visits v
-        LEFT JOIN place_names p ON p.place_id = v.place_id
-        WHERE  p.country IS NOT NULL {year_clause}
-        GROUP BY p.country
+        SELECT country, COUNT(DISTINCT date) as days FROM (
+            SELECT p.country, substr(v.date,1,10) as date
+            FROM   visits v
+            LEFT JOIN place_names p ON p.place_id = v.place_id
+            WHERE  p.country IS NOT NULL {year_clause_v}
+            UNION
+            SELECT t.geocode_country as country, substr(t.date,1,10) as date
+            FROM   tracks t
+            WHERE  t.geocode_country IS NOT NULL {year_clause_t}
+        )
+        GROUP BY country
         ORDER BY days DESC
         """,
-        params,
+        params + params,
     ).fetchall()
 
-    # City rollup (top 40)
+    # City rollup: visits + tracks (top 40)
     cities = con.execute(
         f"""
-        SELECT p.city, p.country, COUNT(DISTINCT substr(v.date,1,10)) as days
-        FROM   visits v
-        LEFT JOIN place_names p ON p.place_id = v.place_id
-        WHERE  p.city IS NOT NULL {year_clause}
-        GROUP BY p.city, p.country
+        SELECT city, country, COUNT(DISTINCT date) as days FROM (
+            SELECT p.city, p.country, substr(v.date,1,10) as date
+            FROM   visits v
+            LEFT JOIN place_names p ON p.place_id = v.place_id
+            WHERE  p.city IS NOT NULL {year_clause_v}
+            UNION
+            SELECT t.geocode_city as city, t.geocode_country as country, substr(t.date,1,10) as date
+            FROM   tracks t
+            WHERE  t.geocode_city IS NOT NULL {year_clause_t}
+        )
+        GROUP BY city, country
         ORDER BY days DESC
         LIMIT 40
         """,
-        params,
+        params + params,
     ).fetchall()
 
-    # Available years for the filter pill
+    # Available years: union both sources
     years = con.execute(
-        "SELECT DISTINCT substr(date,1,4) as y FROM visits ORDER BY y DESC"
+        """SELECT DISTINCT y FROM (
+               SELECT substr(date,1,4) as y FROM visits
+               UNION
+               SELECT substr(date,1,4) as y FROM tracks WHERE geocode_city IS NOT NULL
+           ) ORDER BY y DESC"""
     ).fetchall()
 
     con.close()
@@ -121,7 +174,9 @@ def get_heatmap(year: int | None = None):
 
     city_totals: dict[tuple, int] = {}
     for r in cities:
-        key = (r["city"], _en(r["country"]) or r["country"])
+        city = _norm_city(r["city"]) or r["city"]
+        country = _en(r["country"]) or r["country"]
+        key = (city, country)
         city_totals[key] = city_totals.get(key, 0) + r["days"]
     sorted_cities = sorted(city_totals.items(), key=lambda x: -x[1])
 
@@ -355,6 +410,112 @@ def get_top_places(limit: int = 30, year: int | None = None):
     return result
 
 
+@router.get("/city-timeline")
+def get_city_timeline(year: int | None = None):
+    """
+    Chronological travel log: each city stay as {city, country, first_date, last_date, days}.
+    Merges visits + tracks. Ordered by first_date descending.
+    """
+    con = _conn()
+    year_clause = "AND substr(date, 1, 4) = ?" if year else ""
+    params: tuple = (str(year),) if year else ()
+
+    try:
+        rows = con.execute(
+            f"""
+            SELECT city, country, date FROM (
+                SELECT p.city, p.country, substr(v.date,1,10) AS date
+                FROM   visits v JOIN places p ON p.id = v.place_id
+                WHERE  p.city IS NOT NULL AND p.city != ''
+                       {year_clause}
+                UNION ALL
+                SELECT t.geocode_city AS city, t.geocode_country AS country, substr(t.date,1,10) AS date
+                FROM   tracks t
+                WHERE  t.geocode_city IS NOT NULL AND t.geocode_city != ''
+                       {year_clause}
+            )
+            GROUP BY city, country, date
+            ORDER BY date
+            """,
+            params + params,
+        ).fetchall()
+    except Exception:
+        con.close()
+        return []
+
+    # Collapse consecutive days in same city into stays
+    stays: list[dict] = []
+    for r in rows:
+        city, country, date = r["city"], _en(r["country"]), r["date"]
+        if stays and stays[-1]["city"] == city and stays[-1]["country"] == country:
+            stays[-1]["last_date"] = date
+            stays[-1]["days"] += 1
+        else:
+            stays.append({"city": city, "country": country, "first_date": date, "last_date": date, "days": 1})
+
+    con.close()
+    return list(reversed(stays))
+
+
+@router.get("/place-dates")
+def get_place_dates(place: str, year: int | None = None):
+    """
+    All dates a named place was visited, with mood/energy from that day.
+    """
+    con = _conn()
+    year_clause = "AND substr(t.date,1,4) = ?" if year else ""
+    params: tuple = (str(year),) if year else ()
+
+    try:
+        rows = con.execute(
+            f"""
+            SELECT DISTINCT substr(t.date,1,10) AS date,
+                   t.geocode_city AS city,
+                   t.geocode_country AS country
+            FROM   tracks t
+            WHERE  t.geocode_name = ?
+                   {year_clause}
+            ORDER BY date DESC
+            LIMIT 100
+            """,
+            (place,) + params,
+        ).fetchall()
+    except Exception:
+        con.close()
+        return []
+
+    if not rows:
+        con.close()
+        return []
+
+    dates = [r["date"] for r in rows]
+    placeholders = ",".join("?" * len(dates))
+    try:
+        day_rows = con.execute(
+            f"SELECT date, mood, energy, mood_note FROM days WHERE date IN ({placeholders})",
+            dates,
+        ).fetchall()
+    except Exception:
+        day_rows = []
+
+    day_map = {r["date"]: dict(r) for r in day_rows}
+    con.close()
+
+    result = []
+    for r in rows:
+        d = r["date"]
+        day = day_map.get(d, {})
+        result.append({
+            "date": d,
+            "city": r["city"],
+            "country": _en(r["country"]),
+            "mood": day.get("mood"),
+            "energy": day.get("energy"),
+            "mood_note": day.get("mood_note"),
+        })
+    return result
+
+
 # ── Overland ingestion ────────────────────────────────────────────────────────
 
 OVERLAND_SCHEMA = """
@@ -396,15 +557,7 @@ def _ensure_overland_schema(con: sqlite3.Connection) -> None:
 
 def _overland_token() -> str | None:
     import os
-    token = os.environ.get("OVERLAND_TOKEN")
-    if token:
-        return token
-    env_file = Path(__file__).parents[3] / ".env"
-    if env_file.exists():
-        for line in env_file.read_text().splitlines():
-            if line.startswith("OVERLAND_TOKEN="):
-                return line.split("=", 1)[1].strip()
-    return None
+    return os.environ.get("OVERLAND_TOKEN") or None
 
 
 def _run_processor(dates: set[str]) -> None:

@@ -10,8 +10,23 @@ SCHEMA_PATH = Path(__file__).parents[2] / "infrastructure" / "db" / "money_schem
 
 
 def init_money_db(db_path: Path = MONEY_DB_PATH) -> None:
-    """Create money.db and run the schema DDL. Idempotent."""
+    """Create money.db and run the schema DDL. Idempotent.
+
+    Ordering: ALTERs run FIRST so that the schema's CREATE INDEX statements
+    against the new columns succeed on pre-existing tables. Each ALTER is
+    silently ignored if the table doesn't exist yet OR the column is already there.
+    """
     conn = get_money_connection(db_path)
+
+    for stmt in [
+        "ALTER TABLE holdings ADD COLUMN isin TEXT",
+    ]:
+        try:
+            conn.execute(stmt)
+        except Exception:
+            pass  # column already exists or table not created yet — fine either way
+    conn.commit()
+
     conn.executescript(SCHEMA_PATH.read_text())
     conn.commit()
     conn.close()

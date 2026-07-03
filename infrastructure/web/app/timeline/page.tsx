@@ -4,8 +4,10 @@ import { useState, Suspense } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { format, subDays, parseISO, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachWeekOfInterval, eachMonthOfInterval } from "date-fns";
 import { api, moodEmoji, type DaySummary } from "@/lib/api";
+import Link from "next/link";
 import { DayCard } from "@/components/DayCard";
 import { LifeGridClient } from "@/app/life/LifeGridClient";
+import { WeekCharts } from "@/components/WeekCharts";
 
 const PAGE_SIZE = 30;
 
@@ -26,8 +28,8 @@ export default function TimelinePage() {
   return (
     <main className="w-full px-4 pb-20">
       {/* Header */}
-      <header className="pt-6 pb-5 max-w-5xl mx-auto">
-        <p className="text-xs text-[#F59E0B] uppercase tracking-[0.2em] mb-1">Archive</p>
+      <header className="pt-8 pb-5 max-w-5xl mx-auto">
+        <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Today</Link>
         <h1 className="text-2xl font-semibold tracking-tight mb-5">Timeline</h1>
       </header>
 
@@ -130,12 +132,21 @@ function DaysTab() {
 
 type ReviewMode = "weeks" | "months";
 
+// Years available: 2019 (earliest data) to current year
+const CURRENT_YEAR = new Date().getFullYear();
+const AVAILABLE_YEARS = Array.from(
+  { length: CURRENT_YEAR - 2019 + 1 },
+  (_, i) => CURRENT_YEAR - i
+);
+
 function WeeksTab() {
   const [mode, setMode] = useState<ReviewMode>("weeks");
+  const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR);
 
-  // Load last 6 months of day summaries
-  const end = format(new Date(), "yyyy-MM-dd");
-  const start = format(subDays(new Date(), 180), "yyyy-MM-dd");
+  const start = `${selectedYear}-01-01`;
+  const end = selectedYear === CURRENT_YEAR
+    ? format(new Date(), "yyyy-MM-dd")
+    : `${selectedYear}-12-31`;
 
   const { data: days = [], isLoading } = useQuery({
     queryKey: ["timeline-review", start, end],
@@ -154,27 +165,51 @@ function WeeksTab() {
 
   return (
     <div className="mt-4">
-      {/* Mode toggle */}
-      <div className="flex gap-2 mb-5">
-        {(["weeks", "months"] as ReviewMode[]).map((m) => (
+      {/* Controls row */}
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex gap-2">
+          {(["weeks", "months"] as ReviewMode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                mode === m
+                  ? "border-[#F59E0B] text-[#F59E0B] bg-[#F59E0B]/10"
+                  : "border-[#27272A] text-[#52525B] hover:text-[#A1A1AA]"
+              }`}
+            >
+              {m === "weeks" ? "By Week" : "By Month"}
+            </button>
+          ))}
+        </div>
+        {/* Year selector */}
+        <div className="flex items-center gap-1">
           <button
-            key={m}
-            onClick={() => setMode(m)}
-            className={`px-3 py-1 text-xs rounded-full border transition-colors ${
-              mode === m
-                ? "border-[#F59E0B] text-[#F59E0B] bg-[#F59E0B]/10"
-                : "border-[#27272A] text-[#52525B] hover:text-[#A1A1AA]"
-            }`}
+            onClick={() => setSelectedYear((y) => Math.max(2019, y - 1))}
+            disabled={selectedYear <= 2019}
+            className="px-2 py-1 text-xs text-[#52525B] hover:text-[#A1A1AA] disabled:opacity-30 transition-colors"
           >
-            {m === "weeks" ? "By Week" : "By Month"}
+            ‹
           </button>
-        ))}
+          <span className="text-sm font-medium text-[#FAFAFA] w-12 text-center tabular-nums">
+            {selectedYear}
+          </span>
+          <button
+            onClick={() => setSelectedYear((y) => Math.min(CURRENT_YEAR, y + 1))}
+            disabled={selectedYear >= CURRENT_YEAR}
+            className="px-2 py-1 text-xs text-[#52525B] hover:text-[#A1A1AA] disabled:opacity-30 transition-colors"
+          >
+            ›
+          </button>
+        </div>
       </div>
 
-      {mode === "weeks" ? (
-        <WeekReviewList days={days} />
+      {days.length === 0 ? (
+        <p className="text-sm text-[#52525B] text-center py-12">No data for {selectedYear}</p>
+      ) : mode === "weeks" ? (
+        <WeekReviewList days={days} year={selectedYear} />
       ) : (
-        <MonthReviewList days={days} />
+        <MonthReviewList days={days} year={selectedYear} />
       )}
     </div>
   );
@@ -185,32 +220,33 @@ function avgMood(days: DaySummary[]): number | null {
   return moods.length ? Math.round(moods.reduce((a, b) => a + b, 0) / moods.length) : null;
 }
 
-function WeekReviewList({ days }: { days: DaySummary[] }) {
-  const dayMap = new Map(days.map((d) => [d.date, d]));
+function WeekReviewList({ days, year }: { days: DaySummary[]; year: number }) {
+  const start = parseISO(`${year}-01-01`);
+  const end = year === CURRENT_YEAR ? new Date() : parseISO(`${year}-12-31`);
 
-  // Build week buckets for last 26 weeks
-  const weeks = eachWeekOfInterval(
-    { start: subDays(new Date(), 180), end: new Date() },
-    { weekStartsOn: 1 }
-  ).reverse();
+  const weeks = eachWeekOfInterval({ start, end }, { weekStartsOn: 1 }).reverse();
 
   return (
     <div className="flex flex-col gap-3">
       {weeks.map((weekStart) => {
         const ws = format(weekStart, "yyyy-MM-dd");
-        const we = format(endOfWeek(weekStart, { weekStartsOn: 1 }), "yyyy-MM-dd");
+        const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
+        const we = format(weekEnd, "yyyy-MM-dd");
         const weekDays = days.filter((d) => d.date >= ws && d.date <= we);
         if (weekDays.length === 0) return null;
-        return <ReviewCard key={ws} label={`${format(weekStart, "d MMM")} – ${format(endOfWeek(weekStart, { weekStartsOn: 1 }), "d MMM")}`} days={weekDays} start={ws} end={we} />;
+        // Show year on label so it's clear when browsing past years
+        const label = `${format(weekStart, "d MMM")} – ${format(weekEnd, "d MMM yyyy")}`;
+        return <ReviewCard key={ws} label={label} days={weekDays} start={ws} end={we} />;
       })}
     </div>
   );
 }
 
-function MonthReviewList({ days }: { days: DaySummary[] }) {
-  const months = eachMonthOfInterval(
-    { start: subDays(new Date(), 180), end: new Date() }
-  ).reverse();
+function MonthReviewList({ days, year }: { days: DaySummary[]; year: number }) {
+  const start = parseISO(`${year}-01-01`);
+  const end = year === CURRENT_YEAR ? new Date() : parseISO(`${year}-12-31`);
+
+  const months = eachMonthOfInterval({ start, end }).reverse();
 
   return (
     <div className="flex flex-col gap-3">
@@ -227,6 +263,7 @@ function MonthReviewList({ days }: { days: DaySummary[] }) {
 
 function ReviewCard({ label, days, start, end }: { label: string; days: DaySummary[]; start: string; end: string }) {
   const [expanded, setExpanded] = useState(false);
+  const [expandedView, setExpandedView] = useState<"charts" | "days">("charts");
 
   const mood = avgMood(days);
   const totalFlights = days.reduce((s, d) => s + (d.flight_count ?? 0), 0);
@@ -291,14 +328,35 @@ function ReviewCard({ label, days, start, end }: { label: string; days: DaySumma
         <span className="text-[#3F3F46] text-xs ml-1">{expanded ? "↑" : "↓"}</span>
       </button>
 
-      {/* Expanded: individual day cards */}
+      {/* Expanded content */}
       {expanded && (
         <div className="border-t border-[#27272A]">
-          {days
-            .sort((a, b) => b.date.localeCompare(a.date))
-            .map((day) => (
-              <DayCard key={day.date} day={day} />
+          {/* Toggle: Charts / Days */}
+          <div className="flex gap-1 px-4 pt-3 pb-1">
+            {(["charts", "days"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setExpandedView(v)}
+                className={`px-3 py-1 text-[10px] rounded-full border transition-colors capitalize ${
+                  expandedView === v
+                    ? "border-[#F59E0B] text-[#F59E0B] bg-[#F59E0B]/10"
+                    : "border-[#27272A] text-[#52525B] hover:text-[#A1A1AA]"
+                }`}
+              >
+                {v}
+              </button>
             ))}
+          </div>
+
+          {expandedView === "charts" ? (
+            <WeekCharts start={start} end={end} />
+          ) : (
+            days
+              .sort((a, b) => b.date.localeCompare(a.date))
+              .map((day) => (
+                <DayCard key={day.date} day={day} />
+              ))
+          )}
         </div>
       )}
     </div>

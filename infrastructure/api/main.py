@@ -27,6 +27,15 @@ from infrastructure.api.routers import screen_time as screen_time_module
 from infrastructure.api.routers import books as books_module
 from infrastructure.api.routers import life as life_module
 from infrastructure.api.routers import aviation as aviation_module
+from infrastructure.api.routers import restaurants as restaurants_module
+from infrastructure.api.routers import shows as shows_module
+from infrastructure.api.routers import decisions as decisions_module
+from infrastructure.api.routers import roster as roster_module
+from infrastructure.api.routers import experiments as experiments_module
+from infrastructure.api.routers import injuries as injuries_module
+from infrastructure.api.routers import ai as ai_module
+from infrastructure.api.routers import groceries as groceries_module
+from infrastructure.api.routers import race_plans as race_plans_module
 
 VERSION = "0.1.0"
 ROOT = Path(__file__).parents[2]
@@ -41,10 +50,12 @@ if _env_file.exists():
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
 
+_docs_url = None if os.getenv("DISABLE_DOCS") else "/docs"
+
 app = FastAPI(
     title="Daybook API",
     version=VERSION,
-    docs_url="/docs",
+    docs_url=_docs_url,
     redoc_url=None,
 )
 
@@ -75,6 +86,15 @@ app.include_router(screen_time_module.router)
 app.include_router(books_module.router)
 app.include_router(life_module.router)
 app.include_router(aviation_module.router)
+app.include_router(restaurants_module.router)
+app.include_router(shows_module.router)
+app.include_router(decisions_module.router)
+app.include_router(roster_module.router)
+app.include_router(experiments_module.router)
+app.include_router(injuries_module.router)
+app.include_router(ai_module.router)
+app.include_router(groceries_module.router)
+app.include_router(race_plans_module.router)
 
 _photos_dir = ROOT / "data" / "photos"
 _photos_dir.mkdir(parents=True, exist_ok=True)
@@ -86,6 +106,25 @@ def _run_migrations() -> None:
     """Ensure all DB tables exist. Safe to run on every startup."""
     from infrastructure.db.migrate_screen_time import run as _migrate_screen_time
     _migrate_screen_time()
+    from infrastructure.db.migrate_add_error_log import migrate as _migrate_error_log
+    _migrate_error_log()
+    from infrastructure.db.migrate_load_index_and_decisions import migrate as _migrate_h1_h3
+    _migrate_h1_h3()
+    from infrastructure.db.migrate_intraday_hr import migrate as _migrate_intraday_hr
+    _migrate_intraday_hr()
+    from infrastructure.db.migrate_injuries import migrate as _migrate_injuries
+    from infrastructure.db.connection import get_connection as _get_conn
+    _conn = _get_conn()
+    _migrate_injuries(_conn)
+    _conn.close()
+    from infrastructure.db.migrate_ai import migrate as _migrate_ai
+    _migrate_ai()
+    from infrastructure.db.migrate_groceries import migrate as _migrate_groceries
+    _migrate_groceries()
+    from infrastructure.db.migrate_race_plans import migrate as _migrate_race_plans
+    _conn2 = _get_conn()
+    _migrate_race_plans(_conn2)
+    _conn2.close()
 
 
 @app.get("/")
@@ -110,21 +149,6 @@ def _run_garmin_sync() -> None:
 def sync_garmin(background: BackgroundTasks):
     """Trigger an incremental Garmin sync in the background."""
     background.add_task(_run_garmin_sync)
-    return {"status": "started"}
-
-
-def _run_notion_sync() -> None:
-    subprocess.run(
-        [sys.executable, "-m", "domains.money.notion_sync"],
-        cwd=str(ROOT),
-        capture_output=True,
-    )
-
-
-@app.post("/sync/notion")
-def sync_notion(background: BackgroundTasks):
-    """Trigger an incremental Notion finance sync in the background."""
-    background.add_task(_run_notion_sync)
     return {"status": "started"}
 
 

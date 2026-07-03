@@ -21,15 +21,12 @@ interface Props {
 type Draft = {
   energy: number | null;
   mood: number | null;
-  mood_note: string;
+  mood_note: string;      // "Day reflection" — merged from notes + mood_note
+  error_log: string;
   stress: number | null;
   sleep_quality: number | null;
-  notes: string;
   daily_answer: string;
   daily_question: string;
-  alcohol: number | null;
-  social: boolean | null;
-  outdoors: boolean | null;
   work: boolean;
   intimate: boolean;
   intimate_rating: number | null;
@@ -56,29 +53,6 @@ function serializeTags(
   return parts.join(",");
 }
 
-function Toggle({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: boolean | null;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!(value ?? false))}
-      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
-        value
-          ? "border-[#F59E0B] bg-[#F59E0B]/10 text-[#F59E0B]"
-          : "border-[#27272A] bg-[#18181B] text-[#52525B] hover:text-[#A1A1AA]"
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
 
 
 export function Questionnaire({ date, initial, initialTags = [], initialCompanions = [] }: Props) {
@@ -89,7 +63,6 @@ export function Questionnaire({ date, initial, initialTags = [], initialCompanio
     queryFn: () => api.questionnaire(date),
   });
 
-  // Load all contacts for autocomplete
   const { data: allContacts = [] } = useQuery({
     queryKey: ["contacts"],
     queryFn: () => api.contacts(),
@@ -98,27 +71,24 @@ export function Questionnaire({ date, initial, initialTags = [], initialCompanio
 
   const parsedTags = parseTags(initial.tags ?? null);
 
-  // Initialize people from initialCompanions (names) matched against contacts
-  // Falls back to empty until contacts load — they'll populate from the query
+  // Merge: prefer mood_note; fall back to legacy notes field
+  const mergedReflection = initial.mood_note ?? initial.notes ?? "";
+
   const [draft, setDraft] = useState<Draft>({
     energy: initial.energy ?? null,
     mood: initial.mood ?? null,
-    mood_note: initial.mood_note ?? "",
+    mood_note: mergedReflection,
+    error_log: initial.error_log ?? "",
     stress: initial.stress ?? null,
     sleep_quality: initial.sleep_quality ?? null,
-    notes: initial.notes ?? "",
     daily_answer: initial.daily_answer ?? "",
     daily_question: initial.daily_question ?? q?.rotating.text ?? "",
-    alcohol: (initial as DaySubjective & { alcohol?: number | null }).alcohol ?? null,
-    social: (initial as DaySubjective & { social?: boolean | null }).social ?? null,
-    outdoors: (initial as DaySubjective & { outdoors?: boolean | null }).outdoors ?? null,
     work: parsedTags.work,
     intimate: parsedTags.intimate,
     intimate_rating: parsedTags.intimate_rating,
     people: [],
   });
 
-  // Once contacts load, hydrate draft.people from initialCompanions names
   const companionsHydrated = useRef(false);
   if (!companionsHydrated.current && allContacts.length > 0 && initialCompanions.length > 0) {
     companionsHydrated.current = true;
@@ -153,14 +123,11 @@ export function Questionnaire({ date, initial, initialTags = [], initialCompanio
         energy: patch.energy ?? undefined,
         mood: patch.mood ?? undefined,
         mood_note: patch.mood_note !== undefined ? patch.mood_note : undefined,
+        error_log: patch.error_log !== undefined ? patch.error_log : undefined,
         stress: patch.stress ?? undefined,
         sleep_quality: patch.sleep_quality ?? undefined,
-        notes: patch.notes,
         daily_answer: patch.daily_answer,
         daily_question: patch.daily_question || q?.rotating.text || undefined,
-        alcohol: patch.alcohol ?? undefined,
-        social: patch.social ?? undefined,
-        outdoors: patch.outdoors ?? undefined,
         tags: serializeTags(patch.work, patch.intimate, patch.intimate_rating) || undefined,
       }),
     onSuccess: () => {
@@ -225,17 +192,31 @@ export function Questionnaire({ date, initial, initialTags = [], initialCompanio
             rightLabel={<EmojiLabel value={draft.mood} steps={MOOD_STEPS} />}
           />
           {draft.mood !== null && (
-            <div className="mt-1">
-              <p className="text-xs text-[#52525B] mb-1.5 uppercase tracking-wide">Evening reflection</p>
-              <textarea
-                rows={2}
-                placeholder="What made today good or bad?"
-                value={draft.mood_note}
-                onChange={(e) => update("mood_note", e.target.value)}
-                className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-4 py-3 text-sm
-                           text-[#FAFAFA] placeholder:text-[#52525B] resize-none
-                           focus:outline-none focus:border-[#F59E0B] transition-colors"
-              />
+            <div className="mt-1 flex flex-col gap-3">
+              <div>
+                <p className="text-xs text-[#52525B] mb-1.5 uppercase tracking-wide">Day reflection</p>
+                <textarea
+                  rows={3}
+                  placeholder="How did today go? What shaped it?"
+                  value={draft.mood_note}
+                  onChange={(e) => update("mood_note", e.target.value)}
+                  className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-4 py-3 text-sm
+                             text-[#FAFAFA] placeholder:text-[#52525B] resize-none
+                             focus:outline-none focus:border-[#F59E0B] transition-colors"
+                />
+              </div>
+              <div>
+                <p className="text-xs text-[#52525B] mb-0.5 uppercase tracking-wide">What did you get wrong today?</p>
+                <textarea
+                  rows={2}
+                  placeholder="One line is enough."
+                  value={draft.error_log}
+                  onChange={(e) => update("error_log", e.target.value)}
+                  className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-4 py-3 text-sm
+                             text-[#FAFAFA] placeholder:text-[#52525B] resize-none
+                             focus:outline-none focus:border-[#F59E0B] transition-colors"
+                />
+              </div>
             </div>
           )}
         </div>
@@ -285,7 +266,6 @@ export function Questionnaire({ date, initial, initialTags = [], initialCompanio
                     e.preventDefault();
                     const name = peopleInput.trim().replace(/,$/, "");
                     if (!name) return;
-                    // Find existing contact or create new one
                     let contact = allContacts.find((c) => c.name.toLowerCase() === name.toLowerCase());
                     if (!contact) {
                       try {
@@ -373,21 +353,9 @@ export function Questionnaire({ date, initial, initialTags = [], initialCompanio
           <TagPicker date={date} initialTags={initialTags} />
         </div>
 
-        {/* Notes */}
-        <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium text-[#FAFAFA]">Notes</label>
-          <textarea
-            rows={3}
-            placeholder="Anything worth remembering about today…"
-            value={draft.notes}
-            onChange={(e) => update("notes", e.target.value)}
-            className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-4 py-3 text-sm text-[#FAFAFA] placeholder:text-[#52525B] resize-none focus:outline-none focus:border-[#F59E0B] transition-colors"
-          />
-        </div>
-
         {/* Rotating question */}
         <div className="flex flex-col gap-2 border-t border-[#27272A] pt-6">
-          <p className="text-xs text-[#52525B] uppercase tracking-widest">Today's question</p>
+          <p className="text-xs text-[#52525B] uppercase tracking-widest">Today&rsquo;s question</p>
           <p className="text-base text-[#FAFAFA] font-medium leading-snug">
             {rotatingQuestion}
           </p>

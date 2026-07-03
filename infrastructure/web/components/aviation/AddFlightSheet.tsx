@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X, Loader, PlaneTakeoff, PlaneLanding, ChevronDown, ChevronRight } from "lucide-react";
 import { api, type FlightIn, type AirportInfo } from "@/lib/api";
 
@@ -106,6 +106,15 @@ function AirportInput({ label, value, query, setQuery, setValue, suggestions, cl
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+function formatPicDisplay(raw: string): string {
+  // 6-letter crew code → keep as-is
+  if (/^[A-Za-z]{6}$/.test(raw.trim())) return raw.trim().toUpperCase();
+  // Full name "Firstname Lastname" → "F.LASTNAME"
+  const parts = raw.trim().split(/\s+/);
+  if (parts.length < 2) return raw.toUpperCase();
+  return `${parts[0][0].toUpperCase()}.${parts.slice(1).join(" ").toUpperCase()}`;
+}
+
 export function AddFlightSheet({ date, isOpen, onClose }: Props) {
   const qc = useQueryClient();
 
@@ -122,6 +131,12 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
   const [picName, setPicName] = useState("");
   const [picNameOpen, setPicNameOpen] = useState(false);
   const [savedPicNames, setSavedPicNames] = useState<string[]>([]);
+
+  const { data: dbCaptains } = useQuery({
+    queryKey: ["flightCaptains"],
+    queryFn: api.flightCaptains,
+    staleTime: 5 * 60 * 1000,
+  });
   const [offBlock, setOffBlock] = useState("");
   const [onBlock, setOnBlock] = useState("");
   const [takeoffUtc, setTakeoffUtc] = useState("");
@@ -363,28 +378,35 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
                 <label className={labelCls}>PIC Name</label>
                 <input
                   className={inputCls}
-                  placeholder="Captain's name"
+                  placeholder="Captain crew code or name"
                   value={picName}
                   onChange={e => { setPicName(e.target.value); setPicNameOpen(true); }}
                   onFocus={() => setPicNameOpen(true)}
                   onBlur={() => setTimeout(() => setPicNameOpen(false), 150)}
                 />
-                {picNameOpen && savedPicNames.filter(n => n.toLowerCase().includes(picName.toLowerCase()) && n !== picName).length > 0 && (
-                  <div className="absolute z-50 top-full left-0 right-0 bg-[#18181B] border border-[#27272A] rounded-lg mt-1 max-h-32 overflow-y-auto">
-                    {savedPicNames
-                      .filter(n => n.toLowerCase().includes(picName.toLowerCase()) && n !== picName)
-                      .map(n => (
+                {picNameOpen && (() => {
+                  const q = picName.toLowerCase();
+                  // Merge DB captains (raw values) with local saved names, deduplicate
+                  const dbRaws = (dbCaptains ?? []).map(c => c.raw);
+                  const all = Array.from(new Set([...dbRaws, ...savedPicNames]));
+                  const filtered = all.filter(n => n.toLowerCase().includes(q) && n !== picName);
+                  if (!filtered.length) return null;
+                  return (
+                    <div className="absolute z-50 top-full left-0 right-0 bg-[#18181B] border border-[#27272A] rounded-lg mt-1 max-h-48 overflow-y-auto">
+                      {filtered.map(n => (
                         <button
                           key={n}
                           type="button"
-                          className="w-full text-left px-3 py-2 text-sm text-[#A1A1AA] hover:bg-[#27272A]"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-[#27272A] flex items-center justify-between gap-2"
                           onClick={() => { setPicName(n); setPicNameOpen(false); }}
                         >
-                          {n}
+                          <span className="text-[#FAFAFA] font-mono">{formatPicDisplay(n)}</span>
+                          <span className="text-[#52525B] text-xs truncate">{n}</span>
                         </button>
                       ))}
-                  </div>
-                )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>

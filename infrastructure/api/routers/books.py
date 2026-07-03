@@ -64,12 +64,16 @@ def get_stats(year: Optional[int] = Query(None), conn: DB = None):
 @router.get("", response_model=list[BookOut])
 def list_books(
     year: Optional[int] = Query(None),
+    date: Optional[str] = Query(None),
     genre: Optional[str] = Query(None),
     author: Optional[str] = Query(None),
     conn: DB = None,
 ):
     clauses, params = [], []
-    if year:
+    if date:
+        clauses.append("date_finished=?")
+        params.append(date)
+    elif year:
         clauses.append("substr(date_finished,1,4)=?")
         params.append(str(year))
     if genre:

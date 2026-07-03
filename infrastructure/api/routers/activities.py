@@ -6,16 +6,21 @@ strava_id and segment efforts.
 
 import json
 import sqlite3
-from datetime import date
-from typing import Annotated
+from collections import defaultdict
+from datetime import date, timedelta
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from infrastructure.api.db import get_db
 from infrastructure.api.models.activity import (
+    ActivityCreate,
+    ActivityComputedMetrics,
     ActivityDetail,
+    ActivityPatch,
     ActivitySummary,
     SegmentEffortOut,
+    SplitOut,
     SyncStatusOut,
 )
 
@@ -25,6 +30,7 @@ router = APIRouter(prefix="/activities", tags=["activities"])
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _row_to_summary(r: sqlite3.Row) -> ActivitySummary:
+    keys = r.keys()
     return ActivitySummary(
         id=r["id"],
         date=r["date"],
@@ -46,6 +52,58 @@ def _row_to_summary(r: sqlite3.Row) -> ActivitySummary:
         start_lat=r["start_lat"],
         start_lng=r["start_lng"],
         has_polyline=bool(r["polyline"]),
+        user_notes=r["user_notes"] if "user_notes" in keys else None,
+        user_rating=r["user_rating"] if "user_rating" in keys else None,
+    )
+
+
+def _splits(conn: sqlite3.Connection, activity_id: str) -> list[SplitOut]:
+    rows = conn.execute(
+        """SELECT split_index, type, distance_m, time_s, avg_pace_s_per_km,
+                  gap_s_per_km, avg_hr, avg_power_w, avg_cadence, elev_gain_m, avg_grade
+           FROM activity_split WHERE activity_id=? ORDER BY split_index""",
+        (activity_id,),
+    ).fetchall()
+    return [
+        SplitOut(
+            split_index=r["split_index"],
+            type=r["type"],
+            distance_m=r["distance_m"],
+            time_s=r["time_s"],
+            avg_pace_s_per_km=r["avg_pace_s_per_km"],
+            gap_s_per_km=r["gap_s_per_km"],
+            avg_hr=r["avg_hr"],
+            avg_power_w=r["avg_power_w"],
+            avg_cadence=r["avg_cadence"],
+            elev_gain_m=r["elev_gain_m"],
+            avg_grade=r["avg_grade"],
+        )
+        for r in rows
+    ]
+
+
+def _computed_metrics(conn: sqlite3.Connection, activity_id: str) -> ActivityComputedMetrics | None:
+    row = conn.execute(
+        """SELECT normalized_power_w, intensity_factor, variability_index,
+                  efficiency_factor, decoupling_pct, relative_effort, hr_tss,
+                  zones_json, garmin_aerobic_te, garmin_anaerobic_te, garmin_activity_load
+           FROM activity_detail WHERE activity_id=?""",
+        (activity_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return ActivityComputedMetrics(
+        normalized_power_w=row["normalized_power_w"],
+        intensity_factor=row["intensity_factor"],
+        variability_index=row["variability_index"],
+        efficiency_factor=row["efficiency_factor"],
+        decoupling_pct=row["decoupling_pct"],
+        relative_effort=row["relative_effort"],
+        hr_tss=row["hr_tss"],
+        zones_json=row["zones_json"],
+        garmin_aerobic_te=row["garmin_aerobic_te"],
+        garmin_anaerobic_te=row["garmin_anaerobic_te"],
+        garmin_activity_load=row["garmin_activity_load"],
     )
 
 
@@ -78,6 +136,35 @@ def _segment_efforts(conn: sqlite3.Connection, activity_id: str) -> list[Segment
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
+@router.post("", response_model=ActivitySummary, status_code=201)
+def create_activity(
+    body: ActivityCreate,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+):
+    import uuid
+    activity_id = f"manual_{uuid.uuid4().hex[:12]}"
+    conn.execute(
+        """INSERT INTO activities
+            (id, date, source, activity_type, name, start_time,
+             duration_seconds, distance_meters, elevation_gain_meters,
+             avg_heart_rate, calories, user_notes, user_rating,
+             raw_payload)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            activity_id, body.date, "manual", body.activity_type,
+            body.name or body.activity_type,
+            body.start_time,
+            body.duration_seconds, body.distance_meters,
+            body.elevation_gain_meters, body.avg_heart_rate,
+            body.calories, body.user_notes, body.user_rating,
+            "{}",
+        ),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM activities WHERE id=?", (activity_id,)).fetchone()
+    return _row_to_summary(row)
+
+
 @router.get("", response_model=list[ActivitySummary])
 def get_activities(
     conn: Annotated[sqlite3.Connection, Depends(get_db)],
@@ -108,6 +195,160 @@ def get_activities(
         params,
     ).fetchall()
     return [_row_to_summary(r) for r in rows]
+
+
+@router.get("/streaks")
+def get_streaks(
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+    activity_type: Optional[str] = Query(None),
+):
+    """
+    Compute activity streaks and frequency stats.
+    Returns: current, longest, best_rest, by_type, weekly_avg, monthly_avg, heatmap_weeks.
+    """
+    today = date.today()
+
+    # Fetch all distinct activity dates (optionally filtered by type)
+    if activity_type:
+        rows = conn.execute(
+            "SELECT DISTINCT date FROM activities WHERE activity_type=? ORDER BY date",
+            (activity_type,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT DISTINCT date FROM activities ORDER BY date"
+        ).fetchall()
+
+    all_dates = sorted({date.fromisoformat(r["date"]) for r in rows})
+
+    if not all_dates:
+        return {
+            "current_streak": 0,
+            "longest_streak": 0,
+            "longest_streak_end": None,
+            "current_rest": 0,
+            "longest_rest": 0,
+            "total_active_days": 0,
+            "by_type": [],
+            "weekly_avg": 0.0,
+            "monthly_avg": 0.0,
+            "heatmap_weeks": [],
+        }
+
+    # --- Streak computation ---
+    def compute_streaks(dates: list[date]):
+        if not dates:
+            return 0, 0, None, 0, 0
+        cur_streak = 1
+        max_streak = 1
+        max_end = dates[-1]
+        cur_rest = 0
+        max_rest = 0
+        tmp_rest = 0
+
+        for i in range(1, len(dates)):
+            gap = (dates[i] - dates[i - 1]).days
+            if gap == 1:
+                cur_streak += 1
+                if cur_streak > max_streak:
+                    max_streak = cur_streak
+                    max_end = dates[i]
+                tmp_rest = 0
+            else:
+                cur_streak = 1
+                rest = gap - 1
+                tmp_rest = rest
+                if rest > max_rest:
+                    max_rest = rest
+
+        # current streak: count back from today
+        current = 1
+        for i in range(len(all_dates) - 1, 0, -1):
+            if (all_dates[i] - all_dates[i - 1]).days == 1:
+                current += 1
+            else:
+                break
+        # If last activity wasn't yesterday or today, streak is broken
+        last = all_dates[-1]
+        if (today - last).days > 1:
+            current = 0
+
+        # Current rest streak
+        cur_rest = (today - last).days if (today - last).days > 0 else 0
+
+        return current, max_streak, max_end, cur_rest, max_rest
+
+    current_streak, longest_streak, longest_end, current_rest, longest_rest = compute_streaks(all_dates)
+
+    # --- By type ---
+    type_rows = conn.execute(
+        "SELECT activity_type, COUNT(DISTINCT date) AS days, COUNT(*) AS sessions "
+        "FROM activities WHERE activity_type IS NOT NULL GROUP BY activity_type ORDER BY days DESC"
+    ).fetchall()
+
+    by_type = []
+    for r in type_rows:
+        t_dates = sorted({
+            date.fromisoformat(row["date"])
+            for row in conn.execute(
+                "SELECT DISTINCT date FROM activities WHERE activity_type=?",
+                (r["activity_type"],),
+            ).fetchall()
+        })
+        _, t_longest, t_end, _, _ = compute_streaks(t_dates)
+        by_type.append({
+            "type": r["activity_type"],
+            "sessions": r["sessions"],
+            "active_days": r["days"],
+            "longest_streak": t_longest,
+        })
+
+    # --- Frequency ---
+    if len(all_dates) >= 2:
+        span_days = (all_dates[-1] - all_dates[0]).days + 1
+        weeks = max(span_days / 7, 1)
+        months = max(span_days / 30.44, 1)
+        weekly_avg = round(len(all_dates) / weeks, 1)
+        monthly_avg = round(len(all_dates) / months, 1)
+    else:
+        weekly_avg = float(len(all_dates))
+        monthly_avg = float(len(all_dates))
+
+    # --- Heatmap: last 52 weeks ---
+    week_counts: dict[str, int] = defaultdict(int)
+    cutoff = today - timedelta(weeks=52)
+    for d in all_dates:
+        if d >= cutoff:
+            # ISO week key
+            iso = d.isocalendar()
+            key = f"{iso[0]}-W{iso[1]:02d}"
+            week_counts[key] += 1
+
+    # Build ordered list of weeks
+    heatmap_weeks = []
+    w = cutoff - timedelta(days=cutoff.weekday())  # align to Monday
+    while w <= today:
+        iso = w.isocalendar()
+        key = f"{iso[0]}-W{iso[1]:02d}"
+        heatmap_weeks.append({
+            "week": key,
+            "week_start": w.isoformat(),
+            "count": week_counts.get(key, 0),
+        })
+        w += timedelta(weeks=1)
+
+    return {
+        "current_streak": current_streak,
+        "longest_streak": longest_streak,
+        "longest_streak_end": longest_end.isoformat() if longest_end else None,
+        "current_rest": current_rest,
+        "longest_rest": longest_rest,
+        "total_active_days": len(all_dates),
+        "by_type": by_type,
+        "weekly_avg": weekly_avg,
+        "monthly_avg": monthly_avg,
+        "heatmap_weeks": heatmap_weeks,
+    }
 
 
 @router.get("/sync-status", response_model=list[SyncStatusOut])
@@ -183,6 +424,51 @@ def get_activity_streams(
     }
 
 
+@router.patch("/{activity_id}", response_model=ActivityDetail)
+def patch_activity(
+    activity_id: str,
+    body: ActivityPatch,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+):
+    row = conn.execute("SELECT * FROM activities WHERE id=?", (activity_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Activity {activity_id!r} not found")
+
+    updates: dict = {}
+    if body.user_notes is not None:
+        updates["user_notes"] = body.user_notes
+    if body.user_rating is not None:
+        updates["user_rating"] = body.user_rating
+
+    if updates:
+        set_clause = ", ".join(f"{k}=?" for k in updates) + ", updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+        conn.execute(
+            f"UPDATE activities SET {set_clause} WHERE id=?",
+            [*updates.values(), activity_id],
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM activities WHERE id=?", (activity_id,)).fetchone()
+
+    stream_rows = conn.execute(
+        "SELECT stream_type, data_json FROM activity_streams WHERE activity_id=?",
+        (activity_id,),
+    ).fetchall()
+    streams = {r["stream_type"]: r["data_json"] for r in stream_rows}
+    efforts = _segment_efforts(conn, activity_id)
+    splits = _splits(conn, activity_id)
+    computed = _computed_metrics(conn, activity_id)
+
+    return ActivityDetail(
+        **_row_to_summary(row).__dict__,
+        polyline=row["polyline"],
+        raw_payload=row["raw_payload"],
+        streams=streams,
+        segment_efforts=efforts,
+        splits=splits,
+        computed=computed,
+    )
+
+
 @router.get("/{activity_id}", response_model=ActivityDetail)
 def get_activity(
     activity_id: str,
@@ -192,7 +478,6 @@ def get_activity(
     if row is None:
         raise HTTPException(status_code=404, detail=f"Activity {activity_id!r} not found")
 
-    # Load streams
     stream_rows = conn.execute(
         "SELECT stream_type, data_json FROM activity_streams WHERE activity_id=?",
         (activity_id,),
@@ -200,6 +485,8 @@ def get_activity(
     streams = {r["stream_type"]: r["data_json"] for r in stream_rows}
 
     efforts = _segment_efforts(conn, activity_id)
+    splits = _splits(conn, activity_id)
+    computed = _computed_metrics(conn, activity_id)
 
     return ActivityDetail(
         **_row_to_summary(row).__dict__,
@@ -207,4 +494,6 @@ def get_activity(
         raw_payload=row["raw_payload"],
         streams=streams,
         segment_efforts=efforts,
+        splits=splits,
+        computed=computed,
     )

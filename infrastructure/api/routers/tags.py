@@ -24,6 +24,7 @@ class TagOut(BaseModel):
     category: str
     color: str | None = None
     is_system: bool = False
+    is_negative: bool = False
     usage_count: int = 0
 
 
@@ -33,6 +34,10 @@ class TagCreate(BaseModel):
     icon: str | None = None
     category: str
     color: str | None = None
+
+
+class TagPatch(BaseModel):
+    is_negative: bool | None = None
 
 
 class DayTagOut(BaseModel):
@@ -58,6 +63,7 @@ def list_tags(conn: DB, category: str | None = None):
     rows = conn.execute(
         """
         SELECT t.id, t.slug, t.name, t.icon, t.category, t.color, t.is_system,
+               COALESCE(t.is_negative, 0) AS is_negative,
                COUNT(dt.tag_id) AS usage_count
         FROM tags t
         LEFT JOIN day_tags dt ON dt.tag_id = t.id
@@ -71,10 +77,110 @@ def list_tags(conn: DB, category: str | None = None):
         TagOut(
             id=r["id"], slug=r["slug"], name=r["name"], icon=r["icon"],
             category=r["category"], color=r["color"],
-            is_system=bool(r["is_system"]), usage_count=r["usage_count"],
+            is_system=bool(r["is_system"]), is_negative=bool(r["is_negative"]),
+            usage_count=r["usage_count"],
         )
         for r in rows
     ]
+
+
+@tags_router.get("/streaks")
+def all_tag_streaks(conn: DB):
+    """Return streak stats for every tag that has been used at least once."""
+    today = date.today()
+
+    # Oldest day in DB — used to compute negative streaks from day 1
+    first_day_row = conn.execute("SELECT MIN(date) FROM days WHERE date IS NOT NULL").fetchone()
+    first_day = date.fromisoformat(first_day_row[0]) if first_day_row and first_day_row[0] else today
+
+    tag_rows = conn.execute(
+        "SELECT t.id, t.slug, t.name, t.icon, t.category, COALESCE(t.is_negative,0) AS is_negative FROM tags t "
+        "WHERE EXISTS (SELECT 1 FROM day_tags dt WHERE dt.tag_id = t.id)"
+    ).fetchall()
+
+    results = []
+    for tr in tag_rows:
+        rows = conn.execute(
+            "SELECT date, note FROM day_tags WHERE tag_id=? ORDER BY date", (tr["id"],)
+        ).fetchall()
+        if not rows:
+            continue
+
+        all_dates = [r["date"] for r in rows]
+        parsed = [date.fromisoformat(d) for d in all_dates]
+
+        # Total numeric count (sum of notes for quantity tags like nap:2, si:3)
+        total_count: int | None = None
+        numeric_notes = []
+        for r in rows:
+            if r["note"]:
+                try:
+                    numeric_notes.append(int(float(r["note"])))
+                except (ValueError, TypeError):
+                    pass
+        if numeric_notes:
+            total_count = sum(numeric_notes)
+
+        # Longest positive streak
+        longest = 1
+        longest_end = parsed[-1]
+        cur = 1
+        for i in range(1, len(parsed)):
+            if (parsed[i] - parsed[i - 1]).days == 1:
+                cur += 1
+                if cur > longest:
+                    longest = cur
+                    longest_end = parsed[i]
+            else:
+                cur = 1
+
+        # Current positive streak
+        current = 1
+        for i in range(len(parsed) - 1, 0, -1):
+            if (parsed[i] - parsed[i - 1]).days == 1:
+                current += 1
+            else:
+                break
+        if (today - parsed[-1]).days > 1:
+            current = 0
+
+        # Frequency
+        span_days = (parsed[-1] - parsed[0]).days + 1 if len(parsed) >= 2 else 1
+        weekly_avg = round(len(parsed) / max(span_days / 7, 1), 1)
+
+        # Negative streak: consecutive days WITHOUT this tag (clean streak)
+        negative_streak: int | None = None
+        if bool(tr["is_negative"]):
+            tag_date_set = set(all_dates)
+            clean = 0
+            d = today
+            while d >= first_day:
+                if d.isoformat() in tag_date_set:
+                    break
+                clean += 1
+                d -= timedelta(days=1)
+            negative_streak = clean
+
+        results.append({
+            "id": tr["id"],
+            "slug": tr["slug"],
+            "name": tr["name"],
+            "icon": tr["icon"],
+            "category": tr["category"],
+            "is_negative": bool(tr["is_negative"]),
+            "total_days": len(parsed),
+            "total_count": total_count,
+            "current_streak": current,
+            "longest_streak": longest,
+            "longest_streak_end": longest_end.isoformat(),
+            "last_used": all_dates[-1],
+            "first_used": all_dates[0],
+            "weekly_avg": weekly_avg,
+            "negative_streak": negative_streak,
+        })
+
+    results.sort(key=lambda r: r["longest_streak"], reverse=True)
+    return results
 
 
 @tags_router.post("", response_model=TagOut, status_code=201)
@@ -95,6 +201,26 @@ def create_tag(body: TagCreate, conn: DB):
         id=row["id"], slug=row["slug"], name=row["name"], icon=row["icon"],
         category=row["category"], color=row["color"],
         is_system=bool(row["is_system"]), usage_count=0,
+    )
+
+
+@tags_router.patch("/{tag_id}", response_model=TagOut)
+def patch_tag(tag_id: int, body: TagPatch, conn: DB):
+    """Update tag properties (currently: is_negative)."""
+    row = conn.execute("SELECT * FROM tags WHERE id=?", (tag_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    if body.is_negative is not None:
+        conn.execute("UPDATE tags SET is_negative=? WHERE id=?", (int(body.is_negative), tag_id))
+        conn.commit()
+        row = conn.execute("SELECT * FROM tags WHERE id=?", (tag_id,)).fetchone()
+    usage = conn.execute("SELECT COUNT(*) FROM day_tags WHERE tag_id=?", (tag_id,)).fetchone()[0]
+    return TagOut(
+        id=row["id"], slug=row["slug"], name=row["name"], icon=row["icon"],
+        category=row["category"], color=row["color"],
+        is_system=bool(row["is_system"]),
+        is_negative=bool(row["is_negative"]) if row["is_negative"] is not None else False,
+        usage_count=usage,
     )
 
 
@@ -230,6 +356,45 @@ def tag_stats(slug: str, conn: DB):
             "n": len(hrv_with_vals),
         }
 
+    # ── Streak computation ──
+    def _streaks(dates: list[str]):
+        if not dates:
+            return 0, 0, None
+        parsed = [date.fromisoformat(d) for d in dates]
+        longest = 1
+        longest_end = parsed[-1]
+        cur = 1
+        for i in range(1, len(parsed)):
+            if (parsed[i] - parsed[i - 1]).days == 1:
+                cur += 1
+                if cur > longest:
+                    longest = cur
+                    longest_end = parsed[i]
+            else:
+                cur = 1
+        # Current streak: count back from today
+        current = 1
+        for i in range(len(parsed) - 1, 0, -1):
+            if (parsed[i] - parsed[i - 1]).days == 1:
+                current += 1
+            else:
+                break
+        last = parsed[-1]
+        if (today - last).days > 1:
+            current = 0
+        return current, longest, longest_end.isoformat() if longest_end else None
+
+    current_streak, longest_streak, longest_streak_end = _streaks(usage_dates)
+
+    # ── Frequency ──
+    if len(usage_dates) >= 2:
+        span_days = (date.fromisoformat(usage_dates[-1]) - date.fromisoformat(usage_dates[0])).days + 1
+        weekly_avg = round(len(usage_dates) / max(span_days / 7, 1), 1)
+        monthly_avg = round(len(usage_dates) / max(span_days / 30.44, 1), 1)
+    else:
+        weekly_avg = float(len(usage_dates))
+        monthly_avg = float(len(usage_dates))
+
     return {
         "slug": slug,
         "name": tag_row["name"],
@@ -241,6 +406,12 @@ def tag_stats(slug: str, conn: DB):
         "last_used": last_used,
         "avg_gap_days": avg_gap_days,
         "peak_month": peak_month,
+        "current_streak": current_streak,
+        "longest_streak": longest_streak,
+        "longest_streak_end": longest_streak_end,
+        "weekly_avg": weekly_avg,
+        "monthly_avg": monthly_avg,
+        "usage_dates": usage_dates,
         "weekly_sparkline": [{"week": r["week"], "count": r["count"]} for r in weekly],
         "rolling_28d": rolling_28d,
         "mood_impact": _metric_impact("mood"),

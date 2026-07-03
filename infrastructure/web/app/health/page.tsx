@@ -3,11 +3,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { Activity, Moon, Dumbbell, Flame, AlertTriangle } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, ReferenceLine,
 } from "recharts";
 import { format, parseISO, subDays } from "date-fns";
+import { HRContext } from "@/components/HRContext";
+import { injuriesApi, type ActiveSummaryItem, ZONE_LABELS } from "@/lib/injuries-api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -93,13 +96,18 @@ export default function HealthPage() {
     queryFn: () => fetch(`${BASE}/health/trends?start=${start}&end=${end}`).then(r => r.json()),
   });
 
+  const { data: activeInjuries = [] } = useQuery<ActiveSummaryItem[]>({
+    queryKey: ["injuries-active-summary"],
+    queryFn: injuriesApi.activeSummary,
+  });
+
   const fmtDate = (d: string) => format(parseISO(d), "d MMM");
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
       {/* Header */}
       <div className="mb-6">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between mb-4">
           <div>
             <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
               ← Today
@@ -108,36 +116,36 @@ export default function HealthPage() {
             <p className="text-sm text-[#71717A] mt-0.5">Recovery & wellness trends</p>
           </div>
           {/* Period selector */}
-          <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1">
-          {PERIODS.map(p => (
-            <button
-              key={p.days}
-              onClick={() => setDays(p.days)}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                days === p.days ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
+          <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mt-1">
+            {PERIODS.map(p => (
+              <button
+                key={p.days}
+                onClick={() => setDays(p.days)}
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  days === p.days ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
         </div>
-        {/* Sub-nav pills */}
-        <div className="flex gap-2 mt-4">
-          <span className="text-xs px-3 py-1.5 rounded-full bg-white text-[#18181B] border-white font-medium">
-            Overview
+        {/* Sub-nav */}
+        <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mt-4 w-full overflow-x-auto">
+          <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#27272A] text-[#FAFAFA] whitespace-nowrap">
+            <Activity size={13} />Overview
           </span>
-          <Link
-            href="/training"
-            className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors"
-          >
-            Training
+          <Link href="/training" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
+            <Dumbbell size={13} />Training
           </Link>
-          <Link
-            href="/explore/correlations"
-            className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors"
-          >
-            Correlations ✦
+          <Link href="/health/sleep" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
+            <Moon size={13} />Sleep
+          </Link>
+          <Link href="/health/streaks" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
+            <Flame size={13} />Streaks
+          </Link>
+          <Link href="/health/injuries" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
+            <AlertTriangle size={13} />Injuries
           </Link>
         </div>
       </div>
@@ -177,6 +185,34 @@ export default function HealthPage() {
         />
       </div>
 
+      {/* Injury alert banner */}
+      {activeInjuries.length > 0 && (
+        <Link href="/health/injuries" className="block mb-6">
+          <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl px-4 py-3 flex items-center justify-between hover:bg-orange-500/15 transition-colors">
+            <div className="flex items-center gap-3">
+              <span className="text-orange-400 text-base">⚠</span>
+              <div>
+                <p className="text-sm font-medium text-orange-300">
+                  {activeInjuries.filter(i => i.status === "active").length > 0
+                    ? `${activeInjuries.filter(i => i.status === "active").length} active injur${activeInjuries.filter(i => i.status === "active").length === 1 ? "y" : "ies"}`
+                    : `${activeInjuries.length} recovering`}
+                  {activeInjuries.filter(i => i.status === "active").length > 0 && activeInjuries.filter(i => i.status === "recovering").length > 0
+                    ? ` · ${activeInjuries.filter(i => i.status === "recovering").length} recovering`
+                    : ""}
+                </p>
+                <p className="text-xs text-orange-500/80 mt-0.5">
+                  {activeInjuries.slice(0, 2).map(i =>
+                    `${ZONE_LABELS[i.zone] ?? i.zone}${i.side ? ` (${i.side})` : ""} ${i.pain_scale}/10`
+                  ).join(" · ")}
+                  {activeInjuries.length > 2 ? ` · +${activeInjuries.length - 2} more` : ""}
+                </p>
+              </div>
+            </div>
+            <span className="text-orange-500/60 text-xs">View →</span>
+          </div>
+        </Link>
+      )}
+
       {/* HRV Trend */}
       <section className="mb-8">
         <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-4">HRV trend</h2>
@@ -194,6 +230,8 @@ export default function HealthPage() {
           </ResponsiveContainer>
         </div>
       </section>
+
+      <HRContext days={days} />
 
       {/* Sleep */}
       <section className="mb-8">

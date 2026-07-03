@@ -52,12 +52,14 @@ All browser→backend mutations go through Next.js proxy routes (`/api/*`) to av
 - Server-side fetch uses `API_INTERNAL_URL` (localhost on Pi)
 - Client-side reads use `NEXT_PUBLIC_API_URL` (Tailscale IP, baked at build time)
 
-## Tags Column Convention
+## Tags Convention
 
-`days.tags` stores comma-separated structured tags:
+Tags are stored in `day_tags` (join table) and managed via the TagPicker.
+The legacy `days.tags` text column (`work`, `with:Name`) is still present in the DB
+but tags are now the source of truth. Structured tags include:
 - `work` — work day
-- `si:N` — S.I. with satisfaction rating 1–5 (N optional)
-- `with:Name` — person present that day
+- `candy`, `alcohol` — tracked as "negative" tags (clean streak = days without)
+- All other tags (sex, nap, outdoors, social, etc.) are positive — more = better
 
 ## Key Directories
 

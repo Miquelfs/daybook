@@ -1,10 +1,12 @@
 import { fmtDuration } from "@/lib/api";
-import type { SleepData, DailyStats, HRVData } from "@/lib/api";
+import type { SleepData, DailyStats, HRVData, LoadIndexData } from "@/lib/api";
 
 interface Props {
   sleep: SleepData | null;
   stats: DailyStats | null;
   hrv: HRVData | null;
+  loadIndex?: LoadIndexData | null;
+  brief?: string | null;
 }
 
 function Stat({
@@ -35,11 +37,21 @@ function Stat({
   );
 }
 
-export function MorningBrief({ sleep, stats, hrv }: Props) {
+const RECOVERY_COLOR: Record<string, string> = {
+  recovering:  "text-emerald-400 border-emerald-900",
+  balanced:    "text-[#A1A1AA] border-[#27272A]",
+  accumulating:"text-rose-400 border-rose-900",
+};
+
+export function MorningBrief({ sleep, stats, hrv, loadIndex, brief }: Props) {
   const sleepDuration = fmtDuration(sleep?.duration_seconds ?? null);
   const deepPct = sleep?.duration_seconds && sleep.deep_seconds
     ? Math.round((sleep.deep_seconds / sleep.duration_seconds) * 100)
     : null;
+
+  const fatigue = loadIndex?.fatigue_score != null ? Math.round(loadIndex.fatigue_score) : null;
+  const recoveryStatus = loadIndex?.recovery_status ?? null;
+  const recoveryColor = recoveryStatus ? (RECOVERY_COLOR[recoveryStatus] ?? RECOVERY_COLOR.balanced) : null;
 
   return (
     <section>
@@ -66,20 +78,25 @@ export function MorningBrief({ sleep, stats, hrv }: Props) {
         />
       </div>
 
-      {/* Secondary row */}
-      {(sleep?.score || deepPct || sleep?.avg_hrv) && (
-        <div className="mt-4 flex flex-wrap gap-4">
-          {sleep?.score && (
-            <Pill label="Sleep score" value={`${sleep.score}`} />
-          )}
+      {(sleep?.score || deepPct || sleep?.avg_spo2 || stats?.stress_avg || fatigue != null) && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {sleep?.score && <Pill label="Sleep score" value={`${sleep.score}`} />}
           {deepPct && <Pill label="Deep" value={`${deepPct}%`} />}
-          {sleep?.avg_spo2 && (
-            <Pill label="SpO₂" value={`${sleep.avg_spo2}%`} />
-          )}
-          {stats?.stress_avg && (
-            <Pill label="Stress avg" value={`${stats.stress_avg}/100`} />
+          {sleep?.avg_spo2 && <Pill label="SpO₂" value={`${sleep.avg_spo2}%`} />}
+          {stats?.stress_avg && <Pill label="Stress avg" value={`${stats.stress_avg}/100`} />}
+          {fatigue != null && recoveryColor && (
+            <span className={`inline-flex items-center gap-2 text-xs bg-[#18181B] border rounded-full px-3 py-1 ${recoveryColor}`}>
+              <span className="opacity-60">Load</span>
+              <span>{fatigue}/100 · {recoveryStatus}</span>
+            </span>
           )}
         </div>
+      )}
+
+      {brief && (
+        <p className="mt-5 text-sm text-[#A1A1AA] leading-relaxed border-l-2 border-[#F59E0B]/30 pl-3">
+          {brief}
+        </p>
       )}
     </section>
   );

@@ -13,6 +13,7 @@ import { SyncOnLoad } from "@/components/SyncOnLoad";
 import { DaySpendSummary } from "@/components/money/DaySpendSummary";
 import { PhotoOfDay } from "@/components/PhotoOfDay";
 import { ScreenTimeBlock } from "@/components/ScreenTimeBlock";
+import { DayTraining } from "@/components/DayTraining";
 import { format, subYears, parseISO } from "date-fns";
 
 export default async function TodayPage() {
@@ -48,6 +49,8 @@ export default async function TodayPage() {
           stats={day.daily_stats}
           hrv={day.hrv}
         />
+
+        <DayTraining initialPrescription={null} date={today} />
 
         <MovementBlock
           activities={day.activities}

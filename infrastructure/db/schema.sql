@@ -218,7 +218,7 @@ CREATE TABLE IF NOT EXISTS weather (
     precipitation   REAL,           -- mm
     wind_speed_max  REAL,           -- km/h
     weather_code    INTEGER,        -- WMO code
-    condition       TEXT,           -- sunny|cloudy|rainy|stormy|snowy|foggy
+    condition       TEXT,           -- sunny|partly_cloudy|cloudy|rainy|stormy|snowy
     raw_payload     TEXT,
     fetched_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -272,6 +272,30 @@ CREATE TABLE IF NOT EXISTS books (
 CREATE INDEX IF NOT EXISTS idx_books_date_finished ON books(date_finished);
 CREATE INDEX IF NOT EXISTS idx_books_author        ON books(author);
 CREATE INDEX IF NOT EXISTS idx_books_genre         ON books(genre);
+
+-- ─── Restaurants ──────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS restaurants (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    date_visited    TEXT,           -- YYYY-MM-DD, NULL = wishlist
+    city            TEXT,
+    country         TEXT,
+    cuisine         TEXT,           -- e.g. Italian, Tapas, Asian
+    rating_mf       INTEGER,        -- 1–10 (Miquel's rating)
+    rating_ad       INTEGER,        -- 1–10 (Alice's rating)
+    companions      TEXT,           -- free-text companions list
+    google_maps_url TEXT,
+    notes           TEXT,
+    trip_context    TEXT,           -- trip/context label (from Notion "Viatge" or Location field)
+    source          TEXT,           -- 'notion_restaurants' | 'notion_alice' | 'manual'
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_restaurants_date    ON restaurants(date_visited);
+CREATE INDEX IF NOT EXISTS idx_restaurants_city    ON restaurants(city);
+CREATE INDEX IF NOT EXISTS idx_restaurants_cuisine ON restaurants(cuisine);
 
 -- ─── Life in Weeks ────────────────────────────────────────────────────────────
 
@@ -412,7 +436,10 @@ CREATE TABLE IF NOT EXISTS flights (
     landings_day        INTEGER NOT NULL DEFAULT 0,
     landings_night      INTEGER NOT NULL DEFAULT 0,
 
-    notes               TEXT,
+    notes               TEXT,                  -- private operational notes (not exported)
+    remarks             TEXT,                  -- EASA logbook "Remarks" column (exported)
+    landing_rating      INTEGER,              -- 1–10, pilot's own assessment of the landing
+
     created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     FOREIGN KEY (date)     REFERENCES days(date),
@@ -444,3 +471,124 @@ CREATE TABLE IF NOT EXISTS correlation_snapshots (
     UNIQUE(computed_at, metric_a, metric_b, lag, window_days)
 );
 CREATE INDEX IF NOT EXISTS idx_corr_snap_date ON correlation_snapshots(computed_at);
+
+-- ─── Training Analytics (Strava layer) ───────────────────────────────────────
+
+-- Computed + Garmin-native per-activity metrics. Extends activities via FK.
+-- Populated by domains/health/compute_activity_metrics.py
+CREATE TABLE IF NOT EXISTS activity_detail (
+    activity_id          TEXT PRIMARY KEY,
+    sport                TEXT NOT NULL,          -- run | ride | swim | other
+    sub_sport            TEXT,                   -- e.g. trail_running, lap_swimming
+    avg_pace_s_per_km    REAL,
+    avg_cadence          REAL,
+    normalized_power_w   REAL,                   -- 3.4: 30s rolling power ^ 4 ^ 0.25
+    intensity_factor     REAL,                   -- NP / FTP
+    variability_index    REAL,                   -- NP / avg_power (pacing smoothness)
+    efficiency_factor    REAL,                   -- NP/avgHR or speed/avgHR
+    decoupling_pct       REAL,                   -- aerobic decoupling (EF drift, < 5% = durable)
+    relative_effort      REAL,                   -- TRIMP-style, comparison only
+    hr_tss               REAL,                   -- hrTSS fallback when no power
+    zones_json           TEXT,                   -- {"z1_s":..., "z2_s":..., "z3_s":..., "z4_s":..., "z5_s":...}
+    garmin_aerobic_te    REAL,                   -- Garmin training effect (aerobic)
+    garmin_anaerobic_te  REAL,                   -- Garmin training effect (anaerobic)
+    garmin_activity_load REAL,                   -- Garmin's own activity load
+    computed_at          TEXT,
+    raw_detail_json      TEXT,                   -- raw get_activity_details payload
+    FOREIGN KEY (activity_id) REFERENCES activities(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_detail_sport ON activity_detail(sport);
+
+-- Laps / splits per activity
+CREATE TABLE IF NOT EXISTS activity_split (
+    activity_id        TEXT NOT NULL,
+    split_index        INTEGER NOT NULL,
+    type               TEXT,                     -- auto_km | manual_lap | interval
+    distance_m         REAL,
+    time_s             REAL,
+    avg_pace_s_per_km  REAL,
+    gap_s_per_km       REAL,
+    avg_hr             INTEGER,
+    avg_power_w        REAL,
+    avg_cadence        REAL,
+    elev_gain_m        REAL,
+    avg_grade          REAL,
+    PRIMARY KEY (activity_id, split_index),
+    FOREIGN KEY (activity_id) REFERENCES activities(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_split_id ON activity_split(activity_id);
+
+-- MMP / best-effort curve points (power by duration, pace by distance)
+CREATE TABLE IF NOT EXISTS best_effort (
+    activity_id  TEXT NOT NULL,
+    date         TEXT NOT NULL,
+    sport        TEXT NOT NULL,
+    channel      TEXT NOT NULL,                  -- power | pace | hr
+    bucket       INTEGER NOT NULL,               -- seconds (power/hr) or metres (pace)
+    value        REAL NOT NULL,
+    PRIMARY KEY (activity_id, channel, bucket),
+    FOREIGN KEY (date) REFERENCES days(date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_best_effort_sport_channel ON best_effort(sport, channel, bucket);
+CREATE INDEX IF NOT EXISTS idx_best_effort_date          ON best_effort(date);
+
+-- Daily CTL/ATL/TSB output (Fitness & Freshness)
+-- Populated by domains/health/compute_training_load.py
+CREATE TABLE IF NOT EXISTS training_load_daily (
+    date       TEXT NOT NULL,
+    sport      TEXT NOT NULL,                    -- run | ride | swim | combined
+    daily_tss  REAL NOT NULL DEFAULT 0,
+    ctl        REAL,                             -- chronic training load (42d EWMA)
+    atl        REAL,                             -- acute training load (7d EWMA)
+    tsb        REAL,                             -- form = ctl(yesterday) - atl(yesterday)
+    ramp_rate  REAL,                             -- weekly ΔCTL (> 7 = injury risk flag)
+    PRIMARY KEY (date, sport),
+    FOREIGN KEY (date) REFERENCES days(date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_training_load_sport ON training_load_daily(sport, date);
+
+-- Athlete threshold zones, versioned by valid_from date
+-- Allows historical recalculation against zones true on that date
+CREATE TABLE IF NOT EXISTS athlete_zones (
+    valid_from               TEXT NOT NULL,
+    sport                    TEXT NOT NULL,      -- run | ride | swim
+    max_hr                   INTEGER,
+    threshold_hr             INTEGER,
+    ftp_w                    REAL,               -- bike functional threshold power
+    threshold_pace_s_per_km  REAL,               -- run threshold pace
+    css_pace_s_per_100m      REAL,               -- swim critical swim speed
+    zones_json               TEXT NOT NULL,      -- zone boundaries [{name,min_hr,max_hr}]
+    PRIMARY KEY (valid_from, sport)
+);
+
+-- Training goals (Horizon 3: goals with teeth)
+CREATE TABLE IF NOT EXISTS training_goal (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    sport        TEXT,
+    metric       TEXT,                           -- distance | time | tss | sessions
+    period       TEXT,                           -- week | month | year
+    target       REAL,
+    period_start TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+-- Garmin physiological metrics over time (VO2max, readiness, acute:chronic ratio)
+CREATE TABLE IF NOT EXISTS garmin_physio (
+    date                      TEXT PRIMARY KEY,
+    vo2max_run                REAL,
+    vo2max_bike               REAL,
+    training_readiness_score  INTEGER,
+    acute_load                REAL,
+    chronic_load              REAL,
+    acute_chronic_ratio       REAL,
+    training_status           TEXT,
+    load_focus_json           TEXT,              -- Garmin load focus breakdown
+    raw_payload               TEXT,
+    FOREIGN KEY (date) REFERENCES days(date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_garmin_physio_date ON garmin_physio(date);

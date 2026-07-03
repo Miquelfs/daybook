@@ -15,16 +15,17 @@ interface Props {
   start?: string;
   end?: string;
   category?: string;
+  account?: string;
   limit?: number;
   showDate?: boolean;
 }
 
-export function TransactionList({ start, end, category, limit = 50, showDate = true }: Props) {
+export function TransactionList({ start, end, category, account, limit = 50, showDate = true }: Props) {
   const qc = useQueryClient();
 
   const { data: transactions = [], isLoading } = useQuery({
-    queryKey: ["money", "transactions", start, end, category, limit],
-    queryFn: () => moneyApi.transactions({ start, end, category, limit }),
+    queryKey: ["money", "transactions", start, end, category, account, limit],
+    queryFn: () => moneyApi.transactions({ start, end, category, account, limit }),
   });
 
   const { data: meta } = useQuery({
@@ -85,6 +86,7 @@ function TransactionRow({
 
   const emoji = CATEGORY_EMOJI[t.category ?? ""] ?? "💳";
   const isPositive = t.amount >= 0;
+  const isTransfer = t.transaction_type === "Transfer";
 
   if (editing) {
     return (
@@ -191,12 +193,12 @@ function TransactionRow({
   }
 
   return (
-    <div className="group flex items-center gap-3 py-2">
+    <div className={`group flex items-center gap-3 py-2 ${isTransfer ? "opacity-50" : ""}`}>
       <span className="text-base w-6 text-center shrink-0">{emoji}</span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-[#D4D4D8] truncate">{t.name}</p>
+        <p className={`text-sm truncate ${isTransfer ? "text-[#71717A]" : "text-[#D4D4D8]"}`}>{t.name}</p>
         <p className="text-xs text-[#52525B] truncate">
-          {[showDate ? t.date : null, t.subcategory].filter(Boolean).join(" · ")}
+          {[showDate ? t.date : null, t.subcategory, isTransfer ? "internal transfer" : null].filter(Boolean).join(" · ")}
         </p>
       </div>
       {/* Account pill */}
@@ -208,35 +210,44 @@ function TransactionRow({
           </span>
         );
       })()}
-      <span className={`text-sm tabular-nums shrink-0 ${isPositive ? "text-[#22C55E]" : "text-[#A1A1AA]"}`}>
+      <span className={`text-sm tabular-nums shrink-0 ${
+        isTransfer ? "text-[#3F3F46]" : isPositive ? "text-[#22C55E]" : "text-[#A1A1AA]"
+      }`}>
         {isPositive ? "+" : "-"}{fmtAmount(t.amount)}
       </span>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+      <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
         <button
           onClick={() => setEditing(true)}
-          className="text-[#52525B] hover:text-[#A1A1AA] transition-colors p-1"
+          className="text-[#3F3F46] hover:text-[#A1A1AA] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
+          aria-label="Edit"
         >
-          <Pencil size={13} />
+          <Pencil size={14} />
         </button>
         {confirming ? (
           <>
             <button
               onClick={() => del.mutate()}
-              className="text-[#EF4444] hover:text-[#FCA5A5] transition-colors p-1"
+              className="text-[#EF4444] hover:text-[#FCA5A5] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
               disabled={del.isPending}
+              aria-label="Confirm delete"
             >
-              <Check size={13} />
+              <Check size={14} />
             </button>
-            <button onClick={() => setConfirming(false)} className="text-[#52525B] hover:text-[#A1A1AA] transition-colors p-1">
-              <X size={13} />
+            <button
+              onClick={() => setConfirming(false)}
+              className="text-[#52525B] hover:text-[#A1A1AA] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
+              aria-label="Cancel"
+            >
+              <X size={14} />
             </button>
           </>
         ) : (
           <button
             onClick={() => setConfirming(true)}
-            className="text-[#52525B] hover:text-[#EF4444] transition-colors p-1"
+            className="text-[#3F3F46] hover:text-[#EF4444] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
+            aria-label="Delete"
           >
-            <Trash2 size={13} />
+            <Trash2 size={14} />
           </button>
         )}
       </div>

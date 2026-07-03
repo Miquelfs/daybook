@@ -5,6 +5,13 @@ const API =
   process.env.NEXT_PUBLIC_API_URL ??
   "http://localhost:8000";
 
+export async function GET(req: NextRequest) {
+  const qs = req.nextUrl.searchParams.toString();
+  const upstream = await fetch(`${API}/books${qs ? `?${qs}` : ""}`, { cache: "no-store" });
+  const data = await upstream.json();
+  return NextResponse.json(data, { status: upstream.status });
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const upstream = await fetch(`${API}/books`, {

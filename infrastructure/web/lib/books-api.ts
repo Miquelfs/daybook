@@ -105,9 +105,10 @@ export const booksApi = {
   stats: (year?: number | null): Promise<BooksStats> =>
     get(`/books/stats${year ? `?year=${year}` : ""}`),
 
-  list: (params?: { year?: number; genre?: string; author?: string }): Promise<Book[]> => {
+  list: (params?: { year?: number; date?: string; genre?: string; author?: string }): Promise<Book[]> => {
     const qs = new URLSearchParams();
-    if (params?.year) qs.set("year", String(params.year));
+    if (params?.date) qs.set("date", params.date);
+    else if (params?.year) qs.set("year", String(params.year));
     if (params?.genre) qs.set("genre", params.genre);
     if (params?.author) qs.set("author", params.author);
     const q = qs.toString();

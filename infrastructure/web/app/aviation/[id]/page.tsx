@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -66,9 +66,13 @@ export default function FlightDetailPage() {
   const qc = useQueryClient();
   const [notes, setNotes] = useState<string | null>(null);
   const [editingNotes, setEditingNotes] = useState(false);
+  const [remarks, setRemarks] = useState<string | null>(null);
+  const [editingRemarks, setEditingRemarks] = useState(false);
   const [editingOps, setEditingOps] = useState(false);
   const [editingTimes, setEditingTimes] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [landingRating, setLandingRating] = useState<number | null>(null);
+  const [ratingSaved, setRatingSaved] = useState(false);
 
   // Operational data edit state
   const [epaxTotal, setEpaxTotal] = useState("");
@@ -119,6 +123,14 @@ export default function FlightDetailPage() {
     },
   });
 
+  const { mutate: saveRemarks, isPending: savingRemarks } = useMutation({
+    mutationFn: () => api.patchFlight(id, { remarks: remarks ?? "" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flight", id] });
+      setEditingRemarks(false);
+    },
+  });
+
   const { mutate: saveOps, isPending: savingOps } = useMutation({
     mutationFn: () => {
       const toInt = (s: string) => s !== "" ? parseInt(s, 10) : undefined;
@@ -166,6 +178,21 @@ export default function FlightDetailPage() {
       qc.invalidateQueries({ queryKey: ["flight", id] });
       qc.invalidateQueries({ queryKey: ["flightStats"] });
       setEditingTimes(false);
+    },
+  });
+
+  useEffect(() => {
+    if (data?.landing_rating != null) {
+      setLandingRating(data.landing_rating);
+    }
+  }, [data?.landing_rating]);
+
+  const { mutate: saveRating } = useMutation({
+    mutationFn: (rating: number) => api.patchFlight(id, { landing_rating: rating }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flight", id] });
+      setRatingSaved(true);
+      setTimeout(() => setRatingSaved(false), 2000);
     },
   });
 
@@ -552,8 +579,90 @@ export default function FlightDetailPage() {
         </>
       )}
 
-      {/* Notes */}
+      {/* Landing Quality Rating — only shown when pilot actually landed */}
+      {((f.landings_day ?? 0) + (f.landings_night ?? 0) > 0) && (
+        <div className="bg-[#18181B] rounded-lg p-4 mb-3">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-medium text-[#71717A] uppercase tracking-wider">Landing Quality</p>
+            {ratingSaved && (
+              <span className="text-xs text-emerald-400 transition-opacity">✓ saved</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+              <button
+                key={n}
+                onClick={() => {
+                  setLandingRating(n);
+                  saveRating(n);
+                }}
+                className="flex items-center justify-center w-7 h-7 rounded-full text-xs font-mono transition-colors focus:outline-none"
+                style={{
+                  background: landingRating != null && n <= landingRating ? "#F59E0B" : "#27272A",
+                  color: landingRating != null && n <= landingRating ? "#09090B" : "#71717A",
+                }}
+              >
+                {n}
+              </button>
+            ))}
+            {landingRating != null && (
+              <span className="ml-2 text-sm font-semibold" style={{ color: "#F59E0B" }}>
+                {landingRating}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Remarks — exported in EASA logbook */}
+      <Section title="Remarks" icon={<FileText size={14} />}>
+        <p className="text-xs text-[#52525B] mb-2">Exported in logbook (EASA column 26)</p>
+        {editingRemarks ? (
+          <div className="space-y-2">
+            <textarea
+              className="w-full bg-[#09090B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-amber-500 resize-none"
+              rows={3}
+              value={remarks ?? ""}
+              onChange={e => setRemarks(e.target.value)}
+              autoFocus
+              placeholder="e.g. CAT III approach, crosswind 18kt…"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => saveRemarks()}
+                disabled={savingRemarks}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-xs rounded-lg transition-colors"
+              >
+                {savingRemarks ? <Loader size={12} className="animate-spin" /> : null}
+                Save
+              </button>
+              <button
+                onClick={() => { setEditingRemarks(false); setRemarks(null); }}
+                className="px-3 py-1.5 text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            className="cursor-pointer group"
+            onClick={() => { setRemarks(f.remarks ?? ""); setEditingRemarks(true); }}
+          >
+            {f.remarks ? (
+              <p className="text-sm text-[#A1A1AA] group-hover:text-[#FAFAFA] transition-colors">{f.remarks}</p>
+            ) : (
+              <p className="text-sm text-[#52525B] group-hover:text-[#71717A] transition-colors italic">
+                Click to add remarks…
+              </p>
+            )}
+          </div>
+        )}
+      </Section>
+
+      {/* Notes — private, not exported */}
       <Section title="Notes" icon={<FileText size={14} />}>
+        <p className="text-xs text-[#52525B] mb-2">Private — not exported</p>
         {editingNotes ? (
           <div className="space-y-2">
             <textarea

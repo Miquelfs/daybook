@@ -16,12 +16,17 @@ from fastapi.responses import StreamingResponse
 
 from infrastructure.api.db_money import get_money_db
 from infrastructure.api.models.money import (
-    AccountBalance, AnomalyReport, BudgetAlert,
-    CategoryBudget, CategoryMeta, CategoryMonthSpend, CategorySpikeAnomaly, CategoryStats, CategoryTrendsData,
+    AccountBalance, AllocationSlice, AnomalyReport, BudgetAlert,
+    CategoryBudget, CategoryMeta, CategoryMonthSpend, CategorySpikeAnomaly, CategoryStats, CategoryTrendsData, SubcategoryBreakdown,
     DaySpend, ForecastData, HistoricalData,
+    HoldingCreate, HoldingHistoryPoint, HoldingOut, HoldingPatch,
+    InvestmentPlanCreate, InvestmentPlanOut, InvestmentPlanPatch,
+    IsinCandidate, IsinLookupResult,
     LargeTxAnomaly, MerchantSuggestion, MoneyMeta,
     MonthDetail, MonthHistory, MonthOverview, MonthSummary,
-    PortfolioSummary, SavingsStreak, SpendingPatterns, TrendsData,
+    MoverOut, PlanExecutionOut, PlanRunResult,
+    PortfolioHistoryPoint, PortfolioOverview, PortfolioSummary,
+    SavingsStreak, SpendingPatterns, TrendsData,
     TransactionCreate, TransactionOut, TransactionPatch,
     WeekSpend,
 )
@@ -85,14 +90,22 @@ def create_transaction(body: TransactionCreate, conn: DB):
         stored_amount = abs(body.amount) if body.sign == "+" else -abs(body.amount)
 
     conn.execute(
-        """INSERT INTO transactions
+        """INSERT OR IGNORE INTO transactions
              (id, source, notion_id, date, name, amount, account, category,
-              subcategory, transaction_type, notes)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+              subcategory, transaction_type, notes, source_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (txn_id, "local", None, body.date, body.name, stored_amount,
-         body.account, body.category, body.subcategory, txn_type, body.notes),
+         body.account, body.category, body.subcategory, txn_type, body.notes,
+         body.source_id),
     )
     conn.commit()
+    # If source_id already exists, IGNORE silently — return the existing row
+    if body.source_id:
+        existing = conn.execute(
+            "SELECT * FROM transactions WHERE source_id=?", (body.source_id,)
+        ).fetchone()
+        if existing:
+            return _row_to_txn(existing)
     row = conn.execute("SELECT * FROM transactions WHERE id=?", (txn_id,)).fetchone()
     return _row_to_txn(row)
 
@@ -166,6 +179,12 @@ def patch_transaction(txn_id: str, body: TransactionPatch, conn: DB):
     # Editing any field marks the row as locally owned (Notion sync won't overwrite it)
     updates["source"] = "local"
     updates["updated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    _WRITABLE_COLS = {
+        "date", "name", "amount", "category", "subcategory", "account",
+        "notes", "transaction_type", "source", "updated_at",
+    }
+    updates = {k: v for k, v in updates.items() if k in _WRITABLE_COLS}
 
     set_clause = ", ".join(f"{k} = ?" for k in updates)
     conn.execute(
@@ -797,6 +816,11 @@ def get_category_stats(
 ):
     today = date.today()
     current_month = today.strftime("%Y-%m")
+    start_month = today.replace(day=1)
+    from datetime import timedelta
+    for _ in range(months - 1):
+        start_month = (start_month - timedelta(days=1)).replace(day=1)
+    start_str = start_month.strftime("%Y-%m")
 
     rows = conn.execute(
         """SELECT category,
@@ -807,10 +831,34 @@ def get_category_stats(
                   COUNT(DISTINCT strftime('%Y-%m', date)) AS num_months
            FROM transactions
            WHERE deleted_at IS NULL AND transaction_type='Expense'
-             AND strftime('%Y-%m', date) < ?
+             AND strftime('%Y-%m', date) >= ? AND strftime('%Y-%m', date) < ?
            GROUP BY category ORDER BY total DESC""",
-        (current_month,)
+        (start_str, current_month)
     ).fetchall()
+
+    # Subcategory breakdown per category
+    sub_rows = conn.execute(
+        """SELECT category, subcategory,
+                  COALESCE(-SUM(amount), 0) AS total,
+                  COUNT(*) AS cnt
+           FROM transactions
+           WHERE deleted_at IS NULL AND transaction_type='Expense'
+             AND subcategory IS NOT NULL AND subcategory != ''
+             AND strftime('%Y-%m', date) >= ? AND strftime('%Y-%m', date) < ?
+           GROUP BY category, subcategory ORDER BY total DESC""",
+        (start_str, current_month)
+    ).fetchall()
+
+    subs_by_cat: dict[str, list[SubcategoryBreakdown]] = {}
+    for s in sub_rows:
+        cat = s["category"] or "Other"
+        if cat not in subs_by_cat:
+            subs_by_cat[cat] = []
+        subs_by_cat[cat].append(SubcategoryBreakdown(
+            subcategory=s["subcategory"],
+            total=round(s["total"], 2),
+            count=s["cnt"],
+        ))
 
     grand_total = sum(r["total"] for r in rows) or 1.0
 
@@ -827,6 +875,7 @@ def get_category_stats(
             min_tx=round(r["min_tx"], 2),
             max_tx=round(r["max_tx"], 2),
             pct_of_total=round(total / grand_total * 100, 1),
+            subcategories=subs_by_cat.get(cat, []),
         ))
 
     return result
@@ -959,5 +1008,722 @@ def get_anomalies(
         month=month,
         large_transactions=large_txns,
         category_spikes=spikes,
+    )
+
+
+@router.get("/daily-totals")
+def daily_totals(
+    conn: DB,
+    start: str = Query(...),
+    end: str = Query(...),
+):
+    """
+    Per-day spend totals for the week-charts view.
+    Returns [{date, total_spend, by_category: {cat: amount}}] for each day in [start, end].
+    Only expense transactions (amount < 0) are counted.
+    """
+    from datetime import datetime, timedelta as td
+
+    rows = conn.execute(
+        """
+        SELECT date,
+               ABS(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END)) AS total_spend,
+               category
+        FROM transactions
+        WHERE date BETWEEN ? AND ?
+          AND deleted_at IS NULL
+          AND transaction_type NOT IN ('income', 'transfer', 'finance')
+        GROUP BY date, category
+        ORDER BY date
+        """,
+        (start, end),
+    ).fetchall()
+
+    # Build spine
+    d0 = datetime.strptime(start, "%Y-%m-%d").date()
+    d1 = datetime.strptime(end, "%Y-%m-%d").date()
+    dates = []
+    cur = d0
+    while cur <= d1:
+        dates.append(cur.isoformat())
+        cur += td(days=1)
+
+    # Aggregate by date
+    by_date: dict[str, dict] = {d: {"date": d, "total_spend": 0.0, "by_category": {}} for d in dates}
+    for r in rows:
+        dt = r["date"]
+        if dt not in by_date:
+            continue
+        cat = r["category"] or "Other"
+        spend = round(float(r["total_spend"] or 0), 2)
+        by_date[dt]["by_category"][cat] = spend
+        by_date[dt]["total_spend"] = round(by_date[dt]["total_spend"] + spend, 2)
+
+    return list(by_date.values())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Investment Portfolio (Track A-I)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _slugify(text: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def _latest_price_row(conn: sqlite3.Connection, ticker: str) -> Optional[sqlite3.Row]:
+    return conn.execute(
+        """SELECT date, close_price_eur FROM price_history
+           WHERE ticker = ? ORDER BY date DESC LIMIT 1""",
+        (ticker,),
+    ).fetchone()
+
+
+def _price_on_or_before(conn: sqlite3.Connection, ticker: str, on_date: str) -> Optional[float]:
+    row = conn.execute(
+        """SELECT close_price_eur FROM price_history
+           WHERE ticker = ? AND date <= ?
+           ORDER BY date DESC LIMIT 1""",
+        (ticker, on_date),
+    ).fetchone()
+    return row["close_price_eur"] if row else None
+
+
+def _holding_row_to_out(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    total_portfolio_value: Optional[float] = None,
+) -> HoldingOut:
+    """Enrich a raw holdings row with live-computed price/pnl fields."""
+    ticker = row["ticker"]
+    qty = row["quantity"]
+    cost_basis = row["cost_basis_eur"]
+
+    latest = _latest_price_row(conn, ticker)
+    current_price = latest["close_price_eur"] if latest else None
+    price_as_of = latest["date"] if latest else None
+    market_value = current_price * qty if current_price is not None else None
+
+    # Day change: latest vs previous available close
+    day_change_eur = None
+    day_change_pct = None
+    if latest:
+        prev = conn.execute(
+            """SELECT close_price_eur FROM price_history
+               WHERE ticker = ? AND date < ?
+               ORDER BY date DESC LIMIT 1""",
+            (ticker, latest["date"]),
+        ).fetchone()
+        if prev and prev["close_price_eur"]:
+            prev_price = prev["close_price_eur"]
+            day_change_eur = (current_price - prev_price) * qty
+            day_change_pct = (current_price / prev_price - 1.0) * 100.0
+
+    # YTD change
+    ytd_change_pct = None
+    if latest:
+        year_start = latest["date"][:4] + "-01-01"
+        ytd_row = conn.execute(
+            """SELECT close_price_eur FROM price_history
+               WHERE ticker = ? AND date >= ?
+               ORDER BY date ASC LIMIT 1""",
+            (ticker, year_start),
+        ).fetchone()
+        if ytd_row and ytd_row["close_price_eur"]:
+            ytd_change_pct = (current_price / ytd_row["close_price_eur"] - 1.0) * 100.0
+
+    unrealized_pnl_eur = None
+    unrealized_pnl_pct = None
+    if market_value is not None and cost_basis is not None and cost_basis > 0:
+        unrealized_pnl_eur = market_value - cost_basis
+        unrealized_pnl_pct = (market_value / cost_basis - 1.0) * 100.0
+
+    allocation_pct = None
+    if total_portfolio_value and total_portfolio_value > 0 and market_value is not None:
+        allocation_pct = market_value / total_portfolio_value * 100.0
+
+    return HoldingOut(
+        id=row["id"],
+        account=row["account"],
+        ticker=ticker,
+        isin=row["isin"] if "isin" in row.keys() else None,
+        name=row["name"],
+        asset_class=row["asset_class"],
+        currency=row["currency"],
+        quantity=qty,
+        cost_basis_eur=cost_basis,
+        first_bought_at=row["first_bought_at"],
+        notes=row["notes"],
+        is_active=bool(row["is_active"]),
+        current_price_eur=current_price,
+        market_value_eur=market_value,
+        unrealized_pnl_eur=unrealized_pnl_eur,
+        unrealized_pnl_pct=unrealized_pnl_pct,
+        day_change_eur=day_change_eur,
+        day_change_pct=day_change_pct,
+        ytd_change_pct=ytd_change_pct,
+        price_as_of=price_as_of,
+        allocation_pct=allocation_pct,
+    )
+
+
+@router.get("/portfolio/isin-lookup", response_model=IsinLookupResult)
+def isin_lookup(isin: str = Query(..., min_length=12, max_length=12)):
+    """Resolve an ISIN to yfinance-compatible ticker candidates via OpenFIGI (free, no key).
+
+    Preferred exchanges are ranked first so the user sees a sensible default.
+    """
+    import re
+    import requests
+
+    isin_up = isin.upper().strip()
+    if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}[0-9]", isin_up):
+        raise HTTPException(status_code=400, detail="Invalid ISIN format")
+
+    try:
+        resp = requests.post(
+            "https://api.openfigi.com/v3/mapping",
+            json=[{"idType": "ID_ISIN", "idValue": isin_up}],
+            headers={"Content-Type": "application/json"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"OpenFIGI request failed: {e}") from e
+
+    candidates: list[IsinCandidate] = []
+    if data and isinstance(data, list) and data[0].get("data"):
+        # Preferred exchange codes → yfinance suffix map (major EU + US)
+        EXCHANGE_MAP = {
+            "GY": ".DE", "GR": ".DE", "GF": ".F", "GM": ".MU", "GD": ".DU",  # Germany
+            "SW": ".SW",  # Switzerland
+            "SM": ".MC", "SQ": ".MC",  # Spain
+            "IX": ".IR",  # Ireland
+            "FP": ".PA",  # Paris (Euronext)
+            "NA": ".AS",  # Amsterdam
+            "BB": ".BR",  # Brussels
+            "IM": ".MI",  # Milan
+            "LN": ".L",   # London
+            "PL": ".LS",  # Lisbon
+            "US": "",     # US → no suffix
+            "UN": "",     # NYSE
+            "UW": "",     # Nasdaq
+            "UP": "",
+        }
+        for item in data[0]["data"]:
+            ticker = item.get("ticker")
+            if not ticker:
+                continue
+            exch = item.get("exchCode")
+            suffix = EXCHANGE_MAP.get(exch)
+            if suffix is None:
+                continue  # unknown exchange — skip so we don't send junk to yfinance
+            yf_ticker = f"{ticker}{suffix}"
+            candidates.append(IsinCandidate(
+                ticker=yf_ticker,
+                name=item.get("name") or item.get("securityDescription"),
+                exchange=item.get("exchCode"),
+                exchange_code=exch,
+                currency=item.get("currency"),
+            ))
+
+        # Rank: EUR-quoted first, then Germany (XETRA), then anything else
+        def _rank(c: IsinCandidate) -> tuple:
+            eur = 0 if (c.currency or "").upper() == "EUR" else 1
+            de = 0 if c.exchange_code in ("GY", "GR") else 1
+            return (eur, de)
+        candidates.sort(key=_rank)
+
+    return IsinLookupResult(isin=isin_up, candidates=candidates)
+
+
+@router.get("/portfolio/holdings", response_model=list[HoldingOut])
+def list_holdings(
+    conn: DB,
+    account: Optional[str] = Query(None),
+    asset_class: Optional[str] = Query(None),
+    include_inactive: bool = Query(False),
+):
+    where = []
+    params: list = []
+    if not include_inactive:
+        where.append("is_active = 1")
+    if account:
+        where.append("account = ?")
+        params.append(account)
+    if asset_class:
+        where.append("asset_class = ?")
+        params.append(asset_class)
+    sql = "SELECT * FROM holdings"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY name"
+
+    rows = conn.execute(sql, params).fetchall()
+
+    # Compute total once so allocation_pct is stable across the list
+    enriched_prelim = [_holding_row_to_out(conn, r) for r in rows]
+    total = sum((h.market_value_eur or 0.0) for h in enriched_prelim)
+
+    return [_holding_row_to_out(conn, r, total) for r in rows]
+
+
+@router.post("/portfolio/holdings", response_model=HoldingOut, status_code=201)
+def create_holding(body: HoldingCreate, conn: DB):
+    holding_id = f"{_slugify(body.account)}-{_slugify(body.ticker)}"
+    existing = conn.execute("SELECT id FROM holdings WHERE id = ?", (holding_id,)).fetchone()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Holding {holding_id} already exists")
+
+    conn.execute(
+        """INSERT INTO holdings (id, account, ticker, isin, name, asset_class, currency,
+                                 quantity, cost_basis_eur, first_bought_at, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (holding_id, body.account, body.ticker.upper(),
+         body.isin.upper() if body.isin else None,
+         body.name, body.asset_class,
+         body.currency.upper(), body.quantity, body.cost_basis_eur,
+         body.first_bought_at, body.notes),
+    )
+    conn.commit()
+
+    row = conn.execute("SELECT * FROM holdings WHERE id = ?", (holding_id,)).fetchone()
+    return _holding_row_to_out(conn, row)
+
+
+@router.patch("/portfolio/holdings/{holding_id}", response_model=HoldingOut)
+def patch_holding(holding_id: str, body: HoldingPatch, conn: DB):
+    existing = conn.execute("SELECT * FROM holdings WHERE id = ?", (holding_id,)).fetchone()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Holding not found")
+
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        return _holding_row_to_out(conn, existing)
+
+    if "is_active" in fields:
+        fields["is_active"] = 1 if fields["is_active"] else 0
+
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    params = list(fields.values()) + [holding_id]
+    conn.execute(
+        f"UPDATE holdings SET {set_clause}, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+        params,
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM holdings WHERE id = ?", (holding_id,)).fetchone()
+    return _holding_row_to_out(conn, row)
+
+
+@router.delete("/portfolio/holdings/{holding_id}")
+def delete_holding(holding_id: str, conn: DB):
+    """Soft-close: set is_active = 0. Keeps historical snapshots intact."""
+    existing = conn.execute("SELECT id FROM holdings WHERE id = ?", (holding_id,)).fetchone()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Holding not found")
+    conn.execute("UPDATE holdings SET is_active = 0 WHERE id = ?", (holding_id,))
+    conn.commit()
+    return {"ok": True, "id": holding_id}
+
+
+@router.get("/portfolio/overview", response_model=PortfolioOverview)
+def portfolio_overview(conn: DB):
+    """Full investor dashboard payload."""
+    holding_rows = conn.execute("SELECT * FROM holdings WHERE is_active = 1 ORDER BY name").fetchall()
+    enriched_prelim = [_holding_row_to_out(conn, r) for r in holding_rows]
+    total_value = sum((h.market_value_eur or 0.0) for h in enriched_prelim)
+
+    # Rebuild with allocation now that total is known
+    holdings = [_holding_row_to_out(conn, r, total_value) for r in holding_rows]
+
+    # Aggregate totals
+    total_cost_basis = sum((h.cost_basis_eur or 0.0) for h in holdings if h.cost_basis_eur)
+    total_pnl = total_value - total_cost_basis if total_cost_basis > 0 else 0.0
+    total_pnl_pct = (total_value / total_cost_basis - 1.0) * 100.0 if total_cost_basis > 0 else 0.0
+
+    day_change = sum((h.day_change_eur or 0.0) for h in holdings)
+    prev_value = total_value - day_change
+    day_change_pct = (day_change / prev_value * 100.0) if prev_value > 0 else 0.0
+
+    # YTD change via snapshot on first day of current year (or fallback)
+    if holdings:
+        as_of = max((h.price_as_of for h in holdings if h.price_as_of), default=None) or date.today().isoformat()
+    else:
+        as_of = date.today().isoformat()
+
+    ytd_start = as_of[:4] + "-01-01"
+    ytd_snapshot = conn.execute(
+        """SELECT SUM(value_eur) AS v FROM holding_snapshots
+           WHERE date >= ? AND date = (SELECT MIN(date) FROM holding_snapshots WHERE date >= ?)""",
+        (ytd_start, ytd_start),
+    ).fetchone()
+    ytd_pnl = 0.0
+    ytd_pnl_pct = 0.0
+    if ytd_snapshot and ytd_snapshot["v"]:
+        ytd_start_value = ytd_snapshot["v"]
+        ytd_pnl = total_value - ytd_start_value
+        ytd_pnl_pct = (total_value / ytd_start_value - 1.0) * 100.0 if ytd_start_value > 0 else 0.0
+
+    def _slice(bucket_fn, holdings_list):
+        totals: dict[str, float] = {}
+        for h in holdings_list:
+            if h.market_value_eur is None:
+                continue
+            key = bucket_fn(h)
+            totals[key] = totals.get(key, 0.0) + h.market_value_eur
+        return sorted(
+            [AllocationSlice(label=k, value_eur=round(v, 2),
+                             pct=round(v / total_value * 100.0, 2) if total_value > 0 else 0.0)
+             for k, v in totals.items()],
+            key=lambda s: s.value_eur, reverse=True,
+        )
+
+    alloc_class = _slice(lambda h: h.asset_class, holdings)
+    alloc_account = _slice(lambda h: h.account, holdings)
+    alloc_currency = _slice(lambda h: h.currency, holdings)
+
+    # Movers today
+    movers = [h for h in holdings if h.day_change_pct is not None]
+    up = sorted([h for h in movers if h.day_change_pct > 0],
+                key=lambda h: h.day_change_pct, reverse=True)[:3]
+    down = sorted([h for h in movers if h.day_change_pct < 0],
+                  key=lambda h: h.day_change_pct)[:3]
+
+    def _mover(h: HoldingOut) -> MoverOut:
+        return MoverOut(
+            holding_id=h.id, ticker=h.ticker, name=h.name,
+            day_change_eur=round(h.day_change_eur or 0.0, 2),
+            day_change_pct=round(h.day_change_pct or 0.0, 2),
+        )
+
+    top_holdings = sorted(
+        [h for h in holdings if h.market_value_eur is not None],
+        key=lambda h: h.market_value_eur or 0.0, reverse=True,
+    )[:5]
+
+    # Liquid accounts (from transactions, unchanged logic)
+    liquid = _compute_liquid_accounts(conn)
+
+    return PortfolioOverview(
+        as_of=as_of,
+        total_value_eur=round(total_value, 2),
+        total_cost_basis_eur=round(total_cost_basis, 2),
+        total_pnl_eur=round(total_pnl, 2),
+        total_pnl_pct=round(total_pnl_pct, 2),
+        day_change_eur=round(day_change, 2),
+        day_change_pct=round(day_change_pct, 2),
+        ytd_pnl_eur=round(ytd_pnl, 2),
+        ytd_pnl_pct=round(ytd_pnl_pct, 2),
+        allocation_by_class=alloc_class,
+        allocation_by_account=alloc_account,
+        allocation_by_currency=alloc_currency,
+        top_movers_up=[_mover(h) for h in up],
+        top_movers_down=[_mover(h) for h in down],
+        top_holdings=top_holdings,
+        holdings_count=len(holdings),
+        liquid_accounts=liquid,
+    )
+
+
+def _compute_liquid_accounts(conn: sqlite3.Connection) -> list[AccountBalance]:
+    """Return non-investment accounts using the existing Account Setup + tx sum logic."""
+    account_rows = conn.execute(
+        """SELECT DISTINCT account FROM transactions
+           WHERE account IS NOT NULL AND deleted_at IS NULL"""
+    ).fetchall()
+
+    out: list[AccountBalance] = []
+    for ar in account_rows:
+        acct = ar["account"]
+        if acct in INVESTMENT_ACCOUNTS:
+            continue  # investment accounts are now covered by holdings
+
+        setup = conn.execute(
+            """SELECT amount, date FROM transactions
+               WHERE account=? AND category='Account Setup' AND deleted_at IS NULL
+               ORDER BY date DESC LIMIT 1""",
+            (acct,),
+        ).fetchone()
+        if setup:
+            balance = setup["amount"] + conn.execute(
+                """SELECT COALESCE(SUM(amount), 0) as net FROM transactions
+                   WHERE account=? AND date > ? AND category != 'Account Setup' AND deleted_at IS NULL""",
+                (acct, setup["date"]),
+            ).fetchone()["net"]
+        else:
+            balance = conn.execute(
+                """SELECT COALESCE(SUM(amount), 0) as net FROM transactions
+                   WHERE account=? AND category != 'Account Setup' AND deleted_at IS NULL""",
+                (acct,),
+            ).fetchone()["net"]
+
+        if acct in LIQUID_ACCOUNTS:
+            acct_type = LIQUID_ACCOUNTS[acct]
+        else:
+            acct_type = "Unknown"
+
+        out.append(AccountBalance(name=acct, balance=round(balance, 2), account_type=acct_type))
+
+    out.sort(key=lambda a: a.balance, reverse=True)
+    return out
+
+
+@router.get("/portfolio/history", response_model=list[PortfolioHistoryPoint])
+def portfolio_history(
+    conn: DB,
+    range: str = Query("1Y", pattern="^(1M|3M|YTD|1Y|ALL)$"),
+):
+    """Time series of total portfolio value from holding_snapshots."""
+    from datetime import timedelta
+
+    today = date.today()
+    if range == "1M":
+        cutoff = (today - timedelta(days=31)).isoformat()
+    elif range == "3M":
+        cutoff = (today - timedelta(days=92)).isoformat()
+    elif range == "YTD":
+        cutoff = f"{today.year}-01-01"
+    elif range == "1Y":
+        cutoff = (today - timedelta(days=366)).isoformat()
+    else:
+        cutoff = "1900-01-01"
+
+    rows = conn.execute(
+        """SELECT date, SUM(value_eur) AS total FROM holding_snapshots
+           WHERE date >= ? GROUP BY date ORDER BY date""",
+        (cutoff,),
+    ).fetchall()
+
+    # Cumulative invested proxy: sum of Account Setup + Finance transactions into investment accounts up to that date
+    # (simple approximation — refined later if needed)
+    invested_by_date: dict[str, float] = {}
+    inv_accts = set(INVESTMENT_ACCOUNTS.keys())
+    if inv_accts:
+        placeholders = ",".join("?" * len(inv_accts))
+        cum_rows = conn.execute(
+            f"""SELECT date, SUM(amount) AS inflow FROM transactions
+                WHERE account IN ({placeholders})
+                  AND (category IN ('Account Setup', 'Finance') OR transaction_type = 'Transfer')
+                  AND deleted_at IS NULL
+                GROUP BY date ORDER BY date""",
+            tuple(inv_accts),
+        ).fetchall()
+        running = 0.0
+        for r in cum_rows:
+            running += r["inflow"] or 0.0
+            invested_by_date[r["date"]] = running
+
+    result: list[PortfolioHistoryPoint] = []
+    running_inv = 0.0
+    for r in rows:
+        # find the most recent invested value <= r["date"]
+        for k in sorted(invested_by_date.keys()):
+            if k <= r["date"]:
+                running_inv = invested_by_date[k]
+        result.append(PortfolioHistoryPoint(
+            date=r["date"],
+            total_value_eur=round(r["total"] or 0.0, 2),
+            invested_eur=round(running_inv, 2),
+        ))
+    return result
+
+
+@router.get("/portfolio/holding/{holding_id}/history", response_model=list[HoldingHistoryPoint])
+def holding_history(
+    holding_id: str,
+    conn: DB,
+    range: str = Query("1Y", pattern="^(1M|3M|YTD|1Y|ALL)$"),
+):
+    """Time series for a single position."""
+    from datetime import timedelta
+
+    existing = conn.execute("SELECT id FROM holdings WHERE id = ?", (holding_id,)).fetchone()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Holding not found")
+
+    today = date.today()
+    if range == "1M":
+        cutoff = (today - timedelta(days=31)).isoformat()
+    elif range == "3M":
+        cutoff = (today - timedelta(days=92)).isoformat()
+    elif range == "YTD":
+        cutoff = f"{today.year}-01-01"
+    elif range == "1Y":
+        cutoff = (today - timedelta(days=366)).isoformat()
+    else:
+        cutoff = "1900-01-01"
+
+    rows = conn.execute(
+        """SELECT date, quantity, price_eur, value_eur FROM holding_snapshots
+           WHERE holding_id = ? AND date >= ? ORDER BY date""",
+        (holding_id, cutoff),
+    ).fetchall()
+
+    return [
+        HoldingHistoryPoint(
+            date=r["date"],
+            quantity=r["quantity"],
+            price_eur=round(r["price_eur"], 4),
+            value_eur=round(r["value_eur"], 2),
+        )
+        for r in rows
+    ]
+
+
+# ── Recurring Investment Plans (DCA) ─────────────────────────────────────────
+
+_MONTHLY_FACTOR = {
+    "weekly": 52.0 / 12.0,
+    "biweekly": 26.0 / 12.0,
+    "monthly": 1.0,
+    "quarterly": 1.0 / 3.0,
+    "yearly": 1.0 / 12.0,
+}
+
+
+def _plan_row_to_out(conn: sqlite3.Connection, row: sqlite3.Row) -> InvestmentPlanOut:
+    holding = conn.execute(
+        "SELECT ticker, name, account FROM holdings WHERE id = ?",
+        (row["holding_id"],),
+    ).fetchone()
+    stats = conn.execute(
+        """SELECT COUNT(*) AS n,
+                  COALESCE(SUM(amount_eur), 0) AS total_amt,
+                  COALESCE(SUM(quantity_added), 0) AS total_qty
+             FROM investment_plan_executions
+             WHERE plan_id = ? AND status = 'success'""",
+        (row["id"],),
+    ).fetchone()
+
+    return InvestmentPlanOut(
+        id=row["id"],
+        holding_id=row["holding_id"],
+        ticker=holding["ticker"] if holding else "",
+        holding_name=holding["name"] if holding else "",
+        holding_account=holding["account"] if holding else "",
+        source_account=row["source_account"],
+        amount_eur=row["amount_eur"],
+        cadence=row["cadence"],
+        day_of_month=row["day_of_month"],
+        day_of_week=row["day_of_week"],
+        start_date=row["start_date"],
+        end_date=row["end_date"],
+        next_execution_date=row["next_execution_date"],
+        last_executed_at=row["last_executed_at"],
+        is_active=bool(row["is_active"]),
+        notes=row["notes"],
+        total_contributed_eur=round(stats["total_amt"] or 0.0, 2),
+        total_quantity_added=round(stats["total_qty"] or 0.0, 6),
+        executions_count=stats["n"] or 0,
+        monthly_equivalent_eur=round(row["amount_eur"] * _MONTHLY_FACTOR[row["cadence"]], 2),
+    )
+
+
+def _validate_plan_body(body: InvestmentPlanCreate) -> None:
+    if body.cadence in ("weekly", "biweekly"):
+        if body.day_of_week is None:
+            raise HTTPException(status_code=400, detail="day_of_week required for weekly/biweekly")
+    else:
+        if body.day_of_month is None:
+            raise HTTPException(status_code=400, detail="day_of_month required for monthly/quarterly/yearly")
+
+
+@router.get("/portfolio/plans", response_model=list[InvestmentPlanOut])
+def list_plans(conn: DB, include_inactive: bool = Query(False)):
+    where = "" if include_inactive else " WHERE is_active = 1"
+    rows = conn.execute(
+        f"SELECT * FROM investment_plans{where} ORDER BY is_active DESC, next_execution_date"
+    ).fetchall()
+    return [_plan_row_to_out(conn, r) for r in rows]
+
+
+@router.post("/portfolio/plans", response_model=InvestmentPlanOut, status_code=201)
+def create_plan(body: InvestmentPlanCreate, conn: DB):
+    _validate_plan_body(body)
+
+    # Verify holding exists
+    holding = conn.execute("SELECT id FROM holdings WHERE id = ?", (body.holding_id,)).fetchone()
+    if not holding:
+        raise HTTPException(status_code=404, detail="Holding not found")
+
+    cur = conn.execute(
+        """INSERT INTO investment_plans
+             (holding_id, source_account, amount_eur, cadence,
+              day_of_month, day_of_week, start_date, end_date,
+              next_execution_date, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (body.holding_id, body.source_account, body.amount_eur, body.cadence,
+         body.day_of_month, body.day_of_week, body.start_date, body.end_date,
+         body.start_date, body.notes),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM investment_plans WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return _plan_row_to_out(conn, row)
+
+
+@router.patch("/portfolio/plans/{plan_id}", response_model=InvestmentPlanOut)
+def patch_plan(plan_id: int, body: InvestmentPlanPatch, conn: DB):
+    existing = conn.execute("SELECT * FROM investment_plans WHERE id = ?", (plan_id,)).fetchone()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    fields = body.model_dump(exclude_unset=True)
+    if "is_active" in fields:
+        fields["is_active"] = 1 if fields["is_active"] else 0
+    if not fields:
+        return _plan_row_to_out(conn, existing)
+
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    params = list(fields.values()) + [plan_id]
+    conn.execute(
+        f"UPDATE investment_plans SET {set_clause}, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+        params,
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM investment_plans WHERE id = ?", (plan_id,)).fetchone()
+    return _plan_row_to_out(conn, row)
+
+
+@router.delete("/portfolio/plans/{plan_id}")
+def delete_plan(plan_id: int, conn: DB):
+    existing = conn.execute("SELECT id FROM investment_plans WHERE id = ?", (plan_id,)).fetchone()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    conn.execute("UPDATE investment_plans SET is_active = 0 WHERE id = ?", (plan_id,))
+    conn.commit()
+    return {"ok": True, "id": plan_id}
+
+
+@router.get("/portfolio/plans/{plan_id}/executions", response_model=list[PlanExecutionOut])
+def plan_executions(plan_id: int, conn: DB, limit: int = Query(100, le=500)):
+    rows = conn.execute(
+        """SELECT * FROM investment_plan_executions
+             WHERE plan_id = ?
+             ORDER BY execution_date DESC LIMIT ?""",
+        (plan_id, limit),
+    ).fetchall()
+    return [PlanExecutionOut(**dict(r)) for r in rows]
+
+
+@router.post("/portfolio/plans/run-due", response_model=PlanRunResult)
+def run_due_plans(conn: DB, dry_run: bool = Query(False)):
+    """Manual trigger: execute every plan whose next_execution_date has arrived.
+
+    Called nightly by daily_sync.sh. Safe to run repeatedly — idempotent per (plan_id, execution_date).
+    """
+    from domains.money.plan_executor import run_due
+    # Note: run_due opens its own connection; the caller's `conn` is only used
+    # to return the final ledger. That's fine.
+    run_due(dry_run=dry_run)
+    # Fetch executions from the last 24h to summarise
+    recent = conn.execute(
+        """SELECT * FROM investment_plan_executions
+             WHERE created_at >= datetime('now', '-1 day')
+             ORDER BY created_at DESC LIMIT 100"""
+    ).fetchall()
+    return PlanRunResult(
+        executed=[PlanExecutionOut(**dict(r)) for r in recent],
+        dry_run=dry_run,
     )
 

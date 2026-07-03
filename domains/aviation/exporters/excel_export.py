@@ -10,6 +10,29 @@ import sqlite3
 
 from domains.aviation.aviation_config import EASA_COLUMNS
 
+_AIRCRAFT_PREFIXES = (
+    "DIAMOND AIRCRAFT ", "ELITE SIMULATION ", "BOEING ", "AIRBUS ",
+    "PIPER ", "CESSNA ", "CIRRUS ", "ROBINSON ", "BELL ",
+)
+
+_AIRCRAFT_ALIASES: dict[str, str] = {
+    "Boeing 737 MAX 8-200": "Boeing 737 MAX 8",
+    "Boeing 737-8AS": "Boeing 737-800",
+}
+
+
+def _short_aircraft_type(raw: str | None) -> str:
+    if not raw:
+        return ""
+    s = " ".join(raw.split())
+    if s in _AIRCRAFT_ALIASES:
+        s = _AIRCRAFT_ALIASES[s]
+    upper = s.upper()
+    for prefix in _AIRCRAFT_PREFIXES:
+        if upper.startswith(prefix):
+            return s[len(prefix):]
+    return s
+
 
 def _sec_to_hhmm(seconds: int | None) -> str:
     if not seconds:
@@ -17,6 +40,20 @@ def _sec_to_hhmm(seconds: int | None) -> str:
     h = seconds // 3600
     m = (seconds % 3600) // 60
     return f"{h}:{m:02d}"
+
+
+def _format_pic_name(raw: str | None, is_pic: bool) -> str:
+    if raw:
+        s = raw.strip()
+        if len(s) == 6 and s.isalpha():
+            return s.upper()
+        parts = s.split()
+        if len(parts) == 1:
+            return parts[0].upper()
+        return f"{parts[0][0].upper()}.{' '.join(parts[1:]).upper()}"
+    if is_pic:
+        return "SELF"
+    return ""
 
 
 def generate_excel(conn: sqlite3.Connection) -> bytes:
@@ -65,8 +102,8 @@ def generate_excel(conn: sqlite3.Connection) -> bytes:
 
     row_num = 2
     for idx, r in enumerate(flight_rows):
-        dep_time = r["off_block_utc"][11:16] if r["off_block_utc"] else ""
-        arr_time = r["on_block_utc"][11:16] if r["on_block_utc"] else ""
+        dep_time = (r["off_block_utc"][11:16] if len(r["off_block_utc"] or "") > 5 else r["off_block_utc"]) if r["off_block_utc"] else ""
+        arr_time = (r["on_block_utc"][11:16] if len(r["on_block_utc"] or "") > 5 else r["on_block_utc"]) if r["on_block_utc"] else ""
         is_pic = r["crew_role"] == "pic"
         total = _sec_to_hhmm(r["block_seconds"])
         pic_t = _sec_to_hhmm(r["pic_seconds"])
@@ -79,12 +116,12 @@ def generate_excel(conn: sqlite3.Connection) -> bytes:
             dep_time,
             r["arr_icao"] or "",
             arr_time,
-            r["aircraft_type"] or "",
+            _short_aircraft_type(r["aircraft_type"]),
             r["aircraft_reg"] or "",
             "", "",                          # SP SE, SP ME
             total,                           # MP
             total,                           # Total
-            "SELF" if is_pic else "",
+            _format_pic_name(r["pic_name"] if "pic_name" in r.keys() else None, is_pic),
             r["takeoffs_day"] or 0,
             r["takeoffs_night"] or 0,
             r["landings_day"] or 0,
@@ -95,7 +132,7 @@ def generate_excel(conn: sqlite3.Connection) -> bytes:
             sic_t,
             "", "",                          # Dual, Instructor
             "", "", "",                      # FSTD Date/Type/Total
-            r["notes"] or "",
+            r["remarks"] if "remarks" in r.keys() and r["remarks"] else (r["notes"] or ""),
         ]
 
         for col_idx, val in enumerate(values, 1):

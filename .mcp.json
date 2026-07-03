@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codebase-memory": {
+      "command": "/Users/miquelfarre/bin/codebase-memory-mcp",
+      "args": ["mcp"]
+    }
+  }
+}

@@ -249,21 +249,33 @@ def _fetch_and_store_streams(client, conn, activity_id_full: str, native_id: str
     # garminconnect exposes get_activity_splits and get_activity_hr_in_timezones
     # but the most reliable stream data comes from get_activity_details
     try:
-        details = client.get_activity_details(native_id, max_chart_size=2000)
+        details = client.get_activity_details(native_id)
         if not details or not isinstance(details, dict):
             return
         metrics = details.get("activityDetailMetrics") or []
         if not metrics:
             return
 
-        # metrics is a list of {metrics: [{metricsType, value}, ...], startTimeGMT, ...}
-        # Flatten into per-stream arrays
+        # metricDescriptors maps column position → stream name
+        descriptors = details.get("metricDescriptors") or []
+        idx_to_name: dict[int, str] = {}
+        for d in descriptors:
+            if not isinstance(d, dict):
+                continue
+            idx = d.get("metricsIndex")
+            name = (d.get("key") or d.get("metricsType") or "").lower()
+            if idx is not None and name:
+                idx_to_name[idx] = name
+
         streams: dict[str, list] = {}
         for point in metrics:
-            for m in point.get("metrics", []):
-                mt = m.get("metricsType", "").lower()
-                val = m.get("value")
-                streams.setdefault(mt, []).append(val)
+            if not isinstance(point, dict):
+                continue
+            vals = point.get("metrics", [])
+            for i, val in enumerate(vals):
+                name = idx_to_name.get(i)
+                if name:
+                    streams.setdefault(name, []).append(val)
 
         for stream_type, values in streams.items():
             if not values:
@@ -344,6 +356,49 @@ def sync_activities(client, conn, start: str, end: str, force: bool, fetch_strea
         return 0
 
 
+# ─── Plan session auto-linking ───────────────────────────────────────────────
+
+_DISCIPLINE_MAP: dict[str, str] = {
+    "running": "running",
+    "trail_running": "running",
+    "cycling": "ride",
+    "cycling_road": "ride",
+    "mountain_biking": "ride",
+    "swimming": "swimming",
+    "open_water_swimming": "swimming",
+    "pool_swimming": "swimming",
+}
+
+
+def _link_activities_to_plan_sessions(conn, start_date: str, end_date: str) -> int:
+    """After activity sync, match new activities to pending plan_sessions by date+discipline."""
+    rows = conn.execute(
+        "SELECT id, date, activity_type, duration_seconds FROM activities "
+        "WHERE date BETWEEN ? AND ? AND source='garmin'",
+        (start_date, end_date),
+    ).fetchall()
+
+    linked = 0
+    for r in rows:
+        discipline = _DISCIPLINE_MAP.get(r["activity_type"] or "")
+        if not discipline:
+            continue
+        session = conn.execute(
+            "SELECT id FROM plan_sessions WHERE session_date=? AND discipline=? "
+            "AND status='pending' LIMIT 1",
+            (r["date"], discipline),
+        ).fetchone()
+        if session:
+            conn.execute(
+                "UPDATE plan_sessions SET status='completed', completed_activity_id=?, "
+                "effective_duration_min=?, "
+                "updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?",
+                (r["id"], round((r["duration_seconds"] or 0) / 60), session["id"]),
+            )
+            linked += 1
+    return linked
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def _last_synced_date(conn) -> date:
@@ -400,6 +455,9 @@ def main() -> None:
                 client, conn, str(start), str(end), args.force, fetch_streams=args.streams
             )
             total_records += totals["activities"]
+            linked = _link_activities_to_plan_sessions(conn, str(start), str(end))
+            if linked:
+                print(f"  auto-linked {linked} activit{'y' if linked == 1 else 'ies'} to plan sessions", file=sys.stderr)
             conn.commit()
             time.sleep(RATE_LIMIT_SLEEP)
 

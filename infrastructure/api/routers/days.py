@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse
 from infrastructure.api.db import get_db
 from infrastructure.api.models.day import (
     ActivityData, DayDetail, DayPatch, DaySummary,
-    DailyStatsData, DaySubjective, DayTagSummary, HRVData, LocationSummary,
-    LocationVisit, SleepData,
+    DailyStatsData, DaySubjective, DayTagSummary, HRVData, LoadIndexData, LocationSummary,
+    LocationVisit, SleepData, WeatherData,
 )
 from pydantic import BaseModel
 
@@ -61,10 +61,12 @@ def _subjective(row: sqlite3.Row) -> DaySubjective:
         duty_day=bool(row["duty_day"]),
         away_from_base=bool(row["away_from_base"]),
         timezone_offset=row["timezone_offset"],
-        alcohol=row["alcohol"] if "alcohol" in row.keys() else None,
-        social=bool(row["social"]) if "social" in row.keys() and row["social"] is not None else None,
-        outdoors=bool(row["outdoors"]) if "outdoors" in row.keys() and row["outdoors"] is not None else None,
         mood_note=row["mood_note"] if "mood_note" in row.keys() else None,
+        gratitude=row["gratitude"] if "gratitude" in row.keys() else None,
+        intention=row["intention"] if "intention" in row.keys() else None,
+        learning=row["learning"] if "learning" in row.keys() else None,
+        focus_score=row["focus_score"] if "focus_score" in row.keys() else None,
+        error_log=row["error_log"] if "error_log" in row.keys() else None,
     )
 
 
@@ -140,6 +142,20 @@ def _day_tags(conn: sqlite3.Connection, date_str: str) -> list[DayTagSummary]:
     ]
 
 
+def _load_index(conn: sqlite3.Connection, date_str: str) -> LoadIndexData | None:
+    row = conn.execute("SELECT * FROM load_index WHERE date=?", (date_str,)).fetchone()
+    if row is None:
+        return None
+    return LoadIndexData(
+        fatigue_score=row["fatigue_score"],
+        hrv_load=row["hrv_load"],
+        sleep_debt=row["sleep_debt"],
+        tss_load=row["tss_load"],
+        timezone_penalty=row["timezone_penalty"],
+        recovery_status=row["recovery_status"],
+    )
+
+
 def _activities(conn: sqlite3.Connection, date_str: str) -> list[ActivityData]:
     # Exclude strava-only rows that have a garmin counterpart on the same date/time.
     # Garmin rows with strava_id set already carry Strava enrichment (polyline, segments).
@@ -197,6 +213,12 @@ def get_day(date_str: str, conn: Annotated[sqlite3.Connection, Depends(get_db)])
     photo_path = row["photo_path"] if "photo_path" in row.keys() else None
     photo_url = f"/photos/{photo_path}" if photo_path else None
 
+    weather_row = conn.execute(
+        "SELECT condition, temp_min, temp_max, temp_mean, precipitation, weather_code, wind_speed_max FROM weather WHERE date = ?",
+        (date_str,)
+    ).fetchone()
+    weather = WeatherData(**dict(weather_row)) if weather_row else None
+
     return DayDetail(
         date=date_str,
         subjective=_subjective(row),
@@ -209,6 +231,8 @@ def get_day(date_str: str, conn: Annotated[sqlite3.Connection, Depends(get_db)])
         companions=_companions(conn, date_str),
         photo_url=photo_url,
         tags=_day_tags(conn, date_str),
+        weather=weather,
+        load_index=_load_index(conn, date_str),
     )
 
 

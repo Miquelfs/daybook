@@ -60,6 +60,7 @@ def _row_to_summary(r: sqlite3.Row) -> FlightSummary:
         landings_night=r["landings_night"] or 0,
         is_sim=bool(r["is_sim"]),
         pic_name=r["pic_name"] if "pic_name" in r.keys() else None,
+        landing_rating=r["landing_rating"] if "landing_rating" in r.keys() else None,
     )
 
 
@@ -623,6 +624,85 @@ def get_airport_visits(conn: DB, year: str | None = Query(None, description="4-d
     ]
 
 
+# ─── Airport autocomplete (must be BEFORE /airports/{icao}/flights) ───────────
+
+@router.get("/airports/search")
+def search_airports(
+    conn: DB,
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, le=50),
+):
+    qu = q.upper()
+    pattern = f"{qu}%"
+    rows = conn.execute("""
+        SELECT icao, iata, name, city, country, latitude, longitude
+        FROM airports
+        WHERE icao LIKE ? OR iata LIKE ? OR city LIKE ?
+        ORDER BY
+            CASE WHEN icao = ? OR iata = ? THEN 0
+                 WHEN icao LIKE ? OR iata LIKE ? THEN 1
+                 ELSE 2 END,
+            icao
+        LIMIT ?
+    """, (pattern, pattern, pattern, qu, qu, pattern, pattern, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ─── Airport detail (all flights through an airport) ─────────────────────────
+
+@router.get("/airports/{icao}/flights")
+def airport_flights(icao: str, conn: DB):
+    """Return all flights departing or arriving at an airport. Accepts ICAO or IATA code."""
+    code = icao.upper().strip()
+    # Try ICAO first, then IATA fallback
+    airport = conn.execute(
+        "SELECT * FROM airports WHERE icao = ?", (code,)
+    ).fetchone()
+    if airport is None:
+        airport = conn.execute(
+            "SELECT * FROM airports WHERE iata = ?", (code,)
+        ).fetchone()
+    if airport is None:
+        raise HTTPException(status_code=404, detail=f"Airport {code} not found")
+
+    icao_code = airport["icao"]
+    rows = conn.execute("""
+        SELECT f.id, f.date, f.dep_icao, f.arr_icao, f.flight_number,
+               f.aircraft_type, f.aircraft_reg, f.crew_role, f.pic_name,
+               f.block_seconds, f.off_block_utc, f.on_block_utc,
+               f.takeoffs_day, f.takeoffs_night, f.landings_day, f.landings_night,
+               a1.iata AS dep_iata_a, a1.name AS dep_name, a1.city AS dep_city,
+               a2.iata AS arr_iata_a, a2.name AS arr_name, a2.city AS arr_city
+        FROM flights f
+        LEFT JOIN airports a1 ON a1.icao = f.dep_icao
+        LEFT JOIN airports a2 ON a2.icao = f.arr_icao
+        WHERE (f.dep_icao = ? OR f.arr_icao = ?) AND f.is_sim = 0
+        ORDER BY f.date, f.off_block_utc
+    """, (icao_code, icao_code)).fetchall()
+
+    flights = [dict(r) for r in rows]
+    deps = [f for f in flights if f["dep_icao"] == icao_code]
+    arrs = [f for f in flights if f["arr_icao"] == icao_code]
+    total_block = sum(r["block_seconds"] or 0 for r in rows)
+
+    return {
+        "icao": airport["icao"],
+        "iata": airport["iata"],
+        "name": airport["name"],
+        "city": airport["city"],
+        "country": airport["country"],
+        "latitude": airport["latitude"],
+        "longitude": airport["longitude"],
+        "total_movements": len(rows),
+        "departures": len(deps),
+        "arrivals": len(arrs),
+        "total_block_seconds": total_block,
+        "first_visit": rows[0]["date"] if rows else None,
+        "last_visit": rows[-1]["date"] if rows else None,
+        "flights": flights,
+    }
+
+
 # ─── Export ───────────────────────────────────────────────────────────────────
 
 @router.get("/export/easa")
@@ -656,9 +736,10 @@ def export_excel(conn: DB):
 
 
 @router.get("/export/pdf")
-def export_pdf(conn: DB):
+def export_pdf(conn: DB, theme: str = Query("dark", description="dark | light")):
     from domains.aviation.exporters.pdf_export import generate_pdf
-    content = generate_pdf(conn)
+    content = generate_pdf(conn, theme=theme)
+    fname = "logbook.pdf" if theme == "light" else "logbook_dark.pdf"
 
     def _iter():
         yield content
@@ -666,7 +747,7 @@ def export_pdf(conn: DB):
     return StreamingResponse(
         _iter(),
         media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="logbook.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 
 
@@ -685,28 +766,82 @@ def export_generic_csv(conn: DB):
     )
 
 
-# ─── Airport autocomplete ─────────────────────────────────────────────────────
+# ─── Captains list (for add-flight form autocomplete) ────────────────────────
 
-@router.get("/airports/search")
-def search_airports(
-    conn: DB,
-    q: str = Query(..., min_length=1),
-    limit: int = Query(10, le=50),
-):
-    qu = q.upper()
-    pattern = f"{qu}%"
+@router.get("/captains")
+def list_captains(conn: DB):
+    """Return distinct pic_names seen across all flights."""
     rows = conn.execute("""
-        SELECT icao, iata, name, city, country, latitude, longitude
-        FROM airports
-        WHERE icao LIKE ? OR iata LIKE ? OR city LIKE ?
-        ORDER BY
-            CASE WHEN icao = ? OR iata = ? THEN 0
-                 WHEN icao LIKE ? OR iata LIKE ? THEN 1
-                 ELSE 2 END,
-            icao
-        LIMIT ?
-    """, (pattern, pattern, pattern, qu, qu, pattern, pattern, limit)).fetchall()
-    return [dict(r) for r in rows]
+        SELECT DISTINCT pic_name FROM flights
+        WHERE pic_name IS NOT NULL AND pic_name != '' AND is_sim = 0
+        ORDER BY pic_name
+    """).fetchall()
+    return [{"raw": r["pic_name"], "display": r["pic_name"]} for r in rows]
+
+
+@router.get("/captains/{name}")
+def captain_history(name: str, conn: DB):
+    """Return all flights flown with a specific captain (pic_name match)."""
+    rows = conn.execute("""
+        SELECT f.id, f.date, f.dep_icao, f.arr_icao, f.flight_number,
+               f.aircraft_type, f.aircraft_reg, f.crew_role,
+               f.block_seconds, f.off_block_utc, f.on_block_utc, f.pic_name,
+               a1.iata AS dep_iata_a, a1.name AS dep_name, a1.city AS dep_city,
+               a2.iata AS arr_iata_a, a2.name AS arr_name, a2.city AS arr_city
+        FROM flights f
+        LEFT JOIN airports a1 ON a1.icao = f.dep_icao
+        LEFT JOIN airports a2 ON a2.icao = f.arr_icao
+        WHERE f.pic_name = ? AND f.is_sim = 0
+        ORDER BY f.date, f.off_block_utc
+    """, (name,)).fetchall()
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No flights found with captain {name!r}")
+    flights = [dict(r) for r in rows]
+    total_block = sum(r["block_seconds"] or 0 for r in rows)
+    # Distinct aircraft types flown together
+    types = list({r["aircraft_type"] for r in rows if r["aircraft_type"]})
+    return {
+        "name": name,
+        "total_flights": len(rows),
+        "total_block_seconds": total_block,
+        "first_flight": rows[0]["date"],
+        "last_flight": rows[-1]["date"],
+        "aircraft_types": types,
+        "flights": flights,
+    }
+
+
+# ─── Aircraft lookup ──────────────────────────────────────────────────────────
+
+@router.get("/aircraft/{registration}")
+def aircraft_history(registration: str, conn: DB):
+    """Return all flights on a specific registration."""
+    reg = registration.upper().strip()
+    rows = conn.execute("""
+        SELECT f.id, f.date, f.dep_icao, f.arr_icao, f.flight_number,
+               f.aircraft_type, f.aircraft_reg, f.crew_role,
+               f.block_seconds, f.off_block_utc, f.on_block_utc,
+               a1.iata AS dep_iata_a, a1.name AS dep_name, a1.city AS dep_city,
+               a2.iata AS arr_iata_a, a2.name AS arr_name, a2.city AS arr_city
+        FROM flights f
+        LEFT JOIN airports a1 ON a1.icao = f.dep_icao
+        LEFT JOIN airports a2 ON a2.icao = f.arr_icao
+        WHERE UPPER(f.aircraft_reg) = ?
+        ORDER BY f.date, f.off_block_utc
+    """, (reg,)).fetchall()
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No flights found for {reg}")
+    flights = [dict(r) for r in rows]
+    total_block = sum(r["block_seconds"] or 0 for r in rows)
+    return {
+        "registration": reg,
+        "aircraft_type": rows[0]["aircraft_type"],
+        "total_flights": len(rows),
+        "total_block_seconds": total_block,
+        "first_flight": rows[0]["date"],
+        "last_flight": rows[-1]["date"],
+        "flights": flights,
+    }
 
 
 # ─── Single flight ────────────────────────────────────────────────────────────
@@ -745,6 +880,7 @@ def get_flight(flight_id: str, conn: DB):
         delay_code=row["delay_code"],
         delay_reason=row["delay_reason"],
         notes=row["notes"],
+        remarks=row["remarks"] if "remarks" in row.keys() else None,
         dep_airport=dep_airport,
         arr_airport=arr_airport,
     )
@@ -787,23 +923,28 @@ def create_flight(flight: FlightIn, conn: DB):
     if airborne_s_explicit is None and flight.takeoff_utc and flight.landing_utc:
         airborne_s_explicit = _utc_diff_seconds(flight.takeoff_utc, flight.landing_utc)
 
-    # Auto-calculate night_seconds from takeoff/landing UTC + airport coords
+    # Auto-calculate night_seconds from takeoff/landing UTC + airport coords.
+    # Falls back to off/on-block times if takeoff/landing not provided.
     computed_night = flight.night_seconds  # prefer explicit if user provided
-    if computed_night is None and airborne_s_explicit and dep_row and dep_row["latitude"]:
+    if computed_night is None and dep_row and dep_row["latitude"]:
         try:
-            # Build datetime objects from date + HH:MM
-            def _parse_hhmm(date_str: str, hhmm: str) -> datetime | None:
-                if not hhmm or ":" not in hhmm:
+            def _parse_hhmm(date_str: str, hhmm: str | None) -> datetime | None:
+                if not hhmm:
+                    return None
+                # Accept "HH:MM" or ISO "2026-06-18T14:30" / "2026-06-18T14:30:00"
+                t = hhmm[11:16] if len(hhmm) > 5 else hhmm
+                if ":" not in t:
                     return None
                 try:
-                    h, m = map(int, hhmm.split(":"))
+                    h, m = map(int, t.split(":"))
                     d = datetime.fromisoformat(date_str)
                     return datetime(d.year, d.month, d.day, h, m, tzinfo=timezone.utc)
                 except Exception:
                     return None
 
-            tof_dt = _parse_hhmm(flight.date, flight.takeoff_utc)
-            ldg_dt = _parse_hhmm(flight.date, flight.landing_utc) if flight.landing_utc else None
+            # Prefer takeoff/landing; fall back to off/on-block
+            tof_dt = _parse_hhmm(flight.date, flight.takeoff_utc or flight.off_block_utc)
+            ldg_dt = _parse_hhmm(flight.date, flight.landing_utc or flight.on_block_utc)
             if ldg_dt and tof_dt and ldg_dt <= tof_dt:
                 ldg_dt = ldg_dt + timedelta(days=1)  # midnight crossing
             if tof_dt and ldg_dt:
@@ -844,7 +985,7 @@ def create_flight(flight: FlightIn, conn: DB):
             freight_kg, baggage_kg,
             fuel_uplift_kg, fuel_block_kg, fuel_burn_kg,
             delay_minutes, delay_code, delay_reason,
-            notes, pic_name
+            notes, remarks, pic_name
         ) VALUES (
             :id, :date, 'manual', '{}',
             :dep_icao, :arr_icao, :dep_iata, :arr_iata,
@@ -858,7 +999,7 @@ def create_flight(flight: FlightIn, conn: DB):
             :freight_kg, :baggage_kg,
             :fuel_uplift_kg, :fuel_block_kg, :fuel_burn_kg,
             :delay_minutes, :delay_code, :delay_reason,
-            :notes, :pic_name
+            :notes, :remarks, :pic_name
         )
     """, {
         "id": flight_id,
@@ -902,6 +1043,7 @@ def create_flight(flight: FlightIn, conn: DB):
         "delay_code": flight.delay_code,
         "delay_reason": flight.delay_reason,
         "notes": flight.notes,
+        "remarks": flight.remarks,
         "pic_name": flight.pic_name,
     })
     conn.commit()

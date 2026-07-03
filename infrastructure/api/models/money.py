@@ -12,6 +12,7 @@ class TransactionCreate(BaseModel):
     subcategory: Optional[str] = None
     account: Optional[str] = None
     notes: Optional[str] = None
+    source_id: Optional[str] = None  # external dedup key (e.g. FinanceKit tx UUID)
 
 
 class TransactionOut(BaseModel):
@@ -191,6 +192,11 @@ class SpendingPatterns(BaseModel):
     by_week: list[WeekSpend]
 
 
+class SubcategoryBreakdown(BaseModel):
+    subcategory: str
+    total: float
+    count: int
+
 class CategoryStats(BaseModel):
     category: str
     total: float
@@ -199,6 +205,7 @@ class CategoryStats(BaseModel):
     min_tx: float
     max_tx: float
     pct_of_total: float
+    subcategories: list[SubcategoryBreakdown] = []
 
 
 class LargeTxAnomaly(BaseModel):
@@ -222,5 +229,193 @@ class AnomalyReport(BaseModel):
     month: str
     large_transactions: list[LargeTxAnomaly]
     category_spikes: list[CategorySpikeAnomaly]
+
+
+# ── Investment Portfolio (Track A-I) ─────────────────────────────────────────
+
+AssetClass = Literal["equity_etf", "stock", "crypto", "bond_etf", "cash", "commodity"]
+
+
+class HoldingCreate(BaseModel):
+    account: str
+    ticker: str
+    isin: Optional[str] = None
+    name: str
+    asset_class: AssetClass
+    currency: str = "EUR"
+    quantity: float = Field(gt=0)
+    cost_basis_eur: Optional[float] = None
+    first_bought_at: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class HoldingPatch(BaseModel):
+    quantity: Optional[float] = None
+    cost_basis_eur: Optional[float] = None
+    name: Optional[str] = None
+    ticker: Optional[str] = None
+    isin: Optional[str] = None
+    asset_class: Optional[AssetClass] = None
+    account: Optional[str] = None
+    notes: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class HoldingOut(BaseModel):
+    id: str
+    account: str
+    ticker: str
+    isin: Optional[str]
+    name: str
+    asset_class: AssetClass
+    currency: str
+    quantity: float
+    cost_basis_eur: Optional[float]
+    first_bought_at: Optional[str]
+    notes: Optional[str]
+    is_active: bool
+    # Live computed:
+    current_price_eur: Optional[float]          # None if no price cached yet
+    market_value_eur: Optional[float]
+    unrealized_pnl_eur: Optional[float]         # None if cost basis unknown
+    unrealized_pnl_pct: Optional[float]
+    day_change_eur: Optional[float]
+    day_change_pct: Optional[float]
+    ytd_change_pct: Optional[float]
+    price_as_of: Optional[str]                  # date of the latest cached price
+    allocation_pct: Optional[float]             # % of total portfolio
+
+
+class AllocationSlice(BaseModel):
+    label: str
+    value_eur: float
+    pct: float
+
+
+class MoverOut(BaseModel):
+    holding_id: str
+    ticker: str
+    name: str
+    day_change_eur: float
+    day_change_pct: float
+
+
+class PortfolioOverview(BaseModel):
+    as_of: str
+    total_value_eur: float
+    total_cost_basis_eur: float                 # sum of cost_basis where known
+    total_pnl_eur: float                        # value − cost_basis (known)
+    total_pnl_pct: float
+    day_change_eur: float
+    day_change_pct: float
+    ytd_pnl_eur: float
+    ytd_pnl_pct: float
+    allocation_by_class: list[AllocationSlice]
+    allocation_by_account: list[AllocationSlice]
+    allocation_by_currency: list[AllocationSlice]
+    top_movers_up: list[MoverOut]
+    top_movers_down: list[MoverOut]
+    top_holdings: list[HoldingOut]              # top 5 by market value
+    holdings_count: int
+    # Cash-only accounts (no holdings) — surfaced as a strip
+    liquid_accounts: list[AccountBalance]
+
+
+class PortfolioHistoryPoint(BaseModel):
+    date: str
+    total_value_eur: float
+    invested_eur: float                         # cumulative net inflows (proxy)
+
+
+class HoldingHistoryPoint(BaseModel):
+    date: str
+    quantity: float
+    price_eur: float
+    value_eur: float
+
+
+class IsinCandidate(BaseModel):
+    """One resolution of an ISIN to a tradeable ticker/exchange."""
+    ticker: str          # yfinance-compatible symbol (e.g. VWCE.DE)
+    name: Optional[str] = None
+    exchange: Optional[str] = None
+    exchange_code: Optional[str] = None
+    currency: Optional[str] = None
+
+
+class IsinLookupResult(BaseModel):
+    isin: str
+    candidates: list[IsinCandidate]
+
+
+# ── Recurring Investment Plans (DCA) ─────────────────────────────────────────
+
+Cadence = Literal["weekly", "biweekly", "monthly", "quarterly", "yearly"]
+
+
+class InvestmentPlanCreate(BaseModel):
+    holding_id: str
+    source_account: str
+    amount_eur: float = Field(gt=0)
+    cadence: Cadence
+    day_of_month: Optional[int] = Field(default=None, ge=1, le=31)
+    day_of_week: Optional[int] = Field(default=None, ge=0, le=6)     # Mon=0
+    start_date: str                                                   # YYYY-MM-DD, first execution
+    end_date: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class InvestmentPlanPatch(BaseModel):
+    amount_eur: Optional[float] = Field(default=None, gt=0)
+    cadence: Optional[Cadence] = None
+    day_of_month: Optional[int] = Field(default=None, ge=1, le=31)
+    day_of_week: Optional[int] = Field(default=None, ge=0, le=6)
+    source_account: Optional[str] = None
+    end_date: Optional[str] = None
+    next_execution_date: Optional[str] = None
+    is_active: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class InvestmentPlanOut(BaseModel):
+    id: int
+    holding_id: str
+    ticker: str                     # convenience
+    holding_name: str               # convenience
+    holding_account: str            # convenience
+    source_account: str
+    amount_eur: float
+    cadence: Cadence
+    day_of_month: Optional[int]
+    day_of_week: Optional[int]
+    start_date: str
+    end_date: Optional[str]
+    next_execution_date: str
+    last_executed_at: Optional[str]
+    is_active: bool
+    notes: Optional[str]
+    # Derived stats
+    total_contributed_eur: float
+    total_quantity_added: float
+    executions_count: int
+    monthly_equivalent_eur: float   # normalised per-month contribution rate
+
+
+class PlanExecutionOut(BaseModel):
+    id: int
+    plan_id: int
+    execution_date: str
+    amount_eur: float
+    price_eur: float
+    quantity_added: float
+    transaction_id: Optional[str]
+    status: str
+    notes: Optional[str]
+    created_at: str
+
+
+class PlanRunResult(BaseModel):
+    executed: list[PlanExecutionOut]
+    dry_run: bool
 
 

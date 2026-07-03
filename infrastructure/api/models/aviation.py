@@ -29,6 +29,7 @@ class FlightSummary(BaseModel):
     landings_night: int = 0
     is_sim: bool = False
     pic_name: str | None = None
+    landing_rating: int | None = None
 
 
 class AirportInfo(BaseModel):
@@ -64,6 +65,7 @@ class FlightDetail(FlightSummary):
     delay_code: str | None = None
     delay_reason: str | None = None
     notes: str | None = None
+    remarks: str | None = None
     dep_airport: AirportInfo | None = None
     arr_airport: AirportInfo | None = None
 
@@ -94,6 +96,7 @@ class FlightIn(BaseModel):
     landings_night: int = 0
     night_seconds: int = 0
     notes: str | None = None
+    remarks: str | None = None
     pax_total: int | None = None
     pax_adult: int | None = None
     pax_child: int | None = None
@@ -111,6 +114,8 @@ class FlightIn(BaseModel):
 class FlightPatch(BaseModel):
     crew_role: str | None = None
     notes: str | None = None
+    remarks: str | None = None
+    landing_rating: int | None = None
     night_seconds: int | None = None
     ifr_seconds: int | None = None
     takeoffs_day: int | None = None

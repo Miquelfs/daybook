@@ -80,6 +80,8 @@ def _parse_row(row: list, row_index: int) -> dict | None:
     acft_type = str(row[COL_ACFT_TYPE] or "").strip() or None
     acft_reg  = str(row[COL_ACFT_REG]  or "").strip() or None
 
+    name_pic_raw = str(row[COL_NAME_PIC] or "").strip() or None
+
     # Determine is_sim and crew_role
     sim_type_raw = str(row[COL_SIM] or "").strip()
     # Aircraft like "ELITE SIMULATION" with empty times are sim sessions
@@ -172,6 +174,8 @@ def _parse_row(row: list, row_index: int) -> dict | None:
         "landings_day": ldg_day,
         "landings_night": ldg_night,
         "notes": remarks,
+        # pic_name: the instructor/PIC when we are not the PIC (skip when Miquel is PIC)
+        "pic_name": None if (pic_sec > 0 or not name_pic_raw or "farre" in name_pic_raw.lower()) else name_pic_raw,
     }
 
 
@@ -182,7 +186,7 @@ INSERT OR IGNORE INTO flights (
     off_block_utc, takeoff_utc, landing_utc, on_block_utc,
     block_seconds, airborne_seconds,
     flight_number, aircraft_reg, aircraft_type, operator,
-    crew_role, takeoff_crew, landing_crew, is_sim, sim_type,
+    crew_role, takeoff_crew, landing_crew, pic_name, is_sim, sim_type,
     pic_seconds, sic_seconds, night_seconds, ifr_seconds, distance_nm,
     pax_total, pax_adult, pax_child, pax_infant, freight_kg,
     fuel_block_kg, fuel_trip_kg, fuel_reserves_kg, fuel_uplift_kg, fuel_burn_kg, fuel_burn_diff_kg,
@@ -195,7 +199,7 @@ INSERT OR IGNORE INTO flights (
     :off_block_utc, :takeoff_utc, :landing_utc, :on_block_utc,
     :block_seconds, :airborne_seconds,
     :flight_number, :aircraft_reg, :aircraft_type, :operator,
-    :crew_role, :takeoff_crew, :landing_crew, :is_sim, :sim_type,
+    :crew_role, :takeoff_crew, :landing_crew, :pic_name, :is_sim, :sim_type,
     :pic_seconds, :sic_seconds, :night_seconds, :ifr_seconds, :distance_nm,
     :pax_total, :pax_adult, :pax_child, :pax_infant, :freight_kg,
     :fuel_block_kg, :fuel_trip_kg, :fuel_reserves_kg, :fuel_uplift_kg, :fuel_burn_kg, :fuel_burn_diff_kg,

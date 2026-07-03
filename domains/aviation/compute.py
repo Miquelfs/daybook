@@ -49,11 +49,19 @@ def _night_windows(lat: float, lon: float, date_utc) -> list[tuple[datetime, dat
     dawn = s.get("dawn")
     dusk = s.get("dusk")
 
+    noon = midnight + timedelta(hours=12)
     windows = []
-    if dawn:
-        windows.append((midnight, dawn))       # pre-dawn darkness
-    if dusk:
-        windows.append((dusk, next_midnight))  # post-dusk darkness
+
+    # Only valid pre-dawn window if dawn is in the morning (before noon).
+    # At high latitudes in summer, astral may return a dawn > 12:00 UTC
+    # (wrapping from the previous night), which would incorrectly span the
+    # entire day as a "night" window.
+    if dawn and dawn < noon:
+        windows.append((midnight, dawn))
+
+    # Only valid post-dusk window if dusk is in the afternoon (after noon).
+    if dusk and dusk > noon:
+        windows.append((dusk, next_midnight))
 
     return windows
 

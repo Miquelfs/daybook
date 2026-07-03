@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { format, subDays, parseISO, getDaysInMonth, startOfMonth, getDay } from "date-fns";
 import { api } from "@/lib/api";
@@ -33,7 +33,7 @@ function groupByMonth(days: DaySummary[]): { month: string; days: DaySummary[] }
     map.get(key)!.push(d);
   }
   return Array.from(map.entries())
-    .sort((a, b) => b[0].localeCompare(a[0]))
+    .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([month, days]) => ({ month, days }));
 }
 
@@ -68,12 +68,19 @@ export default function MomentsPage() {
     return groupByMonth(photoDays);
   }, [allDays]);
 
+  // Scroll to bottom on initial load so current month is visible
+  useEffect(() => {
+    if (!isLoading && monthGroups.length > 0) {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" });
+    }
+  }, [isLoading, monthGroups.length]);
+
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20 pt-10">
       <header className="mb-8">
-        <p className="text-xs text-[#F59E0B] uppercase tracking-[0.2em] mb-1">Library</p>
+        <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Today</Link>
         <h1 className="text-2xl font-semibold tracking-tight">Moments</h1>
-        <p className="text-xs text-[#52525B] mt-1">{photoCount} photo{photoCount !== 1 ? "s" : ""}</p>
+        <p className="text-sm text-[#71717A] mt-0.5">{photoCount} photo{photoCount !== 1 ? "s" : ""}</p>
       </header>
 
       {isLoading ? (
@@ -96,6 +103,17 @@ export default function MomentsPage() {
         </div>
       ) : (
         <div className="space-y-10">
+          {hasNextPage && (
+            <div className="flex justify-center mb-2">
+              <button
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+                className="text-sm text-[#A1A1AA] hover:text-[#FAFAFA] disabled:text-[#52525B] px-6 py-2 border border-[#27272A] rounded-full transition-colors"
+              >
+                {isFetchingNextPage ? "Loading…" : "Load older months"}
+              </button>
+            </div>
+          )}
           {monthGroups.map(({ month }) => {
             const monthDate = parseISO(`${month}-01`);
             const daysInMonth = getDaysInMonth(monthDate);
@@ -166,17 +184,6 @@ export default function MomentsPage() {
         </div>
       )}
 
-      {hasNextPage && (
-        <div className="mt-8 flex justify-center">
-          <button
-            onClick={() => fetchNextPage()}
-            disabled={isFetchingNextPage}
-            className="text-sm text-[#A1A1AA] hover:text-[#FAFAFA] disabled:text-[#52525B] px-6 py-2 border border-[#27272A] rounded-full transition-colors"
-          >
-            {isFetchingNextPage ? "Loading…" : "Load older months"}
-          </button>
-        </div>
-      )}
 
       {/* Lightbox */}
       {lightbox && (

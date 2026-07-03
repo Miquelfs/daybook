@@ -17,3 +17,5 @@ astral
 xlrd
 reportlab
 openpyxl
+pymupdf
+yfinance

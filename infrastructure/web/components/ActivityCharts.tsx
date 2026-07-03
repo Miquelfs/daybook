@@ -181,34 +181,50 @@ export function ActivityCharts({ activityId, activityType }: Props) {
       )}
 
       {/* HR Zones breakdown */}
-      {hasZones && data.hr_zones && (
-        <ChartCard title="HR Zones">
-          <div className="space-y-2">
-            {(["z1", "z2", "z3", "z4", "z5"] as const).map((z, i) => {
-              const secs = data.hr_zones![z];
-              const total = Object.values(data.hr_zones!).reduce((a, b) => a + b, 0);
-              const pct = total > 0 ? Math.round((secs / total) * 100) : 0;
-              const mins = Math.round(secs / 60);
-              const zoneColors = ["#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#7C3AED"];
-              const labels = ["Z1 Recovery", "Z2 Aerobic", "Z3 Tempo", "Z4 Threshold", "Z5 Max"];
-              return (
-                <div key={z} className="flex items-center gap-3">
-                  <span className="text-xs text-[#71717A] w-24 shrink-0">{labels[i]}</span>
-                  <div className="flex-1 h-2 bg-[#18181B] rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${pct}%`, background: zoneColors[i] }}
-                    />
+      {hasZones && data.hr_zones && (() => {
+        const zoneKeys = ["z1", "z2", "z3", "z4", "z5"] as const;
+        const zoneColors = ["#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#7C3AED"];
+        const labels = ["Z1 Recovery", "Z2 Aerobic", "Z3 Tempo", "Z4 Threshold", "Z5 Max"];
+        const total = Object.values(data.hr_zones!).reduce((a, b) => a + b, 0);
+        return (
+          <ChartCard title="HR Zones">
+            {/* Proportional stacked bar */}
+            <div className="flex h-3 rounded-full overflow-hidden mb-4">
+              {zoneKeys.map((z, i) => {
+                const pct = total > 0 ? (data.hr_zones![z] / total) * 100 : 0;
+                const mins = Math.round(data.hr_zones![z] / 60);
+                return pct > 0 ? (
+                  <div
+                    key={z}
+                    style={{ width: `${pct}%`, background: zoneColors[i] }}
+                    title={`${labels[i]}: ${mins}m (${Math.round(pct)}%)`}
+                  />
+                ) : null;
+              })}
+            </div>
+            {/* Legend rows */}
+            <div className="space-y-2">
+              {zoneKeys.map((z, i) => {
+                const secs = data.hr_zones![z];
+                const pct = total > 0 ? Math.round((secs / total) * 100) : 0;
+                const mins = Math.round(secs / 60);
+                return (
+                  <div key={z} className="flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: zoneColors[i] }} />
+                    <span className="text-xs text-[#71717A] w-24 shrink-0">{labels[i]}</span>
+                    <div className="flex-1 h-1.5 bg-[#18181B] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: zoneColors[i] }} />
+                    </div>
+                    <span className="text-xs text-[#A1A1AA] tabular-nums w-16 text-right">
+                      {mins}m · {pct}%
+                    </span>
                   </div>
-                  <span className="text-xs text-[#A1A1AA] tabular-nums w-16 text-right">
-                    {mins}m · {pct}%
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </ChartCard>
-      )}
+                );
+              })}
+            </div>
+          </ChartCard>
+        );
+      })()}
     </section>
   );
 }
