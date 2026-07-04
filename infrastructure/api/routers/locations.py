@@ -732,9 +732,31 @@ def _days_by_country(con: sqlite3.Connection) -> dict[str, set[str]]:
     return out
 
 
+# These two endpoints aggregate full location history — expensive on the Pi.
+# Results only change with daily syncs, so cache in-process for 6 hours.
+_NARRATIVE_CACHE: dict[str, tuple[float, dict]] = {}
+_NARRATIVE_TTL_S = 6 * 3600
+
+
+def _cached(key: str):
+    import time as _time
+    hit = _NARRATIVE_CACHE.get(key)
+    if hit and _time.monotonic() - hit[0] < _NARRATIVE_TTL_S:
+        return hit[1]
+    return None
+
+
+def _store(key: str, data: dict) -> dict:
+    import time as _time
+    _NARRATIVE_CACHE[key] = (_time.monotonic(), data)
+    return data
+
+
 @router.get("/world-coverage")
 def world_coverage():
     """Countries visited vs the world: %, continent grouping, per-country detail."""
+    if (cached := _cached("world-coverage")) is not None:
+        return cached
     con = _conn()
     days_by_country = _days_by_country(con)
 
@@ -772,7 +794,7 @@ def world_coverage():
     for m in meta.values():
         all_by_continent[m["continent"]] = all_by_continent.get(m["continent"], 0) + 1
 
-    return {
+    return _store("world-coverage", {
         "countries_visited": visited,
         "countries_total": total,
         "pct_world": round(visited / total * 100, 1) if total else 0,
@@ -786,13 +808,16 @@ def world_coverage():
         },
         "country_details": details,
         "all_countries": {c: m for c, m in sorted(meta.items())},
-    }
+    })
 
 
 @router.get("/fun-facts")
 def fun_facts():
     """Stat cards: cosmic-scale distances, compass extremes, personal records."""
-    from domains.locations.home_base import home_for
+    if (cached := _cached("fun-facts")) is not None:
+        return cached
+
+    from domains.locations.home_base import home_from_periods
 
     con = _conn()
     cards: list[dict] = []
@@ -849,11 +874,15 @@ def fun_facts():
         card("Highest point", round(alt["alt"]), "m", f"GPS altitude · {alt['date']}", "⛰️")
 
     # ── Farthest from home (per-day centroid vs the home active that day) ─
+    # Everything resolves in memory — no per-date SQL (this loop once took
+    # ~17 s via repeated fallback queries and hung the /explore page).
     day_rows = con.execute(
         """SELECT date, AVG(lat) AS lat, AVG(lng) AS lng FROM visits
-           WHERE lat IS NOT NULL GROUP BY date"""
+           WHERE lat IS NOT NULL GROUP BY date ORDER BY date"""
     ).fetchall()
     import math as _math
+    import statistics as _stats
+    from collections import deque as _deque
 
     def _hav(lat1, lng1, lat2, lng2):
         p1, p2 = _math.radians(lat1), _math.radians(lat2)
@@ -862,13 +891,18 @@ def fun_facts():
         return 2 * 6371 * _math.asin(_math.sqrt(a))
 
     farthest = None
+    rolling: _deque = _deque(maxlen=30)  # fallback home: last 30 day-centroids
     for r in day_rows:
-        h = home_for(r["date"])
-        if h is None:
-            continue
-        d = _hav(h["lat"], h["lng"], r["lat"], r["lng"])
-        if farthest is None or d > farthest[0]:
-            farthest = (d, r["date"], h["label"])
+        h = home_from_periods(r["date"])
+        if h is None and len(rolling) >= 5:
+            h = {"label": "GPS centroid",
+                 "lat": _stats.median(p[0] for p in rolling),
+                 "lng": _stats.median(p[1] for p in rolling)}
+        if h is not None:
+            d = _hav(h["lat"], h["lng"], r["lat"], r["lng"])
+            if farthest is None or d > farthest[0]:
+                farthest = (d, r["date"], h["label"])
+        rolling.append((r["lat"], r["lng"]))
     if farthest:
         card("Farthest from home", round(farthest[0]), "km",
              f"{farthest[1]} · home was {farthest[2]}", "🛰️")
@@ -925,7 +959,7 @@ def fun_facts():
                  f"consecutive days outside {home_country}", "🧳")
 
     con.close()
-    return {"cards": cards}
+    return _store("fun-facts", {"cards": cards})
 
 
 @router.get("/trips")

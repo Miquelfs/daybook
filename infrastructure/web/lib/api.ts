@@ -568,7 +568,12 @@ export const LIFE_PALETTE: Record<string, string> = {
 };
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
+  // Timeout so one slow endpoint can never hang a server-rendered page —
+  // callers already .catch() and render without the section.
+  const res = await fetch(`${BASE}${path}`, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(12_000),
+  });
   if (!res.ok) throw new Error(`${res.status} ${path}`);
   return res.json();
 }

@@ -8,8 +8,11 @@ Idempotent — safe to re-run.
 """
 
 import sqlite3
+from pathlib import Path
 
 from infrastructure.db.connection import get_connection
+
+_LOCATIONS_DB = Path(__file__).parent / "locations.db"
 
 
 def _add_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
@@ -51,7 +54,24 @@ def migrate(conn: sqlite3.Connection) -> None:
     print("trips table ready.")
 
 
+def migrate_locations() -> None:
+    """Indexes for the fun-facts compass/altitude queries (overland grows daily)."""
+    if not _LOCATIONS_DB.exists():
+        print("locations.db not found — skipping index migration")
+        return
+    con = sqlite3.connect(_LOCATIONS_DB)
+    con.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_overland_lat ON overland_locations(lat);
+        CREATE INDEX IF NOT EXISTS idx_overland_lng ON overland_locations(lng);
+        CREATE INDEX IF NOT EXISTS idx_overland_alt ON overland_locations(altitude);
+    """)
+    con.commit()
+    con.close()
+    print("overland lat/lng/altitude indexes ready.")
+
+
 if __name__ == "__main__":
     conn = get_connection()
     migrate(conn)
     conn.close()
+    migrate_locations()

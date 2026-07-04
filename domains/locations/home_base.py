@@ -29,36 +29,42 @@ def _conn(path: Path) -> sqlite3.Connection:
     return con
 
 
-@lru_cache(maxsize=4096)
-def home_for(date: str) -> dict | None:
-    """Home base active on `date` (YYYY-MM-DD)."""
+@lru_cache(maxsize=1)
+def _location_periods() -> tuple:
+    """All location periods with coords, loaded once per process (small table)."""
     con = _conn(_DAYBOOK_DB)
     try:
-        row = con.execute(
-            """SELECT label, centroid_lat, centroid_lng, home_radius_km
+        rows = con.execute(
+            """SELECT label, start_date, end_date, centroid_lat, centroid_lng, home_radius_km
                FROM life_periods
                WHERE category = 'location'
                  AND centroid_lat IS NOT NULL AND centroid_lng IS NOT NULL
-                 AND start_date <= ?
-                 AND (end_date IS NULL OR end_date >= ?)
-               ORDER BY start_date DESC
-               LIMIT 1""",
-            (date, date),
-        ).fetchone()
+               ORDER BY start_date DESC"""
+        ).fetchall()
+        return tuple(
+            (r["label"], r["start_date"], r["end_date"],
+             r["centroid_lat"], r["centroid_lng"], r["home_radius_km"] or 40.0)
+            for r in rows
+        )
     except sqlite3.OperationalError:
-        row = None  # centroid columns not migrated yet
+        return ()  # centroid columns not migrated yet
     finally:
         con.close()
 
-    if row:
-        return {
-            "label": row["label"],
-            "lat": row["centroid_lat"],
-            "lng": row["centroid_lng"],
-            "radius_km": row["home_radius_km"] or 40.0,
-            "source": "life_period",
-        }
-    return _gps_centroid_fallback(date)
+
+def home_from_periods(date: str) -> dict | None:
+    """Life-period home for `date`, resolved in memory (no per-date SQL)."""
+    for label, start, end, lat, lng, radius in _location_periods():
+        if start <= date and (end is None or end >= date):
+            return {"label": label, "lat": lat, "lng": lng,
+                    "radius_km": radius, "source": "life_period"}
+    return None
+
+
+@lru_cache(maxsize=4096)
+def home_for(date: str) -> dict | None:
+    """Home base active on `date` (YYYY-MM-DD)."""
+    return home_from_periods(date) or _gps_centroid_fallback(date)
 
 
 @lru_cache(maxsize=4096)
