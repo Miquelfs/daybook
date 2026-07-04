@@ -1,10 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import type { PlaceDate } from "@/lib/api";
 import { ChevronLeft } from "lucide-react";
+import { PlacePinMap } from "@/components/PlacePinMap";
+
+const PAGE_SIZE = 10;
 
 const moodEmoji = (m: number | null) => {
   if (!m) return null;
@@ -24,18 +29,27 @@ function formatDate(d: string) {
 export default function PlacePage() {
   const { name } = useParams<{ name: string }>();
   const placeName = decodeURIComponent(name);
+  const [pages, setPages] = useState(1);
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ["place-dates", placeName],
-    queryFn: () => api.placeDates(placeName),
+  const { data: summary } = useQuery({
+    queryKey: ["place-summary", placeName],
+    queryFn: () => api.placeSummary(placeName),
   });
 
-  const totalDays = data.length;
-  const avgMood = data.filter(d => d.mood).length > 0
-    ? (data.reduce((s, d) => s + (d.mood ?? 0), 0) / data.filter(d => d.mood).length).toFixed(1)
+  const { data: visits = [], isLoading, isFetching } = useQuery({
+    queryKey: ["place-dates", placeName, pages],
+    queryFn: () => api.placeDates(placeName, { limit: pages * PAGE_SIZE }),
+    placeholderData: (prev: PlaceDate[] | undefined) => prev,
+  });
+
+  const totalDays = summary?.total_days ?? visits.length;
+  const withMood = visits.filter((d) => d.mood);
+  const avgMood = withMood.length > 0
+    ? (withMood.reduce((s, d) => s + (d.mood ?? 0), 0) / withMood.length).toFixed(1)
     : null;
-  const country = data[0]?.country ?? null;
-  const city = data[0]?.city ?? null;
+  const country = summary?.country ?? visits[0]?.country ?? null;
+  const city = summary?.city ?? visits[0]?.city ?? null;
+  const hasMore = visits.length < totalDays && visits.length >= pages * PAGE_SIZE;
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
@@ -53,8 +67,15 @@ export default function PlacePage() {
         </p>
       )}
 
+      {/* Map pin */}
+      {summary?.lat != null && summary?.lng != null && (
+        <div className="mb-6">
+          <PlacePinMap lat={summary.lat} lng={summary.lng} label={placeName} />
+        </div>
+      )}
+
       {/* KPI strip */}
-      <div className="grid grid-cols-2 gap-4 mb-8">
+      <div className="grid grid-cols-2 gap-4 mb-4">
         <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
           <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">Visits</p>
           <p className="text-2xl font-semibold text-[#F59E0B] tabular-nums">{totalDays}</p>
@@ -69,16 +90,42 @@ export default function PlacePage() {
         )}
       </div>
 
-      {/* Visit list */}
+      {/* First / last visit */}
+      {summary?.first_visit && summary?.last_visit && (
+        <div className="grid grid-cols-2 gap-4 mb-8">
+          <Link
+            href={`/day/${summary.first_visit}`}
+            className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 hover:border-[#3F3F46] transition-colors group"
+          >
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">First visit</p>
+            <p className="text-sm text-[#A1A1AA] group-hover:text-[#FAFAFA] transition-colors">
+              {formatDate(summary.first_visit)} →
+            </p>
+          </Link>
+          <Link
+            href={`/day/${summary.last_visit}`}
+            className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 hover:border-[#3F3F46] transition-colors group"
+          >
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">Last visit</p>
+            <p className="text-sm text-[#A1A1AA] group-hover:text-[#FAFAFA] transition-colors">
+              {formatDate(summary.last_visit)} →
+            </p>
+          </Link>
+        </div>
+      )}
+
+      {/* Visit list — newest first, paginated */}
       <section>
-        <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Visits</h2>
+        <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">
+          Recent visits
+        </h2>
         {isLoading ? (
           <div className="h-40 flex items-center justify-center text-[#52525B]">Loading…</div>
-        ) : data.length === 0 ? (
+        ) : visits.length === 0 ? (
           <p className="text-sm text-[#52525B]">No recorded visits yet.</p>
         ) : (
           <div className="flex flex-col gap-2">
-            {data.map((entry) => (
+            {visits.map((entry) => (
               <Link
                 key={entry.date}
                 href={`/day/${entry.date}`}
@@ -105,6 +152,15 @@ export default function PlacePage() {
                 </div>
               </Link>
             ))}
+            {hasMore && (
+              <button
+                onClick={() => setPages((p) => p + 1)}
+                disabled={isFetching}
+                className="mt-1 py-2.5 rounded-xl border border-[#27272A] text-xs text-[#71717A] hover:text-[#FAFAFA] hover:border-[#3F3F46] transition-colors uppercase tracking-widest disabled:opacity-50"
+              >
+                {isFetching ? "Loading…" : `Load more (${totalDays - visits.length} left)`}
+              </button>
+            )}
           </div>
         )}
       </section>

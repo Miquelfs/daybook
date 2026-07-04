@@ -47,17 +47,28 @@ export default async function ExplorePage({ searchParams }: Props) {
       countries: [] as { country: string; days: number }[],
       cities: [] as { city: string; country: string; days: number }[],
       years: [] as string[],
+      distinct_days: 0,
     })),
     api.topPlaces(year).catch(() => [] as TopPlace[]),
     api.cityTimeline(year).catch(() => [] as CityStay[]),
-    api.worldCoverage().catch(() => null as WorldCoverage | null),
-    api.funFacts().catch(() => null as { cards: FunFactCard[] } | null),
-    api.trips().catch(() => null as { trips: Trip[]; total: number } | null),
+    api.worldCoverage(year).catch(() => null as WorldCoverage | null),
+    api.funFacts(year).catch(() => null as { cards: FunFactCard[] } | null),
+    api.trips(100, year).catch(() => null as { trips: Trip[]; total: number } | null),
   ]);
 
-  const totalDays      = data.countries.reduce((s, c) => s + c.days, 0);
+  // Distinct days with location data — per-country counts overlap, so summing
+  // them double-counts multi-country days.
+  const totalDays      = data.distinct_days ?? 0;
   const totalCountries = data.countries.length;
   const mostVisited    = data.countries.length > 0 ? data.countries[0] : null;
+
+  // Trips grouped by year for the gallery (newest year first)
+  const tripsByYear = new Map<string, Trip[]>();
+  for (const t of tripsData?.trips ?? []) {
+    const y = t.start_date.slice(0, 4);
+    if (!tripsByYear.has(y)) tripsByYear.set(y, []);
+    tripsByYear.get(y)!.push(t);
+  }
 
   return (
     <main className="max-w-3xl mx-auto px-4 pb-20 pt-8">
@@ -157,34 +168,56 @@ export default async function ExplorePage({ searchParams }: Props) {
         </section>
       )}
 
-      {/* Trips */}
+      {/* Trips — nights away from home, grouped by year, tap → first day */}
       {tripsData && tripsData.trips.length > 0 && (
         <section className="mb-8">
           <div className="flex items-baseline justify-between mb-3">
-            <h2 className="text-xs text-[#52525B] uppercase tracking-widest">Trips</h2>
-            <span className="text-xs text-[#3F3F46] tabular-nums">{tripsData.total} detected</span>
+            <h2 className="text-xs text-[#52525B] uppercase tracking-widest">
+              Trips{year ? ` in ${year}` : ""}
+            </h2>
+            <span className="text-xs text-[#3F3F46] tabular-nums">
+              {tripsData.total} · nights not slept at home
+            </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {tripsData.trips.slice(0, 8).map((t) => (
-              <div key={t.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm text-[#D4D4D8] font-medium truncate">
-                    {FLAG[t.primary_country ?? ""] ?? "🌍"} {t.name}
+          <div className="flex flex-col gap-4">
+            {[...tripsByYear.entries()].map(([y, trips]) => (
+              <div key={y}>
+                {!year && (
+                  <p className="text-xs text-[#71717A] tabular-nums mb-2">
+                    {y} <span className="text-[#3F3F46]">· {trips.length} trips · {trips.reduce((s, t) => s + t.n_nights, 0)} nights away</span>
                   </p>
-                  {t.max_distance_from_home_km != null && (
-                    <span className="text-[10px] text-[#3F3F46] tabular-nums shrink-0">
-                      {Math.round(t.max_distance_from_home_km)} km out
-                    </span>
-                  )}
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {trips.map((t) => (
+                    <Link
+                      key={t.id}
+                      href={`/day/${t.start_date}`}
+                      className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 hover:border-[#3F3F46] transition-colors group"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm text-[#D4D4D8] group-hover:text-[#FAFAFA] font-medium truncate transition-colors">
+                          {FLAG[t.primary_country ?? ""] ?? "🌍"} {t.name}
+                        </p>
+                        {t.max_distance_from_home_km != null && (
+                          <span className="text-[10px] text-[#3F3F46] tabular-nums shrink-0">
+                            {Math.round(t.max_distance_from_home_km)} km out
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-[#52525B] mt-0.5">
+                        {new Date(t.start_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                        {" – "}
+                        {new Date(t.end_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                        {t.cities.length > 0 && (
+                          <span className="text-[#3F3F46]"> · {t.cities.slice(0, 3).join(", ")}</span>
+                        )}
+                        {t.home_at_start && (
+                          <span className="text-[#3F3F46]"> · from {t.home_at_start}</span>
+                        )}
+                      </p>
+                    </Link>
+                  ))}
                 </div>
-                <p className="text-xs text-[#52525B] mt-0.5">
-                  {new Date(t.start_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                  {" – "}
-                  {new Date(t.end_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                  {t.cities.length > 0 && (
-                    <span className="text-[#3F3F46]"> · {t.cities.slice(0, 3).join(", ")}</span>
-                  )}
-                </p>
               </div>
             ))}
           </div>
@@ -200,7 +233,7 @@ export default async function ExplorePage({ searchParams }: Props) {
           {(totalDays > 0 || mostVisited) && (
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-[#18181B] rounded-lg p-3">
-                <p className="text-xs text-[#52525B] uppercase tracking-wider mb-1">Days abroad</p>
+                <p className="text-xs text-[#52525B] uppercase tracking-wider mb-1">Days tracked</p>
                 <p className="text-2xl font-bold tabular-nums" style={{ color: "#F59E0B" }}>{totalDays.toLocaleString()}</p>
               </div>
               {mostVisited && (

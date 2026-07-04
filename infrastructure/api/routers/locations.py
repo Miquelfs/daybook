@@ -126,6 +126,19 @@ def get_heatmap(year: int | None = None):
            ) ORDER BY y DESC"""
     ).fetchall()
 
+    # Distinct days with any location data — per-country day counts overlap
+    # (one day can touch several countries), so summing them double-counts.
+    distinct_days = con.execute(
+        f"""SELECT COUNT(DISTINCT date) AS n FROM (
+                SELECT substr(v.date,1,10) AS date FROM visits v
+                WHERE v.lat IS NOT NULL {year_clause_v}
+                UNION
+                SELECT substr(t.date,1,10) AS date FROM tracks t
+                WHERE t.geocode_city IS NOT NULL {year_clause_t}
+            )""",
+        params + params,
+    ).fetchone()["n"]
+
     con.close()
 
     # Aggregate after translating country names so "España" and "Spain" merge
@@ -148,6 +161,7 @@ def get_heatmap(year: int | None = None):
         "countries": [{"country": name, "days": days} for name, days in sorted_countries],
         "cities": [{"city": city, "country": country, "days": days} for (city, country), days in sorted_cities[:40]],
         "years": [r["y"] for r in years],
+        "distinct_days": distinct_days,
     }
 
 
@@ -420,10 +434,56 @@ def get_city_timeline(year: int | None = None):
     return list(reversed(stays))
 
 
+@router.get("/place-summary")
+def get_place_summary(place: str):
+    """One place's headline: total days, first/last visit, coordinates."""
+    con = _conn()
+    try:
+        meta = con.execute(
+            """SELECT COUNT(DISTINCT substr(date,1,10)) AS total_days,
+                      MIN(substr(date,1,10)) AS first_visit,
+                      MAX(substr(date,1,10)) AS last_visit,
+                      MAX(geocode_city) AS city,
+                      MAX(geocode_country) AS country
+               FROM tracks WHERE geocode_name = ?""",
+            (place,),
+        ).fetchone()
+        coords = con.execute(
+            "SELECT lat, lng FROM place_names WHERE name = ? AND lat IS NOT NULL LIMIT 1",
+            (place,),
+        ).fetchone()
+        if coords is None:
+            # Fall back to the first point of a track segment at this place
+            coords = con.execute(
+                """SELECT json_extract(points_json, '$[0].lat') AS lat,
+                          json_extract(points_json, '$[0].lng') AS lng
+                   FROM tracks WHERE geocode_name = ? AND points_json IS NOT NULL LIMIT 1""",
+                (place,),
+            ).fetchone()
+    finally:
+        con.close()
+    return {
+        "place": place,
+        "total_days": meta["total_days"] if meta else 0,
+        "first_visit": meta["first_visit"] if meta else None,
+        "last_visit": meta["last_visit"] if meta else None,
+        "city": _norm_city(meta["city"]) if meta and meta["city"] else None,
+        "country": _en(meta["country"]) if meta and meta["country"] else None,
+        "lat": coords["lat"] if coords else None,
+        "lng": coords["lng"] if coords else None,
+    }
+
+
 @router.get("/place-dates")
-def get_place_dates(place: str, year: int | None = None):
+def get_place_dates(
+    place: str,
+    year: int | None = None,
+    limit: int = 100,
+    offset: int = 0,
+):
     """
-    All dates a named place was visited, with mood/energy from that day.
+    Dates a named place was visited (newest first, paginated), with
+    mood/energy from that day.
     """
     con = _conn()
     year_clause = "AND substr(t.date,1,4) = ?" if year else ""
@@ -439,9 +499,9 @@ def get_place_dates(place: str, year: int | None = None):
             WHERE  t.geocode_name = ?
                    {year_clause}
             ORDER BY date DESC
-            LIMIT 100
+            LIMIT ? OFFSET ?
             """,
-            (place,) + params,
+            (place,) + params + (limit, offset),
         ).fetchall()
     except Exception:
         con.close()
@@ -716,17 +776,21 @@ def _country_meta() -> dict[str, dict]:
     return data
 
 
-def _days_by_country(con: sqlite3.Connection) -> dict[str, set[str]]:
+def _days_by_country(con: sqlite3.Connection, year: int | None = None) -> dict[str, set[str]]:
     """English country name → set of dates seen there (tracks ∪ visits)."""
+    yc = "AND substr(date,1,4) = ?" if year else ""
+    yp: tuple = (str(year),) if year else ()
     out: dict[str, set[str]] = {}
     for r in con.execute(
-        "SELECT date, geocode_country AS c FROM tracks WHERE geocode_country IS NOT NULL"
+        f"SELECT date, geocode_country AS c FROM tracks WHERE geocode_country IS NOT NULL {yc}",
+        yp,
     ):
         out.setdefault(_en(r["c"]), set()).add(r["date"])
     for r in con.execute(
-        """SELECT v.date, p.country AS c
+        f"""SELECT v.date, p.country AS c
            FROM visits v JOIN place_names p ON p.place_id = v.place_id
-           WHERE p.country IS NOT NULL"""
+           WHERE p.country IS NOT NULL {yc.replace('date', 'v.date')}""",
+        yp,
     ):
         out.setdefault(_en(r["c"]), set()).add(r["date"])
     return out
@@ -753,21 +817,26 @@ def _store(key: str, data: dict) -> dict:
 
 
 @router.get("/world-coverage")
-def world_coverage():
+def world_coverage(year: int | None = None):
     """Countries visited vs the world: %, continent grouping, per-country detail."""
-    if (cached := _cached("world-coverage")) is not None:
+    cache_key = f"world-coverage:{year}"
+    if (cached := _cached(cache_key)) is not None:
         return cached
     con = _conn()
-    days_by_country = _days_by_country(con)
+    days_by_country = _days_by_country(con, year)
 
     # Cities per country (from both geocode sources)
+    yc_t = "AND substr(date,1,4) = ?" if year else ""
+    yp: tuple = (str(year),) if year else ()
     cities: dict[str, set[str]] = {}
     for r in con.execute(
-        """SELECT geocode_country AS c, geocode_city AS city FROM tracks
-           WHERE geocode_country IS NOT NULL AND geocode_city IS NOT NULL
+        f"""SELECT geocode_country AS c, geocode_city AS city FROM tracks
+           WHERE geocode_country IS NOT NULL AND geocode_city IS NOT NULL {yc_t}
            UNION
-           SELECT country AS c, city FROM place_names
-           WHERE country IS NOT NULL AND city IS NOT NULL"""
+           SELECT p.country AS c, p.city FROM visits v
+           JOIN place_names p ON p.place_id = v.place_id
+           WHERE p.country IS NOT NULL AND p.city IS NOT NULL {yc_t.replace('date', 'v.date')}""",
+        yp + yp,
     ):
         cities.setdefault(_en(r["c"]), set()).add(_norm_city(r["city"]))
     con.close()
@@ -794,7 +863,7 @@ def world_coverage():
     for m in meta.values():
         all_by_continent[m["continent"]] = all_by_continent.get(m["continent"], 0) + 1
 
-    return _store("world-coverage", {
+    return _store(cache_key, {
         "countries_visited": visited,
         "countries_total": total,
         "pct_world": round(visited / total * 100, 1) if total else 0,
@@ -812,15 +881,19 @@ def world_coverage():
 
 
 @router.get("/fun-facts")
-def fun_facts():
+def fun_facts(year: int | None = None):
     """Stat cards: cosmic-scale distances, compass extremes, personal records."""
-    if (cached := _cached("fun-facts")) is not None:
+    cache_key = f"fun-facts:{year}"
+    if (cached := _cached(cache_key)) is not None:
         return cached
 
     from domains.locations.home_base import home_from_periods
 
     con = _conn()
     cards: list[dict] = []
+    yc = "AND substr(date,1,4) = ?" if year else ""
+    yp: tuple = (str(year),) if year else ()
+    scope = str(year) if year else "lifetime"
 
     def card(label, value, unit, subtitle, icon):
         cards.append({"label": label, "value": value, "unit": unit,
@@ -829,11 +902,13 @@ def fun_facts():
     # ── Cosmic scale ──────────────────────────────────────────────────────
     total_km = 0.0
     if con.execute("SELECT name FROM sqlite_master WHERE name='location_days'").fetchone():
-        row = con.execute("SELECT SUM(distance_meters)/1000.0 AS km FROM location_days").fetchone()
+        row = con.execute(
+            f"SELECT SUM(distance_meters)/1000.0 AS km FROM location_days WHERE 1=1 {yc}", yp
+        ).fetchone()
         total_km = row["km"] or 0.0
     if total_km > 0:
         card("Around the Earth", round(total_km / 40_075, 2), "laps",
-             f"{total_km:,.0f} km tracked lifetime", "🌍")
+             f"{total_km:,.0f} km tracked {scope}", "🌍")
         card("To the Moon", round(total_km / 384_400 * 100, 1), "% of the way",
              "one-way, 384,400 km", "🌙")
         card("Around the Sun", round(total_km / 149_597_870 * 1000, 3), "‰ of an AU",
@@ -844,12 +919,14 @@ def fun_facts():
         v = con.execute(
             f"""SELECT v.date, v.lat, v.lng, COALESCE(p.name, p.city, p.country) AS label
                 FROM visits v LEFT JOIN place_names p ON p.place_id = v.place_id
-                WHERE v.lat IS NOT NULL AND v.lat != 0
-                ORDER BY v.{col} {direction} LIMIT 1"""
+                WHERE v.lat IS NOT NULL AND v.lat != 0 {yc.replace('date', 'v.date')}
+                ORDER BY v.{col} {direction} LIMIT 1""",
+            yp,
         ).fetchone()
         o = con.execute(
             f"""SELECT date, lat, lng, NULL AS label FROM overland_locations
-                WHERE lat IS NOT NULL ORDER BY {col} {direction} LIMIT 1"""
+                WHERE lat IS NOT NULL {yc} ORDER BY {col} {direction} LIMIT 1""",
+            yp,
         ).fetchone()
         cands = [r for r in (v, o) if r is not None]
         if not cands:
@@ -866,19 +943,48 @@ def fun_facts():
             place = r["label"] or f"{r['lat']:.3f}, {r['lng']:.3f}"
             card(label, place, "", f"{r['date']} · {r['lat']:.3f}, {r['lng']:.3f}", icon)
 
+    # Highest point: phone GPS ∪ Garmin activity altitude streams (the phone
+    # rarely tracks in flight, so activities usually own this record).
+    best_alt: tuple[float, str, str] | None = None  # (alt, date, source)
     alt = con.execute(
-        """SELECT date, MAX(altitude) AS alt FROM overland_locations
-           WHERE altitude IS NOT NULL AND altitude < 15000"""
+        f"""SELECT date, MAX(altitude) AS alt FROM overland_locations
+           WHERE altitude IS NOT NULL AND altitude < 15000 {yc}""",
+        yp,
     ).fetchone()
     if alt and alt["alt"]:
-        card("Highest point", round(alt["alt"]), "m", f"GPS altitude · {alt['date']}", "⛰️")
+        best_alt = (alt["alt"], alt["date"], "phone GPS")
+    try:
+        dcon0 = _daybook_conn()
+        stream_rows = dcon0.execute(
+            f"""SELECT a.date, s.data_json
+                FROM activity_streams s JOIN activities a ON a.id = s.activity_id
+                WHERE s.stream_type IN ('altitude', 'elevation')
+                  {yc.replace('date', 'a.date')}""",
+            yp,
+        ).fetchall()
+        for r in stream_rows:
+            try:
+                values = [v for v in json.loads(r["data_json"]) if isinstance(v, (int, float))]
+            except (ValueError, TypeError):
+                continue
+            if values:
+                m = max(values)
+                if m < 15000 and (best_alt is None or m > best_alt[0]):
+                    best_alt = (m, r["date"], "activity")
+        dcon0.close()
+    except sqlite3.OperationalError:
+        pass
+    if best_alt:
+        card("Highest point", round(best_alt[0]), "m",
+             f"{best_alt[2]} · {best_alt[1]}", "⛰️")
 
     # ── Farthest from home (per-day centroid vs the home active that day) ─
     # Everything resolves in memory — no per-date SQL (this loop once took
     # ~17 s via repeated fallback queries and hung the /explore page).
     day_rows = con.execute(
-        """SELECT date, AVG(lat) AS lat, AVG(lng) AS lng FROM visits
-           WHERE lat IS NOT NULL GROUP BY date ORDER BY date"""
+        f"""SELECT date, AVG(lat) AS lat, AVG(lng) AS lng FROM visits
+           WHERE lat IS NOT NULL {yc} GROUP BY date ORDER BY date""",
+        yp,
     ).fetchall()
     import math as _math
     import statistics as _stats
@@ -910,29 +1016,32 @@ def fun_facts():
     # ── Personal scale ────────────────────────────────────────────────────
     dcon = _daybook_conn()
     run = dcon.execute(
-        """SELECT SUM(distance_meters)/1000.0 AS km FROM activities
-           WHERE LOWER(COALESCE(activity_type,'')) LIKE '%run%'"""
+        f"""SELECT SUM(distance_meters)/1000.0 AS km FROM activities
+           WHERE LOWER(COALESCE(activity_type,'')) LIKE '%run%' {yc}""",
+        yp,
     ).fetchone()
     dcon.close()
     if run and run["km"]:
         card("Marathons run", round(run["km"] / 42.195, 1), "equivalents",
-             f"{run['km']:,.0f} km on foot", "🏃")
+             f"{run['km']:,.0f} km on foot · {scope}", "🏃")
 
     if con.execute("SELECT name FROM sqlite_master WHERE name='location_days'").fetchone():
         top_day = con.execute(
-            "SELECT date, distance_meters/1000.0 AS km FROM location_days ORDER BY distance_meters DESC LIMIT 1"
+            f"SELECT date, distance_meters/1000.0 AS km FROM location_days WHERE 1=1 {yc} ORDER BY distance_meters DESC LIMIT 1",
+            yp,
         ).fetchone()
         if top_day:
             card("Longest day", round(top_day["km"]), "km", top_day["date"], "🚀")
         top_month = con.execute(
-            """SELECT substr(date,1,7) AS m, SUM(distance_meters)/1000.0 AS km
-               FROM location_days GROUP BY m ORDER BY km DESC LIMIT 1"""
+            f"""SELECT substr(date,1,7) AS m, SUM(distance_meters)/1000.0 AS km
+               FROM location_days WHERE 1=1 {yc} GROUP BY m ORDER BY km DESC LIMIT 1""",
+            yp,
         ).fetchone()
         if top_month:
             card("Biggest month", round(top_month["km"]), "km", top_month["m"], "📅")
 
     # ── Country diversity (Shannon entropy over days per country) ────────
-    days_by_country = _days_by_country(con)
+    days_by_country = _days_by_country(con, year)
     counts = [len(v) for v in days_by_country.values()]
     n = sum(counts)
     if n > 0 and len(counts) > 1:
@@ -959,20 +1068,22 @@ def fun_facts():
                  f"consecutive days outside {home_country}", "🧳")
 
     con.close()
-    return _store("fun-facts", {"cards": cards})
+    return _store(cache_key, {"cards": cards})
 
 
 @router.get("/trips")
-def list_trips(limit: int = 50, offset: int = 0):
-    """Auto-detected trips, newest first."""
+def list_trips(limit: int = 100, offset: int = 0, year: int | None = None):
+    """Auto-detected trips (nights away from home), newest first."""
     con = _daybook_conn()
     if not con.execute("SELECT name FROM sqlite_master WHERE name='trips'").fetchone():
         con.close()
         return {"trips": [], "total": 0}
-    total = con.execute("SELECT COUNT(*) AS n FROM trips").fetchone()["n"]
+    yc = "WHERE substr(start_date,1,4) = ? OR substr(end_date,1,4) = ?" if year else ""
+    yp: tuple = (str(year), str(year)) if year else ()
+    total = con.execute(f"SELECT COUNT(*) AS n FROM trips {yc}", yp).fetchone()["n"]
     rows = con.execute(
-        """SELECT * FROM trips ORDER BY start_date DESC LIMIT ? OFFSET ?""",
-        (limit, offset),
+        f"""SELECT * FROM trips {yc} ORDER BY start_date DESC LIMIT ? OFFSET ?""",
+        yp + (limit, offset),
     ).fetchall()
     con.close()
     trips = []
@@ -983,9 +1094,10 @@ def list_trips(limit: int = 50, offset: int = 0):
         t["name"] = t["user_name"] or t["auto_name"]
         t["countries"] = [_en(c) for c in t["countries"]]
         t["primary_country"] = _en(t["primary_country"])
-        n_days = 1 + (
+        n_nights = 1 + (
             datetime.fromisoformat(t["end_date"]) - datetime.fromisoformat(t["start_date"])
         ).days
-        t["n_days"] = n_days
+        t["n_days"] = n_nights          # kept for backward compatibility
+        t["n_nights"] = n_nights        # nights away from home
         trips.append(t)
     return {"trips": trips, "total": total}

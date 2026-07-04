@@ -63,10 +63,16 @@ log "Processing Overland GPS points..."
 python -m domains.locations.overland_process \
   >> "$LOG_FILE" 2>&1
 
-# Trips: re-detect trips over the last 120 days (Plan B.2).
+# Trips: re-detect trips over the last 120 days (Plan B.2, nights-based).
 log "Detecting trips..."
 python -m domains.locations.trip_detection \
   >> "$LOG_FILE" 2>&1 || log "WARN: Trip detection failed (non-fatal)"
+
+# Warm the expensive explore caches so the page is never cold (6h TTL,
+# hourly cron keeps them fresh).
+log "Warming explore caches..."
+curl -s -m 60 -o /dev/null "http://localhost:8000/locations/world-coverage" || true
+curl -s -m 60 -o /dev/null "http://localhost:8000/locations/fun-facts" || true
 
 # Notion sync removed — money data now entered via iOS app directly.
 

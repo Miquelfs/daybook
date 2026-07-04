@@ -603,6 +603,7 @@ export type HeatmapData = {
   countries: { country: string; days: number }[];
   cities: { city: string; country: string; days: number }[];
   years: string[];
+  distinct_days: number;                // days with any location data (no double counting)
 };
 
 export type TopPlace = {
@@ -679,6 +680,18 @@ export type Trip = {
   cover_photo_path: string | null;
   home_at_start: string | null;
   n_days: number;
+  n_nights: number;                     // nights away from home
+};
+
+export type PlaceSummary = {
+  place: string;
+  total_days: number;
+  first_visit: string | null;
+  last_visit: string | null;
+  city: string | null;
+  country: string | null;
+  lat: number | null;
+  lng: number | null;
 };
 
 // ─── Restaurants types ────────────────────────────────────────────────────────
@@ -818,13 +831,22 @@ export const api = {
     get<TopPlace[]>(`/locations/top-places?limit=30${year ? `&year=${year}` : ""}`),
   cityTimeline: (year?: number) =>
     get<CityStay[]>(`/locations/city-timeline${year ? `?year=${year}` : ""}`),
-  placeDates: (place: string, year?: number) =>
-    get<PlaceDate[]>(`/locations/place-dates?place=${encodeURIComponent(place)}${year ? `&year=${year}` : ""}`),
+  placeDates: (place: string, opts?: { year?: number; limit?: number; offset?: number }) =>
+    get<PlaceDate[]>(
+      `/locations/place-dates?place=${encodeURIComponent(place)}` +
+        (opts?.year ? `&year=${opts.year}` : "") +
+        `&limit=${opts?.limit ?? 100}&offset=${opts?.offset ?? 0}`
+    ),
+  placeSummary: (place: string) =>
+    get<PlaceSummary>(`/locations/place-summary?place=${encodeURIComponent(place)}`),
   movementStats: (year?: number) =>
     get<MovementStats>(`/locations/movement/stats${year ? `?year=${year}` : ""}`),
-  worldCoverage: () => get<WorldCoverage>("/locations/world-coverage"),
-  funFacts: () => get<{ cards: FunFactCard[] }>("/locations/fun-facts"),
-  trips: (limit = 24) => get<{ trips: Trip[]; total: number }>(`/locations/trips?limit=${limit}`),
+  worldCoverage: (year?: number) =>
+    get<WorldCoverage>(`/locations/world-coverage${year ? `?year=${year}` : ""}`),
+  funFacts: (year?: number) =>
+    get<{ cards: FunFactCard[] }>(`/locations/fun-facts${year ? `?year=${year}` : ""}`),
+  trips: (limit = 100, year?: number) =>
+    get<{ trips: Trip[]; total: number }>(`/locations/trips?limit=${limit}${year ? `&year=${year}` : ""}`),
   trainingCurve: (sport: "run" | "ride") =>
     get<CurveBucket[]>(`/training/curve?sport=${sport}&channel=pace`),
 

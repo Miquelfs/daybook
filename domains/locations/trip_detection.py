@@ -1,16 +1,23 @@
 """
-Auto-detected trips (Plan B.2).
+Auto-detected trips (Plan B.2) — nights-away-from-home semantics.
 
-A trip = consecutive days whose GPS points all sit further than
-DEFAULT_TRIP_RADIUS_KM (150 km) from the home-base centroid active on that
-date (from home_base.home_for). Runs of away-days separated by ≤1 day back
-home are merged ("quick return, then flight out"); trips shorter than 2 days
-are ignored. Upserts into daybook.db trips by (start_date, end_date).
+A day counts as an *away night* when the LAST observation of that day (latest
+visit end / Overland ping) is further than the active home's radius from the
+home-base centroid for that date (home_base.home_for). Day-trips that end back
+home — a pilot flying out and sleeping in their own bed — are NOT trips.
+
+A trip = consecutive away nights. Sleeping at home breaks the trip. Days with
+no data between two away nights are bridged (assumed still away, up to 3 days).
+Single-night layovers count.
+
+Approximation: a red-eye landing home after midnight still marks the previous
+day as away (last observation of that day is at the outstation).
 
 Usage:
   python -m domains.locations.trip_detection            # last 120 days
   python -m domains.locations.trip_detection --full     # all history
-Runs nightly from daily_sync.sh.
+Runs nightly from daily_sync.sh. Recomputed windows are wiped before upsert so
+rule changes and merged trips never leave stale rows behind.
 """
 
 from __future__ import annotations
@@ -20,18 +27,18 @@ import math
 import sqlite3
 import sys
 from collections import Counter
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from domains.locations.country_names import to_english
-from domains.locations.home_base import DEFAULT_TRIP_RADIUS_KM, home_for
+from domains.locations.home_base import home_for
 
 _ROOT = Path(__file__).parents[2]
 _DAYBOOK_DB = _ROOT / "infrastructure" / "db" / "daybook.db"
 _LOCATIONS_DB = _ROOT / "infrastructure" / "db" / "locations.db"
 
-MERGE_GAP_DAYS = 1   # ≤ this many home-days between away-runs → same trip
-MIN_TRIP_DAYS = 2    # ignore shorter trips
+MIN_AWAY_KM = 40.0        # floor for the "not sleeping at home" radius
+BRIDGE_UNKNOWN_DAYS = 3   # no-data days between away nights assumed still away
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -49,21 +56,60 @@ def _conn(path: Path) -> sqlite3.Connection:
     return con
 
 
-def _day_observations(lcon: sqlite3.Connection, start: str, end: str) -> dict[str, dict]:
-    """Per date: representative coords + countries + cities seen that day."""
+def _parse_ts(ts: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _night_coords(lcon: sqlite3.Connection, start: str, end: str) -> dict[str, tuple]:
+    """date → (lat, lng) of the LAST observation that day (visits ∪ overland)."""
+    best: dict[str, tuple] = {}  # date → (ts, lat, lng)
+
+    for r in lcon.execute(
+        """SELECT date, lat, lng, COALESCE(end_time, start_time) AS ts
+           FROM visits
+           WHERE date BETWEEN ? AND ? AND lat IS NOT NULL AND lat != 0""",
+        (start, end),
+    ):
+        ts = _parse_ts(r["ts"])
+        if ts is None:
+            continue
+        cur = best.get(r["date"])
+        if cur is None or ts > cur[0]:
+            best[r["date"]] = (ts, r["lat"], r["lng"])
+
+    for r in lcon.execute(
+        """SELECT date, lat, lng, recorded_at AS ts
+           FROM overland_locations
+           WHERE date BETWEEN ? AND ? AND lat IS NOT NULL""",
+        (start, end),
+    ):
+        ts = _parse_ts(r["ts"])
+        if ts is None:
+            continue
+        cur = best.get(r["date"])
+        if cur is None or ts > cur[0]:
+            best[r["date"]] = (ts, r["lat"], r["lng"])
+
+    return {d: (v[1], v[2]) for d, v in best.items()}
+
+
+def _day_context(lcon: sqlite3.Connection, start: str, end: str) -> dict[str, dict]:
+    """date → countries/cities Counters seen that day (for naming trips)."""
     days: dict[str, dict] = {}
 
     def _day(d: str) -> dict:
-        return days.setdefault(d, {"coords": [], "countries": Counter(), "cities": Counter()})
+        return days.setdefault(d, {"countries": Counter(), "cities": Counter()})
 
     for r in lcon.execute(
-        """SELECT v.date, v.lat, v.lng, p.country, p.city
+        """SELECT v.date, p.country, p.city
            FROM visits v LEFT JOIN place_names p ON p.place_id = v.place_id
-           WHERE v.date BETWEEN ? AND ? AND v.lat IS NOT NULL""",
+           WHERE v.date BETWEEN ? AND ?""",
         (start, end),
     ):
         d = _day(r["date"])
-        d["coords"].append((r["lat"], r["lng"]))
         if r["country"]:
             d["countries"][r["country"]] += 1
         if r["city"]:
@@ -80,83 +126,84 @@ def _day_observations(lcon: sqlite3.Connection, start: str, end: str) -> dict[st
         if r["city"]:
             d["cities"][r["city"]] += 1
 
-    # Overland points (sampled) fill days without visits, e.g. transit days
-    for r in lcon.execute(
-        """SELECT date, AVG(lat) AS lat, AVG(lng) AS lng
-           FROM overland_locations WHERE date BETWEEN ? AND ?
-           GROUP BY date""",
-        (start, end),
-    ):
-        d = _day(r["date"])
-        if not d["coords"] and r["lat"] is not None:
-            d["coords"].append((r["lat"], r["lng"]))
-
     return days
-
-
-def _min_distance_from_home(day: str, coords: list[tuple[float, float]]) -> float | None:
-    home = home_for(day)
-    if home is None or not coords:
-        return None
-    return min(_haversine_km(home["lat"], home["lng"], lat, lng) for lat, lng in coords)
 
 
 def detect(start: str, end: str, verbose: bool = True) -> int:
     lcon = _conn(_LOCATIONS_DB)
     dcon = _conn(_DAYBOOK_DB)
     try:
-        days = _day_observations(lcon, start, end)
+        nights = _night_coords(lcon, start, end)
 
-        # Classify each observed day: away / home / unknown
-        away: dict[str, dict] = {}
-        for d in sorted(days):
-            obs = days[d]
-            dist = _min_distance_from_home(d, obs["coords"])
-            if dist is None:
+        # Classify each observed date: away night / home night
+        away: dict[str, float] = {}   # date → distance from home that night
+        home_nights: set[str] = set()
+        for d in sorted(nights):
+            home = home_for(d)
+            if home is None:
                 continue
-            if dist > DEFAULT_TRIP_RADIUS_KM:
-                away[d] = {**obs, "max_dist": max(
-                    _haversine_km(home_for(d)["lat"], home_for(d)["lng"], lat, lng)
-                    for lat, lng in obs["coords"]
-                )}
+            lat, lng = nights[d]
+            dist = _haversine_km(home["lat"], home["lng"], lat, lng)
+            radius = max(home.get("radius_km") or MIN_AWAY_KM, MIN_AWAY_KM)
+            if dist > radius:
+                away[d] = dist
+            else:
+                home_nights.add(d)
 
-        # Group away-days into runs, merging gaps ≤ MERGE_GAP_DAYS
+        # Group consecutive away nights; bridge short no-data gaps, but a single
+        # night at home is a hard break.
         runs: list[list[str]] = []
         for d in sorted(away):
             if runs:
                 prev = date.fromisoformat(runs[-1][-1])
-                if (date.fromisoformat(d) - prev).days <= MERGE_GAP_DAYS + 1:
+                cur = date.fromisoformat(d)
+                gap = (cur - prev).days - 1
+                gap_dates = [
+                    (prev + timedelta(days=i + 1)).isoformat() for i in range(gap)
+                ]
+                slept_home_between = any(g in home_nights for g in gap_dates)
+                if gap <= BRIDGE_UNKNOWN_DAYS and not slept_home_between:
                     runs[-1].append(d)
                     continue
             runs.append([d])
 
+        # Wipe the recompute window first — the nightly upsert must also remove
+        # trips that no longer exist under current data/rules.
+        dcon.execute("DELETE FROM trips WHERE start_date >= ?", (start,))
+
+        context = _day_context(lcon, start, end)
+        has_location_days = bool(lcon.execute(
+            "SELECT name FROM sqlite_master WHERE name='location_days'"
+        ).fetchone())
+
         written = 0
         for run in runs:
             start_d, end_d = run[0], run[-1]
-            n_days = (date.fromisoformat(end_d) - date.fromisoformat(start_d)).days + 1
-            if n_days < MIN_TRIP_DAYS:
-                continue
+            n_nights = (date.fromisoformat(end_d) - date.fromisoformat(start_d)).days + 1
 
             countries: Counter = Counter()
             cities: Counter = Counter()
-            max_dist = 0.0
-            for d in run:
-                for c, n in away[d]["countries"].items():
-                    countries[to_english(c)] += n
-                cities.update(away[d]["cities"])
-                max_dist = max(max_dist, away[d]["max_dist"])
+            cur = date.fromisoformat(start_d)
+            while cur <= date.fromisoformat(end_d):
+                ctx = context.get(cur.isoformat())
+                if ctx:
+                    for c, n in ctx["countries"].items():
+                        countries[to_english(c)] += n
+                    cities.update(ctx["cities"])
+                cur += timedelta(days=1)
 
+            max_dist = max(away[d] for d in run)
             primary = countries.most_common(1)[0][0] if countries else None
+
             total_km = None
-            if lcon.execute(
-                "SELECT name FROM sqlite_master WHERE name='location_days'"
-            ).fetchone():
-                total_km_row = lcon.execute(
+            if has_location_days:
+                row = lcon.execute(
                     "SELECT SUM(distance_meters)/1000.0 AS km FROM location_days WHERE date BETWEEN ? AND ?",
                     (start_d, end_d),
                 ).fetchone()
-                if total_km_row and total_km_row["km"]:
-                    total_km = round(total_km_row["km"], 1)
+                if row and row["km"]:
+                    total_km = round(row["km"], 1)
+
             photo_row = dcon.execute(
                 "SELECT photo_path FROM days WHERE date BETWEEN ? AND ? AND photo_path IS NOT NULL ORDER BY date LIMIT 1",
                 (start_d, end_d),
@@ -183,14 +230,14 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
                     json.dumps([c for c, _ in cities.most_common(12)]),
                     total_km,
                     round(max_dist, 1),
-                    f"{primary or 'Away'} · {n_days} days",
+                    f"{primary or 'Away'} · {n_nights} night{'s' if n_nights != 1 else ''}",
                     photo_row["photo_path"] if photo_row else None,
                     home["label"] if home else None,
                 ),
             )
             written += 1
             if verbose:
-                print(f"  ✓ {start_d} → {end_d}: {primary or 'Away'} ({n_days}d, max {max_dist:.0f} km)")
+                print(f"  ✓ {start_d} → {end_d}: {primary or 'Away'} ({n_nights} nights, max {max_dist:.0f} km)")
 
         dcon.commit()
         return written
@@ -203,7 +250,7 @@ def main() -> None:
     full = "--full" in sys.argv
     end = date.today().isoformat()
     start = "2013-01-01" if full else (date.today() - timedelta(days=120)).isoformat()
-    print(f"detecting trips {start} → {end}")
+    print(f"detecting trips (nights away from home) {start} → {end}")
     n = detect(start, end)
     print(f"{n} trips upserted.")
 

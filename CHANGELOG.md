@@ -4,6 +4,35 @@ All notable changes to Daybook are tracked here, day by day.
 
 ---
 
+## 2026-07-04 — Trips mean nights away; explore year filter everywhere; place detail v2
+
+### Changed
+- **Trip detection is nights-based**: a trip = consecutive nights where the
+  *last observation of the day* is outside the active home's radius. A pilot's
+  day-trips that end back in their own bed no longer count; single-night
+  layovers do. Sleeping at home breaks a trip; ≤3 no-data days between away
+  nights are bridged. Recomputed windows are wiped before upsert so rule
+  changes never leave stale trips.
+- **Explore year filter now applies to everything** — world coverage,
+  fun facts and trips all accept `?year=` (cache keyed per year).
+- **"Days abroad" → "Days tracked"** using a new `distinct_days` count — a day
+  touching two countries was previously counted twice.
+- **Highest point** now also scans Garmin activity altitude streams (labelled
+  by source) — the phone rarely tracks in flight.
+
+### Added
+- Trips gallery grouped by year with per-year night totals; each card links to
+  the trip's first day. Cards show departure home ("from Mallorca").
+- Place detail v2: map pin (Leaflet, dark tiles), first/last visit cards
+  linking to those days, paginated visits (10 at a time + load more);
+  `GET /locations/place-summary`, `place-dates` gains `limit/offset`.
+- Hourly cache warmers for world-coverage + fun-facts in `daily_sync.sh` —
+  /explore is never cold.
+- Manual coords fallback in `backfill_home_coords.py` (Grassobio fails
+  Nominatim; OSM spells it Grassobbio).
+
+---
+
 ## 2026-07-03 — Money intelligence, maps narrative layer, sport curves, ops fixes
 
 Full analysis + forward roadmap in `docs/PLAN_2026_07_03.md`. Checkpoint commit

@@ -17,6 +17,11 @@ from infrastructure.db.connection import get_connection
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "daybook-personal/1.0"
 
+# Labels Nominatim can't resolve — known coordinates by hand.
+MANUAL_COORDS: dict[str, tuple[float, float]] = {
+    "Bergamo: Grassobio": (45.6640, 9.7270),  # Grassobbio (double-b in OSM)
+}
+
 
 def _query_for(label: str) -> str:
     # Labels look like "Barcelona", "UK: East Midlands", "Bergamo: Grassobio" —
@@ -53,6 +58,15 @@ def main() -> None:
         return
 
     for row in rows:
+        if row["label"] in MANUAL_COORDS:
+            coords = MANUAL_COORDS[row["label"]]
+            conn.execute(
+                "UPDATE life_periods SET centroid_lat=?, centroid_lng=? WHERE id=?",
+                (coords[0], coords[1], row["id"]),
+            )
+            conn.commit()
+            print(f"  ✓ {row['label']} → {coords[0]:.4f}, {coords[1]:.4f} (manual)")
+            continue
         try:
             coords = geocode(row["label"])
         except requests.RequestException as e:
