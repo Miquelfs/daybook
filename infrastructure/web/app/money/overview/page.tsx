@@ -25,8 +25,8 @@ export default async function OverviewPage({ searchParams }: Props) {
           <Link href="/money" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest">
             ← Finance
           </Link>
-          <Link href="/money/trends" className="text-xs text-[#F59E0B] hover:text-[#FCD34D] transition-colors uppercase tracking-widest">
-            Trends →
+          <Link href="/money/insights" className="text-xs text-[#F59E0B] hover:text-[#FCD34D] transition-colors uppercase tracking-widest">
+            Insights →
           </Link>
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">{monthLabel}</h1>

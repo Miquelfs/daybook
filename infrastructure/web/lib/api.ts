@@ -626,6 +626,56 @@ export type PlaceDate = {
   mood_note: string | null;
 };
 
+// ── Maps narrative layer (Plan Phase B) ──────────────────────────────────────
+
+export type WorldCoverage = {
+  countries_visited: number;
+  countries_total: number;
+  pct_world: number;
+  continents: Record<string, { visited: string[]; visited_count: number; total: number }>;
+  country_details: {
+    country: string;
+    iso2: string | null;
+    continent: string;
+    first_visit: string;
+    last_visit: string;
+    total_days: number;
+    cities_visited: number;
+  }[];
+  all_countries: Record<string, { iso2: string; continent: string }>;
+};
+
+export type FunFactCard = {
+  label: string;
+  value: string | number;
+  unit: string;
+  subtitle: string;
+  icon: string;
+};
+
+export type CurveBucket = {
+  bucket: number;                 // distance in meters
+  all_time_best: number | null;   // pace s/km at that distance
+  last_90d_best: number | null;
+};
+
+export type Trip = {
+  id: number;
+  start_date: string;
+  end_date: string;
+  primary_country: string | null;
+  countries: string[];
+  cities: string[];
+  total_km: number | null;
+  max_distance_from_home_km: number | null;
+  name: string;
+  auto_name: string | null;
+  user_name: string | null;
+  cover_photo_path: string | null;
+  home_at_start: string | null;
+  n_days: number;
+};
+
 // ─── Restaurants types ────────────────────────────────────────────────────────
 
 export type Restaurant = {
@@ -767,6 +817,11 @@ export const api = {
     get<PlaceDate[]>(`/locations/place-dates?place=${encodeURIComponent(place)}${year ? `&year=${year}` : ""}`),
   movementStats: (year?: number) =>
     get<MovementStats>(`/locations/movement/stats${year ? `?year=${year}` : ""}`),
+  worldCoverage: () => get<WorldCoverage>("/locations/world-coverage"),
+  funFacts: () => get<{ cards: FunFactCard[] }>("/locations/fun-facts"),
+  trips: (limit = 24) => get<{ trips: Trip[]; total: number }>(`/locations/trips?limit=${limit}`),
+  trainingCurve: (sport: "run" | "ride") =>
+    get<CurveBucket[]>(`/training/curve?sport=${sport}&channel=pace`),
 
   activity: (id: string) => get<ActivityDetail>(`/activities/${id}`),
   activities: (start: string, end: string) =>

@@ -18,7 +18,9 @@ from infrastructure.api.db_money import get_money_db
 from infrastructure.api.models.money import (
     AccountBalance, AllocationSlice, AnomalyReport, BudgetAlert,
     CategoryBudget, CategoryMeta, CategoryMonthSpend, CategorySpikeAnomaly, CategoryStats, CategoryTrendsData, SubcategoryBreakdown,
-    DaySpend, ForecastData, HistoricalData,
+    DaySpend, EfficiencyData, EfficiencyRow, ForecastData, HistoricalData,
+    MonthlyAnomaly, MonthlyAnomalyReport, MonthlySeriesPoint,
+    SeasonalData, SeasonalMonth, WaterfallData, WaterfallItem,
     HoldingCreate, HoldingHistoryPoint, HoldingOut, HoldingPatch,
     InvestmentPlanCreate, InvestmentPlanOut, InvestmentPlanPatch,
     IsinCandidate, IsinLookupResult,
@@ -32,6 +34,7 @@ from infrastructure.api.models.money import (
 )
 from domains.money.money_config import (
     CATEGORY_EMOJI, EXPENSE_CATEGORIES, classify, get_budget_for_month,
+    FIXED_RECURRING_CATEGORIES,
     INCOME_CATEGORIES, LIQUID_ACCOUNTS, INVESTMENT_ACCOUNTS,
 )
 
@@ -557,16 +560,28 @@ def month_overview(
 
     categories: list[CategoryBudget] = []
     alerts: list[BudgetAlert] = []
+    fixed_spent = 0.0
+    disc_spent = 0.0
     for row in cat_rows:
         cat = row["category"] or "Other"
         spent = max(0.0, row["spent"])  # floor at 0 when reimbursements exceed spending
         bgt = budget.get(cat, 0.0)
         remaining = bgt - spent
-        vel = (spent / bgt / pct_time) if bgt > 0 and pct_time > 0 else 0.0
-        status = _budget_status(spent, bgt, vel)
+        is_fixed = cat in FIXED_RECURRING_CATEGORIES
+        if is_fixed:
+            fixed_spent += spent
+            # A fixed bill is amortised over the whole month: pace is meaningless,
+            # only exceeding the budget matters.
+            vel = (spent / bgt) if bgt > 0 else 0.0
+            status = "Over Budget" if bgt > 0 and spent > bgt else ("No Budget" if bgt == 0 else "OK")
+        else:
+            disc_spent += spent
+            vel = (spent / bgt / pct_time) if bgt > 0 and pct_time > 0 else 0.0
+            status = _budget_status(spent, bgt, vel)
         categories.append(CategoryBudget(
             category=cat, spent=round(spent, 2), budget=round(bgt, 2),
             remaining=round(remaining, 2), velocity=round(vel, 2), status=status,
+            is_fixed=is_fixed,
         ))
         if status in ("Over Budget", "Over Pace"):
             alerts.append(BudgetAlert(
@@ -574,10 +589,19 @@ def month_overview(
                 budget=round(bgt, 2), status=status,
             ))
 
+    fixed_budget = sum(v for k, v in budget.items() if k in FIXED_RECURRING_CATEGORIES)
+    disc_budget = total_budget - fixed_budget
+
     overall_vel = (total_spent / total_budget / pct_time) if total_budget > 0 and pct_time > 0 else 0.0
+    adj_vel = (disc_spent / disc_budget / pct_time) if disc_budget > 0 and pct_time > 0 else 0.0
     daily_burn = total_spent / days_elapsed if days_elapsed > 0 else 0.0
     projected = daily_burn * dim
     projected_savings = total_income - projected
+    # Adjusted projection: discretionary extrapolates by pace; fixed bills count
+    # as the full monthly amount (or actual, once it exceeds the budget).
+    disc_burn = disc_spent / days_elapsed if days_elapsed > 0 else 0.0
+    projected_adj = disc_burn * dim + max(fixed_spent, fixed_budget)
+    projected_savings_adj = total_income - projected_adj
 
     return MonthOverview(
         month=month,
@@ -592,6 +616,13 @@ def month_overview(
         projected_savings=round(projected_savings, 2),
         categories=categories,
         alerts=alerts,
+        adjusted_velocity=round(adj_vel, 2),
+        fixed_spent=round(fixed_spent, 2),
+        fixed_budget=round(fixed_budget, 2),
+        discretionary_spent=round(disc_spent, 2),
+        discretionary_budget=round(disc_budget, 2),
+        projected_month_end_adjusted=round(projected_adj, 2),
+        projected_savings_adjusted=round(projected_savings_adj, 2),
     )
 
 
@@ -840,7 +871,9 @@ def get_category_stats(
     sub_rows = conn.execute(
         """SELECT category, subcategory,
                   COALESCE(-SUM(amount), 0) AS total,
-                  COUNT(*) AS cnt
+                  COUNT(*) AS cnt,
+                  MIN(ABS(amount)) AS min_tx,
+                  MAX(ABS(amount)) AS max_tx
            FROM transactions
            WHERE deleted_at IS NULL AND transaction_type='Expense'
              AND subcategory IS NOT NULL AND subcategory != ''
@@ -848,6 +881,12 @@ def get_category_stats(
            GROUP BY category, subcategory ORDER BY total DESC""",
         (start_str, current_month)
     ).fetchall()
+
+    def _variance_flag(min_tx: float, max_tx: float, count: int, total: float) -> bool:
+        if count <= 3 or count == 0:
+            return False
+        avg = total / count
+        return avg > 0 and (max_tx - min_tx) > 2 * avg
 
     subs_by_cat: dict[str, list[SubcategoryBreakdown]] = {}
     for s in sub_rows:
@@ -858,6 +897,7 @@ def get_category_stats(
             subcategory=s["subcategory"],
             total=round(s["total"], 2),
             count=s["cnt"],
+            variance_flag=_variance_flag(s["min_tx"], s["max_tx"], s["cnt"], s["total"]),
         ))
 
     grand_total = sum(r["total"] for r in rows) or 1.0
@@ -876,6 +916,7 @@ def get_category_stats(
             max_tx=round(r["max_tx"], 2),
             pct_of_total=round(total / grand_total * 100, 1),
             subcategories=subs_by_cat.get(cat, []),
+            variance_flag=_variance_flag(r["min_tx"], r["max_tx"], r["cnt"], total),
         ))
 
     return result
@@ -1009,6 +1050,229 @@ def get_anomalies(
         large_transactions=large_txns,
         category_spikes=spikes,
     )
+
+
+# ── Intelligence layer (Track A-II) ───────────────────────────────────────────
+
+def _month_shift(month: str, delta: int) -> str:
+    """YYYY-MM shifted by delta months."""
+    y, m = int(month[:4]), int(month[5:7])
+    idx = y * 12 + (m - 1) + delta
+    return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+
+
+def _completed_month_series(
+    conn: sqlite3.Connection, window_months: int
+) -> list[MonthlySeriesPoint]:
+    """Expenses/income/savings per completed month, ascending, over the window."""
+    current_month = date.today().strftime("%Y-%m")
+    start = _month_shift(current_month, -window_months)
+    rows = conn.execute(
+        """SELECT strftime('%Y-%m', date) AS mon,
+                  COALESCE(-SUM(CASE WHEN transaction_type='Expense' THEN amount END), 0) AS expenses,
+                  COALESCE(SUM(CASE WHEN transaction_type='Income' THEN amount END), 0) AS income
+           FROM transactions
+           WHERE deleted_at IS NULL
+             AND strftime('%Y-%m', date) >= ? AND strftime('%Y-%m', date) < ?
+           GROUP BY mon ORDER BY mon""",
+        (start, current_month),
+    ).fetchall()
+    return [
+        MonthlySeriesPoint(
+            month=r["mon"],
+            expenses=round(r["expenses"], 2),
+            income=round(r["income"], 2),
+            savings=round(r["income"] - r["expenses"], 2),
+        )
+        for r in rows
+    ]
+
+
+@router.get("/waterfall", response_model=WaterfallData)
+def get_waterfall(
+    conn: DB,
+    month: Optional[str] = Query(None, description="YYYY-MM; defaults to current month"),
+):
+    """Income → per-category expenses → savings, for a waterfall chart."""
+    if not month:
+        month = date.today().strftime("%Y-%m")
+
+    income_row = conn.execute(
+        """SELECT COALESCE(SUM(amount), 0) AS total FROM transactions
+           WHERE strftime('%Y-%m', date)=? AND transaction_type='Income' AND deleted_at IS NULL""",
+        (month,),
+    ).fetchone()
+    income = income_row["total"]
+
+    cat_rows = conn.execute(
+        """SELECT category, COALESCE(-SUM(amount), 0) AS spent FROM transactions
+           WHERE strftime('%Y-%m', date)=? AND transaction_type='Expense' AND deleted_at IS NULL
+           GROUP BY category HAVING spent > 0 ORDER BY spent DESC""",
+        (month,),
+    ).fetchall()
+
+    categories = [
+        WaterfallItem(name=r["category"] or "Other", amount=round(r["spent"], 2))
+        for r in cat_rows
+    ]
+    total_expenses = sum(c.amount for c in categories)
+    savings = income - total_expenses
+
+    return WaterfallData(
+        month=month,
+        income=round(income, 2),
+        categories=categories,
+        savings=round(savings, 2),
+        savings_rate=round(savings / income, 4) if income > 0 else 0.0,
+    )
+
+
+@router.get("/efficiency", response_model=EfficiencyData)
+def get_efficiency(
+    conn: DB,
+    window: int = Query(12, ge=3, le=60, description="Window in completed months"),
+):
+    """Per-category recoverable savings: actual avg vs budget vs an aggressive cap
+    (25th percentile of historical monthly spend)."""
+    current_month = date.today().strftime("%Y-%m")
+    start = _month_shift(current_month, -window)
+    budget = get_budget_for_month(current_month)
+
+    rows = conn.execute(
+        """SELECT category, strftime('%Y-%m', date) AS mon, -SUM(amount) AS spent
+           FROM transactions
+           WHERE deleted_at IS NULL AND transaction_type='Expense'
+             AND strftime('%Y-%m', date) >= ? AND strftime('%Y-%m', date) < ?
+           GROUP BY category, mon""",
+        (start, current_month),
+    ).fetchall()
+
+    from collections import defaultdict
+    per_cat: dict[str, list[float]] = defaultdict(list)
+    for r in rows:
+        per_cat[r["category"] or "Other"].append(max(0.0, r["spent"]))
+
+    def _p25(values: list[float]) -> float:
+        s = sorted(values)
+        if not s:
+            return 0.0
+        # Linear-interpolated 25th percentile
+        k = 0.25 * (len(s) - 1)
+        lo = int(k)
+        hi = min(lo + 1, len(s) - 1)
+        return s[lo] + (s[hi] - s[lo]) * (k - lo)
+
+    out: list[EfficiencyRow] = []
+    for cat, spends in per_cat.items():
+        if len(spends) < 3:
+            continue  # not enough history for a meaningful cap
+        avg_actual = sum(spends) / len(spends)
+        bgt = budget.get(cat, 0.0)
+        cap = min(bgt, _p25(spends)) if bgt > 0 else _p25(spends)
+        recoverable = max(0.0, avg_actual - cap)
+        if bgt > 0 and avg_actual > bgt:
+            flag = "over_budget"
+        elif recoverable > 1.0:
+            flag = "recoverable"
+        else:
+            flag = "efficient"
+        out.append(EfficiencyRow(
+            category=cat,
+            avg_actual=round(avg_actual, 2),
+            budget=round(bgt, 2),
+            aggressive_cap=round(cap, 2),
+            recoverable_per_month=round(recoverable, 2),
+            flag=flag,
+        ))
+
+    out.sort(key=lambda r: r.recoverable_per_month, reverse=True)
+    return EfficiencyData(
+        window_months=window,
+        rows=out,
+        total_recoverable=round(sum(r.recoverable_per_month for r in out), 2),
+    )
+
+
+@router.get("/anomalies/monthly", response_model=MonthlyAnomalyReport)
+def get_monthly_anomalies(
+    conn: DB,
+    window: int = Query(24, ge=6, le=60, description="Window in completed months"),
+):
+    """Whole-month outliers: expenses/income/savings vs the window mean (Z-score)."""
+    series = _completed_month_series(conn, window)
+
+    anomalies: list[MonthlyAnomaly] = []
+    for metric in ("expenses", "income", "savings"):
+        values = [getattr(p, metric) for p in series]
+        if len(values) < 6:
+            continue  # too little history for meaningful Z-scores
+        mean = sum(values) / len(values)
+        var = sum((v - mean) ** 2 for v in values) / len(values)
+        std = var ** 0.5
+        if std == 0:
+            continue
+        for p in series:
+            z = (getattr(p, metric) - mean) / std
+            if abs(z) >= 2.0:
+                anomalies.append(MonthlyAnomaly(
+                    month=p.month,
+                    metric=metric,
+                    value=getattr(p, metric),
+                    mean=round(mean, 2),
+                    std=round(std, 2),
+                    z_score=round(z, 2),
+                    severity="high" if abs(z) >= 2.5 else "medium",
+                ))
+
+    anomalies.sort(key=lambda a: abs(a.z_score), reverse=True)
+    return MonthlyAnomalyReport(window_months=window, series=series, anomalies=anomalies)
+
+
+@router.get("/seasonal", response_model=SeasonalData)
+def get_seasonal(conn: DB):
+    """Average expenses/income by calendar month across all completed months."""
+    current_month = date.today().strftime("%Y-%m")
+    rows = conn.execute(
+        """SELECT strftime('%m', date) AS cal_mon,
+                  strftime('%Y-%m', date) AS mon,
+                  COALESCE(-SUM(CASE WHEN transaction_type='Expense' THEN amount END), 0) AS expenses,
+                  COALESCE(SUM(CASE WHEN transaction_type='Income' THEN amount END), 0) AS income
+           FROM transactions
+           WHERE deleted_at IS NULL AND strftime('%Y-%m', date) < ?
+           GROUP BY mon ORDER BY mon""",
+        (current_month,),
+    ).fetchall()
+
+    LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    from collections import defaultdict
+    exp_by_cal: dict[int, list[float]] = defaultdict(list)
+    inc_by_cal: dict[int, list[float]] = defaultdict(list)
+    for r in rows:
+        cal = int(r["cal_mon"])
+        exp_by_cal[cal].append(r["expenses"])
+        inc_by_cal[cal].append(r["income"])
+
+    months: list[SeasonalMonth] = []
+    for m in range(1, 13):
+        exps = exp_by_cal.get(m, [])
+        incs = inc_by_cal.get(m, [])
+        avg_e = sum(exps) / len(exps) if exps else 0.0
+        avg_i = sum(incs) / len(incs) if incs else 0.0
+        months.append(SeasonalMonth(
+            month_num=m,
+            label=LABELS[m - 1],
+            avg_expenses=round(avg_e, 2),
+            avg_income=round(avg_i, 2),
+            avg_savings=round(avg_i - avg_e, 2),
+            n_years=len(exps),
+        ))
+
+    with_data = [m for m in months if m.n_years > 0]
+    most_expensive = max(with_data, key=lambda m: m.avg_expenses).label if with_data else None
+    cheapest = min(with_data, key=lambda m: m.avg_expenses).label if with_data else None
+
+    return SeasonalData(months=months, most_expensive=most_expensive, cheapest=cheapest)
 
 
 @router.get("/daily-totals")

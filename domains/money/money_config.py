@@ -27,6 +27,11 @@ BUDGET_VERSIONS: dict[str, dict[str, float]] = {
 DEFAULT_EXPECTED_MONTHLY_INCOME: float = 3500
 MONTHLY_SAVINGS_GOAL: float = 1300
 
+# Categories whose monthly cost is a fixed bill (rent, insurance, …) rather than
+# discretionary day-by-day spending.  Used for the "adjusted velocity" metric:
+# a €1000 rent hitting on day 1 must not read as a 1200% burn rate.
+FIXED_RECURRING_CATEGORIES: set[str] = {"Home"}
+
 # ── Category classification ────────────────────────────────────────────────────
 
 INCOME_CATEGORIES: set[str] = {"Income", "OMYRA"}

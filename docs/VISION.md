@@ -220,43 +220,44 @@ The features that make it personal and reflective over time.
 
 **Done when:** I voluntarily open this every morning and every evening. It feels like a tool I trust.
 
-### Phase 4 — Native iOS App 🔄 NEXT (started 2026-06-05)
-Take Daybook from a web app accessed via Tailscale to a native Swift/SwiftUI iOS app installed via Xcode. The Pi remains the single source of truth; the app is a thin client with offline write capabilities.
+### Phase 4 — Native iOS App ✅ COMPLETE (2026-06)
+Daybook went from a web app accessed via Tailscale to a native Swift/SwiftUI app. The Pi remains the single source of truth; the app is a thin client with offline write capability for the questionnaire.
 
-Full plan: `.claude/plans/hello-claude-can-you-mutable-parrot.md`
+Delivered (all sub-phases 4.0–4.4): 5-tab client (~60 Swift files, zero third-party
+dependencies), Today view + offline evening questionnaire, photo upload, day detail
+and day browser, health trends, activities with MapKit routes, money overview +
+trends + expense entry, aviation logbook + flight logging + roster, books/shows/
+restaurants, correlations, Life in Weeks, location heatmap, training + stats,
+injuries, decisions, experiments, groceries.
 
-**Phase 4.0 — Foundation:**
-- ⏳ Xcode project scaffold (`com.miquelfarr.daybook`, iOS 17, SwiftUI)
-- ⏳ `DaybookAPIClient` actor, `OfflineQueue` actor, `NWPathMonitor` connectivity
-- ⏳ `NSAppTransportSecurity` for HTTP over Tailscale
-- ⏳ 5-tab navigation: Today, Aviation, Money, Explore, Settings
+**Beyond the plan (native-only):** VisionKit receipt scanning → server AI parsing,
+FinanceKit transaction import, background GPS → Overland ingest, three home-screen
+widgets, share-extension expense capture, Keychain token storage, `DesignSystem.swift`
+matching the web's tokens.
 
-**Phase 4.1 — Daily Core:**
-- ⏳ Today view (HRV, sleep, steps, body battery, flights, tags)
-- ⏳ Evening questionnaire — offline-capable (CryptoKit MD5, hardcoded questions)
-- ⏳ Photo upload (PHPicker → multipart POST)
-- ⏳ Day detail view (read-only)
+Strategy recorded in ADR-004: iOS = daily capture client, web = analytical
+instrument, one Pi API contract for both. The PWA-hardening track is closed.
 
-**Phase 4.2 — Data Reading:**
-- ⏳ Health trends (Swift Charts)
-- ⏳ Activities list + detail (MapKit polyline)
-- ⏳ Money overview + transactions
-- ⏳ Aviation logbook (read-only) + currency badge
-- ⏳ Books list + stats
+### Phase 4.5 — Instrument (web build-out) ✅ 2026-06 → 07
+The web app became the deep-dive instrument in parallel:
 
-**Phase 4.3 — Active Input:**
-- ⏳ Flight logging form with offline queue (replaces needing a laptop at the gate)
-- ⏳ Expense entry FAB with 8-second UX target
-- ⏳ Book logging sheet
-- ⏳ Overland deep link integration
-
-**Phase 4.4 — Insights:**
-- ⏳ Correlations explorer (scatter plot, top correlations)
-- ⏳ Life in Weeks grid (LazyVGrid / Canvas)
-- ⏳ Location heatmap (WKWebView + Leaflet bridge)
-- ⏳ Training dashboard, Timeline, Sync controls in Settings
-
-**Done when:** I log flights from the cockpit without a laptop, fill the questionnaire in bed, and the Pi web app is a secondary interface.
+- **Money**: investor portfolio (holdings, yfinance daily prices, DCA plans,
+  net-worth history), account/category drill-downs, intelligence layer
+  (`/money/insights`: adjusted velocity, waterfall, month-level Z-scores,
+  seasonal, recoverable-savings table)
+- **Groceries**: Mercadona pantry + price tracker + receipt pipeline + LLM meal planner
+- **Training**: Omyra race coach (adaptation engine, 12 plan templates, RPE loop,
+  taper, compliance), readiness score, CTL/ATL/TSB, per-activity NP/IF/VI/EF,
+  sport-aware activity detail (pace/speed curves)
+- **Health**: sleep section, Personal Load Index (Horizon 1 embryo), streaks, injuries
+- **Aviation**: duty roster import + day briefs + pay estimate + drill-downs
+- **Maps**: home base from life periods, auto-detected trips, world coverage %,
+  fun facts (compass extremes, farthest-from-home)
+- **Horizon 3 instruments**: decision log with calibration, N-of-1 experiments
+  (Cohen's d)
+- **AI layer** (Ollama, graceful degradation): morning brief, health narratives,
+  weekly expense summary — currently dark pending a new LLM host (HP node
+  deprecated 2026-06-29; point `OLLAMA_HOST` at Ollama on the Mac to re-light)
 
 ### Phase 5 — Spark (ongoing)
 The advanced features. Build only after Phase 4 is stable and used daily.

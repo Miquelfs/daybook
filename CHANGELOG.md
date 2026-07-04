@@ -4,6 +4,60 @@ All notable changes to Daybook are tracked here, day by day.
 
 ---
 
+## 2026-07-03 — Money intelligence, maps narrative layer, sport curves, ops fixes
+
+Full analysis + forward roadmap in `docs/PLAN_2026_07_03.md`. Checkpoint commit
+captured the whole June–July build-out (portfolio+DCA, groceries, Omyra coach,
+sleep, injuries, decisions, experiments, roster, AI layer) that had been
+sitting uncommitted.
+
+### Added — Money Intelligence (Plan A-II)
+- **Adjusted budget velocity** — `FIXED_RECURRING_CATEGORIES` (`Home`) amortised
+  over the month; `/money/overview` gains `adjusted_velocity`, fixed/discretionary
+  splits and adjusted projections; fixed categories no longer fire pace alerts
+- **4 new endpoints**: `GET /money/waterfall`, `/money/efficiency` (recoverable
+  savings vs 25th-percentile caps), `/money/anomalies/monthly` (month-level
+  Z-scores), `/money/seasonal` (Jan–Dec averages)
+- **`/money/insights` page** — velocity gauge (adjusted/raw toggle), savings
+  streak with 12-month dots, cash-flow waterfall, unusual-months timeline+cards,
+  seasonal chart, daily-rhythm heat grid, efficiency table, history & forecast
+- `variance_flag` on category/subcategory stats ((max−min) > 2× avg, >3 tx)
+
+### Added — Maps narrative layer (Plan Phase B)
+- **Home base** anchored on life-in-weeks location periods:
+  `life_periods.centroid_lat/lng/home_radius_km` (+ `migrate_maps.py`),
+  `domains/locations/backfill_home_coords.py` (Nominatim), `home_base.home_for(date)`
+  with 30-day GPS-centroid fallback
+- **Auto-detected trips** — `trips` table + `domains/locations/trip_detection.py`
+  (>150 km from the home active that date, ≤1-day home gaps merged, <2 nights
+  ignored); nightly step in `daily_sync.sh`; `GET /locations/trips`
+- **World coverage** — `GET /locations/world-coverage` (32/197 countries — 16.2%),
+  continent split, per-country first/last visit + days + cities;
+  `domains/locations/countries.json`
+- **Fun facts** — `GET /locations/fun-facts`: compass extremes (N/S/E/W with
+  place+date), highest GPS point, farthest-from-home ever, Earth laps / Moon %,
+  marathons-run equivalent, longest day/month, country diversity (Shannon),
+  longest stretch abroad
+- `/explore` shows world coverage bar, fun-facts strip, and trips gallery
+- Country-name normalization moved to `domains/locations/country_names.py`
+  (+ Estonia/Lithuania/Albania/Latvia and other missing mappings)
+
+### Added — Sport-aware activity detail (Plan C.1)
+- `SportCurveSection` — pace curve (runs) / speed curve (rides) with all-time
+  vs last-90d lines and “this one” marker; sport color chip in the header
+  (run=coral, ride=blue, swim=teal)
+
+### Fixed / Ops
+- **Morning brief** now generates once around 06h (05–08h window guard in
+  `daily_sync.sh`), skips when today's brief exists; `--force` flag added and
+  used by the regenerate endpoint
+- **Grocery price sync** added to the nightly cron (06h) with a CLI entry on
+  `price_tracker`
+- ADR-004 records the two-client strategy (web=instrument, iOS=capture,
+  Pi API=single contract)
+
+---
+
 ## 2026-05-15–18 — Daily usability sprint: photo diary, questionnaire overhaul, money fixes, location tuning
 
 ### Added

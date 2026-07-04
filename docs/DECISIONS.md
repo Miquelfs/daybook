@@ -70,3 +70,43 @@ Develop and run Daybook on a Mac (development = production for now). Target a Ra
 
 ### Migration path
 See `docs/MIGRATION.md` for the Pi 3 migration checklist.
+
+---
+
+## ADR-004 — Two clients, one contract (native iOS + web, no PWA hardening)
+
+**Status:** Accepted
+**Date:** 2026-07-03
+
+### Decision
+Daybook ships **two first-class clients of the same Pi FastAPI contract**:
+- **iOS app** (`~/Desktop/daybook-ios/`) — the daily driver: capture (questionnaire,
+  expenses, flights, receipts, photos), glanceable widgets, offline queue,
+  background GPS. Native-only capabilities (VisionKit OCR, FinanceKit, WidgetKit,
+  share extension) are embraced, not avoided.
+- **Web app** (`infrastructure/web/`) — the instrument: deep-dive analytics,
+  large-screen dashboards, exports, admin/browse surfaces (e.g. `/explore/databases`).
+
+The PWA-hardening track (docs/PWA_HARDENING_AUDIT_PROMPT.md) is **closed**: the
+native app shipped first and covers offline capture better than a service worker
+would. The web app stays a plain web app behind Tailscale.
+
+### Rationale
+- The iOS app already delivers the offline/duty-day use cases the PWA track
+  targeted, with better ergonomics (widgets, share sheet, camera).
+- One API contract keeps parity tractable: every feature lands as
+  Pydantic model → endpoint → `lib/api.ts` type → Swift struct.
+- Maintaining a service worker + IndexedDB queue *and* a native offline queue
+  would duplicate the hardest code path for no additional capability.
+
+### Consequences
+- Parity is a per-feature checklist item, not an afterthought — new endpoints
+  should land with web + iOS surfaces (or an explicit "web-only/iOS-only" call).
+- Web-only surfaces are acceptable when they are instrument-like (databases
+  browser, dense tables); capture-only surfaces belong on iOS first.
+
+### Rejected alternatives
+- **PWA hardening instead of native** — lost to native on camera/OCR/widgets/
+  FinanceKit and background location.
+- **iOS-only (retire web)** — loses the large-screen analytical instrument and
+  the fastest iteration surface for new analytics.

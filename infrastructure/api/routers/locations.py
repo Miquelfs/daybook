@@ -6,47 +6,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
+from domains.locations.country_names import to_english
 from domains.locations.locations_query import tracks_for_date
 
 router = APIRouter(prefix="/locations", tags=["locations"])
 
 _DB = Path(__file__).parents[3] / "infrastructure" / "db" / "locations.db"
-
-# Nominatim returns local-language country names; map them to English
-_COUNTRY_EN: dict[str, str] = {
-    "España": "Spain",
-    "Éire / Ireland": "Ireland",
-    "México": "Mexico",
-    "Lëtzebuerg": "Luxembourg",
-    "Maroc ⵍⵎⵖⵔⵉⴱ المغرب": "Morocco",
-    "België / Belgique / Belgien": "Belgium",
-    "Magyarország": "Hungary",
-    "Österreich": "Austria",
-    "Civitas Vaticana - Città del Vaticano": "Vatican City",
-    "България": "Bulgaria",
-    "Ελλάς": "Greece",
-    "România": "Romania",
-    "Česko": "Czech Republic",
-    "Slovensko": "Slovakia",
-    "Hrvatska": "Croatia",
-    "Slovenija": "Slovenia",
-    "Schweiz/Suisse/Svizzera/Svizra": "Switzerland",
-    "Nederland": "Netherlands",
-    "Polska": "Poland",
-    "Türkiye": "Turkey",
-    "Россия": "Russia",
-    "日本": "Japan",
-    "中国": "China",
-    # Scandinavian local names (appear when Overland tracks are geocoded there)
-    "Norge": "Norway",
-    "Danmark": "Denmark",
-    "Sverige": "Sweden",
-    "Suomi / Finland": "Finland",
-    "Deutschland": "Germany",
-    "Italia": "Italy",
-    "Frankreich": "France",
-    "Norwegen": "Norway",
-}
 
 # Normalize city names that Nominatim returns inconsistently
 _CITY_NORM: dict[str, str] = {
@@ -61,9 +26,7 @@ _CITY_NORM: dict[str, str] = {
 
 
 def _en(country: str | None) -> str | None:
-    if country is None:
-        return None
-    return _COUNTRY_EN.get(country, country)
+    return to_english(country)
 
 
 def _norm_city(city: str | None) -> str | None:
@@ -732,3 +695,263 @@ async def ingest_overland(request: Request, background: BackgroundTasks):
         background.add_task(_run_processor, affected_dates)
 
     return {"result": "ok", "saved": saved, "skipped": skipped}
+
+
+# ── Narrative layer: world coverage, fun facts, trips (Plan Phase B) ──────────
+
+_DAYBOOK_DB = Path(__file__).parents[3] / "infrastructure" / "db" / "daybook.db"
+_COUNTRIES_JSON = Path(__file__).parents[3] / "domains" / "locations" / "countries.json"
+
+
+def _daybook_conn() -> sqlite3.Connection:
+    con = sqlite3.connect(_DAYBOOK_DB)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def _country_meta() -> dict[str, dict]:
+    with open(_COUNTRIES_JSON) as f:
+        data = json.load(f)
+    data.pop("_comment", None)
+    return data
+
+
+def _days_by_country(con: sqlite3.Connection) -> dict[str, set[str]]:
+    """English country name → set of dates seen there (tracks ∪ visits)."""
+    out: dict[str, set[str]] = {}
+    for r in con.execute(
+        "SELECT date, geocode_country AS c FROM tracks WHERE geocode_country IS NOT NULL"
+    ):
+        out.setdefault(_en(r["c"]), set()).add(r["date"])
+    for r in con.execute(
+        """SELECT v.date, p.country AS c
+           FROM visits v JOIN place_names p ON p.place_id = v.place_id
+           WHERE p.country IS NOT NULL"""
+    ):
+        out.setdefault(_en(r["c"]), set()).add(r["date"])
+    return out
+
+
+@router.get("/world-coverage")
+def world_coverage():
+    """Countries visited vs the world: %, continent grouping, per-country detail."""
+    con = _conn()
+    days_by_country = _days_by_country(con)
+
+    # Cities per country (from both geocode sources)
+    cities: dict[str, set[str]] = {}
+    for r in con.execute(
+        """SELECT geocode_country AS c, geocode_city AS city FROM tracks
+           WHERE geocode_country IS NOT NULL AND geocode_city IS NOT NULL
+           UNION
+           SELECT country AS c, city FROM place_names
+           WHERE country IS NOT NULL AND city IS NOT NULL"""
+    ):
+        cities.setdefault(_en(r["c"]), set()).add(_norm_city(r["city"]))
+    con.close()
+
+    meta = _country_meta()
+    details = []
+    continents: dict[str, list[str]] = {}
+    for country, dates in sorted(days_by_country.items(), key=lambda kv: -len(kv[1])):
+        m = meta.get(country, {})
+        details.append({
+            "country": country,
+            "iso2": m.get("iso2"),
+            "continent": m.get("continent", "Unknown"),
+            "first_visit": min(dates),
+            "last_visit": max(dates),
+            "total_days": len(dates),
+            "cities_visited": len(cities.get(country, set())),
+        })
+        continents.setdefault(m.get("continent", "Unknown"), []).append(country)
+
+    total = len(meta)
+    visited = len(days_by_country)
+    all_by_continent: dict[str, int] = {}
+    for m in meta.values():
+        all_by_continent[m["continent"]] = all_by_continent.get(m["continent"], 0) + 1
+
+    return {
+        "countries_visited": visited,
+        "countries_total": total,
+        "pct_world": round(visited / total * 100, 1) if total else 0,
+        "continents": {
+            cont: {
+                "visited": sorted(continents.get(cont, [])),
+                "visited_count": len(continents.get(cont, [])),
+                "total": cnt,
+            }
+            for cont, cnt in sorted(all_by_continent.items())
+        },
+        "country_details": details,
+        "all_countries": {c: m for c, m in sorted(meta.items())},
+    }
+
+
+@router.get("/fun-facts")
+def fun_facts():
+    """Stat cards: cosmic-scale distances, compass extremes, personal records."""
+    from domains.locations.home_base import home_for
+
+    con = _conn()
+    cards: list[dict] = []
+
+    def card(label, value, unit, subtitle, icon):
+        cards.append({"label": label, "value": value, "unit": unit,
+                      "subtitle": subtitle, "icon": icon})
+
+    # ── Cosmic scale ──────────────────────────────────────────────────────
+    total_km = 0.0
+    if con.execute("SELECT name FROM sqlite_master WHERE name='location_days'").fetchone():
+        row = con.execute("SELECT SUM(distance_meters)/1000.0 AS km FROM location_days").fetchone()
+        total_km = row["km"] or 0.0
+    if total_km > 0:
+        card("Around the Earth", round(total_km / 40_075, 2), "laps",
+             f"{total_km:,.0f} km tracked lifetime", "🌍")
+        card("To the Moon", round(total_km / 384_400 * 100, 1), "% of the way",
+             "one-way, 384,400 km", "🌙")
+        card("Around the Sun", round(total_km / 149_597_870 * 1000, 3), "‰ of an AU",
+             "1 AU = 149.6M km", "☀️")
+
+    # ── Compass extremes (visits ∪ overland) ─────────────────────────────
+    def _extreme(col: str, direction: str):
+        v = con.execute(
+            f"""SELECT v.date, v.lat, v.lng, COALESCE(p.name, p.city, p.country) AS label
+                FROM visits v LEFT JOIN place_names p ON p.place_id = v.place_id
+                WHERE v.lat IS NOT NULL AND v.lat != 0
+                ORDER BY v.{col} {direction} LIMIT 1"""
+        ).fetchone()
+        o = con.execute(
+            f"""SELECT date, lat, lng, NULL AS label FROM overland_locations
+                WHERE lat IS NOT NULL ORDER BY {col} {direction} LIMIT 1"""
+        ).fetchone()
+        cands = [r for r in (v, o) if r is not None]
+        if not cands:
+            return None
+        rev = direction == "DESC"
+        return max(cands, key=lambda r: r[col]) if rev else min(cands, key=lambda r: r[col])
+
+    for label, col, direction, icon in [
+        ("Northernmost", "lat", "DESC", "⬆️"), ("Southernmost", "lat", "ASC", "⬇️"),
+        ("Easternmost", "lng", "DESC", "➡️"), ("Westernmost", "lng", "ASC", "⬅️"),
+    ]:
+        r = _extreme(col, direction)
+        if r:
+            place = r["label"] or f"{r['lat']:.3f}, {r['lng']:.3f}"
+            card(label, place, "", f"{r['date']} · {r['lat']:.3f}, {r['lng']:.3f}", icon)
+
+    alt = con.execute(
+        """SELECT date, MAX(altitude) AS alt FROM overland_locations
+           WHERE altitude IS NOT NULL AND altitude < 15000"""
+    ).fetchone()
+    if alt and alt["alt"]:
+        card("Highest point", round(alt["alt"]), "m", f"GPS altitude · {alt['date']}", "⛰️")
+
+    # ── Farthest from home (per-day centroid vs the home active that day) ─
+    day_rows = con.execute(
+        """SELECT date, AVG(lat) AS lat, AVG(lng) AS lng FROM visits
+           WHERE lat IS NOT NULL GROUP BY date"""
+    ).fetchall()
+    import math as _math
+
+    def _hav(lat1, lng1, lat2, lng2):
+        p1, p2 = _math.radians(lat1), _math.radians(lat2)
+        dp, dl = _math.radians(lat2 - lat1), _math.radians(lng2 - lng1)
+        a = _math.sin(dp / 2) ** 2 + _math.cos(p1) * _math.cos(p2) * _math.sin(dl / 2) ** 2
+        return 2 * 6371 * _math.asin(_math.sqrt(a))
+
+    farthest = None
+    for r in day_rows:
+        h = home_for(r["date"])
+        if h is None:
+            continue
+        d = _hav(h["lat"], h["lng"], r["lat"], r["lng"])
+        if farthest is None or d > farthest[0]:
+            farthest = (d, r["date"], h["label"])
+    if farthest:
+        card("Farthest from home", round(farthest[0]), "km",
+             f"{farthest[1]} · home was {farthest[2]}", "🛰️")
+
+    # ── Personal scale ────────────────────────────────────────────────────
+    dcon = _daybook_conn()
+    run = dcon.execute(
+        """SELECT SUM(distance_meters)/1000.0 AS km FROM activities
+           WHERE LOWER(COALESCE(activity_type,'')) LIKE '%run%'"""
+    ).fetchone()
+    dcon.close()
+    if run and run["km"]:
+        card("Marathons run", round(run["km"] / 42.195, 1), "equivalents",
+             f"{run['km']:,.0f} km on foot", "🏃")
+
+    if con.execute("SELECT name FROM sqlite_master WHERE name='location_days'").fetchone():
+        top_day = con.execute(
+            "SELECT date, distance_meters/1000.0 AS km FROM location_days ORDER BY distance_meters DESC LIMIT 1"
+        ).fetchone()
+        if top_day:
+            card("Longest day", round(top_day["km"]), "km", top_day["date"], "🚀")
+        top_month = con.execute(
+            """SELECT substr(date,1,7) AS m, SUM(distance_meters)/1000.0 AS km
+               FROM location_days GROUP BY m ORDER BY km DESC LIMIT 1"""
+        ).fetchone()
+        if top_month:
+            card("Biggest month", round(top_month["km"]), "km", top_month["m"], "📅")
+
+    # ── Country diversity (Shannon entropy over days per country) ────────
+    days_by_country = _days_by_country(con)
+    counts = [len(v) for v in days_by_country.values()]
+    n = sum(counts)
+    if n > 0 and len(counts) > 1:
+        h_val = -sum((c / n) * _math.log(c / n) for c in counts)
+        card("Country diversity", round(h_val, 2), "Shannon H",
+             f"{len(counts)} countries · higher = more diverse", "🧭")
+
+    # Most consecutive days in a foreign country (vs modal = home country)
+    if days_by_country:
+        home_country = max(days_by_country.items(), key=lambda kv: len(kv[1]))[0]
+        foreign_dates = sorted(set().union(
+            *[v for k, v in days_by_country.items() if k != home_country]
+        ) - days_by_country.get(home_country, set()))
+        best = streak = 0
+        prev = None
+        from datetime import date as _date, timedelta as _td
+        for ds in foreign_dates:
+            d = _date.fromisoformat(ds)
+            streak = streak + 1 if prev is not None and d - prev == _td(days=1) else 1
+            best = max(best, streak)
+            prev = d
+        if best >= 2:
+            card("Longest stretch abroad", best, "days",
+                 f"consecutive days outside {home_country}", "🧳")
+
+    con.close()
+    return {"cards": cards}
+
+
+@router.get("/trips")
+def list_trips(limit: int = 50, offset: int = 0):
+    """Auto-detected trips, newest first."""
+    con = _daybook_conn()
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='trips'").fetchone():
+        con.close()
+        return {"trips": [], "total": 0}
+    total = con.execute("SELECT COUNT(*) AS n FROM trips").fetchone()["n"]
+    rows = con.execute(
+        """SELECT * FROM trips ORDER BY start_date DESC LIMIT ? OFFSET ?""",
+        (limit, offset),
+    ).fetchall()
+    con.close()
+    trips = []
+    for r in rows:
+        t = dict(r)
+        t["countries"] = json.loads(t.pop("countries_json") or "[]")
+        t["cities"] = json.loads(t.pop("cities_json") or "[]")
+        t["name"] = t["user_name"] or t["auto_name"]
+        t["countries"] = [_en(c) for c in t["countries"]]
+        t["primary_country"] = _en(t["primary_country"])
+        n_days = 1 + (
+            datetime.fromisoformat(t["end_date"]) - datetime.fromisoformat(t["start_date"])
+        ).days
+        t["n_days"] = n_days
+        trips.append(t)
+    return {"trips": trips, "total": total}

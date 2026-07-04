@@ -3,7 +3,7 @@ import { ChevronRight, Globe, PersonStanding, Database } from "lucide-react";
 import { api } from "@/lib/api";
 import { HeatMap } from "@/components/HeatMap";
 import { YearSelect } from "@/components/YearSelect";
-import type { TopPlace, CityStay } from "@/lib/api";
+import type { TopPlace, CityStay, WorldCoverage, FunFactCard, Trip } from "@/lib/api";
 
 interface Props {
   searchParams: Promise<{ year?: string }>;
@@ -41,7 +41,7 @@ export default async function ExplorePage({ searchParams }: Props) {
   const { year: yearStr } = await searchParams;
   const year = yearStr ? parseInt(yearStr) : undefined;
 
-  const [data, topPlaces, cityTimeline] = await Promise.all([
+  const [data, topPlaces, cityTimeline, coverage, funFacts, tripsData] = await Promise.all([
     api.heatmap(year).catch(() => ({
       points: [] as [number, number, number][],
       countries: [] as { country: string; days: number }[],
@@ -50,6 +50,9 @@ export default async function ExplorePage({ searchParams }: Props) {
     })),
     api.topPlaces(year).catch(() => [] as TopPlace[]),
     api.cityTimeline(year).catch(() => [] as CityStay[]),
+    api.worldCoverage().catch(() => null as WorldCoverage | null),
+    api.funFacts().catch(() => null as { cards: FunFactCard[] } | null),
+    api.trips().catch(() => null as { trips: Trip[]; total: number } | null),
   ]);
 
   const totalDays      = data.countries.reduce((s, c) => s + c.days, 0);
@@ -99,6 +102,94 @@ export default async function ExplorePage({ searchParams }: Props) {
       <section className="mb-8">
         <HeatMap data={data} />
       </section>
+
+      {/* World coverage */}
+      {coverage && coverage.countries_visited > 0 && (
+        <section className="mb-8">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+            <div className="flex items-baseline justify-between mb-3">
+              <p className="text-xs text-[#52525B] uppercase tracking-widest">World coverage</p>
+              <p className="text-sm tabular-nums">
+                <span className="text-[#F59E0B] font-semibold">{coverage.countries_visited}</span>
+                <span className="text-[#52525B]"> of {coverage.countries_total} countries · </span>
+                <span className="text-[#FAFAFA] font-semibold">{coverage.pct_world}%</span>
+              </p>
+            </div>
+            <div className="h-1.5 rounded-full bg-[#18181B] mb-4">
+              <div className="h-full rounded-full bg-[#F59E0B]" style={{ width: `${Math.max(coverage.pct_world, 1)}%` }} />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
+              {Object.entries(coverage.continents)
+                .filter(([cont]) => cont !== "Unknown")
+                .map(([cont, c]) => (
+                  <div key={cont} className="flex items-center justify-between gap-2" title={c.visited.join(", ") || "none yet"}>
+                    <span className="text-xs text-[#71717A] truncate">{cont}</span>
+                    <span className="text-xs tabular-nums shrink-0" style={{ color: c.visited_count > 0 ? "#A1A1AA" : "#3F3F46" }}>
+                      {c.visited_count}/{c.total}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Fun facts strip */}
+      {funFacts && funFacts.cards.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Fun facts</h2>
+          <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4">
+            {funFacts.cards.map((c) => (
+              <div
+                key={c.label}
+                className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 min-w-[170px] shrink-0"
+                title={c.subtitle}
+              >
+                <p className="text-lg leading-none mb-1.5">{c.icon}</p>
+                <p className="text-sm font-semibold text-[#FAFAFA] tabular-nums truncate max-w-[180px]">
+                  {c.value}{c.unit ? <span className="text-xs text-[#52525B] font-normal"> {c.unit}</span> : null}
+                </p>
+                <p className="text-[10px] text-[#71717A] uppercase tracking-wider mt-0.5">{c.label}</p>
+                <p className="text-[10px] text-[#3F3F46] mt-0.5 truncate max-w-[180px]">{c.subtitle}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Trips */}
+      {tripsData && tripsData.trips.length > 0 && (
+        <section className="mb-8">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-xs text-[#52525B] uppercase tracking-widest">Trips</h2>
+            <span className="text-xs text-[#3F3F46] tabular-nums">{tripsData.total} detected</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {tripsData.trips.slice(0, 8).map((t) => (
+              <div key={t.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm text-[#D4D4D8] font-medium truncate">
+                    {FLAG[t.primary_country ?? ""] ?? "🌍"} {t.name}
+                  </p>
+                  {t.max_distance_from_home_km != null && (
+                    <span className="text-[10px] text-[#3F3F46] tabular-nums shrink-0">
+                      {Math.round(t.max_distance_from_home_km)} km out
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-[#52525B] mt-0.5">
+                  {new Date(t.start_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                  {" – "}
+                  {new Date(t.end_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                  {t.cities.length > 0 && (
+                    <span className="text-[#3F3F46]"> · {t.cities.slice(0, 3).join(", ")}</span>
+                  )}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {/* Countries */}

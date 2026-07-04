@@ -6,6 +6,7 @@ import { ActivityMap } from "@/components/ActivityMap";
 import { ActivityCharts } from "@/components/ActivityCharts";
 import { ActivityNotes } from "@/components/ActivityNotes";
 import { ActivitySplitsChart } from "@/components/ActivitySplitsChart";
+import { SportCurveSection, SPORT_COLORS, sportOf } from "@/components/training/SportCurveSection";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -152,6 +153,8 @@ export default async function ActivityPage({ params }: Props) {
   }
 
   const date = activity.date;
+  const sport = sportOf(activity.activity_type);
+  const sportColor = SPORT_COLORS[sport];
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20">
@@ -174,6 +177,14 @@ export default async function ActivityPage({ params }: Props) {
           </h1>
         </div>
         <div className="flex gap-2 items-center mt-1">
+          {activity.activity_type && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded font-medium capitalize"
+              style={{ backgroundColor: `${sportColor}1A`, color: sportColor }}
+            >
+              {activity.activity_type.replace(/_/g, " ")}
+            </span>
+          )}
           <span className="text-xs text-[#52525B]">
             {activity.start_time
               ? new Date(activity.start_time).toLocaleTimeString("en-GB", {
@@ -214,6 +225,15 @@ export default async function ActivityPage({ params }: Props) {
           <SectionLabel>Splits</SectionLabel>
           <ActivitySplitsChart splits={activity.splits} activityType={activity.activity_type} />
         </section>
+      )}
+
+      {/* Where this effort sits on your own curve (runs & rides) */}
+      {(sport === "run" || sport === "ride") && (
+        <SportCurveSection
+          sport={sport}
+          distanceM={activity.distance_meters ?? null}
+          avgSpeedMps={activity.avg_speed_mps ?? null}
+        />
       )}
 
       {/* Key stats */}

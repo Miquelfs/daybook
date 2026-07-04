@@ -53,7 +53,7 @@ def regenerate_morning_brief(date_str: str, conn: DB):
     from pathlib import Path
     ROOT = Path(__file__).parents[3]
     result = subprocess.run(
-        [sys.executable, "-m", "domains.ai.morning_brief", "--date", date_str],
+        [sys.executable, "-m", "domains.ai.morning_brief", "--date", date_str, "--force"],
         cwd=str(ROOT),
         capture_output=True,
         text=True,

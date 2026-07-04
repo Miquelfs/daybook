@@ -120,7 +120,7 @@ def _fetch_data(conn, target_date: str, yesterday: str) -> dict:
     }
 
 
-def run(target_date: str) -> None:
+def run(target_date: str, force: bool = False) -> None:
     yesterday = (date.fromisoformat(target_date) - timedelta(days=1)).isoformat()
     log.info("Generating morning brief for %s (using yesterday=%s)", target_date, yesterday)
 
@@ -130,6 +130,13 @@ def run(target_date: str) -> None:
 
     conn = get_connection()
     try:
+        if not force:
+            existing = conn.execute(
+                "SELECT morning_brief_text FROM days WHERE date = ?", (target_date,)
+            ).fetchone()
+            if existing and existing["morning_brief_text"]:
+                log.info("Brief already exists for %s — skipping (use --force to regenerate)", target_date)
+                return
         data = _fetch_data(conn, target_date, yesterday)
 
         prompt = build_brief_prompt(
@@ -172,5 +179,6 @@ def run(target_date: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", default=date.today().isoformat())
+    parser.add_argument("--force", action="store_true", help="regenerate even if a brief exists")
     args = parser.parse_args()
-    run(args.date)
+    run(args.date, force=args.force)

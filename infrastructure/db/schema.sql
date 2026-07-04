@@ -325,6 +325,9 @@ CREATE TABLE IF NOT EXISTS life_periods (
     sort_order  INTEGER NOT NULL DEFAULT 0,  -- tiebreak at exact boundaries
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    centroid_lat   REAL,                     -- location periods: home-base anchor (backfill_home_coords.py)
+    centroid_lng   REAL,
+    home_radius_km REAL DEFAULT 40,          -- "at home" radius around the centroid
     CHECK (category IN ('education','work','aviation','relationship','location','health','other')),
     CHECK (layer    IN ('main','top_stripe','bottom_stripe'))
 );
@@ -332,6 +335,27 @@ CREATE TABLE IF NOT EXISTS life_periods (
 CREATE INDEX IF NOT EXISTS idx_life_periods_start ON life_periods(start_date);
 CREATE INDEX IF NOT EXISTS idx_life_periods_end   ON life_periods(end_date);
 CREATE INDEX IF NOT EXISTS idx_life_periods_layer ON life_periods(layer);
+
+-- Auto-detected trips (nightly domains/locations/trip_detection.py).
+-- A trip = consecutive days far from the home-base centroid active on that
+-- date; ≤1-day returns home are merged; <2 nights ignored.
+CREATE TABLE IF NOT EXISTS trips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    primary_country TEXT,
+    countries_json TEXT,                     -- JSON list of countries visited
+    cities_json TEXT,                        -- JSON list of cities
+    total_km REAL,
+    max_distance_from_home_km REAL,
+    auto_name TEXT,                          -- e.g. "Portugal · 5 days"
+    user_name TEXT,                          -- overrides auto_name if user edits
+    cover_photo_path TEXT,                   -- best photo from the trip window
+    home_at_start TEXT,                      -- label of home period active on start_date
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(start_date, end_date)
+);
+CREATE INDEX IF NOT EXISTS idx_trips_dates ON trips(start_date, end_date);
 
 -- Single-week pins rendered as dots/icons on top of period fills.
 -- event_date is the raw date of the event; week-cell assignment is computed at query time.

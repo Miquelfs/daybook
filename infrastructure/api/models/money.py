@@ -47,6 +47,7 @@ class CategoryBudget(BaseModel):
     remaining: float
     velocity: float        # (spent/budget) / (days_elapsed/days_in_month); >1 = over pace
     status: str            # 'OK' | 'Over Pace' | 'Over Budget' | 'No Budget'
+    is_fixed: bool = False # fixed recurring bill (rent, …) — pace alerts don't apply
 
 
 class MonthSummary(BaseModel):
@@ -134,6 +135,14 @@ class MonthOverview(BaseModel):
     projected_savings: float
     categories: list[CategoryBudget]
     alerts: list[BudgetAlert]
+    # Adjusted (discretionary-only) metrics — fixed bills amortised over the month
+    adjusted_velocity: float = 0.0
+    fixed_spent: float = 0.0
+    fixed_budget: float = 0.0
+    discretionary_spent: float = 0.0
+    discretionary_budget: float = 0.0
+    projected_month_end_adjusted: float = 0.0
+    projected_savings_adjusted: float = 0.0
 
 
 class MonthDetail(BaseModel):
@@ -196,6 +205,7 @@ class SubcategoryBreakdown(BaseModel):
     subcategory: str
     total: float
     count: int
+    variance_flag: bool = False  # (max−min) > 2× avg over >3 transactions
 
 class CategoryStats(BaseModel):
     category: str
@@ -206,6 +216,7 @@ class CategoryStats(BaseModel):
     max_tx: float
     pct_of_total: float
     subcategories: list[SubcategoryBreakdown] = []
+    variance_flag: bool = False  # (max−min) > 2× avg over >3 transactions
 
 
 class LargeTxAnomaly(BaseModel):
@@ -229,6 +240,74 @@ class AnomalyReport(BaseModel):
     month: str
     large_transactions: list[LargeTxAnomaly]
     category_spikes: list[CategorySpikeAnomaly]
+
+
+# ── Money Intelligence (Track A-II) ───────────────────────────────────────────
+
+class WaterfallItem(BaseModel):
+    name: str
+    amount: float
+
+
+class WaterfallData(BaseModel):
+    month: str
+    income: float
+    categories: list[WaterfallItem]   # expenses by category, descending
+    savings: float                    # income − total expenses
+    savings_rate: float               # 0-1 (0 when income is 0)
+
+
+class EfficiencyRow(BaseModel):
+    category: str
+    avg_actual: float                 # avg monthly spend over the window
+    budget: float
+    aggressive_cap: float             # min(budget, 25th percentile of monthly spends)
+    recoverable_per_month: float      # max(0, avg_actual − aggressive_cap)
+    flag: str                         # 'over_budget' | 'recoverable' | 'efficient'
+
+
+class EfficiencyData(BaseModel):
+    window_months: int
+    rows: list[EfficiencyRow]         # sorted by recoverable desc
+    total_recoverable: float
+
+
+class MonthlyAnomaly(BaseModel):
+    month: str
+    metric: str                       # 'expenses' | 'income' | 'savings'
+    value: float
+    mean: float
+    std: float
+    z_score: float
+    severity: str                     # 'high' (|z|≥2.5) | 'medium' (2.0–2.5)
+
+
+class MonthlySeriesPoint(BaseModel):
+    month: str
+    expenses: float
+    income: float
+    savings: float
+
+
+class MonthlyAnomalyReport(BaseModel):
+    window_months: int
+    series: list[MonthlySeriesPoint]  # completed months, ascending
+    anomalies: list[MonthlyAnomaly]   # sorted by |z| desc
+
+
+class SeasonalMonth(BaseModel):
+    month_num: int                    # 1..12
+    label: str                        # 'Jan'..'Dec'
+    avg_expenses: float
+    avg_income: float
+    avg_savings: float
+    n_years: int                      # how many observations back this average
+
+
+class SeasonalData(BaseModel):
+    months: list[SeasonalMonth]
+    most_expensive: Optional[str]     # label of hi month (None if no data)
+    cheapest: Optional[str]
 
 
 # ── Investment Portfolio (Track A-I) ─────────────────────────────────────────

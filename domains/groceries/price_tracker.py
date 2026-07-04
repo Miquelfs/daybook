@@ -56,3 +56,8 @@ def sync_prices() -> dict:
             errors += 1
 
     return {"synced": synced, "skipped": skipped, "errors": errors}
+
+
+if __name__ == "__main__":
+    result = sync_prices()
+    print(f"prices synced: {result}")

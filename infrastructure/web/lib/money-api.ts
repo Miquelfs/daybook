@@ -123,6 +123,7 @@ export type CategoryBudget = {
   remaining: number;
   velocity: number;
   status: string;
+  is_fixed: boolean;
 };
 
 export type MonthHistory = {
@@ -185,6 +186,14 @@ export type MonthOverview = MonthSummary & {
   projected_month_end: number;
   projected_savings: number;
   alerts: BudgetAlert[];
+  // Adjusted (discretionary-only) metrics — fixed bills amortised over the month
+  adjusted_velocity: number;
+  fixed_spent: number;
+  fixed_budget: number;
+  discretionary_spent: number;
+  discretionary_budget: number;
+  projected_month_end_adjusted: number;
+  projected_savings_adjusted: number;
 };
 
 export type MonthDetail = {
@@ -248,6 +257,7 @@ export type SubcategoryBreakdown = {
   subcategory: string;
   total: number;
   count: number;
+  variance_flag: boolean;
 };
 
 export type CategoryStats = {
@@ -259,6 +269,7 @@ export type CategoryStats = {
   max_tx: number;
   pct_of_total: number;
   subcategories: SubcategoryBreakdown[];
+  variance_flag: boolean;
 };
 
 export type LargeTxAnomaly = {
@@ -282,6 +293,80 @@ export type AnomalyReport = {
   month: string;
   large_transactions: LargeTxAnomaly[];
   category_spikes: CategorySpikeAnomaly[];
+};
+
+// ── Money intelligence (Track A-II) ───────────────────────────────────────────
+
+export type WaterfallItem = {
+  name: string;
+  amount: number;
+};
+
+export type WaterfallData = {
+  month: string;
+  income: number;
+  categories: WaterfallItem[];
+  savings: number;
+  savings_rate: number;
+};
+
+export type EfficiencyRow = {
+  category: string;
+  avg_actual: number;
+  budget: number;
+  aggressive_cap: number;
+  recoverable_per_month: number;
+  flag: "over_budget" | "recoverable" | "efficient";
+};
+
+export type EfficiencyData = {
+  window_months: number;
+  rows: EfficiencyRow[];
+  total_recoverable: number;
+};
+
+export type MonthlyAnomaly = {
+  month: string;
+  metric: "expenses" | "income" | "savings";
+  value: number;
+  mean: number;
+  std: number;
+  z_score: number;
+  severity: "high" | "medium";
+};
+
+export type MonthlySeriesPoint = {
+  month: string;
+  expenses: number;
+  income: number;
+  savings: number;
+};
+
+export type MonthlyAnomalyReport = {
+  window_months: number;
+  series: MonthlySeriesPoint[];
+  anomalies: MonthlyAnomaly[];
+};
+
+export type SeasonalMonth = {
+  month_num: number;
+  label: string;
+  avg_expenses: number;
+  avg_income: number;
+  avg_savings: number;
+  n_years: number;
+};
+
+export type SeasonalData = {
+  months: SeasonalMonth[];
+  most_expensive: string | null;
+  cheapest: string | null;
+};
+
+export type DailyTotal = {
+  date: string;
+  total_spend: number;
+  by_category: Record<string, number>;
 };
 
 // ── Investment portfolio (Track A-I) ─────────────────────────────────────────
@@ -588,6 +673,22 @@ export const moneyApi = {
 
   anomalies: (month?: string) =>
     get<AnomalyReport>(`/money/anomalies${month ? `?month=${month}` : ""}`),
+
+  // Intelligence layer (Track A-II)
+  waterfall: (month?: string) =>
+    get<WaterfallData>(`/money/waterfall${month ? `?month=${month}` : ""}`),
+
+  efficiency: (window = 12) =>
+    get<EfficiencyData>(`/money/efficiency?window=${window}`),
+
+  monthlyAnomalies: (window = 24) =>
+    get<MonthlyAnomalyReport>(`/money/anomalies/monthly?window=${window}`),
+
+  seasonal: () =>
+    get<SeasonalData>("/money/seasonal"),
+
+  dailyTotals: (start: string, end: string) =>
+    get<DailyTotal[]>(`/money/daily-totals?start=${start}&end=${end}`),
 
   subcategories: (category: string, q?: string) => {
     const params = new URLSearchParams({ category });

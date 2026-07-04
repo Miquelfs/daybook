@@ -63,6 +63,11 @@ log "Processing Overland GPS points..."
 python -m domains.locations.overland_process \
   >> "$LOG_FILE" 2>&1
 
+# Trips: re-detect trips over the last 120 days (Plan B.2).
+log "Detecting trips..."
+python -m domains.locations.trip_detection \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Trip detection failed (non-fatal)"
+
 # Notion sync removed — money data now entered via iOS app directly.
 
 # Strava: cross-reference last 7 days of Garmin activities with Strava.
@@ -127,10 +132,24 @@ log "Executing due investment plans..."
 python -m domains.money.plan_executor \
   >> "$LOG_FILE" 2>&1 || log "WARN: Plan executor failed (non-fatal)"
 
-# AI: morning brief + daily health narratives (requires Ollama on HP at OLLAMA_HOST).
-# Runs last so all data is fresh. Skips gracefully if Ollama is unreachable.
-log "Generating AI morning brief..."
-python -m domains.ai.morning_brief --date "$DATE" \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Morning brief generation failed (non-fatal)"
+# AI: morning brief (requires Ollama at OLLAMA_HOST; skips gracefully otherwise).
+# The cron runs hourly — only attempt in the 05–08h window so the brief lands
+# once around 6am; later hours retry only if the earlier run failed (the brief
+# itself skips when today's already exists).
+HOUR="$(date +%H)"
+if [[ "$HOUR" -ge 5 && "$HOUR" -le 8 ]]; then
+  log "Generating AI morning brief..."
+  python -m domains.ai.morning_brief --date "$DATE" \
+    >> "$LOG_FILE" 2>&1 || log "WARN: Morning brief generation failed (non-fatal)"
+else
+  log "Skipping morning brief (outside 05-08h window)"
+fi
+
+# Groceries: refresh Mercadona prices for pantry items once a day (06h window).
+if [[ "$HOUR" -eq 6 ]]; then
+  log "Syncing grocery prices..."
+  python -m domains.groceries.price_tracker \
+    >> "$LOG_FILE" 2>&1 || log "WARN: Grocery price sync failed (non-fatal)"
+fi
 
 log "=== daily_sync done ==="

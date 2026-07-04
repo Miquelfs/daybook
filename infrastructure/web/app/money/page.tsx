@@ -42,6 +42,9 @@ export default async function MoneyPage({ searchParams }: Props) {
             <Link href="/money/portfolio" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest">
               Portfolio →
             </Link>
+            <Link href="/money/insights" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest">
+              Insights →
+            </Link>
             <Link href="/money/trends" className="text-xs text-[#F59E0B] hover:text-[#FCD34D] transition-colors uppercase tracking-widest">
               Trends →
             </Link>
