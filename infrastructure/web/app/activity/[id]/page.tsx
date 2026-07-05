@@ -6,7 +6,8 @@ import { ActivityMap } from "@/components/ActivityMap";
 import { ActivityCharts } from "@/components/ActivityCharts";
 import { ActivityNotes } from "@/components/ActivityNotes";
 import { ActivitySplitsChart } from "@/components/ActivitySplitsChart";
-import { SportCurveSection, SPORT_COLORS, sportOf } from "@/components/training/SportCurveSection";
+import { SportCurveSection } from "@/components/training/SportCurveSection";
+import { SPORT_COLORS, sportOf } from "@/lib/sport";
 
 interface Props {
   params: Promise<{ id: string }>;
