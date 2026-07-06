@@ -365,6 +365,22 @@ class HoldingOut(BaseModel):
     allocation_pct: Optional[float]             # % of total portfolio
 
 
+class SellHoldingBody(BaseModel):
+    to_account: str                                    # liquid account receiving proceeds
+    quantity: Optional[float] = Field(default=None, gt=0)   # None = sell everything
+    price_eur: Optional[float] = Field(default=None, gt=0)  # None = latest cached close
+    date: Optional[str] = None                         # YYYY-MM-DD, default today
+    notes: Optional[str] = None
+
+
+class SellResult(BaseModel):
+    holding: HoldingOut
+    transaction_id: str
+    quantity_sold: float
+    price_eur: float
+    proceeds_eur: float
+
+
 class AllocationSlice(BaseModel):
     label: str
     value_eur: float

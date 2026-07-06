@@ -476,6 +476,22 @@ export type HoldingHistoryPoint = {
 
 export type PortfolioRange = "1M" | "3M" | "YTD" | "1Y" | "ALL";
 
+export type SellHoldingBody = {
+  to_account: string;
+  quantity?: number;    // omit = sell everything
+  price_eur?: number;   // omit = latest cached close
+  date?: string;
+  notes?: string;
+};
+
+export type SellResult = {
+  holding: Holding;
+  transaction_id: string;
+  quantity_sold: number;
+  price_eur: number;
+  proceeds_eur: number;
+};
+
 export type IsinCandidate = {
   ticker: string;
   name: string | null;
@@ -645,6 +661,9 @@ export const moneyApi = {
 
   deleteHolding: (id: string) =>
     proxyDel(`/api/money/portfolio/holdings/${encodeURIComponent(id)}`),
+
+  sellHolding: (id: string, body: SellHoldingBody) =>
+    proxyPost<SellResult>(`/api/money/portfolio/holdings/${encodeURIComponent(id)}/sell`, body),
 
   isinLookup: (isin: string) =>
     get<IsinLookupResult>(`/money/portfolio/isin-lookup?isin=${encodeURIComponent(isin)}`),

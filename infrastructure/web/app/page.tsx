@@ -62,7 +62,7 @@ export default async function TodayPage() {
 
         <section>
           <SectionLabel>Photo of the day</SectionLabel>
-          <PhotoOfDay date={today} initialPhotoUrl={day.photo_url ?? null} allowYesterday />
+          <PhotoOfDay date={today} initialPhotoUrl={day.photo_url ?? null} />
         </section>
 
         <section>

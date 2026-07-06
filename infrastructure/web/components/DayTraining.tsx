@@ -84,59 +84,71 @@ interface DayPrescription {
 
 // ── Readiness bar ───────────────────────────────────────────────────────────
 
+// Body battery already lives in the health KPIs above — this strip is about
+// what the numbers mean for training: readiness ring, recovery state, form.
 function ReadinessBar({ ctx }: { ctx: ReadinessContext }) {
-  const battery = ctx.body_battery;
   const readiness = ctx.garmin_readiness;
   const status = ctx.recovery_status;
   const tsb = ctx.tsb;
 
-  const batteryColor = battery == null ? "#3F3F46"
-    : battery >= 60 ? "#4ADE80"
-    : battery >= 35 ? "#FB923C"
+  const statusMeta: Record<string, { dot: string; label: string; hint: string }> = {
+    recovering:   { dot: "#4ADE80", label: "Recovering",  hint: "absorbing load" },
+    balanced:     { dot: "#A1A1AA", label: "Balanced",    hint: "steady state" },
+    accumulating: { dot: "#F87171", label: "Fatigued",    hint: "load piling up" },
+  };
+
+  const readinessColor = readiness == null ? "#3F3F46"
+    : readiness >= 70 ? "#4ADE80"
+    : readiness >= 40 ? "#FB923C"
     : "#F87171";
 
-  const statusColor: Record<string, string> = {
-    recovering: "text-[#4ADE80]",
-    balanced: "text-[#A1A1AA]",
-    accumulating: "text-[#F87171]",
-  };
-  const statusLabel: Record<string, string> = {
-    recovering: "Recovering",
-    balanced: "Balanced",
-    accumulating: "Fatigued",
-  };
+  const formMeta = tsb == null ? null
+    : tsb >= 15 ? { color: "#4ADE80", label: "fresh" }
+    : tsb >= -10 ? { color: "#A1A1AA", label: "optimal" }
+    : tsb >= -25 ? { color: "#FB923C", label: "productive" }
+    : { color: "#F87171", label: "overreaching" };
 
-  const hasAny = battery != null || readiness != null || status != null || tsb != null;
+  const hasAny = readiness != null || status != null || tsb != null;
   if (!hasAny) return null;
 
+  const R = 13;
+  const C = 2 * Math.PI * R;
+
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-4 flex-wrap">
-      {battery != null && (
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-[#52525B] uppercase tracking-wider">Battery</span>
-          <span className="text-sm font-semibold tabular-nums" style={{ color: batteryColor }}>{battery}%</span>
-        </div>
-      )}
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-5 flex-wrap">
       {readiness != null && (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2.5" title="Garmin training readiness">
+          <svg width="34" height="34" viewBox="0 0 34 34" className="-rotate-90">
+            <circle cx="17" cy="17" r={R} stroke="#27272A" strokeWidth="3.5" fill="none" />
+            <circle
+              cx="17" cy="17" r={R}
+              stroke={readinessColor} strokeWidth="3.5" fill="none"
+              strokeLinecap="round"
+              strokeDasharray={C}
+              strokeDashoffset={C * (1 - Math.min(readiness, 100) / 100)}
+            />
+          </svg>
+          <div className="flex flex-col -ml-11 w-[34px] items-center pointer-events-none">
+            <span className="text-[11px] font-semibold tabular-nums text-[#FAFAFA]">{readiness}</span>
+          </div>
           <span className="text-[10px] text-[#52525B] uppercase tracking-wider">Readiness</span>
-          <span className="text-sm font-semibold text-[#FAFAFA] tabular-nums">{readiness}</span>
         </div>
       )}
-      {status && (
+      {status && statusMeta[status] && (
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-[#52525B] uppercase tracking-wider">Status</span>
-          <span className={`text-sm font-semibold ${statusColor[status] ?? "text-[#A1A1AA]"}`}>
-            {statusLabel[status] ?? status}
-          </span>
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: statusMeta[status].dot }} />
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-medium text-[#D4D4D8]">{statusMeta[status].label}</span>
+            <span className="text-[10px] text-[#52525B]">{statusMeta[status].hint}</span>
+          </div>
         </div>
       )}
-      {tsb != null && (
-        <div className="flex items-center gap-1.5 ml-auto">
-          <span className="text-[10px] text-[#52525B] uppercase tracking-wider">Form</span>
-          <span className={`text-sm font-semibold tabular-nums ${tsb >= 5 ? "text-[#4ADE80]" : tsb <= -15 ? "text-[#F87171]" : "text-[#A1A1AA]"}`}>
-            {tsb > 0 ? "+" : ""}{tsb.toFixed(0)}
+      {tsb != null && formMeta && (
+        <div className="flex flex-col leading-tight ml-auto text-right" title="Training stress balance (CTL − ATL)">
+          <span className="text-sm font-semibold tabular-nums" style={{ color: formMeta.color }}>
+            {tsb > 0 ? "+" : ""}{tsb.toFixed(0)} <span className="text-[10px] font-normal">form</span>
           </span>
+          <span className="text-[10px] text-[#52525B]">{formMeta.label}</span>
         </div>
       )}
       {ctx.roster_today && (

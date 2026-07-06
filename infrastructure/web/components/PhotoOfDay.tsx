@@ -2,14 +2,10 @@
 
 import { useRef, useState } from "react";
 import { Camera, Loader, X } from "lucide-react";
-import { api } from "@/lib/api";
 
 interface Props {
   date: string;
   initialPhotoUrl: string | null;
-  /** Show a Today/Yesterday switch — for the Today page, where a long day
-      often rolls past midnight before the photo gets uploaded. */
-  allowYesterday?: boolean;
 }
 
 // Photos are served through the Next.js proxy (/api/photos/...) so the browser
@@ -21,38 +17,12 @@ function toProxyUrl(url: string | null): string | null {
   return `/api/photos/${filename}`;
 }
 
-function dayBefore(date: string): string {
-  const d = new Date(date + "T12:00:00");
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
-export function PhotoOfDay({ date, initialPhotoUrl, allowYesterday = false }: Props) {
-  const [targetDate, setTargetDate] = useState(date);
+export function PhotoOfDay({ date, initialPhotoUrl }: Props) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(toProxyUrl(initialPhotoUrl));
   const [uploading, setUploading] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const yesterday = dayBefore(date);
-
-  async function switchTarget(d: string) {
-    if (d === targetDate) return;
-    setTargetDate(d);
-    setError(null);
-    if (d === date) {
-      setPhotoUrl(toProxyUrl(initialPhotoUrl));
-      return;
-    }
-    setPhotoUrl(null);
-    try {
-      const other = await api.day(d);
-      setPhotoUrl(toProxyUrl(other.photo_url ?? null));
-    } catch {
-      /* no photo yet — the upload placeholder shows */
-    }
-  }
 
   async function handleFile(file: File) {
     setUploading(true);
@@ -60,7 +30,7 @@ export function PhotoOfDay({ date, initialPhotoUrl, allowYesterday = false }: Pr
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch(`/api/days/${targetDate}/photo`, {
+      const res = await fetch(`/api/days/${date}/photo`, {
         method: "POST",
         body: form,
       });
@@ -78,39 +48,15 @@ export function PhotoOfDay({ date, initialPhotoUrl, allowYesterday = false }: Pr
     }
   }
 
-  const targetSwitch = allowYesterday && (
-    <div className="flex items-center gap-1">
-      {[
-        { d: date, label: "Today" },
-        { d: yesterday, label: "Yesterday" },
-      ].map(({ d, label }) => (
-        <button
-          key={d}
-          type="button"
-          onClick={() => switchTarget(d)}
-          className={`px-2.5 py-1 rounded-full text-[10px] uppercase tracking-widest border transition-colors ${
-            targetDate === d
-              ? "border-[#F59E0B]/40 bg-[#F59E0B]/10 text-[#F59E0B]"
-              : "border-[#27272A] text-[#3F3F46] hover:text-[#71717A]"
-          }`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-
   return (
     <div className="flex flex-col gap-2">
-      {targetSwitch}
-
       {photoUrl ? (
         <>
           <div className="relative rounded-xl overflow-hidden border border-[#27272A] cursor-pointer" onClick={() => setExpanded(true)}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={photoUrl}
-              alt={`Photo of ${targetDate}`}
+              alt={`Photo of ${date}`}
               className="w-full object-cover"
               style={{ maxHeight: 280 }}
             />
@@ -133,7 +79,7 @@ export function PhotoOfDay({ date, initialPhotoUrl, allowYesterday = false }: Pr
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={photoUrl}
-                alt={`Photo of ${targetDate}`}
+                alt={`Photo of ${date}`}
                 className="max-w-full max-h-[85vh] object-contain rounded-xl"
                 onClick={(e) => e.stopPropagation()}
               />
@@ -155,15 +101,11 @@ export function PhotoOfDay({ date, initialPhotoUrl, allowYesterday = false }: Pr
           className="w-full border border-dashed border-[#27272A] rounded-xl px-4 py-6 flex flex-col items-center gap-2 text-[#52525B] hover:border-[#3F3F46] hover:text-[#A1A1AA] transition-colors disabled:opacity-50"
         >
           {uploading ? <Loader size={20} className="animate-spin" /> : <Camera size={20} />}
-          <span className="text-sm">
-            {uploading ? "Uploading…" : targetDate === date && !allowYesterday && targetDate !== new Date().toISOString().slice(0, 10)
-              ? `Add a photo to ${targetDate}`
-              : "Add a photo"}
-          </span>
+          <span className="text-sm">{uploading ? "Uploading…" : "Add a photo"}</span>
         </button>
       )}
 
-      {/* Single shared file input — uploads always target targetDate */}
+      {/* Single shared file input */}
       <input
         ref={inputRef}
         type="file"

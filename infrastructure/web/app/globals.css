@@ -23,6 +23,7 @@
 }
 
 html {
+  color-scheme: dark;
   background-color: #09090B;
   /* cockpit glow */
   background-image: radial-gradient(70% 42% at 50% 0%, rgba(245, 158, 11, 0.055), transparent 70%);
@@ -31,30 +32,10 @@ html {
   -webkit-font-smoothing: antialiased;
 }
 
-/* body paints transparent so the html atmosphere shows through */
+/* body paints transparent so the html atmosphere shows through (the
+   light-mode utility remap is more specific, hence the qualified variant) */
 body.antialiased { background-color: transparent; }
-
-/* ─── Typography: Fraunces headings · Alegreya Sans body · Plex Mono data ── */
-
-body {
-  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
-}
-
-h1, h2, .font-display {
-  font-family: var(--font-display), ui-serif, Georgia, serif;
-  letter-spacing: -0.01em;
-}
-
-/* The app's small uppercase section labels + all tabular figures read as
-   instrument markings */
-.tracking-widest {
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-weight: 500;
-}
-.tabular-nums {
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-}
+html[data-theme="light"] body.antialiased { background-color: transparent; }
 
 /* ─── Motion: one staggered page-load rise, nothing scattered ────────────── */
 
@@ -115,12 +96,13 @@ input[type="range"]::-webkit-slider-thumb:hover {
    ══════════════════════════════════════════════════════════════════════════ */
 
 html[data-theme="light"] {
+  color-scheme: light;
   background-color: var(--paper);
   /* daylight sheen + faint chart grid */
   background-image:
     radial-gradient(75% 45% at 50% 0%, rgba(255, 253, 245, 0.9), transparent 65%),
-    repeating-linear-gradient(0deg, rgba(34, 29, 19, 0.03) 0 1px, transparent 1px 28px),
-    repeating-linear-gradient(90deg, rgba(34, 29, 19, 0.03) 0 1px, transparent 1px 28px);
+    repeating-linear-gradient(0deg, rgba(34, 29, 19, 0.022) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(90deg, rgba(34, 29, 19, 0.022) 0 1px, transparent 1px 32px);
   color: var(--ink);
 }
 
@@ -130,14 +112,14 @@ html[data-theme="light"] input[type="range"]::-webkit-slider-thumb { background:
 html[data-theme="light"] *:focus-visible { outline-color: var(--amber-deep); }
 
 /* — Surfaces — */
-html[data-theme="light"] .bg-\[\#09090B\]        { background-color: transparent; }
+html[data-theme="light"] .bg-\[\#09090B\]        { background-color: var(--paper); }
 html[data-theme="light"] .bg-\[\#09090B\]\/95    { background-color: rgba(243, 239, 230, 0.92); }
 html[data-theme="light"] .bg-\[\#0D0D0F\]        { background-color: var(--paper-raised); }
 html[data-theme="light"] .bg-\[\#111113\]        { background-color: var(--paper-raised); }
 html[data-theme="light"] .bg-\[\#18181B\]        { background-color: var(--paper-inset); }
 html[data-theme="light"] .bg-\[\#27272A\]        { background-color: var(--paper-line); }
 html[data-theme="light"] .bg-\[\#3F3F46\]        { background-color: #C9BC9F; }
-html[data-theme="light"] .bg-\[\#FAFAFA\]        { background-color: var(--ink); }
+html[data-theme="light"] .bg-\[\#FAFAFA\]        { background-color: #FFFDF7; }
 html[data-theme="light"] .bg-\[\#D4D4D8\]        { background-color: var(--ink-soft); }
 
 /* — Borders / dividers — */
@@ -153,10 +135,10 @@ html[data-theme="light"] .divide-\[\#27272A\] > * { border-color: var(--paper-li
 html[data-theme="light"] .text-\[\#FAFAFA\]  { color: var(--ink); }
 html[data-theme="light"] .text-\[\#E4E4E7\]  { color: #2E2819; }
 html[data-theme="light"] .text-\[\#D4D4D8\]  { color: var(--ink-soft); }
-html[data-theme="light"] .text-\[\#A1A1AA\]  { color: #5B5342; }
-html[data-theme="light"] .text-\[\#71717A\]  { color: var(--ink-mute); }
-html[data-theme="light"] .text-\[\#52525B\]  { color: #857B67; }
-html[data-theme="light"] .text-\[\#3F3F46\]  { color: var(--ink-faint); }
+html[data-theme="light"] .text-\[\#A1A1AA\]  { color: #4E4737; }
+html[data-theme="light"] .text-\[\#71717A\]  { color: #5F5745; }
+html[data-theme="light"] .text-\[\#52525B\]  { color: #6B6250; }
+html[data-theme="light"] .text-\[\#3F3F46\]  { color: #8F8469; }
 html[data-theme="light"] .text-\[\#27272A\]  { color: #B7AC90; }
 html[data-theme="light"] .text-\[\#18181B\]  { color: var(--ink); }
 html[data-theme="light"] .text-\[\#09090B\]  { color: #141210; }
@@ -194,9 +176,9 @@ html[data-theme="light"] .bg-\[\#EF4444\]\/25 { background-color: rgba(180, 35, 
 html[data-theme="light"] .hover\:bg-\[\#18181B\]:hover   { background-color: var(--paper-inset); }
 html[data-theme="light"] .hover\:bg-\[\#27272A\]:hover   { background-color: var(--paper-line-soft); }
 html[data-theme="light"] .hover\:text-\[\#FAFAFA\]:hover { color: var(--ink); }
-html[data-theme="light"] .hover\:text-\[\#A1A1AA\]:hover { color: #5B5342; }
-html[data-theme="light"] .hover\:text-\[\#71717A\]:hover { color: var(--ink-mute); }
-html[data-theme="light"] .hover\:text-\[\#52525B\]:hover { color: #857B67; }
+html[data-theme="light"] .hover\:text-\[\#A1A1AA\]:hover { color: #4E4737; }
+html[data-theme="light"] .hover\:text-\[\#71717A\]:hover { color: #5F5745; }
+html[data-theme="light"] .hover\:text-\[\#52525B\]:hover { color: #6B6250; }
 html[data-theme="light"] .hover\:text-\[\#F59E0B\]:hover { color: var(--amber-ink); }
 html[data-theme="light"] .hover\:text-\[\#FCD34D\]:hover { color: var(--amber-deep); }
 html[data-theme="light"] .hover\:text-\[\#EF4444\]:hover { color: #B42318; }
@@ -215,3 +197,35 @@ html[data-theme="light"] .shadow-\[0_0_8px_rgba\(245\,158\,11\,0\.15\)\],
 html[data-theme="light"] .shadow-\[0_0_8px_rgba\(245\,158\,11\,0\.2\)\] {
   box-shadow: 0 1px 3px rgba(34, 29, 19, 0.12);
 }
+
+/* — Form controls: guaranteed legibility in light (native pickers included) — */
+html[data-theme="light"] input,
+html[data-theme="light"] select,
+html[data-theme="light"] textarea {
+  color: var(--ink);
+  caret-color: var(--ink);
+}
+html[data-theme="light"] input::placeholder,
+html[data-theme="light"] textarea::placeholder {
+  color: var(--ink-faint);
+}
+
+/* — Solid amber surfaces: deepen so they keep contrast on paper — */
+html[data-theme="light"] .bg-\[\#F59E0B\] { background-color: #D97706; }
+html[data-theme="light"] .bg-\[\#D97706\] { background-color: #B45309; }
+html[data-theme="light"] .bg-\[\#FBBF24\] { background-color: #D97706; }
+html[data-theme="light"] .hover\:bg-\[\#FCD34D\]:hover { background-color: #B45309; }
+
+/* — Named zinc grays used by older components — */
+html[data-theme="light"] .text-zinc-200 { color: #4A4334; }
+html[data-theme="light"] .text-zinc-300 { color: #4E4737; }
+html[data-theme="light"] .text-zinc-400 { color: #5B5342; }
+html[data-theme="light"] .text-zinc-500 { color: #6B6250; }
+html[data-theme="light"] .text-zinc-600 { color: #857B67; }
+html[data-theme="light"] .bg-zinc-600   { background-color: #C9BC9F; }
+
+/* — SVG status text (gauge zone labels etc.) — */
+html[data-theme="light"] svg text[fill="#EAB308"] { fill: #854D0E; }
+html[data-theme="light"] svg text[fill="#F59E0B"] { fill: #99570A; }
+html[data-theme="light"] svg text[fill="#22C55E"] { fill: #157A3C; }
+html[data-theme="light"] svg text[fill="#EF4444"] { fill: #B42318; }

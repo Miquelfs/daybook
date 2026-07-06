@@ -1,25 +1,17 @@
 import type { Metadata } from "next";
-import { Fraunces, Alegreya_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { BottomNav } from "@/components/BottomNav";
 
-// A pilot's logbook: editorial serif display, humanist body, instrument mono.
-const display = Fraunces({
+const geistSans = Geist({
+  variable: "--font-geist-sans",
   subsets: ["latin"],
-  variable: "--font-display",
 });
 
-const body = Alegreya_Sans({
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
   subsets: ["latin"],
-  weight: ["400", "500", "700"],
-  variable: "--font-body",
-});
-
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-mono",
 });
 
 export const metadata: Metadata = {
@@ -50,7 +42,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${display.variable} ${body.variable} ${mono.variable} h-full`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
       <head>
         <meta name="theme-color" content="#09090B" />

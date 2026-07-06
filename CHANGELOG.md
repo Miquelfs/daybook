@@ -4,6 +4,42 @@ All notable changes to Daybook are tracked here, day by day.
 
 ---
 
+## 2026-07-06 (later) — Feedback round: fonts back, light-mode fixes, sell holdings, compact Today
+
+### Fixed
+- **Sheets were invisible in light mode** — the bottom sheets (add expense,
+  add flight) use `bg-[#09090B]`, which light mode remapped to transparent
+  (meant only for the body). This is why "add money from the day view" and
+  "add manual flight" broke. Panels now get solid paper; only the body stays
+  transparent for the atmosphere.
+- **Light-mode legibility pass**: muted inks darkened several steps, native
+  date/time/select controls follow the theme via `color-scheme`, form
+  controls get guaranteed ink text, zinc-named grays remapped, solid amber
+  deepened, gauge zone labels readable.
+- Fonts reverted to Geist / Geist Mono (web) and system nav titles (iOS).
+
+### Changed
+- **Photo card**: Today/Yesterday switch removed — upload lives on each
+  day's page (any past day works, replace included).
+- **Today header**: prev/next arrows moved inline next to the date (plus a
+  "Now" pill on past days) — one row instead of two, much less phone space.
+- **Training strip**: body battery removed (already in the health KPIs);
+  readiness is now a ring gauge, recovery state a labeled dot, form (TSB)
+  color-coded with its zone name.
+
+### Added
+- **Sell / delete holdings** on /money/portfolio: per-row actions; the sell
+  sheet books proceeds as a Finance transaction into a chosen liquid account
+  (partial sales reduce cost basis proportionally, selling all closes the
+  holding). `POST /money/portfolio/holdings/{id}/sell`.
+
+### iOS production readiness
+- `NSCameraUsageDescription` added (receipt scanner would crash without it),
+  `NSFinancialDataUsageDescription` added, deployment target 16.4 → 17.0
+  (the app uses iOS 17 APIs).
+
+---
+
 ## 2026-07-06 — Full tag management, light mode, design identity, photo backfill
 
 ### Added — Tags

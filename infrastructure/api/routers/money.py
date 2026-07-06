@@ -27,6 +27,7 @@ from infrastructure.api.models.money import (
     LargeTxAnomaly, MerchantSuggestion, MoneyMeta,
     MonthDetail, MonthHistory, MonthOverview, MonthSummary,
     MoverOut, PlanExecutionOut, PlanRunResult,
+    SellHoldingBody, SellResult,
     PortfolioHistoryPoint, PortfolioOverview, PortfolioSummary,
     SavingsStreak, SpendingPatterns, TrendsData,
     TransactionCreate, TransactionOut, TransactionPatch,
@@ -1578,6 +1579,78 @@ def patch_holding(holding_id: str, body: HoldingPatch, conn: DB):
     conn.commit()
     row = conn.execute("SELECT * FROM holdings WHERE id = ?", (holding_id,)).fetchone()
     return _holding_row_to_out(conn, row)
+
+
+@router.post("/portfolio/holdings/{holding_id}/sell", response_model=SellResult)
+def sell_holding(holding_id: str, body: SellHoldingBody, conn: DB):
+    """Sell part or all of a holding: reduces quantity (deactivates at zero)
+    and books the proceeds as a Finance transaction into `to_account`."""
+    row = conn.execute(
+        "SELECT * FROM holdings WHERE id = ? AND is_active = 1", (holding_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Holding not found")
+
+    qty_held = row["quantity"]
+    qty = min(body.quantity, qty_held) if body.quantity is not None else qty_held
+    if qty <= 0:
+        raise HTTPException(status_code=400, detail="Nothing to sell")
+
+    price = body.price_eur
+    if price is None:
+        latest = _latest_price_row(conn, row["ticker"])
+        if latest is None or not latest["close_price_eur"]:
+            raise HTTPException(
+                status_code=400,
+                detail="No cached price for this ticker — pass price_eur explicitly",
+            )
+        price = latest["close_price_eur"]
+
+    proceeds = round(qty * price, 2)
+    sell_date = body.date or date.today().isoformat()
+    txn_id = "local-" + str(uuid.uuid4())
+    txn_type = classify("Finance")
+
+    conn.execute(
+        """INSERT INTO transactions
+             (id, source, notion_id, date, name, amount, account, category,
+              subcategory, transaction_type, notes, source_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            txn_id, "local", None, sell_date,
+            f"Sell {row['ticker']} × {qty:g}",
+            proceeds, body.to_account, "Finance", None, txn_type,
+            body.notes or f"Sold {qty:g} × {row['name']} @ {price:.2f} €",
+            None,
+        ),
+    )
+
+    new_qty = qty_held - qty
+    if new_qty <= 1e-9:
+        conn.execute(
+            """UPDATE holdings SET quantity = 0, is_active = 0,
+                     updated_at = datetime('now') WHERE id = ?""",
+            (holding_id,),
+        )
+    else:
+        new_cb = None
+        if row["cost_basis_eur"] is not None and qty_held > 0:
+            new_cb = round(row["cost_basis_eur"] * new_qty / qty_held, 2)
+        conn.execute(
+            """UPDATE holdings SET quantity = ?, cost_basis_eur = ?,
+                     updated_at = datetime('now') WHERE id = ?""",
+            (new_qty, new_cb, holding_id),
+        )
+    conn.commit()
+
+    updated = conn.execute("SELECT * FROM holdings WHERE id = ?", (holding_id,)).fetchone()
+    return SellResult(
+        holding=_holding_row_to_out(conn, updated),
+        transaction_id=txn_id,
+        quantity_sold=qty,
+        price_eur=price,
+        proceeds_eur=proceeds,
+    )
 
 
 @router.delete("/portfolio/holdings/{holding_id}")
