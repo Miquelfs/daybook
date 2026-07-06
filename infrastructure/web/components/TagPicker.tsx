@@ -90,7 +90,12 @@ export function TagPicker({ date, initialTags }: Props) {
     return acc;
   }, {});
 
-  const categoryOrder = ["work", "location", "social", "activity", "health", "emotion", "environment"];
+  // Known categories first, any user-created ones after (alphabetically)
+  const knownOrder = ["work", "location", "social", "activity", "health", "emotion", "environment"];
+  const categoryOrder = [
+    ...knownOrder,
+    ...Object.keys(grouped).filter((c) => !knownOrder.includes(c)).sort(),
+  ];
 
   // Tags that are active AND have a counter input
   const activeCounterTags = allTags.filter(
@@ -228,13 +233,21 @@ export function TagPicker({ date, initialTags }: Props) {
           {/* New tag form */}
           <div className="border-t border-[#27272A] pt-2">
             {!showNewForm ? (
-              <button
-                onClick={() => setShowNewForm(true)}
-                className="flex items-center gap-1 text-xs text-[#3F3F46] hover:text-[#52525B] transition-colors"
-              >
-                <Plus size={12} />
-                New tag
-              </button>
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setShowNewForm(true)}
+                  className="flex items-center gap-1 text-xs text-[#3F3F46] hover:text-[#52525B] transition-colors"
+                >
+                  <Plus size={12} />
+                  New tag
+                </button>
+                <a
+                  href="/tags"
+                  className="text-[10px] uppercase tracking-widest text-[#3F3F46] hover:text-[#F59E0B] transition-colors"
+                >
+                  Manage tags →
+                </a>
+              </div>
             ) : (
               <div className="space-y-2">
                 <p className="text-[10px] uppercase tracking-widest text-[#3F3F46]">New tag</p>

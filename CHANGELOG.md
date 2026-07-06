@@ -4,6 +4,36 @@ All notable changes to Daybook are tracked here, day by day.
 
 ---
 
+## 2026-07-06 — Full tag management, light mode, design identity, photo backfill
+
+### Added — Tags
+- **Tag manager** at `/tags` (linked from the picker): inline rename, emoji
+  re-icon, move between categories, delete with confirm (system tags locked),
+  new tags per category, and **new categories** (a category is born with its
+  first tag). `PATCH /tags/{id}` now accepts name/icon/category/color;
+  TagPicker shows user-created categories.
+
+### Added — Theme & design ("a pilot's logbook")
+- **Light mode: paper chart** — warm paper surfaces, ink text, faint chart
+  grid; **dark stays the cockpit** with a subtle amber glow. Toggle in the nav,
+  persisted, no flash on load. Implemented as compiled-utility remaps so the
+  whole app flips without touching every page.
+- **Typography identity**: Fraunces (serif display, h1/h2), Alegreya Sans
+  (body), IBM Plex Mono (section labels + all tabular figures — instrument
+  readouts).
+- **Motion**: one staggered page-load rise (CSS only, reduced-motion aware).
+- **iOS**: all db* tokens are now light/dark adaptive (same paper palette),
+  Appearance setting (Cockpit / Paper chart / System) in Settings, and serif
+  navigation titles via the New York design.
+
+### Fixed — Photos
+- Past days without a photo showed a dead placeholder — **upload now works on
+  any day** (replace too), matching the original backfill intent.
+- **Today/Yesterday switch** on the photo card (web Today page + iOS Today
+  tab) for days that roll past midnight.
+
+---
+
 ## 2026-07-04 — Trips mean nights away; explore year filter everywhere; place detail v2
 
 ### Changed

@@ -80,7 +80,10 @@ export const tagsApi = {
     return res.json();
   },
 
-  updateTag: async (id: number, body: { is_negative?: boolean }): Promise<Tag> => {
+  updateTag: async (
+    id: number,
+    body: { name?: string; icon?: string; category?: string; color?: string; is_negative?: boolean }
+  ): Promise<Tag> => {
     const res = await fetch(`${PROXY_BASE}/api/tags/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -91,7 +94,11 @@ export const tagsApi = {
   },
 
   deleteTag: async (id: number): Promise<void> => {
-    await fetch(`${PROXY_BASE}/api/tags/${id}`, { method: "DELETE" });
+    const res = await fetch(`${PROXY_BASE}/api/tags/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail ?? `deleteTag failed ${res.status}`);
+    }
   },
 
   getDayTags: (date: string): Promise<DayTag[]> =>

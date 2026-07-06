@@ -1,9 +1,77 @@
 @import "tailwindcss";
 
+/* ══════════════════════════════════════════════════════════════════════════
+   Daybook theme — a pilot's logbook.
+   Dark  = cockpit at night: near-black, amber instrument glow.
+   Light = paper chart by day: warm paper, faint chart grid, ink.
+   The app's utilities are a small fixed token set (bg-[#0D0D0F] etc.);
+   light mode remaps those compiled utilities under html[data-theme="light"].
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --paper: #F3EFE6;
+  --paper-raised: #FBF9F3;
+  --paper-inset: #EAE4D5;
+  --paper-line: #DCD3BF;
+  --paper-line-soft: #E6DECC;
+  --ink: #221D13;
+  --ink-soft: #4A4334;
+  --ink-mute: #7A7161;
+  --ink-faint: #A99E86;
+  --amber-ink: #99570A;      /* amber that reads on paper */
+  --amber-deep: #B45309;
+}
+
 html {
   background-color: #09090B;
+  /* cockpit glow */
+  background-image: radial-gradient(70% 42% at 50% 0%, rgba(245, 158, 11, 0.055), transparent 70%);
+  background-attachment: fixed;
   color: #FAFAFA;
   -webkit-font-smoothing: antialiased;
+}
+
+/* body paints transparent so the html atmosphere shows through */
+body.antialiased { background-color: transparent; }
+
+/* ─── Typography: Fraunces headings · Alegreya Sans body · Plex Mono data ── */
+
+body {
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+h1, h2, .font-display {
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+  letter-spacing: -0.01em;
+}
+
+/* The app's small uppercase section labels + all tabular figures read as
+   instrument markings */
+.tracking-widest {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-weight: 500;
+}
+.tabular-nums {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Motion: one staggered page-load rise, nothing scattered ────────────── */
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes db-rise {
+    from { opacity: 0; transform: translateY(7px); }
+    to   { opacity: 1; transform: none; }
+  }
+  main > * { animation: db-rise 0.45s cubic-bezier(0.22, 0.7, 0.3, 1) both; }
+  main > *:nth-child(1) { animation-delay: 0.02s; }
+  main > *:nth-child(2) { animation-delay: 0.07s; }
+  main > *:nth-child(3) { animation-delay: 0.12s; }
+  main > *:nth-child(4) { animation-delay: 0.17s; }
+  main > *:nth-child(5) { animation-delay: 0.22s; }
+  main > *:nth-child(6) { animation-delay: 0.27s; }
+  main > *:nth-child(7) { animation-delay: 0.32s; }
+  main > *:nth-child(n+8) { animation-delay: 0.36s; }
 }
 
 /* Thin scrollbar */
@@ -40,4 +108,110 @@ input[type="range"]::-webkit-slider-thumb:hover {
   outline: 2px solid #F59E0B;
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LIGHT — paper chart
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html[data-theme="light"] {
+  background-color: var(--paper);
+  /* daylight sheen + faint chart grid */
+  background-image:
+    radial-gradient(75% 45% at 50% 0%, rgba(255, 253, 245, 0.9), transparent 65%),
+    repeating-linear-gradient(0deg, rgba(34, 29, 19, 0.03) 0 1px, transparent 1px 28px),
+    repeating-linear-gradient(90deg, rgba(34, 29, 19, 0.03) 0 1px, transparent 1px 28px);
+  color: var(--ink);
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-thumb { background: var(--paper-line); }
+html[data-theme="light"] input[type="range"] { background: var(--paper-line); }
+html[data-theme="light"] input[type="range"]::-webkit-slider-thumb { background: var(--amber-deep); }
+html[data-theme="light"] *:focus-visible { outline-color: var(--amber-deep); }
+
+/* — Surfaces — */
+html[data-theme="light"] .bg-\[\#09090B\]        { background-color: transparent; }
+html[data-theme="light"] .bg-\[\#09090B\]\/95    { background-color: rgba(243, 239, 230, 0.92); }
+html[data-theme="light"] .bg-\[\#0D0D0F\]        { background-color: var(--paper-raised); }
+html[data-theme="light"] .bg-\[\#111113\]        { background-color: var(--paper-raised); }
+html[data-theme="light"] .bg-\[\#18181B\]        { background-color: var(--paper-inset); }
+html[data-theme="light"] .bg-\[\#27272A\]        { background-color: var(--paper-line); }
+html[data-theme="light"] .bg-\[\#3F3F46\]        { background-color: #C9BC9F; }
+html[data-theme="light"] .bg-\[\#FAFAFA\]        { background-color: var(--ink); }
+html[data-theme="light"] .bg-\[\#D4D4D8\]        { background-color: var(--ink-soft); }
+
+/* — Borders / dividers — */
+html[data-theme="light"] .border-\[\#18181B\]     { border-color: var(--paper-line-soft); }
+html[data-theme="light"] .border-\[\#1C1C1F\]     { border-color: var(--paper-line-soft); }
+html[data-theme="light"] .border-\[\#27272A\]     { border-color: var(--paper-line); }
+html[data-theme="light"] .border-\[\#3F3F46\]     { border-color: #C4B692; }
+html[data-theme="light"] .border-\[\#52525B\]     { border-color: #B3A67F; }
+html[data-theme="light"] .divide-\[\#18181B\] > * { border-color: var(--paper-line-soft); }
+html[data-theme="light"] .divide-\[\#27272A\] > * { border-color: var(--paper-line); }
+
+/* — Ink scale — */
+html[data-theme="light"] .text-\[\#FAFAFA\]  { color: var(--ink); }
+html[data-theme="light"] .text-\[\#E4E4E7\]  { color: #2E2819; }
+html[data-theme="light"] .text-\[\#D4D4D8\]  { color: var(--ink-soft); }
+html[data-theme="light"] .text-\[\#A1A1AA\]  { color: #5B5342; }
+html[data-theme="light"] .text-\[\#71717A\]  { color: var(--ink-mute); }
+html[data-theme="light"] .text-\[\#52525B\]  { color: #857B67; }
+html[data-theme="light"] .text-\[\#3F3F46\]  { color: var(--ink-faint); }
+html[data-theme="light"] .text-\[\#27272A\]  { color: #B7AC90; }
+html[data-theme="light"] .text-\[\#18181B\]  { color: var(--ink); }
+html[data-theme="light"] .text-\[\#09090B\]  { color: #141210; }
+html[data-theme="light"] .placeholder-\[\#52525B\]::placeholder { color: var(--ink-faint); }
+html[data-theme="light"] .placeholder\:text-\[\#3F3F46\]::placeholder { color: var(--ink-faint); }
+
+/* — Amber (the identity accent, deepened for paper) — */
+html[data-theme="light"] .text-\[\#F59E0B\]   { color: var(--amber-ink); }
+html[data-theme="light"] .text-\[\#FCD34D\]   { color: var(--amber-deep); }
+html[data-theme="light"] .text-\[\#FBBF24\]   { color: var(--amber-deep); }
+html[data-theme="light"] .border-\[\#F59E0B\] { border-color: #C97B08; }
+html[data-theme="light"] .border-\[\#F59E0B\]\/30 { border-color: rgba(153, 87, 10, 0.35); }
+html[data-theme="light"] .border-\[\#F59E0B\]\/40 { border-color: rgba(153, 87, 10, 0.45); }
+html[data-theme="light"] .bg-\[\#F59E0B\]\/10 { background-color: rgba(180, 83, 9, 0.10); }
+html[data-theme="light"] .bg-\[\#F59E0B\]\/15 { background-color: rgba(180, 83, 9, 0.14); }
+html[data-theme="light"] .bg-\[\#F59E0B\]\/20 { background-color: rgba(180, 83, 9, 0.18); }
+/* solid amber fills keep their dark text — legible on paper as-is */
+
+/* — Status colors, darkened for contrast on paper — */
+html[data-theme="light"] .text-\[\#22C55E\] { color: #157A3C; }
+html[data-theme="light"] .text-\[\#4ADE80\] { color: #16A34A; }
+html[data-theme="light"] .text-\[\#EF4444\] { color: #B42318; }
+html[data-theme="light"] .text-\[\#F87171\] { color: #DC2626; }
+html[data-theme="light"] .text-\[\#3B82F6\] { color: #1D4ED8; }
+html[data-theme="light"] .text-\[\#60A5FA\] { color: #2563EB; }
+html[data-theme="light"] .text-\[\#2DD4BF\] { color: #0F766E; }
+html[data-theme="light"] .text-\[\#FB923C\] { color: #C2410C; }
+html[data-theme="light"] .border-\[\#22C55E\]\/30 { border-color: rgba(21, 122, 60, 0.4); }
+html[data-theme="light"] .border-\[\#EF4444\]\/30 { border-color: rgba(180, 35, 24, 0.35); }
+html[data-theme="light"] .border-\[\#EF4444\]\/40 { border-color: rgba(180, 35, 24, 0.45); }
+html[data-theme="light"] .bg-\[\#EF4444\]\/15 { background-color: rgba(180, 35, 24, 0.12); }
+html[data-theme="light"] .bg-\[\#EF4444\]\/25 { background-color: rgba(180, 35, 24, 0.2); }
+
+/* — Hovers that reference dark surfaces — */
+html[data-theme="light"] .hover\:bg-\[\#18181B\]:hover   { background-color: var(--paper-inset); }
+html[data-theme="light"] .hover\:bg-\[\#27272A\]:hover   { background-color: var(--paper-line-soft); }
+html[data-theme="light"] .hover\:text-\[\#FAFAFA\]:hover { color: var(--ink); }
+html[data-theme="light"] .hover\:text-\[\#A1A1AA\]:hover { color: #5B5342; }
+html[data-theme="light"] .hover\:text-\[\#71717A\]:hover { color: var(--ink-mute); }
+html[data-theme="light"] .hover\:text-\[\#52525B\]:hover { color: #857B67; }
+html[data-theme="light"] .hover\:text-\[\#F59E0B\]:hover { color: var(--amber-ink); }
+html[data-theme="light"] .hover\:text-\[\#FCD34D\]:hover { color: var(--amber-deep); }
+html[data-theme="light"] .hover\:text-\[\#EF4444\]:hover { color: #B42318; }
+html[data-theme="light"] .hover\:border-\[\#3F3F46\]:hover { border-color: #C4B692; }
+html[data-theme="light"] .hover\:border-\[\#F59E0B\]:hover { border-color: #C97B08; }
+html[data-theme="light"] .focus\:border-\[\#F59E0B\]:focus { border-color: #C97B08; }
+
+/* — Inline SVG chart text/strokes written for the dark theme — */
+html[data-theme="light"] svg text[fill="#FAFAFA"] { fill: var(--ink); }
+html[data-theme="light"] svg text[fill="#3F3F46"] { fill: var(--ink-faint); }
+html[data-theme="light"] svg text[fill="#52525B"] { fill: #857B67; }
+html[data-theme="light"] svg line[stroke="#3F3F46"] { stroke: #C4B692; }
+
+/* — Amber glow shadows read as ink smudge on paper: soften — */
+html[data-theme="light"] .shadow-\[0_0_8px_rgba\(245\,158\,11\,0\.15\)\],
+html[data-theme="light"] .shadow-\[0_0_8px_rgba\(245\,158\,11\,0\.2\)\] {
+  box-shadow: 0 1px 3px rgba(34, 29, 19, 0.12);
 }

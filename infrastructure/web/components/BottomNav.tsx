@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CalendarDays, List, Wallet, Globe, Camera, HeartPulse, TrendingUp, PlaneTakeoff } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const tabs = [
   { href: "/",             label: "Today",    icon: CalendarDays },
@@ -48,6 +49,7 @@ export function BottomNav() {
             </Link>
           );
         })}
+        <ThemeToggle />
       </div>
     </nav>
   );

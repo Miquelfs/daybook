@@ -37,6 +37,10 @@ class TagCreate(BaseModel):
 
 
 class TagPatch(BaseModel):
+    name: str | None = None
+    icon: str | None = None
+    category: str | None = None
+    color: str | None = None
     is_negative: bool | None = None
 
 
@@ -206,12 +210,31 @@ def create_tag(body: TagCreate, conn: DB):
 
 @tags_router.patch("/{tag_id}", response_model=TagOut)
 def patch_tag(tag_id: int, body: TagPatch, conn: DB):
-    """Update tag properties (currently: is_negative)."""
+    """Update tag properties: name, icon, category (move), color, is_negative."""
     row = conn.execute("SELECT * FROM tags WHERE id=?", (tag_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Tag not found")
+
+    updates: list[str] = []
+    params: list = []
+    if body.name is not None and body.name.strip():
+        updates.append("name=?")
+        params.append(body.name.strip())
+    if body.icon is not None:
+        updates.append("icon=?")
+        params.append(body.icon.strip() or None)
+    if body.category is not None and body.category.strip():
+        updates.append("category=?")
+        params.append(body.category.strip().lower())
+    if body.color is not None:
+        updates.append("color=?")
+        params.append(body.color.strip() or None)
     if body.is_negative is not None:
-        conn.execute("UPDATE tags SET is_negative=? WHERE id=?", (int(body.is_negative), tag_id))
+        updates.append("is_negative=?")
+        params.append(int(body.is_negative))
+
+    if updates:
+        conn.execute(f"UPDATE tags SET {', '.join(updates)} WHERE id=?", (*params, tag_id))
         conn.commit()
         row = conn.execute("SELECT * FROM tags WHERE id=?", (tag_id,)).fetchone()
     usage = conn.execute("SELECT COUNT(*) FROM day_tags WHERE tag_id=?", (tag_id,)).fetchone()[0]
