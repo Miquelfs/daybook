@@ -4,6 +4,27 @@ All notable changes to Daybook are tracked here, day by day.
 
 ---
 
+## 2026-07-06 (night) — Fix 409 on Add Holding; surface real API error messages
+
+### Fixed
+- **Adding a holding could 409 forever with no explanation.** `create_holding`
+  keys each row on a deterministic `account+ticker` id and blocked re-creation
+  whenever that id already existed — even if the existing row was `is_active=0`
+  (fully sold). Selling a position to zero and later buying back into the same
+  ticker/account was permanently blocked. Now: an existing **active** holding
+  still 409s (you should use "Buy more" instead), but an existing **inactive**
+  one is revived — the row is updated in place and reactivated rather than
+  treated as a conflict.
+- **The 409 (or any failed mutation) showed a useless message** — the
+  frontend's `post`/`patch`/`del`/`proxyPost`/`proxyPatch`/`proxyDel` helpers
+  in `lib/money-api.ts` discarded the response body on failure and threw a bare
+  `POST ... failed 409`, which is exactly the unhelpful text users were seeing.
+  They now parse the FastAPI `{"detail": "..."}` body and surface that message
+  instead, falling back to the generic string only if the body isn't JSON.
+  Fixes every money-module mutation's error display at once, not just holdings.
+
+---
+
 ## 2026-07-06 (evening) — Root-cause fix for every overlapping modal; live prices; buy/avg-cost-basis
 
 ### Fixed

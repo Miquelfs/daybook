@@ -9,13 +9,26 @@ const BASE =
 // Reads go directly to the backend (GET requests are not CORS-preflight blocked for simple requests).
 const PROXY_BASE = typeof window === "undefined" ? BASE : "";
 
+// FastAPI error bodies are {"detail": "..."} — surface that instead of a bare
+// status code, since `detail` is often the only actionable part of the message
+// (e.g. "You already hold AMZN in ... — use Buy more instead").
+async function errorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = await res.json();
+    if (data && typeof data.detail === "string") return data.detail;
+  } catch {
+    // Body wasn't JSON — fall back to the generic message below.
+  }
+  return fallback;
+}
+
 async function get<T>(path: string): Promise<T> {
   // Timeout so one slow endpoint can never hang a server-rendered page.
   const res = await fetch(`${BASE}${path}`, {
     cache: "no-store",
     signal: AbortSignal.timeout(12_000),
   });
-  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  if (!res.ok) throw new Error(await errorMessage(res, `${res.status} ${path}`));
   return res.json();
 }
 
@@ -26,7 +39,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`POST ${path} failed ${res.status}`);
+  if (!res.ok) throw new Error(await errorMessage(res, `POST ${path} failed ${res.status}`));
   return res.json();
 }
 
@@ -37,13 +50,13 @@ async function patch<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`PATCH ${path} failed ${res.status}`);
+  if (!res.ok) throw new Error(await errorMessage(res, `PATCH ${path} failed ${res.status}`));
   return res.json();
 }
 
 async function del(path: string): Promise<void> {
   const res = await fetch(`${BASE}${path}`, { method: "DELETE", cache: "no-store" });
-  if (!res.ok) throw new Error(`DELETE ${path} failed ${res.status}`);
+  if (!res.ok) throw new Error(await errorMessage(res, `DELETE ${path} failed ${res.status}`));
 }
 
 // Proxy variants — mutations routed through Next.js /api/* to avoid browser CORS blocks.
@@ -54,7 +67,7 @@ async function proxyPost<T>(proxyPath: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`POST ${proxyPath} failed ${res.status}`);
+  if (!res.ok) throw new Error(await errorMessage(res, `POST ${proxyPath} failed ${res.status}`));
   return res.json();
 }
 
@@ -65,13 +78,13 @@ async function proxyPatch<T>(proxyPath: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`PATCH ${proxyPath} failed ${res.status}`);
+  if (!res.ok) throw new Error(await errorMessage(res, `PATCH ${proxyPath} failed ${res.status}`));
   return res.json();
 }
 
 async function proxyDel(proxyPath: string): Promise<void> {
   const res = await fetch(`${PROXY_BASE}${proxyPath}`, { method: "DELETE", cache: "no-store" });
-  if (!res.ok) throw new Error(`DELETE ${proxyPath} failed ${res.status}`);
+  if (!res.ok) throw new Error(await errorMessage(res, `DELETE ${proxyPath} failed ${res.status}`));
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────

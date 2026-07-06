@@ -1538,20 +1538,41 @@ def list_holdings(
 @router.post("/portfolio/holdings", response_model=HoldingOut, status_code=201)
 def create_holding(body: HoldingCreate, conn: DB):
     holding_id = f"{_slugify(body.account)}-{_slugify(body.ticker)}"
-    existing = conn.execute("SELECT id FROM holdings WHERE id = ?", (holding_id,)).fetchone()
-    if existing:
-        raise HTTPException(status_code=409, detail=f"Holding {holding_id} already exists")
+    existing = conn.execute("SELECT * FROM holdings WHERE id = ?", (holding_id,)).fetchone()
 
-    conn.execute(
-        """INSERT INTO holdings (id, account, ticker, isin, name, asset_class, currency,
-                                 quantity, cost_basis_eur, first_bought_at, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (holding_id, body.account, body.ticker.upper(),
-         body.isin.upper() if body.isin else None,
-         body.name, body.asset_class,
-         body.currency.upper(), body.quantity, body.cost_basis_eur,
-         body.first_bought_at, body.notes),
-    )
+    if existing and existing["is_active"]:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"You already hold {body.ticker.upper()} in {body.account} — "
+                f'use "Buy more" on that holding instead of adding it again.'
+            ),
+        )
+
+    if existing:
+        # Same account+ticker was fully sold before (is_active=0). The id is a
+        # deterministic slug, so re-adding it means reviving that row rather
+        # than inserting a second one under the same primary key.
+        conn.execute(
+            """UPDATE holdings SET isin = ?, name = ?, asset_class = ?, currency = ?,
+                     quantity = ?, cost_basis_eur = ?, first_bought_at = ?, notes = ?,
+                     is_active = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+               WHERE id = ?""",
+            (body.isin.upper() if body.isin else None, body.name, body.asset_class,
+             body.currency.upper(), body.quantity, body.cost_basis_eur,
+             body.first_bought_at, body.notes, holding_id),
+        )
+    else:
+        conn.execute(
+            """INSERT INTO holdings (id, account, ticker, isin, name, asset_class, currency,
+                                     quantity, cost_basis_eur, first_bought_at, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (holding_id, body.account, body.ticker.upper(),
+             body.isin.upper() if body.isin else None,
+             body.name, body.asset_class,
+             body.currency.upper(), body.quantity, body.cost_basis_eur,
+             body.first_bought_at, body.notes),
+        )
     conn.commit()
 
     # Fetch today's price synchronously so the holding shows a real value
