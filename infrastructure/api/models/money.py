@@ -381,6 +381,22 @@ class SellResult(BaseModel):
     proceeds_eur: float
 
 
+class BuyHoldingBody(BaseModel):
+    from_account: str                                   # liquid account funding the purchase
+    quantity: float = Field(gt=0)                        # units added
+    price_eur: Optional[float] = Field(default=None, gt=0)   # None = fetch today's live price
+    date: Optional[str] = None                           # YYYY-MM-DD, default today
+    notes: Optional[str] = None
+
+
+class BuyResult(BaseModel):
+    holding: HoldingOut
+    transaction_id: str
+    quantity_bought: float
+    price_eur: float
+    cost_eur: float
+
+
 class AllocationSlice(BaseModel):
     label: str
     value_eur: float

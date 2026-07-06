@@ -38,13 +38,21 @@ body.antialiased { background-color: transparent; }
 html[data-theme="light"] body.antialiased { background-color: transparent; }
 
 /* ─── Motion: one staggered page-load rise, nothing scattered ────────────── */
-
+/* fill-mode is `backwards`, NOT `both`/`forwards`: a transform-animated
+   element with a forwards-filling animation permanently acts as a
+   containing block for position:fixed descendants, even once the
+   animation settles at `transform: none` — that traps every full-screen
+   modal (add-expense, add-flight, add-holding, sell sheet, photo
+   lightbox) inside whatever <main> section it's nested under instead of
+   the real viewport. `backwards` keeps the entrance stagger (still
+   applies the pre-animation "from" state during the delay) without
+   leaving that trap active after the 0.45s animation completes. */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes db-rise {
     from { opacity: 0; transform: translateY(7px); }
     to   { opacity: 1; transform: none; }
   }
-  main > * { animation: db-rise 0.45s cubic-bezier(0.22, 0.7, 0.3, 1) both; }
+  main > * { animation: db-rise 0.45s cubic-bezier(0.22, 0.7, 0.3, 1) backwards; }
   main > *:nth-child(1) { animation-delay: 0.02s; }
   main > *:nth-child(2) { animation-delay: 0.07s; }
   main > *:nth-child(3) { animation-delay: 0.12s; }

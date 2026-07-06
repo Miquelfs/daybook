@@ -79,6 +79,45 @@ def _fetch_close(ticker: str, on_date: date) -> Optional[tuple[float, str]]:
         return None
 
 
+def sync_price_now(conn: sqlite3.Connection, ticker: str, currency_hint: str = "EUR") -> Optional[float]:
+    """Fetch and cache TODAY's price for a single ticker, synchronously.
+
+    Used right after a holding is created (or bought into) so its value shows
+    immediately instead of waiting for the nightly `price_sync` cron. Returns
+    the cached EUR close, or None if yfinance is unavailable/fetch fails —
+    callers should treat that as non-fatal (the holding still saves; price
+    fills in on the next cron run).
+    """
+    if yf is None:
+        return None
+    today = date.today()
+    try:
+        result = _fetch_close(ticker, today)
+        if result is None:
+            return None
+        close_native, currency = result
+        currency = currency or currency_hint
+        fx_rate, _ = _fx_to_eur(currency, today)
+        close_eur = close_native * fx_rate
+
+        conn.execute(
+            """INSERT INTO price_history (ticker, date, close_price, close_price_eur, currency, fx_rate, source)
+               VALUES (?, ?, ?, ?, ?, ?, 'yfinance')
+               ON CONFLICT(ticker, date) DO UPDATE SET
+                   close_price = excluded.close_price,
+                   close_price_eur = excluded.close_price_eur,
+                   currency = excluded.currency,
+                   fx_rate = excluded.fx_rate,
+                   fetched_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
+            (ticker, today.isoformat(), close_native, close_eur, currency, fx_rate),
+        )
+        conn.commit()
+        return close_eur
+    except Exception as e:
+        print(f"  [{ticker}] immediate sync failed: {e}", file=sys.stderr)
+        return None
+
+
 def sync_prices_for_date(conn: sqlite3.Connection, target_date: date) -> tuple[int, int]:
     """Fetch and cache prices for all active tickers for target_date.
 

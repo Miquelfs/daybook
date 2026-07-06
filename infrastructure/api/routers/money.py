@@ -26,6 +26,7 @@ from infrastructure.api.models.money import (
     IsinCandidate, IsinLookupResult,
     LargeTxAnomaly, MerchantSuggestion, MoneyMeta,
     MonthDetail, MonthHistory, MonthOverview, MonthSummary,
+    BuyHoldingBody, BuyResult,
     MoverOut, PlanExecutionOut, PlanRunResult,
     SellHoldingBody, SellResult,
     PortfolioHistoryPoint, PortfolioOverview, PortfolioSummary,
@@ -1553,6 +1554,12 @@ def create_holding(body: HoldingCreate, conn: DB):
     )
     conn.commit()
 
+    # Fetch today's price synchronously so the holding shows a real value
+    # immediately, rather than waiting for the nightly price_sync cron.
+    # Best-effort: a slow/failed yfinance call never blocks holding creation.
+    from domains.money.price_sync import sync_price_now
+    sync_price_now(conn, body.ticker.upper(), body.currency.upper())
+
     row = conn.execute("SELECT * FROM holdings WHERE id = ?", (holding_id,)).fetchone()
     return _holding_row_to_out(conn, row)
 
@@ -1650,6 +1657,73 @@ def sell_holding(holding_id: str, body: SellHoldingBody, conn: DB):
         quantity_sold=qty,
         price_eur=price,
         proceeds_eur=proceeds,
+    )
+
+
+@router.post("/portfolio/holdings/{holding_id}/buy", response_model=BuyResult)
+def buy_holding(holding_id: str, body: BuyHoldingBody, conn: DB):
+    """Add to a holding — the DCA counterpart to /sell. Increases quantity,
+    recomputes cost_basis_eur as a weighted average (old total cost + new
+    cost), and books the purchase as a Finance transaction debiting
+    `from_account`. This is the ongoing way to keep an average buy-in price
+    accurate as you add to a position over time."""
+    row = conn.execute(
+        "SELECT * FROM holdings WHERE id = ? AND is_active = 1", (holding_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Holding not found")
+
+    price = body.price_eur
+    if price is None:
+        from domains.money.price_sync import sync_price_now
+        price = sync_price_now(conn, row["ticker"], row["currency"])
+        if price is None:
+            latest = _latest_price_row(conn, row["ticker"])
+            price = latest["close_price_eur"] if latest else None
+        if price is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No live or cached price for this ticker — pass price_eur explicitly",
+            )
+
+    cost = round(body.quantity * price, 2)
+    buy_date = body.date or date.today().isoformat()
+    txn_id = "local-" + str(uuid.uuid4())
+    txn_type = classify("Finance")
+
+    conn.execute(
+        """INSERT INTO transactions
+             (id, source, notion_id, date, name, amount, account, category,
+              subcategory, transaction_type, notes, source_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            txn_id, "local", None, buy_date,
+            f"Buy {row['ticker']} × {body.quantity:g}",
+            -cost, body.from_account, "Finance", None, txn_type,
+            body.notes or f"Bought {body.quantity:g} × {row['name']} @ {price:.2f} €",
+            None,
+        ),
+    )
+
+    old_qty = row["quantity"]
+    old_cost_basis = row["cost_basis_eur"] or 0.0
+    new_qty = old_qty + body.quantity
+    new_cost_basis = round(old_cost_basis + cost, 2)
+
+    conn.execute(
+        """UPDATE holdings SET quantity = ?, cost_basis_eur = ?,
+                 updated_at = datetime('now') WHERE id = ?""",
+        (new_qty, new_cost_basis, holding_id),
+    )
+    conn.commit()
+
+    updated = conn.execute("SELECT * FROM holdings WHERE id = ?", (holding_id,)).fetchone()
+    return BuyResult(
+        holding=_holding_row_to_out(conn, updated),
+        transaction_id=txn_id,
+        quantity_bought=body.quantity,
+        price_eur=price,
+        cost_eur=cost,
     )
 
 

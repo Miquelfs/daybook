@@ -492,6 +492,22 @@ export type SellResult = {
   proceeds_eur: number;
 };
 
+export type BuyHoldingBody = {
+  from_account: string;
+  quantity: number;
+  price_eur?: number;   // omit = fetch today's live price
+  date?: string;
+  notes?: string;
+};
+
+export type BuyResult = {
+  holding: Holding;
+  transaction_id: string;
+  quantity_bought: number;
+  price_eur: number;
+  cost_eur: number;
+};
+
 export type IsinCandidate = {
   ticker: string;
   name: string | null;
@@ -664,6 +680,9 @@ export const moneyApi = {
 
   sellHolding: (id: string, body: SellHoldingBody) =>
     proxyPost<SellResult>(`/api/money/portfolio/holdings/${encodeURIComponent(id)}/sell`, body),
+
+  buyHolding: (id: string, body: BuyHoldingBody) =>
+    proxyPost<BuyResult>(`/api/money/portfolio/holdings/${encodeURIComponent(id)}/buy`, body),
 
   isinLookup: (isin: string) =>
     get<IsinLookupResult>(`/money/portfolio/isin-lookup?isin=${encodeURIComponent(isin)}`),

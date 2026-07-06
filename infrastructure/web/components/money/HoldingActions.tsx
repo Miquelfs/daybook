@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Banknote, Trash2, X, Check } from "lucide-react";
+import { Banknote, ShoppingCart, Trash2, X, Check } from "lucide-react";
 import { moneyApi, fmtAmount, type Holding } from "@/lib/money-api";
 
-// Per-holding actions: sell (books proceeds into a liquid account) or delete.
+// Per-holding actions: buy more (DCA — updates avg cost basis), sell (books
+// proceeds into a liquid account), or delete.
 export function HoldingActions({ holding, accounts }: { holding: Holding; accounts: string[] }) {
   const router = useRouter();
   const [sellOpen, setSellOpen] = useState(false);
+  const [buyOpen, setBuyOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,11 +22,22 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
   const [account, setAccount] = useState(accounts[0] ?? "");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
 
+  const [buyQty, setBuyQty] = useState("");
+  const [buyPrice, setBuyPrice] = useState("");
+  const [buyAccount, setBuyAccount] = useState(accounts[0] ?? "");
+  const [buyDate, setBuyDate] = useState(new Date().toISOString().slice(0, 10));
+
   const qtyNum = parseFloat(qty);
   const priceNum = parseFloat(price);
   const valid = !isNaN(qtyNum) && qtyNum > 0 && !isNaN(priceNum) && priceNum > 0 && !!account;
   const proceeds = valid ? qtyNum * priceNum : null;
   const sellingAll = valid && qtyNum >= holding.quantity - 1e-9;
+
+  const buyQtyNum = parseFloat(buyQty);
+  const buyPriceNum = buyPrice ? parseFloat(buyPrice) : null;
+  const buyValid = !isNaN(buyQtyNum) && buyQtyNum > 0 && !!buyAccount &&
+    (buyPrice === "" || (buyPriceNum != null && buyPriceNum > 0));
+  const buyCost = buyValid && buyPriceNum != null ? buyQtyNum * buyPriceNum : null;
 
   async function sell() {
     if (!valid) return;
@@ -46,6 +59,28 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
     }
   }
 
+  async function buy() {
+    if (!buyValid) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await moneyApi.buyHolding(holding.id, {
+        from_account: buyAccount,
+        quantity: buyQtyNum,
+        price_eur: buyPriceNum ?? undefined,
+        date: buyDate,
+      });
+      setBuyOpen(false);
+      setBuyQty("");
+      setBuyPrice("");
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Buy failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove() {
     setBusy(true);
     try {
@@ -60,6 +95,14 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
   return (
     <>
       <div className="flex items-center gap-0.5" onClick={(e) => e.preventDefault()}>
+        <button
+          type="button"
+          title={`Buy more ${holding.ticker}`}
+          onClick={(e) => { e.stopPropagation(); setBuyOpen(true); }}
+          className="p-1.5 rounded-lg text-[#3F3F46] hover:text-[#3B82F6] hover:bg-[#18181B] transition-colors"
+        >
+          <ShoppingCart size={14} />
+        </button>
         <button
           type="button"
           title={`Sell ${holding.ticker}`}
@@ -98,6 +141,95 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
           </button>
         )}
       </div>
+
+      {buyOpen && (
+        <div className="fixed inset-0 z-50" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute inset-0 bg-black/60" onClick={() => setBuyOpen(false)} />
+          <div className="absolute bottom-0 left-0 right-0 max-w-lg mx-auto bg-[#0D0D0F] border border-[#27272A] border-b-0 rounded-t-2xl px-5 pb-8 pt-4">
+            <div className="flex justify-center mb-3">
+              <div className="w-10 h-1 rounded-full bg-[#3F3F46]" />
+            </div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-sm font-semibold text-[#FAFAFA]">Buy more {holding.ticker}</p>
+                <p className="text-xs text-[#52525B]">
+                  {holding.name} · currently {holding.quantity.toLocaleString()} units
+                  {holding.cost_basis_eur != null && ` · avg €${(holding.cost_basis_eur / holding.quantity).toFixed(2)}/unit`}
+                </p>
+              </div>
+              <button onClick={() => setBuyOpen(false)} className="p-1.5 rounded-lg hover:bg-[#27272A] transition-colors">
+                <X size={16} className="text-[#71717A]" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Quantity bought</span>
+                  <input
+                    value={buyQty}
+                    onChange={(e) => setBuyQty(e.target.value)}
+                    inputMode="decimal"
+                    autoFocus
+                    className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Price € / unit</span>
+                  <input
+                    value={buyPrice}
+                    onChange={(e) => setBuyPrice(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="live price"
+                    className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                  />
+                </label>
+              </div>
+
+              <label className="block">
+                <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Funding account</span>
+                <select
+                  value={buyAccount}
+                  onChange={(e) => setBuyAccount(e.target.value)}
+                  className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                >
+                  {accounts.map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Date</span>
+                <input
+                  type="date"
+                  value={buyDate}
+                  onChange={(e) => setBuyDate(e.target.value)}
+                  className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                />
+              </label>
+
+              <div className="bg-[#18181B] rounded-lg px-3 py-2.5 flex items-center justify-between">
+                <span className="text-xs text-[#71717A]">
+                  {buyCost != null ? "New avg. buy-in updates automatically" : "Leave price blank to use today's live quote"}
+                </span>
+                {buyCost != null && (
+                  <span className="text-sm font-semibold text-[#3B82F6] tabular-nums">−{fmtAmount(buyCost)}</span>
+                )}
+              </div>
+
+              {error && <p className="text-xs text-[#EF4444]">{error}</p>}
+
+              <button
+                type="button"
+                onClick={buy}
+                disabled={!buyValid || busy}
+                className="w-full bg-[#F59E0B] hover:bg-[#FBBF24] disabled:opacity-40 text-black font-semibold text-sm rounded-lg py-2.5 transition-colors"
+              >
+                {busy ? "Buying…" : buyCost != null ? `Buy for ${fmtAmount(buyCost)}` : "Buy at live price"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {sellOpen && (
         <div className="fixed inset-0 z-50" onClick={(e) => e.stopPropagation()}>

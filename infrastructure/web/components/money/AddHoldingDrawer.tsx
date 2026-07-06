@@ -39,12 +39,22 @@ export function AddHoldingDrawer({ accounts = INVESTMENT_ACCOUNTS }: Props) {
     asset_class: "equity_etf" as AssetClass,
     currency: "EUR",
     quantity: "",
-    cost_basis_eur: "",
     first_bought_at: "",
     notes: "",
   });
+  // Collected separately from `form` because the API stores cost_basis_eur
+  // as a TOTAL — asking for that directly reads as "price per unit" to most
+  // people and silently produces nonsense P&L (that ambiguity is exactly
+  // what caused the wildly-wrong percentages users were seeing).
+  const [avgBuyIn, setAvgBuyIn] = useState("");
   const [lookupPending, setLookupPending] = useState(false);
   const [lookupMsg, setLookupMsg] = useState<string | null>(null);
+
+  const totalCostBasis = (() => {
+    const qty = Number(form.quantity);
+    const price = Number(avgBuyIn);
+    return avgBuyIn && form.quantity && !isNaN(qty) && !isNaN(price) ? qty * price : null;
+  })();
 
   async function onIsinLookup() {
     const isin = form.isin.trim().toUpperCase();
@@ -93,7 +103,7 @@ export function AddHoldingDrawer({ accounts = INVESTMENT_ACCOUNTS }: Props) {
         asset_class: form.asset_class,
         currency: form.currency.trim().toUpperCase() || "EUR",
         quantity: Number(form.quantity),
-        cost_basis_eur: form.cost_basis_eur ? Number(form.cost_basis_eur) : null,
+        cost_basis_eur: totalCostBasis,
         first_bought_at: form.first_bought_at || null,
         notes: form.notes || null,
       });
@@ -106,10 +116,10 @@ export function AddHoldingDrawer({ accounts = INVESTMENT_ACCOUNTS }: Props) {
         asset_class: "equity_etf",
         currency: "EUR",
         quantity: "",
-        cost_basis_eur: "",
         first_bought_at: "",
         notes: "",
       });
+      setAvgBuyIn("");
       setLookupMsg(null);
       router.refresh();
     } catch (e) {
@@ -217,31 +227,37 @@ export function AddHoldingDrawer({ accounts = INVESTMENT_ACCOUNTS }: Props) {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-[#71717A] uppercase tracking-widest">Quantity</label>
-                  <input
-                    required
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={form.quantity}
-                    onChange={e => update("quantity", e.target.value)}
-                    className="mt-1 w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-[#71717A] uppercase tracking-widest">Cost basis €</label>
-                  <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    placeholder="optional"
-                    value={form.cost_basis_eur}
-                    onChange={e => update("cost_basis_eur", e.target.value)}
-                    className="mt-1 w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
+              <div>
+                <label className="text-xs text-[#71717A] uppercase tracking-widest">Quantity</label>
+                <input
+                  required
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={form.quantity}
+                  onChange={e => update("quantity", e.target.value)}
+                  className="mt-1 w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-[#71717A] uppercase tracking-widest">
+                  Avg. buy-in price € / unit
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  placeholder="optional — what you paid per unit, on average"
+                  value={avgBuyIn}
+                  onChange={e => setAvgBuyIn(e.target.value)}
+                  className="mt-1 w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm"
+                />
+                {totalCostBasis != null && (
+                  <p className="text-xs text-[#52525B] mt-1">
+                    Total cost: €{totalCostBasis.toFixed(2)} · this is what P&amp;L compares against
+                  </p>
+                )}
               </div>
 
               <div>
@@ -272,7 +288,7 @@ export function AddHoldingDrawer({ accounts = INVESTMENT_ACCOUNTS }: Props) {
               >
                 {pending ? "Adding…" : "Add holding"}
               </button>
-              <p className="text-xs text-[#52525B] text-center">Price will be fetched on next sync (~05:30 daily)</p>
+              <p className="text-xs text-[#52525B] text-center">Today's price is fetched immediately</p>
             </form>
           </div>
         </div>
