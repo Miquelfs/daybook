@@ -4,6 +4,35 @@ All notable changes to Daybook are tracked here, day by day.
 
 ---
 
+## 2026-07-06 (evening) — Root-cause fix for every overlapping modal; live prices; buy/avg-cost-basis
+
+### Fixed
+- **All modal overlap, everywhere** (not just Add Holding): the page-load
+  stagger animation used `animation-fill-mode: both`. Per spec, an element
+  with a forwards/both-filling transform animation permanently acts as a
+  containing block for `position: fixed` descendants — even once the
+  animation settles at `transform: none`. That trapped every full-screen
+  sheet (add holding, add expense, add flight, sell, the photo lightbox)
+  inside whatever page section it was nested under instead of the real
+  viewport. Changed `both` → `backwards`: keeps the entrance stagger, drops
+  the permanent trap once the 0.45s animation completes.
+- **P&L was reading real numbers as garbage** because "Cost basis €" asked
+  for a *total* but reads like "price per unit" — a natural mix-up that
+  silently produced 100s-of-percent P&L. The field is now "Avg. buy-in
+  price € / unit" with the total shown live underneath before you submit.
+
+### Added
+- **Live price on creation** — adding a holding now fetches today's price
+  synchronously (`domains/money/price_sync.py: sync_price_now`) instead of
+  waiting for the nightly cron; falls back silently to "price pending" if
+  the fetch fails, exactly as before.
+- **Buy more** (the DCA counterpart to Sell): updates quantity and
+  recomputes a true weighted-average cost basis, books the purchase as a
+  Finance transaction debiting a chosen funding account. Fetches a live
+  price if none is given. `POST /money/portfolio/holdings/{id}/buy`.
+
+---
+
 ## 2026-07-06 (later still) — Merge Training's two half-empty cards into one
 
 ### Changed
