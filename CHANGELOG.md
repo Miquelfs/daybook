@@ -4,6 +4,20 @@ All notable changes to Daybook are tracked here, day by day.
 
 ---
 
+## 2026-07-06 (later still) — Merge Training's two half-empty cards into one
+
+### Changed
+- The Today/day-view Training section showed readiness (form, roster badge)
+  and the rest-day/session list as two separate bordered cards — often both
+  mostly whitespace (e.g. just "-2 form · optimal" and a roster badge sitting
+  alone in their own box). Merged into a single card: readiness becomes a
+  compact header row (bottom-divided), sessions render as divided rows
+  instead of individually-bordered buttons, and the rest-day message sits
+  directly below the header with no gap. `ReadinessBar` renamed
+  `ReadinessHeader` to reflect the new role.
+
+---
+
 ## 2026-07-06 (later) — Feedback round: fonts back, light-mode fixes, sell holdings, compact Today
 
 ### Fixed

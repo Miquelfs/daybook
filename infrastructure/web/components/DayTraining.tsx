@@ -84,9 +84,11 @@ interface DayPrescription {
 
 // ── Readiness bar ───────────────────────────────────────────────────────────
 
-// Body battery already lives in the health KPIs above — this strip is about
-// what the numbers mean for training: readiness ring, recovery state, form.
-function ReadinessBar({ ctx }: { ctx: ReadinessContext }) {
+// Header row for the merged Training card — readiness ring, recovery state,
+// form, roster badge. Body battery lives in the health KPIs above, so it's
+// deliberately not repeated here. Renders nothing if there's no signal at
+// all, so a card with only a roster badge doesn't get an empty ring either.
+function ReadinessHeader({ ctx }: { ctx: ReadinessContext }) {
   const readiness = ctx.garmin_readiness;
   const status = ctx.recovery_status;
   const tsb = ctx.tsb;
@@ -108,14 +110,14 @@ function ReadinessBar({ ctx }: { ctx: ReadinessContext }) {
     : tsb >= -25 ? { color: "#FB923C", label: "productive" }
     : { color: "#F87171", label: "overreaching" };
 
-  const hasAny = readiness != null || status != null || tsb != null;
+  const hasAny = readiness != null || status != null || tsb != null || ctx.roster_today;
   if (!hasAny) return null;
 
   const R = 13;
   const C = 2 * Math.PI * R;
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-5 flex-wrap">
+    <div className="px-4 py-3 border-b border-[#18181B] flex items-center gap-5 flex-wrap">
       {readiness != null && (
         <div className="flex items-center gap-2.5" title="Garmin training readiness">
           <svg width="34" height="34" viewBox="0 0 34 34" className="-rotate-90">
@@ -152,7 +154,7 @@ function ReadinessBar({ ctx }: { ctx: ReadinessContext }) {
         </div>
       )}
       {ctx.roster_today && (
-        <span className="text-[10px] px-2 py-0.5 rounded bg-[#1C1700] border border-[#B45309] text-[#FCD34D]">
+        <span className={`text-[10px] px-2 py-0.5 rounded bg-[#1C1700] border border-[#B45309] text-[#FCD34D] ${tsb == null ? "ml-auto" : ""}`}>
           ✈ {ctx.roster_today}
         </span>
       )}
@@ -510,9 +512,6 @@ export function DayTraining({ initialPrescription, date }: {
       <section className="space-y-3">
         <SectionLabel>Training</SectionLabel>
 
-        {/* Readiness bar */}
-        {ctx && <ReadinessBar ctx={ctx} />}
-
         {/* Injury banners */}
         {(data.injury_suggestions ?? [])
           .filter((s) => !dismissedInjuries.includes(s.injury_id))
@@ -550,63 +549,66 @@ export function DayTraining({ initialPrescription, date }: {
           </div>
         )}
 
-        {/* Rest day */}
-        {sessions.length === 0 && (
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 flex items-center gap-3">
-            <span className="text-xl">😴</span>
-            <div>
-              <p className="text-sm text-[#A1A1AA] font-medium">Rest day</p>
-              <p className="text-xs text-[#52525B] mt-0.5">No sessions scheduled — recover well</p>
-            </div>
-          </div>
-        )}
+        {/* Readiness header + rest-day/sessions — one card, not two */}
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+          {ctx && <ReadinessHeader ctx={ctx} />}
 
-        {/* Session cards */}
-        {sessions.map((s) => {
-          const zone = ZONE_STYLE[s.intensity_zone] ?? ZONE_STYLE.Z2;
-          const isCompleted = s.status === "completed";
-          return (
-            <button
-              key={s.id}
-              onClick={() => setOpenSession(s)}
-              className={`w-full text-left border rounded-xl px-4 py-3.5 flex items-center gap-3 transition-colors ${
-                isCompleted
-                  ? "bg-[#052E16] border-[#14532D] opacity-70"
-                  : "bg-[#0D0D0F] border-[#27272A] hover:border-[#3F3F46]"
-              }`}
-            >
-              <span className="text-xl">{disciplineIcon(s.discipline)}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-[#FAFAFA] truncate">{s.session_type}</p>
-                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                  <p className="text-xs text-[#52525B]">{s.goal_name}</p>
-                  {s.current_phase && s.current_week && s.total_weeks && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#18181B] border border-[#27272A] text-[#3F3F46] uppercase tracking-wider">
-                      {PHASE_LABEL[s.current_phase] ?? s.current_phase} · Wk {s.current_week}/{s.total_weeks}
-                    </span>
-                  )}
-                </div>
-                {s.adaptation_note && (
-                  <p className="text-xs text-[#71717A] mt-1 truncate">{s.adaptation_note}</p>
-                )}
-                {isCompleted && s.rpe_actual == null && (
-                  <p className="text-[10px] text-[#FB923C] mt-1">Tap to log RPE →</p>
-                )}
-                {isCompleted && s.rpe_actual != null && (
-                  <p className="text-[10px] text-[#4ADE80] mt-1">RPE {s.rpe_actual} logged ✓</p>
-                )}
+          {sessions.length === 0 ? (
+            <div className="px-4 py-4 flex items-center gap-3">
+              <span className="text-xl">😴</span>
+              <div>
+                <p className="text-sm text-[#A1A1AA] font-medium">Rest day</p>
+                <p className="text-xs text-[#52525B] mt-0.5">No sessions scheduled — recover well</p>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {isCompleted && <span className="text-xs text-[#4ADE80]">✓</span>}
-                <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${zone.bg} ${zone.text}`}>
-                  {s.intensity_zone}
-                </span>
-                <span className="text-xs text-[#52525B] tabular-nums">{s.effective_duration_min}m</span>
-                <span className="text-[#3F3F46]">›</span>
-              </div>
-            </button>
-          );
-        })}
+            </div>
+          ) : (
+            <div className="divide-y divide-[#18181B]">
+              {sessions.map((s) => {
+                const zone = ZONE_STYLE[s.intensity_zone] ?? ZONE_STYLE.Z2;
+                const isCompleted = s.status === "completed";
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => setOpenSession(s)}
+                    className={`w-full text-left px-4 py-3.5 flex items-center gap-3 transition-colors ${
+                      isCompleted ? "bg-[#052E16]/40" : "hover:bg-[#131316]"
+                    }`}
+                  >
+                    <span className="text-xl">{disciplineIcon(s.discipline)}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-[#FAFAFA] truncate">{s.session_type}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        <p className="text-xs text-[#52525B]">{s.goal_name}</p>
+                        {s.current_phase && s.current_week && s.total_weeks && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#18181B] border border-[#27272A] text-[#3F3F46] uppercase tracking-wider">
+                            {PHASE_LABEL[s.current_phase] ?? s.current_phase} · Wk {s.current_week}/{s.total_weeks}
+                          </span>
+                        )}
+                      </div>
+                      {s.adaptation_note && (
+                        <p className="text-xs text-[#71717A] mt-1 truncate">{s.adaptation_note}</p>
+                      )}
+                      {isCompleted && s.rpe_actual == null && (
+                        <p className="text-[10px] text-[#FB923C] mt-1">Tap to log RPE →</p>
+                      )}
+                      {isCompleted && s.rpe_actual != null && (
+                        <p className="text-[10px] text-[#4ADE80] mt-1">RPE {s.rpe_actual} logged ✓</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {isCompleted && <span className="text-xs text-[#4ADE80]">✓</span>}
+                      <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${zone.bg} ${zone.text}`}>
+                        {s.intensity_zone}
+                      </span>
+                      <span className="text-xs text-[#52525B] tabular-nums">{s.effective_duration_min}m</span>
+                      <span className="text-[#3F3F46]">›</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </section>
 
       {openSession && (
