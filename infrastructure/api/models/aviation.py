@@ -204,3 +204,22 @@ class CurrencyStatus(BaseModel):
     night_takeoffs_90d: int
     night_landings_90d: int
     next_expiry_date: str | None = None
+    # Night passenger currency (EASA FCL.060): ≥1 night T/O and ≥1 night ldg in 90 days
+    night_current: bool = False
+    night_expiry_date: str | None = None
+
+
+class LimitWindow(BaseModel):
+    label: str
+    hours: float
+    limit_hours: float
+    window_start: str
+    window_end: str
+
+
+class FlightTimeLimits(BaseModel):
+    """EASA ORO.FTL.210 rolling block-hour limitations."""
+    reference_date: str
+    days_28: LimitWindow
+    calendar_year: LimitWindow
+    months_12: LimitWindow

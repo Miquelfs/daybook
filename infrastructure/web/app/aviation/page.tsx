@@ -10,11 +10,11 @@ import {
   PlaneTakeoff, PlaneLanding, Moon, Clock, Globe, Plus,
   Shield, TrendingUp, Award, ChevronRight, Download,
   Flag, Compass, Plane, Fuel, Users, Layers, AlertTriangle,
-  List, BarChart2, MapPin, CalendarDays, X, User,
+  List, BarChart2, MapPin, CalendarDays, X, User, Gauge,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { api, type FlightSummary } from "@/lib/api";
+import { api, type FlightSummary, type LimitWindow } from "@/lib/api";
 import { AddFlightSheet } from "@/components/aviation/AddFlightSheet";
 
 const FlightRouteMap = dynamic(
@@ -104,6 +104,25 @@ function AnalyticCard({ label, value, sub, accent }: { label: string; value: str
   );
 }
 
+function LimitBar({ window: w }: { window: LimitWindow }) {
+  const pct = Math.min(100, (w.hours / w.limit_hours) * 100);
+  const barColor = pct >= 90 ? "#EF4444" : pct >= 75 ? "#F59E0B" : "#38BDF8";
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="text-xs text-[#71717A]">{w.label}</span>
+        <span className="text-xs tabular-nums">
+          <span className="text-[#FAFAFA] font-medium">{w.hours.toFixed(0)}h</span>
+          <span className="text-[#52525B]"> / {w.limit_hours.toFixed(0)}h</span>
+        </span>
+      </div>
+      <div className="h-1.5 bg-[#27272A] rounded-full overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: barColor }} />
+      </div>
+    </div>
+  );
+}
+
 function SectionTitle({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 mb-3">
@@ -181,6 +200,11 @@ export default function AviationPage() {
   const { data: currency } = useQuery({
     queryKey: ["flightCurrency"],
     queryFn: () => api.flightCurrency(),
+  });
+
+  const { data: limits } = useQuery({
+    queryKey: ["flightLimits"],
+    queryFn: () => api.flightLimits(),
   });
 
   const { data: routes = [] } = useQuery({
@@ -358,6 +382,38 @@ export default function AviationPage() {
                   </p>
                   <p className="text-xs text-[#71717A]">Status</p>
                 </div>
+              </div>
+              <div className="flex items-center gap-2 mt-3 pt-3 border-t border-[#27272A]">
+                <Moon size={12} className={currency.night_current ? "text-indigo-400" : "text-[#52525B]"} />
+                {currency.night_current ? (
+                  <p className="text-xs text-[#A1A1AA]">
+                    Night pax currency <span className="text-green-400 font-medium">current</span>
+                    {currency.night_expiry_date && (
+                      <span className="text-[#52525B]"> · expires {format(parseISO(currency.night_expiry_date), "dd MMM yyyy")}</span>
+                    )}
+                  </p>
+                ) : (
+                  <p className="text-xs text-[#71717A]">
+                    Night pax currency <span className="text-amber-400 font-medium">not held</span>
+                    <span className="text-[#52525B]"> · needs 1 night T/O + 1 night ldg in 90 days</span>
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Flight time limitations (EASA ORO.FTL.210) */}
+          {limits && (
+            <div className="bg-[#18181B] border border-[#27272A] rounded-lg p-4 mb-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Gauge size={14} className="text-sky-400" />
+                <p className="text-sm font-medium text-[#FAFAFA]">Flight Time Limits</p>
+                <span className="ml-auto text-xs text-[#52525B]">EASA ORO.FTL.210</span>
+              </div>
+              <div className="space-y-3">
+                {[limits.days_28, limits.calendar_year, limits.months_12].map(w => (
+                  <LimitBar key={w.label} window={w} />
+                ))}
               </div>
             </div>
           )}
@@ -694,6 +750,40 @@ export default function AviationPage() {
             </div>
           </div>
 
+          {/* Night flying */}
+          {analytics.night_stats && (
+            <div className="bg-[#18181B] rounded-lg p-4">
+              <SectionTitle icon={<Moon size={14} />}>Night Flying</SectionTitle>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <AnalyticCard label="Night hours" value={hToHHMM(analytics.night_stats.night_hours)} accent="text-indigo-400"
+                  sub={`${analytics.night_stats.night_pct}% of block`} />
+                <AnalyticCard label="Night sectors" value={fmt(analytics.night_stats.night_sectors)}
+                  sub={`${analytics.night_stats.full_night_sectors} fully at night`} />
+                <AnalyticCard label="Night T/O · Ldg" value={`${analytics.night_stats.night_takeoffs} · ${analytics.night_stats.night_landings}`} />
+              </div>
+              {/* Day vs night split bar */}
+              <div className="h-2 rounded-full overflow-hidden flex mb-1.5">
+                <div className="bg-sky-500" style={{ width: `${100 - analytics.night_stats.night_pct}%` }} />
+                <div className="bg-indigo-600" style={{ width: `${analytics.night_stats.night_pct}%` }} />
+              </div>
+              <div className="flex items-center justify-between text-xs text-[#52525B] mb-3">
+                <span>Day {(100 - analytics.night_stats.night_pct).toFixed(1)}%</span>
+                <span>Night {analytics.night_stats.night_pct}%</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {analytics.night_stats.darkest_month && (
+                  <AnalyticCard label="Most night in a month" value={analytics.night_stats.darkest_month.month}
+                    sub={`${hToHHMM(analytics.night_stats.darkest_month.night_hours)} · ${analytics.night_stats.darkest_month.night_sectors} sectors`} />
+                )}
+                {analytics.night_stats.most_night_flight && (
+                  <AnalyticCard label="Most night in a flight" accent="text-indigo-400"
+                    value={hToHHMM(analytics.night_stats.most_night_flight.night_seconds / 3600)}
+                    sub={`${analytics.night_stats.most_night_flight.dep_icao} → ${analytics.night_stats.most_night_flight.arr_icao} · ${analytics.night_stats.most_night_flight.date}`} />
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Countries — map-style grid */}
           {analytics.countries.length > 0 && (
             <div className="bg-[#18181B] rounded-lg p-4">
@@ -927,11 +1017,12 @@ export default function AviationPage() {
                       <p className="text-xs text-[#71717A]">{[airportData.city, airportData.country].filter(Boolean).join(", ")}</p>
                       {airportData.iata && <p className="text-xs text-[#52525B] font-mono">{airportData.icao} / {airportData.iata}</p>}
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-4 gap-2">
                       {[
                         { label: "Movements", value: String(airportData.total_movements) },
                         { label: "Departures", value: String(airportData.departures) },
                         { label: "Arrivals", value: String(airportData.arrivals) },
+                        { label: "Night ops", value: String(airportData.night_movements) },
                       ].map(({ label, value }) => (
                         <div key={label} className="bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-center">
                           <p className="text-lg font-semibold tabular-nums">{value}</p>
@@ -986,10 +1077,11 @@ export default function AviationPage() {
                       <p className="text-base font-semibold text-[#FAFAFA] font-mono">{aircraftData.registration}</p>
                       <p className="text-xs text-[#71717A]">{shortAircraftType(aircraftData.aircraft_type)}</p>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-4 gap-2">
                       {[
                         { label: "Flights", value: String(aircraftData.total_flights) },
                         { label: "Block time", value: secToHHMM(aircraftData.total_block_seconds) },
+                        { label: "Night", value: secToHHMM(aircraftData.total_night_seconds) },
                         { label: "First flight", value: aircraftData.first_flight },
                       ].map(({ label, value }) => (
                         <div key={label} className="bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-center">
@@ -1040,10 +1132,11 @@ export default function AviationPage() {
                         <p className="text-xs text-[#52525B] mt-1">{captainData.aircraft_types.map(shortAircraftType).join(" · ")}</p>
                       )}
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-4 gap-2">
                       {[
                         { label: "Flights", value: String(captainData.total_flights) },
                         { label: "Block time", value: secToHHMM(captainData.total_block_seconds) },
+                        { label: "Night", value: secToHHMM(captainData.total_night_seconds) },
                         { label: "First flight", value: captainData.first_flight },
                       ].map(({ label, value }) => (
                         <div key={label} className="bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-center">
@@ -1100,6 +1193,11 @@ function FlightRow({ flight: f, codeMode }: { flight: FlightSummary; codeMode: C
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: dot }} />
       <span className="text-[#52525B] text-xs w-20 shrink-0 tabular-nums">{f.date}</span>
       <span className="text-[#FAFAFA] font-mono text-xs">{dep} → {arr}</span>
+      {f.night_seconds > 0 && (
+        <span className="flex items-center gap-0.5 text-indigo-400 text-xs tabular-nums" title={`${secToHHMM(f.night_seconds)} night`}>
+          <Moon size={9} />{(f.night_seconds / 3600).toFixed(1)}
+        </span>
+      )}
       <span className="text-[#71717A] text-xs ml-auto hidden sm:block">{f.flight_number || ""}</span>
       <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${f.crew_role === "pic" ? "bg-violet-900/50 text-violet-300" : "bg-[#27272A] text-[#71717A]"}`}>
         {role}

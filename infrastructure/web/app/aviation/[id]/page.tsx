@@ -7,6 +7,7 @@ import Link from "next/link";
 import {
   ArrowLeft, PlaneTakeoff, PlaneLanding, Clock, Users,
   Fuel, AlertTriangle, FileText, Loader, Pencil, X, Check, Trash2,
+  Moon, Sun,
 } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -345,6 +346,29 @@ export default function FlightDetailPage() {
         {f.distance_nm && <Row label="Distance" value={`${f.distance_nm.toLocaleString()} NM`} />}
         <Row label="Night" value={hhmm(f.night_seconds)} />
         <Row label="IFR" value={hhmm(f.ifr_seconds)} />
+        {/* Day / night split of the flight */}
+        {(() => {
+          const base = f.airborne_seconds || f.block_seconds || 0;
+          if (!base || f.is_sim) return null;
+          const nightPct = Math.min(100, ((f.night_seconds || 0) / base) * 100);
+          const dayPct = 100 - nightPct;
+          return (
+            <div className="mt-3">
+              <div className="h-2 rounded-full overflow-hidden flex bg-[#09090B]">
+                <div className="bg-sky-500" style={{ width: `${dayPct}%` }} />
+                <div className="bg-indigo-600" style={{ width: `${nightPct}%` }} />
+              </div>
+              <div className="flex items-center justify-between mt-1.5 text-xs text-[#52525B]">
+                <span className="flex items-center gap-1">
+                  <Sun size={10} className="text-sky-500" />Day {dayPct.toFixed(0)}%
+                </span>
+                <span className="flex items-center gap-1">
+                  <Moon size={10} className="text-indigo-400" />Night {nightPct.toFixed(0)}%
+                </span>
+              </div>
+            </div>
+          );
+        })()}
       </Section>
 
       {/* Crew & Aircraft */}

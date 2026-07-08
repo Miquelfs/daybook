@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { ArrowLeft, Clock, Calendar, User, Plane } from "lucide-react";
+import { ArrowLeft, Clock, Calendar, User, Plane, Moon } from "lucide-react";
 
 function secToHHMM(s: number): string {
   if (!s) return "0:00";
@@ -84,10 +84,11 @@ export default function CaptainPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-3 mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
           {[
             { label: "Flights together", value: String(data.total_flights), icon: <Plane size={12} /> },
             { label: "Block time", value: secToHHMM(data.total_block_seconds), icon: <Clock size={12} /> },
+            { label: "Night time", value: secToHHMM(data.total_night_seconds), icon: <Moon size={12} /> },
             { label: "First flight", value: data.first_flight, icon: <Calendar size={12} /> },
           ].map(({ label, value, icon }) => (
             <div key={label} className="bg-[#18181B] border border-[#27272A] rounded-xl p-4">
@@ -111,6 +112,7 @@ export default function CaptainPage() {
               const role = f.crew_role as string;
               const isPIC = role === "pic";
               const block = secToHHMM((f.block_seconds as number) || 0);
+              const nightSec = (f.night_seconds as number) || 0;
               const fn = f.flight_number as string | null;
               const acft = shortType(f.aircraft_type as string | null);
               return (
@@ -136,6 +138,11 @@ export default function CaptainPage() {
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {fn && <span className="text-xs text-[#52525B]">{fn}</span>}
                       <span className="text-xs text-[#71717A]">{acft}</span>
+                      {nightSec > 0 && (
+                        <span className="flex items-center gap-0.5 text-xs text-indigo-400 tabular-nums">
+                          <Moon size={9} />{secToHHMM(nightSec)}
+                        </span>
+                      )}
                       <span className="text-xs text-[#A1A1AA] tabular-nums">{block}</span>
                       <span className={`text-xs px-1.5 py-0.5 rounded ${isPIC ? "bg-violet-950/50 text-violet-300" : "bg-[#27272A] text-[#71717A]"}`}>
                         {isPIC ? "PIC" : "FO"}

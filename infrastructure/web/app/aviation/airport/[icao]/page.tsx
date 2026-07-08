@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { ArrowLeft, Clock, MapPin, PlaneTakeoff, PlaneLanding, Calendar } from "lucide-react";
+import { ArrowLeft, Clock, MapPin, PlaneTakeoff, PlaneLanding, Calendar, Moon } from "lucide-react";
 
 function secToHHMM(s: number): string {
   if (!s) return "0:00";
@@ -85,11 +85,13 @@ export default function AirportPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
           {[
             { label: "Movements", value: String(data.total_movements), icon: <MapPin size={12} /> },
             { label: "Departures", value: String(data.departures), icon: <PlaneTakeoff size={12} /> },
             { label: "Arrivals", value: String(data.arrivals), icon: <PlaneLanding size={12} /> },
+            { label: "Night ops here", value: String(data.night_movements), icon: <Moon size={12} /> },
+            { label: "Block time", value: secToHHMM(data.total_block_seconds), icon: <Clock size={12} /> },
             { label: "First visit", value: data.first_visit ?? "—", icon: <Calendar size={12} /> },
           ].map(({ label, value, icon }) => (
             <div key={label} className="bg-[#18181B] border border-[#27272A] rounded-xl p-4">
@@ -117,6 +119,7 @@ export default function AirportPage() {
               const role = f.crew_role as string;
               const isPIC = role === "pic";
               const block = secToHHMM((f.block_seconds as number) || 0);
+              const nightSec = (f.night_seconds as number) || 0;
               const fn = f.flight_number as string | null;
               const acft = shortType(f.aircraft_type as string | null);
               const picName = formatPicName(f.pic_name as string | null);
@@ -141,6 +144,11 @@ export default function AirportPage() {
                       {fn && <span className="text-xs text-[#52525B]">{fn}</span>}
                       {picName && <span className="text-xs text-[#52525B] font-mono hidden sm:block">{picName}</span>}
                       <span className="text-xs text-[#71717A]">{acft}</span>
+                      {nightSec > 0 && (
+                        <span className="flex items-center gap-0.5 text-xs text-indigo-400 tabular-nums">
+                          <Moon size={9} />{secToHHMM(nightSec)}
+                        </span>
+                      )}
                       <span className="text-xs text-[#A1A1AA] tabular-nums">{block}</span>
                       <span className={`text-xs px-1.5 py-0.5 rounded ${isPIC ? "bg-violet-950/50 text-violet-300" : "bg-[#27272A] text-[#71717A]"}`}>
                         {isPIC ? "PIC" : "FO"}

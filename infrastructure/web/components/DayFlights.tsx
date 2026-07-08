@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { Moon } from "lucide-react";
 import type { FlightSummary } from "@/lib/api";
 
 function flightOpColor(f: FlightSummary): { dot: string; badge: string } {
@@ -85,6 +86,11 @@ export function DayFlights({ date }: { date: string }) {
               <div className="flex items-center gap-3 mt-1.5 text-xs text-[#52525B]">
                 {depTime && <span className="tabular-nums">{depTime} UTC</span>}
                 {arrTime && <span className="tabular-nums">→ {arrTime}</span>}
+                {f.night_seconds > 0 && (
+                  <span className="flex items-center gap-0.5 text-indigo-400 tabular-nums">
+                    <Moon size={9} />{(f.night_seconds / 3600).toFixed(1)}h
+                  </span>
+                )}
                 <span className="ml-auto text-[#71717A] tabular-nums">{blockStr}</span>
               </div>
               {f.aircraft_type && (

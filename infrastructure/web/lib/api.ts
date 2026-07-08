@@ -429,6 +429,23 @@ export type CurrencyStatus = {
   night_takeoffs_90d: number;
   night_landings_90d: number;
   next_expiry_date: string | null;
+  night_current: boolean;
+  night_expiry_date: string | null;
+};
+
+export type LimitWindow = {
+  label: string;
+  hours: number;
+  limit_hours: number;
+  window_start: string;
+  window_end: string;
+};
+
+export type FlightTimeLimits = {
+  reference_date: string;
+  days_28: LimitWindow;
+  calendar_year: LimitWindow;
+  months_12: LimitWindow;
 };
 
 type AnalyticFlight = { id: string; date: string; dep_icao: string | null; arr_icao: string | null; dep_iata: string | null; arr_iata: string | null; block_seconds: number; dep_city: string | null; arr_city: string | null };
@@ -448,6 +465,17 @@ export type FlightAnalytics = {
   fuel_stats: { avg_burn_kg: number; total_burn_kg: number; avg_uplift_kg: number; flights_with_fuel: number } | null;
   burn_by_type: { aircraft_type: string; avg_burn_kg: number; kg_per_nm: number | null; flights: number }[];
   pax_stats: { avg_pax: number; total_pax: number; max_pax: number; flights_with_pax: number } | null;
+  night_stats: {
+    night_hours: number;
+    block_hours: number;
+    night_takeoffs: number;
+    night_landings: number;
+    night_sectors: number;
+    full_night_sectors: number;
+    night_pct: number;
+    darkest_month: { month: string; night_hours: number; night_sectors: number } | null;
+    most_night_flight: (AnalyticFlight & { night_seconds: number }) | null;
+  } | null;
   operators: { op_label: string; sectors: number; block_hours: number }[];
   delay_stats: { delayed_flights: number; avg_delay_min: number; max_delay_min: number; total_delay_min: number } | null;
   delay_by_code: { delay_code: string; cnt: number; avg_min: number }[];
@@ -963,6 +991,7 @@ export const api = {
   flight: (id: string) => get<FlightDetail>(`/flights/${id}`),
   flightStats: () => get<LogbookStats>("/flights/stats"),
   flightCurrency: () => get<CurrencyStatus>("/flights/currency"),
+  flightLimits: () => get<FlightTimeLimits>("/flights/limits"),
   flightAnalytics: () => get<FlightAnalytics>("/flights/analytics"),
   flightRoutes: (year?: string) => get<RouteFrequency[]>(`/flights/routes${year ? `?year=${year}` : ""}`),
   flightAirports: (year?: string) => get<AirportVisit[]>(`/flights/airports${year ? `?year=${year}` : ""}`),
@@ -1001,6 +1030,7 @@ export const api = {
       name: string;
       total_flights: number;
       total_block_seconds: number;
+      total_night_seconds: number;
       first_flight: string;
       last_flight: string;
       aircraft_types: string[];
@@ -1020,6 +1050,8 @@ export const api = {
       departures: number;
       arrivals: number;
       total_block_seconds: number;
+      total_night_seconds: number;
+      night_movements: number;
       first_visit: string | null;
       last_visit: string | null;
       flights: Record<string, unknown>[];
@@ -1031,6 +1063,7 @@ export const api = {
       aircraft_type: string | null;
       total_flights: number;
       total_block_seconds: number;
+      total_night_seconds: number;
       first_flight: string;
       last_flight: string;
       flights: Record<string, unknown>[];

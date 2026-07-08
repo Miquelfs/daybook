@@ -20,6 +20,8 @@ from infrastructure.api.models.aviation import (
     FlightIn,
     FlightPatch,
     FlightSummary,
+    FlightTimeLimits,
+    LimitWindow,
     LogbookStats,
     LogbookTotals,
     RouteFrequency,
@@ -449,6 +451,39 @@ def get_analytics(conn: DB):
         GROUP BY delay_code ORDER BY cnt DESC LIMIT 10
     """).fetchall()
 
+    # Night flying stats
+    night_stats = conn.execute("""
+        SELECT
+            ROUND(SUM(night_seconds)/3600.0, 2)  AS night_hours,
+            ROUND(SUM(block_seconds)/3600.0, 2)  AS block_hours,
+            SUM(takeoffs_night)                  AS night_takeoffs,
+            SUM(landings_night)                  AS night_landings,
+            SUM(CASE WHEN night_seconds > 0 THEN 1 ELSE 0 END) AS night_sectors,
+            SUM(CASE WHEN night_seconds >= COALESCE(block_seconds, airborne_seconds, 0)
+                      AND night_seconds > 0 THEN 1 ELSE 0 END) AS full_night_sectors
+        FROM flights WHERE is_sim = 0
+    """).fetchone()
+
+    # Month with most night hours
+    darkest_month = conn.execute("""
+        SELECT substr(date,1,7) AS month,
+               ROUND(SUM(night_seconds)/3600.0, 2) AS night_hours,
+               SUM(CASE WHEN night_seconds > 0 THEN 1 ELSE 0 END) AS night_sectors
+        FROM flights WHERE is_sim = 0
+        GROUP BY month HAVING night_hours > 0
+        ORDER BY night_hours DESC LIMIT 1
+    """).fetchone()
+
+    # Flight with most night time
+    most_night_flight = conn.execute("""
+        SELECT f.*, a1.city AS dep_city, a2.city AS arr_city
+        FROM flights f
+        LEFT JOIN airports a1 ON a1.icao = f.dep_icao
+        LEFT JOIN airports a2 ON a2.icao = f.arr_icao
+        WHERE f.is_sim = 0 AND f.night_seconds > 0
+        ORDER BY f.night_seconds DESC LIMIT 1
+    """).fetchone()
+
     # Operators breakdown
     operators = conn.execute("""
         SELECT COALESCE(operator, source) AS op_label,
@@ -473,6 +508,21 @@ def get_analytics(conn: DB):
             "arr_city": r["arr_city"],
         }
 
+    night_stats_dict = None
+    if night_stats and (night_stats["night_hours"] or 0) > 0:
+        night_stats_dict = dict(night_stats)
+        night_stats_dict["night_pct"] = round(
+            night_stats["night_hours"] / night_stats["block_hours"] * 100, 1
+        ) if night_stats["block_hours"] else 0
+        night_stats_dict["darkest_month"] = dict(darkest_month) if darkest_month else None
+        if most_night_flight:
+            night_stats_dict["most_night_flight"] = {
+                **(_flight_dict(most_night_flight) or {}),
+                "night_seconds": most_night_flight["night_seconds"],
+            }
+        else:
+            night_stats_dict["most_night_flight"] = None
+
     return {
         "longest_flight": _flight_dict(longest),
         "shortest_flight": _flight_dict(shortest),
@@ -488,6 +538,7 @@ def get_analytics(conn: DB):
         "fuel_stats": dict(fuel_stats) if fuel_stats and fuel_stats["flights_with_fuel"] else None,
         "burn_by_type": [dict(r) for r in burn_by_type],
         "pax_stats": dict(pax_stats) if pax_stats and pax_stats["flights_with_pax"] else None,
+        "night_stats": night_stats_dict,
         "operators": [dict(r) for r in operators],
         "delay_stats": dict(delay_stats) if delay_stats and delay_stats["delayed_flights"] else None,
         "delay_by_code": [dict(r) for r in delay_by_code],
@@ -536,6 +587,21 @@ def get_currency(
             expiry_dt = date.fromisoformat(oldest_of_three) + timedelta(days=90)
             expiry = expiry_dt.isoformat()
 
+    # Night passenger currency: ≥1 night T/O and ≥1 night landing in the window.
+    # Expires 90 days after the older of (latest night T/O, latest night landing).
+    night_current = tof_n >= 1 and ldg_n >= 1
+    night_expiry = None
+    if night_current:
+        last_n_tof = conn.execute(
+            "SELECT MAX(date) FROM flights WHERE takeoffs_night > 0 AND date <= ?", (ref,)
+        ).fetchone()[0]
+        last_n_ldg = conn.execute(
+            "SELECT MAX(date) FROM flights WHERE landings_night > 0 AND date <= ?", (ref,)
+        ).fetchone()[0]
+        if last_n_tof and last_n_ldg:
+            anchor = min(last_n_tof, last_n_ldg)
+            night_expiry = (date.fromisoformat(anchor) + timedelta(days=90)).isoformat()
+
     return CurrencyStatus(
         reference_date=ref,
         takeoffs_landings_90d=tl,
@@ -544,6 +610,46 @@ def get_currency(
         night_takeoffs_90d=tof_n,
         night_landings_90d=ldg_n,
         next_expiry_date=expiry,
+        night_current=night_current,
+        night_expiry_date=night_expiry,
+    )
+
+
+# ─── Flight time limitations (EASA ORO.FTL.210) ──────────────────────────────
+
+@router.get("/limits", response_model=FlightTimeLimits)
+def get_limits(
+    conn: DB,
+    reference_date: str | None = Query(None, description="YYYY-MM-DD (default: today)"),
+):
+    ref = reference_date or date.today().isoformat()
+    ref_d = date.fromisoformat(ref)
+
+    def _block_hours(start: str, end: str) -> float:
+        row = conn.execute(
+            "SELECT SUM(block_seconds) FROM flights WHERE is_sim = 0 AND date >= ? AND date <= ?",
+            (start, end),
+        ).fetchone()
+        return round((row[0] or 0) / 3600, 1)
+
+    d28_start = (ref_d - timedelta(days=27)).isoformat()
+    y_start = date(ref_d.year, 1, 1).isoformat()
+    m12_start = (ref_d - timedelta(days=364)).isoformat()
+
+    return FlightTimeLimits(
+        reference_date=ref,
+        days_28=LimitWindow(
+            label="28 days", hours=_block_hours(d28_start, ref), limit_hours=100,
+            window_start=d28_start, window_end=ref,
+        ),
+        calendar_year=LimitWindow(
+            label="Calendar year", hours=_block_hours(y_start, ref), limit_hours=900,
+            window_start=y_start, window_end=ref,
+        ),
+        months_12=LimitWindow(
+            label="12 months", hours=_block_hours(m12_start, ref), limit_hours=1000,
+            window_start=m12_start, window_end=ref,
+        ),
     )
 
 
@@ -669,7 +775,7 @@ def airport_flights(icao: str, conn: DB):
     rows = conn.execute("""
         SELECT f.id, f.date, f.dep_icao, f.arr_icao, f.flight_number,
                f.aircraft_type, f.aircraft_reg, f.crew_role, f.pic_name,
-               f.block_seconds, f.off_block_utc, f.on_block_utc,
+               f.block_seconds, f.night_seconds, f.off_block_utc, f.on_block_utc,
                f.takeoffs_day, f.takeoffs_night, f.landings_day, f.landings_night,
                a1.iata AS dep_iata_a, a1.name AS dep_name, a1.city AS dep_city,
                a2.iata AS arr_iata_a, a2.name AS arr_name, a2.city AS arr_city
@@ -684,6 +790,12 @@ def airport_flights(icao: str, conn: DB):
     deps = [f for f in flights if f["dep_icao"] == icao_code]
     arrs = [f for f in flights if f["arr_icao"] == icao_code]
     total_block = sum(r["block_seconds"] or 0 for r in rows)
+    total_night = sum(r["night_seconds"] or 0 for r in rows)
+    night_movements = sum(
+        1 for f in flights
+        if (f["dep_icao"] == icao_code and (f["takeoffs_night"] or 0) > 0)
+        or (f["arr_icao"] == icao_code and (f["landings_night"] or 0) > 0)
+    )
 
     return {
         "icao": airport["icao"],
@@ -697,6 +809,8 @@ def airport_flights(icao: str, conn: DB):
         "departures": len(deps),
         "arrivals": len(arrs),
         "total_block_seconds": total_block,
+        "total_night_seconds": total_night,
+        "night_movements": night_movements,
         "first_visit": rows[0]["date"] if rows else None,
         "last_visit": rows[-1]["date"] if rows else None,
         "flights": flights,
@@ -785,7 +899,7 @@ def captain_history(name: str, conn: DB):
     rows = conn.execute("""
         SELECT f.id, f.date, f.dep_icao, f.arr_icao, f.flight_number,
                f.aircraft_type, f.aircraft_reg, f.crew_role,
-               f.block_seconds, f.off_block_utc, f.on_block_utc, f.pic_name,
+               f.block_seconds, f.night_seconds, f.off_block_utc, f.on_block_utc, f.pic_name,
                a1.iata AS dep_iata_a, a1.name AS dep_name, a1.city AS dep_city,
                a2.iata AS arr_iata_a, a2.name AS arr_name, a2.city AS arr_city
         FROM flights f
@@ -798,12 +912,14 @@ def captain_history(name: str, conn: DB):
         raise HTTPException(status_code=404, detail=f"No flights found with captain {name!r}")
     flights = [dict(r) for r in rows]
     total_block = sum(r["block_seconds"] or 0 for r in rows)
+    total_night = sum(r["night_seconds"] or 0 for r in rows)
     # Distinct aircraft types flown together
     types = list({r["aircraft_type"] for r in rows if r["aircraft_type"]})
     return {
         "name": name,
         "total_flights": len(rows),
         "total_block_seconds": total_block,
+        "total_night_seconds": total_night,
         "first_flight": rows[0]["date"],
         "last_flight": rows[-1]["date"],
         "aircraft_types": types,
@@ -820,7 +936,7 @@ def aircraft_history(registration: str, conn: DB):
     rows = conn.execute("""
         SELECT f.id, f.date, f.dep_icao, f.arr_icao, f.flight_number,
                f.aircraft_type, f.aircraft_reg, f.crew_role,
-               f.block_seconds, f.off_block_utc, f.on_block_utc,
+               f.block_seconds, f.night_seconds, f.off_block_utc, f.on_block_utc,
                a1.iata AS dep_iata_a, a1.name AS dep_name, a1.city AS dep_city,
                a2.iata AS arr_iata_a, a2.name AS arr_name, a2.city AS arr_city
         FROM flights f
@@ -833,11 +949,13 @@ def aircraft_history(registration: str, conn: DB):
         raise HTTPException(status_code=404, detail=f"No flights found for {reg}")
     flights = [dict(r) for r in rows]
     total_block = sum(r["block_seconds"] or 0 for r in rows)
+    total_night = sum(r["night_seconds"] or 0 for r in rows)
     return {
         "registration": reg,
         "aircraft_type": rows[0]["aircraft_type"],
         "total_flights": len(rows),
         "total_block_seconds": total_block,
+        "total_night_seconds": total_night,
         "first_flight": rows[0]["date"],
         "last_flight": rows[-1]["date"],
         "flights": flights,
