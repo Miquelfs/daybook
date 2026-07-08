@@ -223,3 +223,30 @@ class FlightTimeLimits(BaseModel):
     days_28: LimitWindow
     calendar_year: LimitWindow
     months_12: LimitWindow
+
+
+class NightCalcResult(BaseModel):
+    """Preview of the night-time split for a prospective flight."""
+    night_seconds: int
+    duration_seconds: int
+    night_takeoff: bool
+    night_landing: bool
+
+
+class PilotLicense(BaseModel):
+    id: int
+    category: str          # licence | rating | medical | training | other
+    name: str
+    number: str | None = None
+    issued_date: str | None = None
+    valid_until: str | None = None
+    remarks: str | None = None
+
+
+class PilotLicenseIn(BaseModel):
+    category: str = "licence"
+    name: str
+    number: str | None = None
+    issued_date: str | None = None
+    valid_until: str | None = None
+    remarks: str | None = None

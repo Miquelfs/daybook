@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { RouteFrequency, AirportVisit } from "@/lib/api";
 
 type CodeMode = "icao" | "iata";
+export type MapStyle = "dark" | "light" | "satellite";
 
 // Map from ICAO → hex color for base airports (different operators get different colors)
 type BaseColorMap = Record<string, string>;
@@ -15,7 +16,23 @@ interface Props {
   basesIcao?: string[];
   baseColors?: BaseColorMap;
   codeMode?: CodeMode;
+  mapStyle?: MapStyle;
 }
+
+const TILE_LAYERS: Record<MapStyle, { url: string; attribution: string }> = {
+  dark: {
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attribution: "©OpenStreetMap ©CARTO",
+  },
+  light: {
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attribution: "©OpenStreetMap ©CARTO",
+  },
+  satellite: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "©Esri ©Maxar",
+  },
+};
 
 const AIRPORT_COLOR = "#F59E0B";   // amber-500 (regular visited airports)
 
@@ -39,6 +56,7 @@ export function FlightRouteMap({
     LELL: "#A78BFA",  // violet — training base (Sabadell)
   },
   codeMode = "icao",
+  mapStyle = "dark",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -64,8 +82,9 @@ export function FlightRouteMap({
       });
       mapRef.current = map;
 
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        attribution: "©OpenStreetMap ©CARTO",
+      const tiles = TILE_LAYERS[mapStyle] ?? TILE_LAYERS.dark;
+      L.tileLayer(tiles.url, {
+        attribution: tiles.attribution,
         maxZoom: 18,
       }).addTo(map);
 
@@ -139,7 +158,7 @@ export function FlightRouteMap({
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routes, airports, codeMode, basesIcao, baseColors]);
+  }, [routes, airports, codeMode, basesIcao, baseColors, mapStyle]);
 
   return (
     <div

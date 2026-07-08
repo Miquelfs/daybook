@@ -24,6 +24,9 @@ from infrastructure.api.models.aviation import (
     LimitWindow,
     LogbookStats,
     LogbookTotals,
+    NightCalcResult,
+    PilotLicense,
+    PilotLicenseIn,
     RouteFrequency,
 )
 
@@ -925,6 +928,111 @@ def captain_history(name: str, conn: DB):
         "aircraft_types": types,
         "flights": flights,
     }
+
+
+# ─── Night-time calculator (live preview for the add-flight form) ────────────
+
+@router.get("/night-calc", response_model=NightCalcResult)
+def night_calc(
+    conn: DB,
+    date_: str = Query(..., alias="date", description="YYYY-MM-DD"),
+    dep: str = Query(..., description="Departure ICAO"),
+    arr: str = Query(..., description="Arrival ICAO"),
+    takeoff: str = Query(..., description="Takeoff UTC HH:MM"),
+    landing: str = Query(..., description="Landing UTC HH:MM"),
+):
+    from domains.aviation.compute import night_seconds as compute_night, is_night_moment
+
+    dep_row = conn.execute("SELECT * FROM airports WHERE icao = ?", (dep.upper(),)).fetchone()
+    arr_row = conn.execute("SELECT * FROM airports WHERE icao = ?", (arr.upper(),)).fetchone()
+    if not dep_row or dep_row["latitude"] is None:
+        raise HTTPException(status_code=404, detail=f"Unknown departure airport {dep!r}")
+
+    def _dt(hhmm: str) -> datetime:
+        try:
+            h, m = map(int, hhmm.strip().split(":"))
+            d = date.fromisoformat(date_)
+            return datetime(d.year, d.month, d.day, h, m, tzinfo=timezone.utc)
+        except Exception:
+            raise HTTPException(status_code=422, detail=f"Bad time {hhmm!r}, expected HH:MM")
+
+    tof_dt = _dt(takeoff)
+    ldg_dt = _dt(landing)
+    if ldg_dt <= tof_dt:
+        ldg_dt += timedelta(days=1)
+
+    arr_lat = arr_row["latitude"] if arr_row else None
+    arr_lon = arr_row["longitude"] if arr_row else None
+    night_s = compute_night(
+        dep_lat=dep_row["latitude"], dep_lon=dep_row["longitude"],
+        takeoff_utc=tof_dt, landing_utc=ldg_dt,
+        arr_lat=arr_lat, arr_lon=arr_lon,
+    )
+    return NightCalcResult(
+        night_seconds=night_s,
+        duration_seconds=int((ldg_dt - tof_dt).total_seconds()),
+        night_takeoff=is_night_moment(dep_row["latitude"], dep_row["longitude"], tof_dt),
+        night_landing=is_night_moment(
+            arr_lat if arr_lat is not None else dep_row["latitude"],
+            arr_lon if arr_lon is not None else dep_row["longitude"],
+            ldg_dt,
+        ),
+    )
+
+
+# ─── Licenses & ratings (expiry tracking) ─────────────────────────────────────
+
+def _license_row(r: sqlite3.Row) -> PilotLicense:
+    return PilotLicense(
+        id=r["id"], category=r["category"], name=r["name"], number=r["number"],
+        issued_date=r["issued_date"], valid_until=r["valid_until"], remarks=r["remarks"],
+    )
+
+
+@router.get("/licenses", response_model=list[PilotLicense])
+def list_licenses(conn: DB):
+    rows = conn.execute("""
+        SELECT * FROM pilot_licenses
+        ORDER BY valid_until IS NULL, valid_until, name
+    """).fetchall()
+    return [_license_row(r) for r in rows]
+
+
+@router.post("/licenses", response_model=PilotLicense, status_code=201)
+def create_license(lic: PilotLicenseIn, conn: DB):
+    cur = conn.execute("""
+        INSERT INTO pilot_licenses (category, name, number, issued_date, valid_until, remarks)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (lic.category, lic.name, lic.number, lic.issued_date, lic.valid_until, lic.remarks))
+    conn.commit()
+    row = conn.execute("SELECT * FROM pilot_licenses WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return _license_row(row)
+
+
+@router.patch("/licenses/{license_id}", response_model=PilotLicense)
+def update_license(license_id: int, lic: PilotLicenseIn, conn: DB):
+    row = conn.execute("SELECT * FROM pilot_licenses WHERE id = ?", (license_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="License not found")
+    conn.execute("""
+        UPDATE pilot_licenses
+        SET category = ?, name = ?, number = ?, issued_date = ?, valid_until = ?,
+            remarks = ?, updated_at = datetime('now')
+        WHERE id = ?
+    """, (lic.category, lic.name, lic.number, lic.issued_date, lic.valid_until,
+          lic.remarks, license_id))
+    conn.commit()
+    row = conn.execute("SELECT * FROM pilot_licenses WHERE id = ?", (license_id,)).fetchone()
+    return _license_row(row)
+
+
+@router.delete("/licenses/{license_id}", status_code=204)
+def delete_license(license_id: int, conn: DB):
+    row = conn.execute("SELECT 1 FROM pilot_licenses WHERE id = ?", (license_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="License not found")
+    conn.execute("DELETE FROM pilot_licenses WHERE id = ?", (license_id,))
+    conn.commit()
 
 
 # ─── Aircraft lookup ──────────────────────────────────────────────────────────

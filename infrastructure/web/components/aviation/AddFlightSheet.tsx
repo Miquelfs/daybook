@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, Loader, PlaneTakeoff, PlaneLanding, ChevronDown, ChevronRight } from "lucide-react";
+import { X, Loader, PlaneTakeoff, PlaneLanding, ChevronDown, ChevronRight, Moon } from "lucide-react";
 import { api, type FlightIn, type AirportInfo } from "@/lib/api";
 
 interface Props {
@@ -229,6 +229,20 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
     }, 300);
     return () => clearTimeout(t);
   }, [arrQ]);
+
+  // Live night-time preview (computed server-side from civil twilight)
+  const previewTakeoff = takeoffUtc || offBlock;
+  const previewLanding = landingUtc || onBlock;
+  const { data: nightPreview } = useQuery({
+    queryKey: ["nightCalc", flightDate, depIcao, arrIcao, previewTakeoff, previewLanding],
+    queryFn: () => api.nightCalc({
+      date: flightDate, dep: depIcao, arr: arrIcao,
+      takeoff: previewTakeoff, landing: previewLanding,
+    }),
+    enabled: !isSim && !!flightDate && !!depIcao && !!arrIcao && !!previewTakeoff && !!previewLanding,
+    staleTime: 60_000,
+    retry: false,
+  });
 
   const { mutate: save, isPending, error } = useMutation({
     mutationFn: () => {
@@ -457,6 +471,22 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
                 />
               </div>
             </div>
+            {nightPreview && (
+              <div className="flex items-center gap-2 mt-2 px-3 py-2 bg-indigo-950/30 border border-indigo-900/40 rounded-lg">
+                <Moon size={12} className="text-indigo-400 shrink-0" />
+                <p className="text-xs text-indigo-300">
+                  Night: <span className="font-medium tabular-nums">{seconds_to_hhmm(nightPreview.night_seconds) || "0:00"}</span>
+                  <span className="text-indigo-400/60"> of {seconds_to_hhmm(nightPreview.duration_seconds)}</span>
+                  {(nightPreview.night_takeoff || nightPreview.night_landing) && (
+                    <span className="text-indigo-400/80">
+                      {" · "}
+                      {[nightPreview.night_takeoff && "night T/O", nightPreview.night_landing && "night ldg"].filter(Boolean).join(", ")}
+                    </span>
+                  )}
+                </p>
+                <span className="ml-auto text-[10px] text-indigo-400/50 shrink-0">auto-saved with flight</span>
+              </div>
+            )}
           </div>
 
           {/* T/O and Landings */}

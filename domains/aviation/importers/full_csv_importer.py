@@ -145,6 +145,25 @@ def _local_to_utc(date_str: str, time_hhmm: str, tz_name: str) -> datetime | Non
         return None
 
 
+def _roll_midnight(*times: datetime | None) -> list[datetime | None]:
+    """
+    Given event times in chronological order (some may be None), add +1 day to
+    any event that is earlier than the latest event before it (midnight crossing).
+    """
+    from datetime import timedelta
+
+    result: list[datetime | None] = []
+    latest: datetime | None = None
+    for t in times:
+        if t is not None:
+            if latest is not None:
+                while t < latest:
+                    t += timedelta(days=1)
+            latest = t
+        result.append(t)
+    return result
+
+
 def _is_night_time(dt_utc: datetime | None, lat: float | None, lon: float | None) -> bool:
     """Return True if the given UTC time is at night at the given coordinates."""
     if dt_utc is None or lat is None or lon is None:
@@ -178,6 +197,14 @@ def _parse_row(row: dict, date_iso: str, fleet: dict[str, str], captain_index: d
     takeoff_utc = _local_to_utc(date_iso, row.get("Airborne"), dep_tz)
     # Landed = actual landing time (HH:MM local arr)
     landing_utc = _local_to_utc(date_iso, row.get("Landed"), arr_tz)
+
+    # All times come from the same calendar date, so a flight crossing midnight
+    # UTC ends up with landing/on-block *before* takeoff. Roll each event
+    # forward a day until the sequence off_block → takeoff → landing → on_block
+    # is chronological.
+    off_block_utc, takeoff_utc, landing_utc, on_block_utc = _roll_midnight(
+        off_block_utc, takeoff_utc, landing_utc, on_block_utc
+    )
 
     block_seconds = hhmm_to_seconds(row.get("Total Block"))
     airborne_seconds = hhmm_to_seconds(row.get("Total flight"))

@@ -448,6 +448,32 @@ export type FlightTimeLimits = {
   months_12: LimitWindow;
 };
 
+export type NightCalcResult = {
+  night_seconds: number;
+  duration_seconds: number;
+  night_takeoff: boolean;
+  night_landing: boolean;
+};
+
+export type PilotLicense = {
+  id: number;
+  category: string;   // licence | rating | medical | training | other
+  name: string;
+  number: string | null;
+  issued_date: string | null;
+  valid_until: string | null;
+  remarks: string | null;
+};
+
+export type PilotLicenseIn = {
+  category: string;
+  name: string;
+  number?: string | null;
+  issued_date?: string | null;
+  valid_until?: string | null;
+  remarks?: string | null;
+};
+
 type AnalyticFlight = { id: string; date: string; dep_icao: string | null; arr_icao: string | null; dep_iata: string | null; arr_iata: string | null; block_seconds: number; dep_city: string | null; arr_city: string | null };
 
 export type FlightAnalytics = {
@@ -992,6 +1018,38 @@ export const api = {
   flightStats: () => get<LogbookStats>("/flights/stats"),
   flightCurrency: () => get<CurrencyStatus>("/flights/currency"),
   flightLimits: () => get<FlightTimeLimits>("/flights/limits"),
+
+  nightCalc: (params: { date: string; dep: string; arr: string; takeoff: string; landing: string }) => {
+    const q = new URLSearchParams(params);
+    return get<NightCalcResult>(`/flights/night-calc?${q}`);
+  },
+
+  licenses: () => get<PilotLicense[]>("/flights/licenses"),
+
+  createLicense: async (body: PilotLicenseIn): Promise<PilotLicense> => {
+    const res = await fetch(`${PROXY_BASE}/api/flights/licenses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`createLicense failed ${res.status}`);
+    return res.json();
+  },
+
+  updateLicense: async (id: number, body: PilotLicenseIn): Promise<PilotLicense> => {
+    const res = await fetch(`${PROXY_BASE}/api/flights/licenses/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`updateLicense failed ${res.status}`);
+    return res.json();
+  },
+
+  deleteLicense: async (id: number): Promise<void> => {
+    const res = await fetch(`${PROXY_BASE}/api/flights/licenses/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`deleteLicense failed ${res.status}`);
+  },
   flightAnalytics: () => get<FlightAnalytics>("/flights/analytics"),
   flightRoutes: (year?: string) => get<RouteFrequency[]>(`/flights/routes${year ? `?year=${year}` : ""}`),
   flightAirports: (year?: string) => get<AirportVisit[]>(`/flights/airports${year ? `?year=${year}` : ""}`),

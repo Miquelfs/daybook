@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
@@ -21,6 +21,10 @@ const FlightRouteMap = dynamic(
   () => import("@/components/aviation/FlightRouteMap").then(m => m.FlightRouteMap),
   { ssr: false, loading: () => <div className="h-96 bg-[#18181B] rounded-lg animate-pulse" /> }
 );
+import type { MapStyle } from "@/components/aviation/FlightRouteMap";
+import { LicensesCard } from "@/components/aviation/LicensesCard";
+
+const MAP_STYLE_KEY = "daybook_aviation_map_style";
 
 type Tab = "overview" | "logbook" | "map" | "stats";
 type CodeMode = "icao" | "iata";
@@ -184,7 +188,18 @@ export default function AviationPage() {
   const [codeMode, setCodeMode] = useState<CodeMode>("icao");
   const [flightLimit, setFlightLimit] = useState(10);
   const [mapYear, setMapYear] = useState<string>("");
+  const [mapStyle, setMapStyle] = useState<MapStyle>("dark");
   const [lookup, setLookup] = useState<LookupPanel>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(MAP_STYLE_KEY);
+    if (saved === "light" || saved === "satellite" || saved === "dark") setMapStyle(saved);
+  }, []);
+
+  const changeMapStyle = (s: MapStyle) => {
+    setMapStyle(s);
+    localStorage.setItem(MAP_STYLE_KEY, s);
+  };
 
   const { data: stats } = useQuery({
     queryKey: ["flightStats"],
@@ -417,6 +432,9 @@ export default function AviationPage() {
               </div>
             </div>
           )}
+
+          {/* Licenses & ratings expiry tracker */}
+          <LicensesCard />
 
           {/* Annual chart */}
           {yearsWithGaps.length > 0 && (
@@ -686,6 +704,16 @@ export default function AviationPage() {
         <div>
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <CodeToggle />
+            {/* Map style toggle */}
+            <div className="flex items-center bg-[#18181B] border border-[#27272A] rounded-lg p-0.5">
+              {(["dark", "light", "satellite"] as MapStyle[]).map(s => (
+                <button key={s}
+                  className={`px-2 py-0.5 text-xs rounded-md transition-colors capitalize ${mapStyle === s ? "bg-sky-600 text-white" : "text-[#71717A]"}`}
+                  onClick={() => changeMapStyle(s)}>
+                  {s === "satellite" ? "Sat" : s}
+                </button>
+              ))}
+            </div>
             <select className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]"
               value={mapYear} onChange={e => setMapYear(e.target.value)}>
               <option value="">All years</option>
@@ -693,7 +721,7 @@ export default function AviationPage() {
             </select>
           </div>
           {routes.length > 0
-            ? <FlightRouteMap routes={routes} airports={airportVisits} height="440px" basesIcao={["LIME", "GCTS", "LELL", "LEPA"]} codeMode={codeMode} />
+            ? <FlightRouteMap routes={routes} airports={airportVisits} height="440px" basesIcao={["LIME", "GCTS", "LELL", "LEPA"]} codeMode={codeMode} mapStyle={mapStyle} />
             : <div className="h-40 flex items-center justify-center text-[#52525B] text-sm">No route data for selected year.</div>
           }
           {routes.slice(0, 10).length > 0 && (
