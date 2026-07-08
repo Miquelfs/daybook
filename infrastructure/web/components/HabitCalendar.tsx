@@ -293,6 +293,7 @@ export function HabitCalendar() {
   const [weeks, setWeeks] = useState(26);
   const [cat, setCat] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showAllChips, setShowAllChips] = useState(false);
 
   const { data: items = [], isLoading } = useQuery<GridItem[]>({
     queryKey: ["habit-grid", mode, weeks],
@@ -319,8 +320,8 @@ export function HabitCalendar() {
     [items, cat],
   );
 
-  // Reset category when switching Tags/People
-  useEffect(() => { setCat("all"); }, [mode]);
+  // Reset category + collapse the picker when switching Tags/People
+  useEffect(() => { setCat("all"); setShowAllChips(false); }, [mode]);
 
   // Default selection: a curated set on the "All" view, else everything in the category
   useEffect(() => {
@@ -406,30 +407,41 @@ export function HabitCalendar() {
 
       {!isLoading && items.length > 0 && (
         <>
-          {/* Chips within the chosen category */}
-          {visible.length > 1 && (
-            <div className="flex flex-wrap gap-1.5">
-              {visible.map((it) => {
-                const key = itemKey(it);
-                const on = selected.has(key);
-                const color = stableColor(it);
-                return (
+          {/* Selected chips by default; the full pick list is one tap away */}
+          {(() => {
+            const chipItems = showAllChips ? visible : shown;
+            return (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {chipItems.map((it) => {
+                  const key = itemKey(it);
+                  const on = selected.has(key);
+                  const color = stableColor(it);
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => toggle(key)}
+                      className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                        on ? "text-[#FAFAFA]" : "border-[#27272A] text-[#52525B] hover:text-[#A1A1AA]"
+                      }`}
+                      style={on ? { borderColor: color, backgroundColor: `${color}1f` } : {}}
+                    >
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: on ? color : "#3F3F46" }} />
+                      {it.icon && <span>{it.icon}</span>}
+                      {it.name}
+                    </button>
+                  );
+                })}
+                {visible.length > 1 && (
                   <button
-                    key={key}
-                    onClick={() => toggle(key)}
-                    className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
-                      on ? "text-[#FAFAFA]" : "border-[#27272A] text-[#52525B] hover:text-[#A1A1AA]"
-                    }`}
-                    style={on ? { borderColor: color, backgroundColor: `${color}1f` } : {}}
+                    onClick={() => setShowAllChips((s) => !s)}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-dashed border-[#3F3F46] text-[#71717A] hover:text-[#A1A1AA] transition-colors"
                   >
-                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: on ? color : "#3F3F46" }} />
-                    {it.icon && <span>{it.icon}</span>}
-                    {it.name}
+                    {showAllChips ? "Done" : `+ ${mode === "tags" ? "Add tags" : "Add people"}`}
                   </button>
-                );
-              })}
-            </div>
-          )}
+                )}
+              </div>
+            );
+          })()}
 
           {/* Grid cards */}
           <div className="space-y-3">
