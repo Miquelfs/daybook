@@ -19,3 +19,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ dat
   const data = await upstream.json();
   return NextResponse.json(data, { status: upstream.status });
 }
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ date: string }> }) {
+  const { date } = await params;
+  const upstream = await fetch(`${API}/days/${date}/photo`, { method: "DELETE" });
+  if (upstream.status === 204) {
+    return new NextResponse(null, { status: 204 });
+  }
+  const data = await upstream.json();
+  return NextResponse.json(data, { status: upstream.status });
+}

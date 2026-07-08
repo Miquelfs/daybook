@@ -383,6 +383,22 @@ def upload_photo(
     return JSONResponse({"photo_url": f"/photos/{filename}"})
 
 
+@router.delete("/{date_str}/photo", status_code=204)
+def delete_photo(
+    date_str: str,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+):
+    row = conn.execute("SELECT photo_path FROM days WHERE date=?", (date_str,)).fetchone()
+    if row is None or not row["photo_path"]:
+        raise HTTPException(status_code=404, detail="No photo for this day")
+
+    photo_path = PHOTOS_DIR / row["photo_path"]
+    photo_path.unlink(missing_ok=True)
+
+    conn.execute("UPDATE days SET photo_path = NULL WHERE date = ?", (date_str,))
+    conn.commit()
+
+
 @router.post("/{date_str}/companions", response_model=list[str])
 def set_companions(
     date_str: str,

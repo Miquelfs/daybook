@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ActivityMap } from "@/components/ActivityMap";
 import { ActivityCharts } from "@/components/ActivityCharts";
 import { ActivityNotes } from "@/components/ActivityNotes";
+import { TennisSessionPanel } from "@/components/TennisSessionPanel";
 import { ActivitySplitsChart } from "@/components/ActivitySplitsChart";
 import { SportCurveSection } from "@/components/training/SportCurveSection";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
@@ -156,6 +157,7 @@ export default async function ActivityPage({ params }: Props) {
   const date = activity.date;
   const sport = sportOf(activity.activity_type);
   const sportColor = SPORT_COLORS[sport];
+  const isTennis = (activity.activity_type ?? "").toLowerCase().includes("tennis");
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20">
@@ -286,6 +288,14 @@ export default async function ActivityPage({ params }: Props) {
               </div>
             ))}
           </div>
+        </section>
+      )}
+
+      {/* Tennis match / training */}
+      {isTennis && (
+        <section className="mb-8">
+          <SectionLabel>Tennis journal</SectionLabel>
+          <TennisSessionPanel activityId={decodedId} initial={activity.tennis ?? null} />
         </section>
       )}
 

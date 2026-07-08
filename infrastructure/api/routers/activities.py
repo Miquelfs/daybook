@@ -22,6 +22,9 @@ from infrastructure.api.models.activity import (
     SegmentEffortOut,
     SplitOut,
     SyncStatusOut,
+    TennisPlayer,
+    TennisSession,
+    TennisSessionWrite,
 )
 
 router = APIRouter(prefix="/activities", tags=["activities"])
@@ -54,6 +57,49 @@ def _row_to_summary(r: sqlite3.Row) -> ActivitySummary:
         has_polyline=bool(r["polyline"]),
         user_notes=r["user_notes"] if "user_notes" in keys else None,
         user_rating=r["user_rating"] if "user_rating" in keys else None,
+    )
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return bool(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone())
+
+
+def _tennis_session(conn: sqlite3.Connection, activity_id: str) -> TennisSession | None:
+    """Return the tennis match/training attached to an activity, if any."""
+    if not _table_exists(conn, "tennis_session"):
+        return None
+    row = conn.execute(
+        "SELECT * FROM tennis_session WHERE activity_id=?", (activity_id,)
+    ).fetchone()
+    if row is None:
+        return None
+
+    player_rows = conn.execute(
+        """SELECT p.contact_id, p.role, c.name, c.emoji
+           FROM tennis_session_player p
+           JOIN contacts c ON c.id = p.contact_id
+           WHERE p.activity_id=?
+           ORDER BY p.role, c.name""",
+        (activity_id,),
+    ).fetchall()
+
+    return TennisSession(
+        session_type=row["session_type"],
+        format=row["format"],
+        result=row["result"],
+        score=row["score"],
+        surface=row["surface"],
+        focus=row["focus"],
+        coaching_notes=row["coaching_notes"],
+        players=[
+            TennisPlayer(
+                contact_id=p["contact_id"], name=p["name"],
+                emoji=p["emoji"], role=p["role"],
+            )
+            for p in player_rows
+        ],
     )
 
 
@@ -466,7 +512,70 @@ def patch_activity(
         segment_efforts=efforts,
         splits=splits,
         computed=computed,
+        tennis=_tennis_session(conn, activity_id),
     )
+
+
+@router.put("/{activity_id}/tennis", response_model=TennisSession)
+def put_tennis_session(
+    activity_id: str,
+    body: TennisSessionWrite,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+):
+    """Create or replace the tennis match/training attached to an activity."""
+    if conn.execute("SELECT 1 FROM activities WHERE id=?", (activity_id,)).fetchone() is None:
+        raise HTTPException(status_code=404, detail=f"Activity {activity_id!r} not found")
+
+    conn.execute(
+        """INSERT INTO tennis_session
+               (activity_id, session_type, format, result, score, surface, focus, coaching_notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(activity_id) DO UPDATE SET
+               session_type=excluded.session_type,
+               format=excluded.format,
+               result=excluded.result,
+               score=excluded.score,
+               surface=excluded.surface,
+               focus=excluded.focus,
+               coaching_notes=excluded.coaching_notes,
+               updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')""",
+        (
+            activity_id, body.session_type, body.format, body.result,
+            body.score, body.surface, body.focus, body.coaching_notes,
+        ),
+    )
+
+    # Replace the player set for this activity
+    conn.execute("DELETE FROM tennis_session_player WHERE activity_id=?", (activity_id,))
+    seen: set[tuple[int, str]] = set()
+    for role, ids in (
+        ("partner", body.partner_ids),
+        ("opponent", body.opponent_ids),
+        ("coach", body.coach_ids),
+    ):
+        for cid in ids:
+            key = (cid, role)
+            if key in seen:
+                continue
+            seen.add(key)
+            conn.execute(
+                "INSERT OR IGNORE INTO tennis_session_player (activity_id, contact_id, role) VALUES (?,?,?)",
+                (activity_id, cid, role),
+            )
+
+    conn.commit()
+    return _tennis_session(conn, activity_id)
+
+
+@router.delete("/{activity_id}/tennis", status_code=204)
+def delete_tennis_session(
+    activity_id: str,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+):
+    """Detach the tennis match/training from an activity."""
+    conn.execute("DELETE FROM tennis_session_player WHERE activity_id=?", (activity_id,))
+    conn.execute("DELETE FROM tennis_session WHERE activity_id=?", (activity_id,))
+    conn.commit()
 
 
 @router.get("/{activity_id}", response_model=ActivityDetail)
@@ -496,4 +605,5 @@ def get_activity(
         segment_efforts=efforts,
         splits=splits,
         computed=computed,
+        tennis=_tennis_session(conn, activity_id),
     )

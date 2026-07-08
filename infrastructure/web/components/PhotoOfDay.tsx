@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Camera, Loader, X } from "lucide-react";
+import { Camera, Loader, Trash2, X } from "lucide-react";
+import { api } from "@/lib/api";
 
 interface Props {
   date: string;
@@ -20,6 +21,7 @@ function toProxyUrl(url: string | null): string | null {
 export function PhotoOfDay({ date, initialPhotoUrl }: Props) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(toProxyUrl(initialPhotoUrl));
   const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -48,6 +50,22 @@ export function PhotoOfDay({ date, initialPhotoUrl }: Props) {
     }
   }
 
+  async function handleDelete() {
+    if (!confirm("Delete this photo? This can't be undone.")) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await api.deletePhoto(date);
+      setPhotoUrl(null);
+      setExpanded(false);
+    } catch (e) {
+      console.error("Photo delete error:", e);
+      setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-2">
       {photoUrl ? (
@@ -68,6 +86,15 @@ export function PhotoOfDay({ date, initialPhotoUrl }: Props) {
             >
               <Camera size={14} />
             </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleDelete(); }}
+              disabled={deleting}
+              className="absolute bottom-2 right-11 bg-black/50 hover:bg-red-900/80 text-white rounded-full p-1.5 transition-colors disabled:opacity-50"
+              title="Delete photo"
+            >
+              <Trash2 size={14} />
+            </button>
           </div>
 
           {/* Expanded overlay — rendered outside the thumbnail so clicks don't re-trigger setExpanded(true) */}
@@ -83,6 +110,14 @@ export function PhotoOfDay({ date, initialPhotoUrl }: Props) {
                 className="max-w-full max-h-[85vh] object-contain rounded-xl"
                 onClick={(e) => e.stopPropagation()}
               />
+              <button
+                type="button"
+                className="absolute top-4 right-16 bg-black/50 hover:bg-red-900/80 text-white rounded-full p-2 transition-colors disabled:opacity-50"
+                disabled={deleting}
+                onClick={(e) => { e.stopPropagation(); handleDelete(); }}
+              >
+                <Trash2 size={22} />
+              </button>
               <button
                 type="button"
                 className="absolute top-4 right-4 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors"

@@ -8,7 +8,8 @@ import { Slider } from "./Slider";
 import { SectionLabel } from "./MorningBrief";
 import { EmojiLabel, MOOD_STEPS, ENERGY_STEPS, STRESS_STEPS } from "./EmojiLabel";
 import { TagPicker } from "./TagPicker";
-import { Check, Loader, ChevronDown, ChevronUp, X } from "lucide-react";
+import { PeopleManager } from "./PeopleManager";
+import { Check, Loader, ChevronDown, ChevronUp, X, Users } from "lucide-react";
 import { format } from "date-fns";
 
 interface Props {
@@ -100,9 +101,24 @@ export function Questionnaire({ date, initial, initialTags = [], initialCompanio
     }
   }
 
+  // Keep selected companion chips in sync when a person is renamed elsewhere
+  if (allContacts.length > 0 && draft.people.length > 0) {
+    let changed = false;
+    const synced = draft.people.map((p) => {
+      const latest = allContacts.find((c) => c.id === p.id);
+      if (latest && (latest.name !== p.name || latest.emoji !== p.emoji)) {
+        changed = true;
+        return latest;
+      }
+      return p;
+    });
+    if (changed) setDraft((d) => ({ ...d, people: synced }));
+  }
+
   const [saved, setSaved] = useState(false);
   const [showPast, setShowPast] = useState(false);
   const [peopleInput, setPeopleInput] = useState("");
+  const [showPeopleManager, setShowPeopleManager] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pastEnd = format(new Date(date + "T12:00:00"), "yyyy-MM-dd");
@@ -237,7 +253,16 @@ export function Questionnaire({ date, initial, initialTags = [], initialCompanio
 
         {/* With — contacts autocomplete */}
         <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium text-[#FAFAFA]">With</label>
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-[#FAFAFA]">With</label>
+            <button
+              type="button"
+              onClick={() => setShowPeopleManager(true)}
+              className="flex items-center gap-1 text-xs text-[#52525B] hover:text-[#A1A1AA] transition-colors"
+            >
+              <Users size={12} /> Manage people
+            </button>
+          </div>
           <div className="relative">
             <div className="flex flex-wrap gap-1.5 items-center min-h-[36px] bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 focus-within:border-[#F59E0B] transition-colors">
               {draft.people.map((contact) => (
@@ -397,6 +422,8 @@ export function Questionnaire({ date, initial, initialTags = [], initialCompanio
           )}
         </div>
       </div>
+
+      {showPeopleManager && <PeopleManager onClose={() => setShowPeopleManager(false)} />}
     </section>
   );
 }

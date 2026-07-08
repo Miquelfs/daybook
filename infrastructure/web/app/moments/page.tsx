@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, subDays, parseISO, getDaysInMonth, startOfMonth, getDay } from "date-fns";
 import { api } from "@/lib/api";
 import type { DaySummary } from "@/lib/api";
 import Link from "next/link";
-import { X } from "lucide-react";
+import { X, Trash2 } from "lucide-react";
 
 function photoProxyUrl(path: string): string {
   const filename = path.replace(/^\/photos\//, "").replace(/^.*\//, "");
@@ -39,6 +39,7 @@ function groupByMonth(days: DaySummary[]): { month: string; days: DaySummary[] }
 
 export default function MomentsPage() {
   const [lightbox, setLightbox] = useState<DaySummary | null>(null);
+  const queryClient = useQueryClient();
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
     useInfiniteQuery({
@@ -50,6 +51,14 @@ export default function MomentsPage() {
       initialPageParam: 0,
       getNextPageParam: (_last, _all, lastParam) => (lastParam as number) + 1,
     });
+
+  const { mutate: deletePhoto, isPending: isDeleting } = useMutation({
+    mutationFn: (date: string) => api.deletePhoto(date),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["moments"] });
+      setLightbox(null);
+    },
+  });
 
   const allDays = data?.pages.flat() ?? [];
   const photoCount = allDays.filter((d) => d.photo_path).length;
@@ -191,6 +200,19 @@ export default function MomentsPage() {
           className="fixed inset-0 bg-black/95 z-50 flex flex-col items-center justify-center p-4"
           onClick={() => setLightbox(null)}
         >
+          <button
+            type="button"
+            className="absolute top-4 right-16 bg-black/50 hover:bg-red-900/80 text-white rounded-full p-2 transition-colors disabled:opacity-50"
+            disabled={isDeleting}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm("Delete this photo? This can't be undone.")) {
+                deletePhoto(lightbox.date);
+              }
+            }}
+          >
+            <Trash2 size={22} />
+          </button>
           <button
             type="button"
             className="absolute top-4 right-4 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors"

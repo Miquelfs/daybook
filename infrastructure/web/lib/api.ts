@@ -95,6 +95,37 @@ export type ActivitySplit = {
   avg_grade: number | null;
 };
 
+export type TennisPlayer = {
+  contact_id: number;
+  name: string;
+  emoji: string | null;
+  role: "partner" | "opponent" | "coach";
+};
+
+export type TennisSession = {
+  session_type: "match" | "training";
+  format: "singles" | "doubles" | null;
+  result: "win" | "loss" | "draw" | null;
+  score: string | null;
+  surface: "hard" | "clay" | "grass" | "indoor" | null;
+  focus: string | null;
+  coaching_notes: string | null;
+  players: TennisPlayer[];
+};
+
+export type TennisSessionWrite = {
+  session_type: "match" | "training";
+  format?: string | null;
+  result?: string | null;
+  score?: string | null;
+  surface?: string | null;
+  focus?: string | null;
+  coaching_notes?: string | null;
+  partner_ids: number[];
+  opponent_ids: number[];
+  coach_ids: number[];
+};
+
 export type ActivityDetail = Activity & {
   moving_time_seconds: number | null;
   avg_speed_mps: number | null;
@@ -106,6 +137,7 @@ export type ActivityDetail = Activity & {
   segment_efforts: SegmentEffort[];
   computed: ActivityComputedMetrics | null;
   splits: ActivitySplit[];
+  tennis: TennisSession | null;
 };
 
 export type SegmentEffort = {
@@ -872,6 +904,11 @@ export const api = {
     return res.json();
   },
 
+  deletePhoto: async (date: string): Promise<void> => {
+    const res = await fetch(`${PROXY_BASE}/api/days/${date}/photo`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`deletePhoto failed ${res.status}`);
+  },
+
   contacts: () => get<Contact[]>("/contacts"),
 
   createContact: async (body: { name: string; emoji?: string; group_?: string }): Promise<Contact> => {
@@ -882,6 +919,24 @@ export const api = {
     });
     if (!res.ok) throw new Error(`createContact failed ${res.status}`);
     return res.json();
+  },
+
+  updateContact: async (id: number, body: { name?: string; emoji?: string | null; group_?: string | null }): Promise<Contact> => {
+    const res = await fetch(`${PROXY_BASE}/api/contacts/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null);
+      throw new Error(detail?.detail ?? `updateContact failed ${res.status}`);
+    }
+    return res.json();
+  },
+
+  deleteContact: async (id: number): Promise<void> => {
+    const res = await fetch(`${PROXY_BASE}/api/contacts/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`deleteContact failed ${res.status}`);
   },
 
   setCompanions: async (date: string, contactIds: number[]): Promise<string[]> => {

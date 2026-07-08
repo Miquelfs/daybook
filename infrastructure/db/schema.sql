@@ -153,6 +153,33 @@ CREATE TABLE IF NOT EXISTS day_companions (
 
 CREATE INDEX IF NOT EXISTS idx_day_companions_date ON day_companions(date);
 
+-- ─── Tennis journal ──────────────────────────────────────────────────────────
+-- One row per tennis activity — a match or a training. Partners/opponents/coach
+-- reference contacts so head-to-head records can be derived. See migrate_tennis.py.
+
+CREATE TABLE IF NOT EXISTS tennis_session (
+    activity_id     TEXT PRIMARY KEY REFERENCES activities(id) ON DELETE CASCADE,
+    session_type    TEXT NOT NULL DEFAULT 'match',  -- 'match' | 'training'
+    format          TEXT,      -- 'singles' | 'doubles' (matches)
+    result          TEXT,      -- 'win' | 'loss' | 'draw' (matches)
+    score           TEXT,      -- free text, e.g. "6-4 3-6 7-5" (matches)
+    surface         TEXT,      -- 'hard' | 'clay' | 'grass' | 'indoor' | NULL
+    focus           TEXT,      -- what you worked on (trainings)
+    coaching_notes  TEXT,      -- tips / takeaways, separate from user_notes
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS tennis_session_player (
+    activity_id TEXT    NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+    contact_id  INTEGER NOT NULL REFERENCES contacts(id)   ON DELETE CASCADE,
+    role        TEXT    NOT NULL,   -- 'partner' | 'opponent' | 'coach'
+    PRIMARY KEY (activity_id, contact_id, role)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tennis_session_player_activity ON tennis_session_player(activity_id);
+CREATE INDEX IF NOT EXISTS idx_tennis_session_player_contact  ON tennis_session_player(contact_id);
+
 -- ─── Sync metadata ────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS sync_log (

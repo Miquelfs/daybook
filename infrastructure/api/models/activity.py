@@ -85,6 +85,37 @@ class ActivityComputedMetrics(BaseModel):
     garmin_activity_load: float | None = None
 
 
+class TennisPlayer(BaseModel):
+    contact_id: int
+    name: str
+    emoji: str | None = None
+    role: str                            # 'partner' | 'opponent' | 'coach'
+
+
+class TennisSession(BaseModel):
+    session_type: str = "match"          # 'match' | 'training'
+    format: str | None = None            # 'singles' | 'doubles'
+    result: str | None = None            # 'win' | 'loss' | 'draw'
+    score: str | None = None             # free text, e.g. "6-4 3-6 7-5"
+    surface: str | None = None           # 'hard' | 'clay' | 'grass' | 'indoor'
+    focus: str | None = None             # what you worked on (trainings)
+    coaching_notes: str | None = None    # tips / takeaways
+    players: list[TennisPlayer] = []
+
+
+class TennisSessionWrite(BaseModel):
+    session_type: str = "match"
+    format: str | None = None
+    result: str | None = None
+    score: str | None = None
+    surface: str | None = None
+    focus: str | None = None
+    coaching_notes: str | None = None
+    partner_ids: list[int] = []
+    opponent_ids: list[int] = []
+    coach_ids: list[int] = []
+
+
 class ActivityDetail(ActivitySummary):
     polyline: str | None = None
     raw_payload: str | None = None
@@ -92,6 +123,7 @@ class ActivityDetail(ActivitySummary):
     segment_efforts: list[SegmentEffortOut] = []
     splits: list[SplitOut] = []
     computed: ActivityComputedMetrics | None = None
+    tennis: TennisSession | None = None
 
 
 class SyncStatusOut(BaseModel):
