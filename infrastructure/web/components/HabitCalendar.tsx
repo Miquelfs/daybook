@@ -19,9 +19,25 @@ const EMPTY = "#1C1C1F";
 
 // The user started logging on this date — nothing before it, so the grid
 // never renders empty cells earlier than this.
-const APP_START = new Date(2026, 4, 10); // 10 May 2026 (month is 0-indexed)
+const APP_START = new Date(2026, 4, 18); // 18 May 2026 (a Monday; month is 0-indexed)
 
 const DAY_MS = 86400000;
+
+// Default tags/people shown when first landing on the "All" view, so the page
+// doesn't dump every tag at once. Matched against normalised slug OR name, so
+// they resolve regardless of exact slug. Everything else is one click away.
+const DEFAULT_TAG_KEYS = new Set([
+  "no_instagram", "noinstagram", "instagram", "personal", "candy",
+  "cycling", "swimming", "running", "tennis",
+]);
+const DEFAULT_PERSON_KEYS = new Set(["alice", "milo"]);
+
+function norm(s: string): string {
+  return s.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+function isDefaultItem(item: GridItem, keys: Set<string>): boolean {
+  return keys.has(norm(item.name)) || (item.slug ? keys.has(norm(item.slug)) : false);
+}
 
 type GridItem = {
   kind: "tag" | "person";
@@ -284,16 +300,17 @@ export function HabitCalendar() {
       fetch(`${BASE_URL}/${mode === "tags" ? "tags" : "contacts"}/grid?days=${weeks * 7}`).then((r) => r.json()),
   });
 
-  // Category / group options built from the data
+  // Category / group options built from the data. Items with no category are
+  // not given an "Other" bucket — they're still reachable under "All".
   const options = useMemo(() => {
     const counts = new Map<string, number>();
     for (const it of items) {
-      const c = it.category ?? "other";
-      counts.set(c, (counts.get(c) ?? 0) + 1);
+      if (!it.category) continue;
+      counts.set(it.category, (counts.get(it.category) ?? 0) + 1);
     }
     const opts = [...counts.entries()]
       .sort((a, b) => b[1] - a[1])
-      .map(([value, count]) => ({ value, label: value === "other" ? "Other" : catLabel(value), count }));
+      .map(([value, count]) => ({ value, label: catLabel(value), count }));
     return [{ value: "all", label: "All", count: items.length }, ...opts];
   }, [items]);
 
@@ -305,9 +322,16 @@ export function HabitCalendar() {
   // Reset category when switching Tags/People
   useEffect(() => { setCat("all"); }, [mode]);
 
-  // Default selection: everything in the chosen category (top 6 when "All")
+  // Default selection: a curated set on the "All" view, else everything in the category
   useEffect(() => {
-    const base = cat === "all" ? items.slice(0, 6) : items.filter((it) => (it.category ?? "other") === cat);
+    let base: GridItem[];
+    if (cat === "all") {
+      const keys = mode === "tags" ? DEFAULT_TAG_KEYS : DEFAULT_PERSON_KEYS;
+      const matched = items.filter((it) => isDefaultItem(it, keys));
+      base = matched.length > 0 ? matched : items.slice(0, 6);
+    } else {
+      base = items.filter((it) => (it.category ?? "other") === cat);
+    }
     setSelected(new Set(base.map(itemKey)));
   }, [mode, cat, items]);
 
@@ -340,7 +364,7 @@ export function HabitCalendar() {
               </button>
             ))}
           </div>
-          {items.length > 0 && (
+          {options.length > 1 && (
             <Dropdown
               label={mode === "tags" ? "Category" : "Group"}
               value={cat}
