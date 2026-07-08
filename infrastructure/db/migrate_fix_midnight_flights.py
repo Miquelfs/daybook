@@ -30,7 +30,14 @@ def _parse(iso: str | None) -> datetime | None:
 
 def run(dry_run: bool = False, db_path: Path = DB_PATH) -> None:
     import sqlite3
+    from domains.aviation import compute
     from domains.aviation.compute import night_seconds as compute_night
+
+    if not compute._ASTRAL_AVAILABLE:
+        raise SystemExit(
+            "ABORT: 'astral' is not installed in this Python — night time would "
+            "compute as 0. Install it first (pip install astral) or use the venv python."
+        )
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
