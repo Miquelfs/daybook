@@ -13,6 +13,7 @@ import { correlationsApi } from "@/lib/correlations-api";
 import type { MetricMeta, TopCorrelation, TagImpact, PrecomputedCorrelation } from "@/lib/correlations-api";
 import { TrendingUp, Minus, ArrowUpRight, ArrowDownRight, Plus, X, CheckCircle, Trash2, Sparkles, GitCompare, CalendarDays, BarChart2, Flame, FlaskConical } from "lucide-react";
 import { TagStatsDrawer } from "@/components/TagStatsDrawer";
+import { HabitCalendar } from "@/components/HabitCalendar";
 import { tagsApi, type Tag as TagType } from "@/lib/tags-api";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -175,6 +176,7 @@ export default function CorrelationsPage() {
   const [selectedTagSlug, setSelectedTagSlug] = useState<string | null>(null);
   const [habitSortBy, setHabitSortBy] = useState("longest_streak");
   const [selectedHabitSlug, setSelectedHabitSlug] = useState<string | null>(null);
+  const [habitView, setHabitView] = useState<"calendar" | "list">("calendar");
   const [precomputedVisible, setPrecomputedVisible] = useState(5);
   const compareRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
@@ -1005,6 +1007,20 @@ export default function CorrelationsPage() {
             </div>
           ) : (
             <div className="space-y-4">
+              {/* Calendar / List toggle */}
+              <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 w-fit">
+                {(["calendar", "list"] as const).map((v) => (
+                  <button key={v} onClick={() => setHabitView(v)}
+                    className={`px-3 py-1 rounded text-xs font-medium capitalize transition-colors ${
+                      habitView === v ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"
+                    }`}
+                  >{v}</button>
+                ))}
+              </div>
+
+              {habitView === "calendar" && <HabitCalendar />}
+
+              {habitView === "list" && <>
               {/* Sort pills */}
               <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
                 {HABIT_SORT_OPTIONS.map((opt) => (
@@ -1095,6 +1111,7 @@ export default function CorrelationsPage() {
               <p className="text-[10px] text-[#3F3F46] text-center">
                 ✓ = clean streak (less is better) · — = positive streak (more is better)
               </p>
+              </>}
             </div>
           )}
         </div>

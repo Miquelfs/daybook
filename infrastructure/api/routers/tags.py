@@ -187,6 +187,77 @@ def all_tag_streaks(conn: DB):
     return results
 
 
+def _streaks_from_dates(all_dates: list[str], today: date) -> tuple[int, int, str | None]:
+    """Return (current_streak, longest_streak, longest_streak_end) from a sorted date list."""
+    if not all_dates:
+        return 0, 0, None
+    parsed = [date.fromisoformat(d) for d in all_dates]
+    longest, longest_end, cur = 1, parsed[-1], 1
+    for i in range(1, len(parsed)):
+        if (parsed[i] - parsed[i - 1]).days == 1:
+            cur += 1
+            if cur > longest:
+                longest, longest_end = cur, parsed[i]
+        else:
+            cur = 1
+    current = 1
+    for i in range(len(parsed) - 1, 0, -1):
+        if (parsed[i] - parsed[i - 1]).days == 1:
+            current += 1
+        else:
+            break
+    if (today - parsed[-1]).days > 1:
+        current = 0
+    return current, longest, longest_end.isoformat()
+
+
+@tags_router.get("/grid")
+def tags_grid(conn: DB, days: int = 371):
+    """
+    Per-tag completion dates over the last `days` days — feeds the HabitKit-style
+    calendar grid (web + iOS widget). One row per tag used at least once in window.
+    """
+    today = date.today()
+    cutoff = (today - timedelta(days=days)).isoformat()
+
+    tag_rows = conn.execute(
+        """SELECT t.id, t.slug, t.name, t.icon, t.category, t.color,
+                  COALESCE(t.is_negative, 0) AS is_negative
+           FROM tags t
+           WHERE EXISTS (SELECT 1 FROM day_tags dt WHERE dt.tag_id = t.id AND dt.date >= ?)
+           ORDER BY t.category, t.name""",
+        (cutoff,),
+    ).fetchall()
+
+    out = []
+    for t in tag_rows:
+        dates = [
+            r["date"] for r in conn.execute(
+                "SELECT date FROM day_tags WHERE tag_id=? AND date >= ? ORDER BY date",
+                (t["id"], cutoff),
+            ).fetchall()
+        ]
+        current, longest, longest_end = _streaks_from_dates(dates, today)
+        out.append({
+            "kind": "tag",
+            "id": t["id"],
+            "slug": t["slug"],
+            "name": t["name"],
+            "icon": t["icon"],
+            "category": t["category"],
+            "color": t["color"],
+            "is_negative": bool(t["is_negative"]),
+            "dates": dates,
+            "total_days": len(dates),
+            "current_streak": current,
+            "longest_streak": longest,
+            "longest_streak_end": longest_end,
+        })
+
+    out.sort(key=lambda r: r["total_days"], reverse=True)
+    return out
+
+
 @tags_router.post("", response_model=TagOut, status_code=201)
 def create_tag(body: TagCreate, conn: DB):
     """Create a custom (non-system) tag."""
