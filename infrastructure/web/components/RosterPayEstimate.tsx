@@ -46,6 +46,8 @@ interface PayEstimate {
     dh_int_pay: number;
     dh_int_overnight_days: number;
     dh_int_overnight_pay: number;
+    dh_nat_overnight_days: number;
+    dh_nat_overnight_pay: number;
     bdo_days: number;
     bdo_pay: number;
     hdb_days: number;
@@ -103,7 +105,7 @@ export function RosterPayEstimate({ month, billedMonth }: { month: string; bille
   });
 
   const hasFlightData = data && data.block_hours > 0;
-  const hasPerDiems = data && (data.variable_pay.dh_int_days + data.variable_pay.dh_int_overnight_days) > 0;
+  const hasPerDiems = data && (data.variable_pay.dh_int_days + data.variable_pay.dh_int_overnight_days + data.variable_pay.dh_nat_overnight_days) > 0;
 
   return (
     <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
@@ -242,14 +244,20 @@ export function RosterPayEstimate({ month, billedMonth }: { month: string; bille
                     <Row
                       label={`Intl day trip — ${data.variable_pay.dh_int_days} day${data.variable_pay.dh_int_days !== 1 ? "s" : ""}`}
                       value={fmt(data.variable_pay.dh_int_pay)}
-                      sub="Departed & returned to PMI same day"
+                      sub="Departed & returned to PMI same day (66.11 €/day)"
                       zero={data.variable_pay.dh_int_days === 0}
                     />
                     <Row
                       label={`Intl overnight — ${data.variable_pay.dh_int_overnight_days} night${data.variable_pay.dh_int_overnight_days !== 1 ? "s" : ""}`}
                       value={fmt(data.variable_pay.dh_int_overnight_pay)}
-                      sub="Away from base at end of duty day"
+                      sub="Overnight abroad (91.35 €/night)"
                       zero={data.variable_pay.dh_int_overnight_days === 0}
+                    />
+                    <Row
+                      label={`Spain overnight — ${data.variable_pay.dh_nat_overnight_days} night${data.variable_pay.dh_nat_overnight_days !== 1 ? "s" : ""}`}
+                      value={fmt(data.variable_pay.dh_nat_overnight_pay)}
+                      sub="Overnight in Spain away from base (66.11 €/night)"
+                      zero={data.variable_pay.dh_nat_overnight_days === 0}
                     />
                     <Row
                       label={`BDO — ${data.variable_pay.bdo_days} day${data.variable_pay.bdo_days !== 1 ? "s" : ""}`}
@@ -289,9 +297,11 @@ export function RosterPayEstimate({ month, billedMonth }: { month: string; bille
                           <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${
                             d.perd_type === "int_overnight"
                               ? "bg-indigo-900/40 text-indigo-300"
+                              : d.perd_type === "int_nat_overnight"
+                              ? "bg-sky-900/40 text-sky-300"
                               : "bg-emerald-900/30 text-emerald-400"
                           }`}>
-                            {d.perd_type === "int_overnight" ? "Overnight" : "Day trip"}
+                            {d.perd_type === "int_overnight" ? "Overnight" : d.perd_type === "int_nat_overnight" ? "Spain o/n" : "Day trip"}
                           </span>
                           {d.cross_midnight && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400 font-medium">

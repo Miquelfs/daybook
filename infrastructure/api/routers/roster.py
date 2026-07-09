@@ -259,28 +259,36 @@ _FIXED_2025 = {
 
 _VAR_2025 = {
     "FO": {
-        "blh": 35.70,       # per block hour
+        "blh": 9.91,        # per block hour
         "blhp": 14.87,      # per block hour over 60h threshold
         "sby": 39.66,       # per standby day
         "bdo": 510.00,      # bought day off (OVT landing after midnight)
         "hdb": 255.00,      # half day bought (HDB — Art.2.09)
-        "dh_int": 39.66,    # international positioning per diem
-        "dh_dom": 19.83,    # domestic positioning per diem
-        "dh_int_overnight": 91.35,   # intl per diem with intl overnight
-        "dh_nat_overnight": 60.00,   # national overnight stay
+        # Positioning / deadhead per diems (carried as pax, not operating)
+        "dh_int": 39.66,    # DH international positioning
+        "dh_dom": 19.83,    # DH domestic positioning
+        # Worked per diems (operating crew) — CLA "dietas" table
+        "int_no_overnight": 66.11,   # international WITHOUT overnight stay
+        "int_int_overnight": 91.35,  # international WITH international overnight
+        "int_nat_overnight": 66.11,  # international WITH national (Spain) overnight
+        "nat_no_overnight": 50.00,   # national without overnight stay
+        "nat_nat_overnight": 60.00,  # national with national overnight stay
         "simulator": 39.66, # per sim day
         "var_soc": 39.66,   # SOC/VAC supplement per vacation/leave day
     },
     "CPT": {
-        "blh": 82.56,
+        "blh": 21.05,       # per block hour  (was mistakenly 82.56 — the STBY/DH rate)
         "blhp": 31.58,
         "sby": 84.21,
         "bdo": 1021.00,
         "hdb": 510.00,
-        "dh_int": 39.66,
-        "dh_dom": 19.83,
-        "dh_int_overnight": 91.35,
-        "dh_nat_overnight": 60.00,
+        "dh_int": 84.21,    # DH international positioning (was 39.66 — the FO rate)
+        "dh_dom": 42.11,    # DH domestic positioning (was 19.83 — the FO rate)
+        "int_no_overnight": 66.11,   # same dieta for CPT & FO
+        "int_int_overnight": 91.35,
+        "int_nat_overnight": 66.11,
+        "nat_no_overnight": 50.00,
+        "nat_nat_overnight": 60.00,
         "simulator": 84.21,
         "var_soc": 84.21,
     },
@@ -334,7 +342,7 @@ def _analyse_per_diems(conn: sqlite3.Connection, month: str) -> dict:
 
     if not rows:
         return {
-            "int_no_overnight": 0, "int_overnight": 0,
+            "int_no_overnight": 0, "int_overnight": 0, "int_nat_overnight": 0,
             "nat_overnight": 0, "bdo_days": 0, "hdb_days": 0,
             "detail": [],
         }
@@ -348,7 +356,8 @@ def _analyse_per_diems(conn: sqlite3.Connection, month: str) -> dict:
     sorted_dates = sorted(days.keys())
 
     int_no_overnight = 0
-    int_overnight = 0
+    int_overnight = 0       # overnight abroad (non-Spain) → 91.35
+    int_nat_overnight = 0   # overnight in Spain away from base → 66.11
     nat_overnight = 0
     bdo_days = 0
     hdb_days = 0
@@ -384,14 +393,19 @@ def _analyse_per_diems(conn: sqlite3.Connection, month: str) -> dict:
                 except (ValueError, IndexError):
                     bdo_days += 1
 
-        # Per diem classification
+        # Per diem classification. Every NAS Spain flight is international, but the
+        # overnight per diem differs by where you stop: abroad (non-Spain) pays the
+        # full international overnight (91.35), while an overnight still inside Spain
+        # away from base pays the "international with national overnight" rate (66.11).
         if away_from_base:
-            # Determine if it's truly international (non-Spain destination)
-            # Since Norwegian Spain = international by definition, all overnights are intl
-            int_overnight += 1
-            perd_type = "int_overnight"
+            if _is_spain(last_arr):
+                int_nat_overnight += 1
+                perd_type = "int_nat_overnight"
+            else:
+                int_overnight += 1
+                perd_type = "int_overnight"
         else:
-            # Returned to base — international day trip (no overnight)
+            # Returned to base — international day trip, no overnight (66.11)
             int_no_overnight += 1
             perd_type = "int_no_overnight"
 
@@ -406,6 +420,7 @@ def _analyse_per_diems(conn: sqlite3.Connection, month: str) -> dict:
     return {
         "int_no_overnight": int_no_overnight,
         "int_overnight": int_overnight,
+        "int_nat_overnight": int_nat_overnight,
         "nat_overnight": nat_overnight,  # not applicable for NAS Spain
         "bdo_days": bdo_days,
         "hdb_days": hdb_days,
@@ -486,19 +501,22 @@ def get_pay_estimate(
     vac_days = duty_counts.get("VAC", 0)
     soc_pay  = round(vac_days * var["var_soc"], 2)
 
-    # LVO in roster = deadhead/positioning day → international per diem (no overnight)
+    # LVO in roster = deadhead/positioning day → DH international per diem
     lvo_days = duty_counts.get("LVO", 0)
     lvo_pay  = round(lvo_days * var["dh_int"], 2)
 
-    # Per diems from flight analysis
-    dh_int_pay      = round(per_diems["int_no_overnight"] * var["dh_int"], 2)
-    dh_int_ovn_pay  = round(per_diems["int_overnight"] * var["dh_int_overnight"], 2)
+    # Per diems from flight analysis. A worked international day trip (returned to
+    # base same day) pays the "international without overnight" dieta (66.11), NOT
+    # the DH positioning rate (39.66). Overnights split abroad vs Spain.
+    dh_int_pay      = round(per_diems["int_no_overnight"] * var["int_no_overnight"], 2)
+    dh_int_ovn_pay  = round(per_diems["int_overnight"] * var["int_int_overnight"], 2)
+    dh_nat_ovn_pay  = round(per_diems["int_nat_overnight"] * var["int_nat_overnight"], 2)
     bdo_pay         = round(per_diems["bdo_days"] * var["bdo"], 2)
     hdb_pay         = round(per_diems["hdb_days"] * var["hdb"], 2)
 
     variable_total = (
         blh_pay + blhp_pay + sby_pay + sim_pay + soc_pay + lvo_pay
-        + dh_int_pay + dh_int_ovn_pay + bdo_pay + hdb_pay
+        + dh_int_pay + dh_int_ovn_pay + dh_nat_ovn_pay + bdo_pay + hdb_pay
     )
 
     gross_monthly = round(fixed_total + variable_total, 2)
@@ -541,6 +559,8 @@ def get_pay_estimate(
             "dh_int_pay": dh_int_pay,
             "dh_int_overnight_days": per_diems["int_overnight"],
             "dh_int_overnight_pay": dh_int_ovn_pay,
+            "dh_nat_overnight_days": per_diems["int_nat_overnight"],
+            "dh_nat_overnight_pay": dh_nat_ovn_pay,
             "bdo_days": per_diems["bdo_days"],
             "bdo_pay": bdo_pay,
             "hdb_days": per_diems["hdb_days"],
