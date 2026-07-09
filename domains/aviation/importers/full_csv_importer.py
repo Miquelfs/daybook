@@ -171,7 +171,8 @@ def _is_night_time(dt_utc: datetime | None, lat: float | None, lon: float | None
     return is_night_moment(lat, lon, dt_utc)
 
 
-def _parse_row(row: dict, date_iso: str, fleet: dict[str, str], captain_index: dict | None = None) -> dict:
+def _parse_row(row: dict, date_iso: str, fleet: dict[str, str], captain_index: dict | None = None,
+               iata_lookup: dict[str, tuple] | None = None) -> dict:
     """Map one Full.csv row to a canonical flights dict."""
     dep_tz = (row.get("Region_x") or "UTC").strip() or "UTC"
     arr_tz = (row.get("Region_y") or "UTC").strip() or "UTC"
@@ -188,6 +189,19 @@ def _parse_row(row: dict, date_iso: str, fleet: dict[str, str], captain_index: d
     arr_icao = (row.get("ICAO Code Destination") or row.get("ICAO Code_y") or "").strip() or None
     dep_iata = (row.get("Origin") or "").strip() or None
     arr_iata = (row.get("Destination") or "").strip() or None
+
+    # Some source rows carry only the IATA code (e.g. Berlin "BER") with a blank
+    # ICAO column and no coords. Resolve ICAO + coords from the airports table so
+    # night time and distance can still be computed.
+    if iata_lookup:
+        if dep_icao is None and dep_iata and dep_iata in iata_lookup:
+            dep_icao, la, lo = iata_lookup[dep_iata]
+            if dep_lat is None:
+                dep_lat, dep_lon = la, lo
+        if arr_icao is None and arr_iata and arr_iata in iata_lookup:
+            arr_icao, la, lo = iata_lookup[arr_iata]
+            if arr_lat is None:
+                arr_lat, arr_lon = la, lo
     flight_number = (row.get("FlightNumber") or "").strip() or None
     aircraft_reg = (row.get("Registration") or "").strip() or None
 
@@ -394,6 +408,14 @@ def run(force: bool = False, csv_path: Path = CSV_PATH) -> int:
     conn = get_connection()
     inserted = skipped = errors = 0
 
+    # IATA → (ICAO, lat, lon) for rows that carry only the IATA code
+    iata_lookup: dict[str, tuple] = {
+        r["iata"]: (r["icao"], r["latitude"], r["longitude"])
+        for r in conn.execute(
+            "SELECT icao, iata, latitude, longitude FROM airports WHERE iata IS NOT NULL AND iata != ''"
+        ).fetchall()
+    }
+
     # Pre-load all rows to build the captain index (needs full day context)
     with open(csv_path, newline="", encoding="utf-8") as f:
         all_rows = list(csv.DictReader(f))
@@ -408,7 +430,7 @@ def run(force: bool = False, csv_path: Path = CSV_PATH) -> int:
         date_iso = raw_date.replace("/", "-")
 
         try:
-            record = _parse_row(row, date_iso, fleet, captain_index)
+            record = _parse_row(row, date_iso, fleet, captain_index, iata_lookup)
         except Exception as e:
             log.warning("Parse error on %s: %s", raw_date, e)
             errors += 1
