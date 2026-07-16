@@ -389,7 +389,10 @@ export type DailyTotal = {
 // ── Investment portfolio (Track A-I) ─────────────────────────────────────────
 
 export type AssetClass =
-  | "equity_etf" | "stock" | "crypto" | "bond_etf" | "cash" | "commodity";
+  | "equity_etf" | "stock" | "crypto" | "bond_etf" | "cash" | "commodity"
+  | "fund" | "real_estate" | "pension" | "private" | "other";
+
+export type PricingMode = "market" | "manual";
 
 export type HoldingCreate = {
   account: string;
@@ -402,6 +405,8 @@ export type HoldingCreate = {
   cost_basis_eur?: number | null;
   first_bought_at?: string | null;
   notes?: string | null;
+  pricing_mode?: PricingMode;
+  current_value_eur?: number | null; // manual holdings: initial total value
 };
 
 export type HoldingPatch = Partial<{
@@ -412,6 +417,7 @@ export type HoldingPatch = Partial<{
   isin: string | null;
   asset_class: AssetClass;
   account: string;
+  first_bought_at: string | null;
   notes: string | null;
   is_active: boolean;
 }>;
@@ -429,6 +435,7 @@ export type Holding = {
   first_bought_at: string | null;
   notes: string | null;
   is_active: boolean;
+  pricing_mode: PricingMode;
   current_price_eur: number | null;
   market_value_eur: number | null;
   unrealized_pnl_eur: number | null;
@@ -472,6 +479,10 @@ export type PortfolioOverview = {
   top_holdings: Holding[];
   holdings_count: number;
   liquid_accounts: AccountBalance[];
+  total_liquid_eur: number;
+  total_net_worth_eur: number;
+  realized_pnl_total_eur: number;
+  realized_pnl_ytd_eur: number;
 };
 
 export type PortfolioHistoryPoint = {
@@ -503,6 +514,21 @@ export type SellResult = {
   quantity_sold: number;
   price_eur: number;
   proceeds_eur: number;
+  realized_pnl_eur: number | null;
+};
+
+export type RealizedTrade = {
+  id: number;
+  holding_id: string;
+  ticker: string;
+  name: string;
+  account: string;
+  date: string;
+  quantity: number;
+  price_eur: number;
+  proceeds_eur: number;
+  cost_basis_sold_eur: number | null;
+  realized_pnl_eur: number | null;
 };
 
 export type BuyHoldingBody = {
@@ -527,6 +553,8 @@ export type IsinCandidate = {
   exchange: string | null;
   exchange_code: string | null;
   currency: string | null;
+  has_data: boolean | null;        // probed against yfinance; null = not probed
+  last_close_date: string | null;
 };
 
 export type IsinLookupResult = {
@@ -696,6 +724,12 @@ export const moneyApi = {
 
   buyHolding: (id: string, body: BuyHoldingBody) =>
     proxyPost<BuyResult>(`/api/money/portfolio/holdings/${encodeURIComponent(id)}/buy`, body),
+
+  setHoldingValue: (id: string, body: { value_eur: number; date?: string }) =>
+    proxyPost<Holding>(`/api/money/portfolio/holdings/${encodeURIComponent(id)}/value`, body),
+
+  realizedTrades: (limit = 100) =>
+    get<RealizedTrade[]>(`/money/portfolio/realized?limit=${limit}`),
 
   isinLookup: (isin: string) =>
     get<IsinLookupResult>(`/money/portfolio/isin-lookup?isin=${encodeURIComponent(isin)}`),

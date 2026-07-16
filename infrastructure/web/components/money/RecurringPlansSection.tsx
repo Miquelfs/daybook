@@ -20,12 +20,22 @@ interface Props {
 export function RecurringPlansSection({ plans, holdings, liquidAccounts }: Props) {
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const router = useRouter();
 
   async function pauseResume(plan: InvestmentPlan) {
     setBusy(true);
     try {
       await moneyApi.patchPlan(plan.id, { is_active: !plan.is_active });
+      router.refresh();
+    } finally { setBusy(false); }
+  }
+
+  async function deletePlan(plan: InvestmentPlan) {
+    setBusy(true);
+    try {
+      await moneyApi.deletePlan(plan.id);
+      setConfirmDeleteId(null);
       router.refresh();
     } finally { setBusy(false); }
   }
@@ -114,6 +124,32 @@ export function RecurringPlansSection({ plans, holdings, liquidAccounts }: Props
                   >
                     {p.is_active ? "Pause" : "Resume"}
                   </button>
+                  {confirmDeleteId === p.id ? (
+                    <span className="flex items-center gap-2">
+                      <button
+                        onClick={() => deletePlan(p)}
+                        disabled={busy}
+                        className="text-[11px] text-[#EF4444] hover:text-[#FCA5A5]"
+                      >
+                        Confirm delete
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="text-[11px] text-[#52525B] hover:text-[#A1A1AA]"
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteId(p.id)}
+                      disabled={busy}
+                      title="Delete plan permanently — past purchases stay in the ledger"
+                      className="text-[11px] text-[#3F3F46] hover:text-[#EF4444]"
+                    >
+                      Delete
+                    </button>
+                  )}
                 </div>
               </div>
             );

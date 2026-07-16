@@ -2,18 +2,43 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Banknote, ShoppingCart, Trash2, X, Check } from "lucide-react";
-import { moneyApi, fmtAmount, type Holding } from "@/lib/money-api";
+import { Banknote, PencilLine, Settings2, ShoppingCart, Trash2, X, Check } from "lucide-react";
+import { moneyApi, fmtAmount, type Holding, type HoldingPatch } from "@/lib/money-api";
 
 // Per-holding actions: buy more (DCA — updates avg cost basis), sell (books
-// proceeds into a liquid account), or delete.
+// proceeds into a liquid account), update value (manual assets), edit the
+// position in place (fix quantity/cost after an off-DCA purchase, switch a
+// dead ticker), or delete.
 export function HoldingActions({ holding, accounts }: { holding: Holding; accounts: string[] }) {
   const router = useRouter();
   const [sellOpen, setSellOpen] = useState(false);
   const [buyOpen, setBuyOpen] = useState(false);
+  const [valueOpen, setValueOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isManual = holding.pricing_mode === "manual";
+
+  const avgCost =
+    holding.cost_basis_eur != null && holding.quantity > 0
+      ? holding.cost_basis_eur / holding.quantity
+      : null;
+  const [eQty, setEQty] = useState(String(holding.quantity));
+  const [eAvg, setEAvg] = useState(avgCost != null ? avgCost.toFixed(4).replace(/\.?0+$/, "") : "");
+  const [ePaid, setEPaid] = useState(
+    holding.cost_basis_eur != null ? String(holding.cost_basis_eur) : ""
+  );
+  const [eTicker, setETicker] = useState(holding.ticker);
+  const [eName, setEName] = useState(holding.name);
+  const [eAccount, setEAccount] = useState(holding.account);
+  const [eNotes, setENotes] = useState(holding.notes ?? "");
+
+  const [newValue, setNewValue] = useState(
+    holding.market_value_eur != null ? String(Math.round(holding.market_value_eur)) : ""
+  );
+  const newValueNum = parseFloat(newValue);
+  const newValueValid = !isNaN(newValueNum) && newValueNum > 0;
 
   const [qty, setQty] = useState(String(holding.quantity));
   const [price, setPrice] = useState(
@@ -81,6 +106,59 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
     }
   }
 
+  async function updateValue() {
+    if (!newValueValid) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await moneyApi.setHoldingValue(holding.id, { value_eur: newValueNum });
+      setValueOpen(false);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdit() {
+    const patch: HoldingPatch = {};
+    if (!isManual) {
+      const q = parseFloat(eQty);
+      if (isNaN(q) || q <= 0) { setError("Quantity must be > 0"); return; }
+      if (q !== holding.quantity) patch.quantity = q;
+
+      const t = eTicker.trim().toUpperCase();
+      if (t && t !== holding.ticker) patch.ticker = t;
+
+      // Avg €/unit → total cost basis (recomputed against the edited quantity)
+      const a = eAvg.trim() === "" ? null : parseFloat(eAvg);
+      if (a !== null && (isNaN(a) || a < 0)) { setError("Avg buy-in must be a number"); return; }
+      const newBasis = a === null ? null : a * q;
+      if (newBasis !== holding.cost_basis_eur) patch.cost_basis_eur = newBasis;
+    } else {
+      const p = ePaid.trim() === "" ? null : parseFloat(ePaid);
+      if (p !== null && (isNaN(p) || p < 0)) { setError("Paid must be a number"); return; }
+      if (p !== holding.cost_basis_eur) patch.cost_basis_eur = p;
+    }
+    if (eName.trim() && eName.trim() !== holding.name) patch.name = eName.trim();
+    if (eAccount.trim() && eAccount.trim() !== holding.account) patch.account = eAccount.trim();
+    if ((eNotes.trim() || null) !== holding.notes) patch.notes = eNotes.trim() || null;
+
+    if (Object.keys(patch).length === 0) { setEditOpen(false); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      await moneyApi.patchHolding(holding.id, patch);
+      setEditOpen(false);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove() {
     setBusy(true);
     try {
@@ -95,14 +173,25 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
   return (
     <>
       <div className="flex items-center gap-0.5" onClick={(e) => e.preventDefault()}>
-        <button
-          type="button"
-          title={`Buy more ${holding.ticker}`}
-          onClick={(e) => { e.stopPropagation(); setBuyOpen(true); }}
-          className="p-1.5 rounded-lg text-[#3F3F46] hover:text-[#3B82F6] hover:bg-[#18181B] transition-colors"
-        >
-          <ShoppingCart size={14} />
-        </button>
+        {isManual ? (
+          <button
+            type="button"
+            title={`Update value of ${holding.name}`}
+            onClick={(e) => { e.stopPropagation(); setValueOpen(true); }}
+            className="p-1.5 rounded-lg text-[#3F3F46] hover:text-[#F59E0B] hover:bg-[#18181B] transition-colors"
+          >
+            <PencilLine size={14} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            title={`Buy more ${holding.ticker}`}
+            onClick={(e) => { e.stopPropagation(); setBuyOpen(true); }}
+            className="p-1.5 rounded-lg text-[#3F3F46] hover:text-[#3B82F6] hover:bg-[#18181B] transition-colors"
+          >
+            <ShoppingCart size={14} />
+          </button>
+        )}
         <button
           type="button"
           title={`Sell ${holding.ticker}`}
@@ -110,6 +199,14 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
           className="p-1.5 rounded-lg text-[#3F3F46] hover:text-[#22C55E] hover:bg-[#18181B] transition-colors"
         >
           <Banknote size={14} />
+        </button>
+        <button
+          type="button"
+          title={`Edit ${holding.ticker} — quantity, cost, ticker, account`}
+          onClick={(e) => { e.stopPropagation(); setEditOpen(true); }}
+          className="p-1.5 rounded-lg text-[#3F3F46] hover:text-[#A1A1AA] hover:bg-[#18181B] transition-colors"
+        >
+          <Settings2 size={14} />
         </button>
         {confirmDelete ? (
           <span className="flex items-center">
@@ -141,6 +238,180 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
           </button>
         )}
       </div>
+
+      {editOpen && (
+        <div className="fixed inset-0 z-50" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute inset-0 bg-black/60" onClick={() => setEditOpen(false)} />
+          <div className="absolute bottom-0 left-0 right-0 max-w-lg mx-auto bg-[#0D0D0F] border border-[#27272A] border-b-0 rounded-t-2xl px-5 pb-8 pt-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-center mb-3">
+              <div className="w-10 h-1 rounded-full bg-[#3F3F46]" />
+            </div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-sm font-semibold text-[#FAFAFA]">Edit position</p>
+                <p className="text-xs text-[#52525B]">
+                  Corrects the position in place — no transaction is booked. Use Buy/Sell to also move cash.
+                </p>
+              </div>
+              <button onClick={() => setEditOpen(false)} className="p-1.5 rounded-lg hover:bg-[#27272A] transition-colors">
+                <X size={16} className="text-[#71717A]" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {!isManual && (
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Quantity</span>
+                    <input
+                      value={eQty}
+                      onChange={(e) => setEQty(e.target.value)}
+                      inputMode="decimal"
+                      className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Avg buy-in € / unit</span>
+                    <input
+                      value={eAvg}
+                      onChange={(e) => setEAvg(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="unknown"
+                      className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                    />
+                  </label>
+                </div>
+              )}
+
+              {!isManual && (() => {
+                const q = parseFloat(eQty);
+                const a = parseFloat(eAvg);
+                const total = !isNaN(q) && !isNaN(a) ? q * a : null;
+                return total != null ? (
+                  <p className="text-xs text-[#52525B]">
+                    New total cost basis: <span className="text-[#D4D4D8] tabular-nums">{fmtAmount(total)}</span> — P&amp;L compares against this
+                  </p>
+                ) : null;
+              })()}
+
+              {isManual && (
+                <label className="block">
+                  <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Paid € (total)</span>
+                  <input
+                    value={ePaid}
+                    onChange={(e) => setEPaid(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="unknown"
+                    className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                  />
+                </label>
+              )}
+
+              {!isManual && (
+                <label className="block">
+                  <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Ticker</span>
+                  <input
+                    value={eTicker}
+                    onChange={(e) => setETicker(e.target.value.toUpperCase())}
+                    className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] font-mono focus:outline-none focus:border-[#F59E0B]"
+                  />
+                  {eTicker.trim().toUpperCase() !== holding.ticker && (
+                    <p className="text-[10px] text-[#F59E0B]/80 mt-1">
+                      Price for the new symbol is fetched immediately on save
+                    </p>
+                  )}
+                </label>
+              )}
+
+              <label className="block">
+                <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Name</span>
+                <input
+                  value={eName}
+                  onChange={(e) => setEName(e.target.value)}
+                  className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Account</span>
+                <input
+                  value={eAccount}
+                  onChange={(e) => setEAccount(e.target.value)}
+                  className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Notes</span>
+                <input
+                  value={eNotes}
+                  onChange={(e) => setENotes(e.target.value)}
+                  className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                />
+              </label>
+
+              {error && <p className="text-xs text-[#EF4444]">{error}</p>}
+
+              <button
+                type="button"
+                onClick={saveEdit}
+                disabled={busy}
+                className="w-full bg-[#F59E0B] hover:bg-[#FBBF24] disabled:opacity-40 text-black font-semibold text-sm rounded-lg py-2.5 transition-colors"
+              >
+                {busy ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {valueOpen && (
+        <div className="fixed inset-0 z-50" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute inset-0 bg-black/60" onClick={() => setValueOpen(false)} />
+          <div className="absolute bottom-0 left-0 right-0 max-w-lg mx-auto bg-[#0D0D0F] border border-[#27272A] border-b-0 rounded-t-2xl px-5 pb-8 pt-4">
+            <div className="flex justify-center mb-3">
+              <div className="w-10 h-1 rounded-full bg-[#3F3F46]" />
+            </div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-sm font-semibold text-[#FAFAFA]">Update value</p>
+                <p className="text-xs text-[#52525B]">
+                  {holding.name}
+                  {holding.market_value_eur != null && ` · currently ${fmtAmount(holding.market_value_eur)}`}
+                  {holding.price_as_of && ` (as of ${holding.price_as_of})`}
+                </p>
+              </div>
+              <button onClick={() => setValueOpen(false)} className="p-1.5 rounded-lg hover:bg-[#27272A] transition-colors">
+                <X size={16} className="text-[#71717A]" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block">
+                <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Current total value €</span>
+                <input
+                  value={newValue}
+                  onChange={(e) => setNewValue(e.target.value)}
+                  inputMode="decimal"
+                  autoFocus
+                  className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                />
+              </label>
+
+              {error && <p className="text-xs text-[#EF4444]">{error}</p>}
+
+              <button
+                type="button"
+                onClick={updateValue}
+                disabled={!newValueValid || busy}
+                className="w-full bg-[#F59E0B] hover:bg-[#FBBF24] disabled:opacity-40 text-black font-semibold text-sm rounded-lg py-2.5 transition-colors"
+              >
+                {busy ? "Saving…" : newValueValid ? `Set value to ${fmtAmount(newValueNum)}` : "Set value"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {buyOpen && (
         <div className="fixed inset-0 z-50" onClick={(e) => e.stopPropagation()}>

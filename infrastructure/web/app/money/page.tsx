@@ -196,10 +196,10 @@ export default async function MoneyPage({ searchParams }: Props) {
         </>
       )}
 
-      {/* Recent transactions */}
+      {/* Transactions explorer */}
       <section>
-        <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Recent transactions</h2>
-        <TransactionList limit={50} showDate={true} />
+        <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Transactions</h2>
+        <TransactionList limit={50} showDate={true} filterable />
       </section>
 
       {/* FAB */}

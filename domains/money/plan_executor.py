@@ -151,19 +151,19 @@ def execute_plan(conn: sqlite3.Connection, plan_row: sqlite3.Row, as_of: date, d
         (new_qty, new_cost, holding_id),
     )
 
-    # 2. Ledger entry: a Transfer from source_account marked with the plan.
-    # We record it against the holding.account so the balance rollup sees the inflow,
-    # matching the existing "Transfer" convention in money_config.
+    # 2. Ledger entry: debit the source cash account, same convention as the
+    # manual Buy endpoint (−cost on the funding account, category 'Finance' so
+    # it stays out of spending analytics). The investment side is tracked by
+    # the holding itself — booking a matching inflow would double-count.
     txn_id = "local-" + str(uuid.uuid4())
     name = f"DCA: {holding['ticker']} ({plan_row['cadence']})"
     conn.execute(
         """INSERT INTO transactions
              (id, source, date, name, amount, account, category, subcategory,
               transaction_type, notes)
-           VALUES (?, 'local', ?, ?, ?, ?, 'Transfer', ?, 'Transfer', ?)""",
-        (txn_id, exec_date, name, amount, holding["account"],
-         plan_row["source_account"],
-         f"Plan #{plan_id} → {holding['ticker']}"),
+           VALUES (?, 'local', ?, ?, ?, ?, 'Finance', NULL, 'Finance', ?)""",
+        (txn_id, exec_date, name, -amount, plan_row["source_account"],
+         f"Plan #{plan_id} → {holding['ticker']} ({holding['account']})"),
     )
 
     # 3. Log execution

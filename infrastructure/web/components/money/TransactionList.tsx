@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Pencil, Check, X } from "lucide-react";
 import { moneyApi, fmtAmount, type Transaction, type TransactionPatch } from "@/lib/money-api";
@@ -11,6 +11,9 @@ const ALL_CATEGORIES = [
   "Income", "OMYRA", "Finance", "Transfer", "Other",
 ];
 
+// Server caps limit at 500 — the explorer pages up to that in `limit` steps
+const MAX_ROWS = 500;
+
 interface Props {
   start?: string;
   end?: string;
@@ -18,14 +21,35 @@ interface Props {
   account?: string;
   limit?: number;
   showDate?: boolean;
+  // Explorer mode: filter bar (range/category/account), running totals and a
+  // "Load older" button. Fixed props above act as the base scope.
+  filterable?: boolean;
 }
 
-export function TransactionList({ start, end, category, account, limit = 50, showDate = true }: Props) {
+export function TransactionList({ start, end, category, account, limit = 50, showDate = true, filterable = false }: Props) {
   const qc = useQueryClient();
 
-  const { data: transactions = [], isLoading } = useQuery({
-    queryKey: ["money", "transactions", start, end, category, account, limit],
-    queryFn: () => moneyApi.transactions({ start, end, category, account, limit }),
+  const [fStart, setFStart] = useState("");
+  const [fEnd, setFEnd] = useState("");
+  const [fCategory, setFCategory] = useState("");
+  const [fAccount, setFAccount] = useState("");
+  const [pages, setPages] = useState(1);
+
+  // Back to page 1 whenever the filter scope changes
+  useEffect(() => { setPages(1); }, [fStart, fEnd, fCategory, fAccount]);
+
+  const effStart = filterable ? (fStart || undefined) : start;
+  const effEnd = filterable ? (fEnd || undefined) : end;
+  const effCategory = filterable ? (fCategory || undefined) : category;
+  const effAccount = filterable ? (fAccount || undefined) : account;
+  const visible = Math.min(limit * pages, MAX_ROWS);
+
+  const { data: transactions = [], isLoading, isFetching } = useQuery({
+    queryKey: ["money", "transactions", effStart, effEnd, effCategory, effAccount, visible],
+    queryFn: () => moneyApi.transactions({
+      start: effStart, end: effEnd, category: effCategory, account: effAccount, limit: visible,
+    }),
+    placeholderData: (prev) => prev, // keep the list up while loading more
   });
 
   const { data: meta } = useQuery({
@@ -35,17 +59,73 @@ export function TransactionList({ start, end, category, account, limit = 50, sho
   });
 
   const accounts = meta?.accounts ?? [];
+  const hasFilters = !!(fStart || fEnd || fCategory || fAccount);
+  const maybeMore = transactions.length >= visible && visible < MAX_ROWS;
 
-  if (isLoading) return <p className="text-sm text-[#52525B] py-4 text-center">Loading…</p>;
-  if (transactions.length === 0) return (
-    <p className="text-sm text-[#52525B] py-4 text-center">No transactions</p>
-  );
+  // Transfers and Finance rows (sells, DCA buys) move money between pockets —
+  // they're not spending or income, so keep them out of the running totals.
+  const counted = (t: Transaction) => t.transaction_type !== "Transfer" && t.transaction_type !== "Finance";
+  const spent = transactions.reduce((s, t) => t.amount < 0 && counted(t) ? s - t.amount : s, 0);
+  const received = transactions.reduce((s, t) => t.amount > 0 && counted(t) ? s + t.amount : s, 0);
+
+  const inputCls = "bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1.5 text-xs text-[#D4D4D8] focus:outline-none focus:border-[#F59E0B]";
 
   return (
-    <div className="flex flex-col divide-y divide-[#18181B]">
-      {transactions.map((t) => (
-        <TransactionRow key={t.id} t={t} showDate={showDate} qc={qc} accounts={accounts} />
-      ))}
+    <div>
+      {filterable && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <input type="date" value={fStart} onChange={e => setFStart(e.target.value)} className={inputCls} aria-label="From date" />
+          <span className="text-[10px] text-[#3F3F46]">→</span>
+          <input type="date" value={fEnd} onChange={e => setFEnd(e.target.value)} className={inputCls} aria-label="To date" />
+          <select value={fCategory} onChange={e => setFCategory(e.target.value)} className={inputCls}>
+            <option value="">All categories</option>
+            {ALL_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_EMOJI[c] ?? ""} {c}</option>)}
+          </select>
+          <select value={fAccount} onChange={e => setFAccount(e.target.value)} className={inputCls}>
+            <option value="">All accounts</option>
+            {accounts.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          {hasFilters && (
+            <button
+              onClick={() => { setFStart(""); setFEnd(""); setFCategory(""); setFAccount(""); }}
+              className="text-xs px-2 py-1.5 rounded-lg text-[#71717A] hover:text-[#FAFAFA] border border-[#27272A] transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {filterable && transactions.length > 0 && (
+        <p className="text-[11px] text-[#52525B] mb-2 tabular-nums">
+          {transactions.length}{maybeMore ? "+" : ""} transactions ·{" "}
+          <span className="text-[#EF4444]/80">−{fmtAmount(spent)}</span> spent ·{" "}
+          <span className="text-[#22C55E]/80">+{fmtAmount(received)}</span> received
+        </p>
+      )}
+
+      {isLoading ? (
+        <p className="text-sm text-[#52525B] py-4 text-center">Loading…</p>
+      ) : transactions.length === 0 ? (
+        <p className="text-sm text-[#52525B] py-4 text-center">No transactions{hasFilters ? " match these filters" : ""}</p>
+      ) : (
+        <>
+          <div className="flex flex-col divide-y divide-[#18181B]">
+            {transactions.map((t) => (
+              <TransactionRow key={t.id} t={t} showDate={showDate} qc={qc} accounts={accounts} />
+            ))}
+          </div>
+          {maybeMore && (
+            <button
+              onClick={() => setPages(p => p + 1)}
+              disabled={isFetching}
+              className="w-full mt-3 py-2 rounded-lg border border-[#27272A] text-xs text-[#71717A] hover:text-[#FAFAFA] hover:bg-[#131316] transition-colors disabled:opacity-50"
+            >
+              {isFetching ? "Loading…" : "Load older"}
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -86,7 +166,8 @@ function TransactionRow({
 
   const emoji = CATEGORY_EMOJI[t.category ?? ""] ?? "💳";
   const isPositive = t.amount >= 0;
-  const isTransfer = t.transaction_type === "Transfer";
+  // Both render muted: cash conversions, not gains or spending
+  const isTransfer = t.transaction_type === "Transfer" || t.transaction_type === "Finance";
 
   if (editing) {
     return (
@@ -198,7 +279,7 @@ function TransactionRow({
       <div className="flex-1 min-w-0">
         <p className={`text-sm truncate ${isTransfer ? "text-[#71717A]" : "text-[#D4D4D8]"}`}>{t.name}</p>
         <p className="text-xs text-[#52525B] truncate">
-          {[showDate ? t.date : null, t.subcategory, isTransfer ? "internal transfer" : null].filter(Boolean).join(" · ")}
+          {[showDate ? t.date : null, t.subcategory, isTransfer ? (t.transaction_type === "Finance" ? "portfolio" : "internal transfer") : null].filter(Boolean).join(" · ")}
         </p>
       </div>
       {/* Account pill */}

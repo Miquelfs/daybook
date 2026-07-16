@@ -29,8 +29,15 @@ export function DaySpendSummary({ date }: Props) {
   if (txnError || metaError) return null;
   if (!meta) return null;
 
-  const expenses = transactions.filter(isExpense);
-  const incomes = transactions.filter((t) => !isExpense(t));
+  // Portfolio movements (sells, DCA buys) and transfers are cash conversions,
+  // not spending or income — keep them out of the day's totals. A sale's
+  // proceeds are not a gain; the gain/loss lives in the portfolio's
+  // "Realized gains" section.
+  const ledger = transactions.filter(
+    (t) => t.transaction_type !== "Finance" && t.transaction_type !== "Transfer"
+  );
+  const expenses = ledger.filter(isExpense);
+  const incomes = ledger.filter((t) => !isExpense(t));
   const totalSpent = expenses.reduce((s, t) => s + Math.abs(t.amount), 0);
   const totalIncome = incomes.reduce((s, t) => s + t.amount, 0);
   const net = totalIncome - totalSpent;
@@ -94,11 +101,19 @@ export function DaySpendSummary({ date }: Props) {
 function TransactionRow({ t }: { t: Transaction }) {
   const emoji = CATEGORY_EMOJI[t.category ?? ""] ?? "💳";
   const isPositive = t.amount >= 0;
+  // Sells/DCA buys and transfers move money between pockets — render them
+  // muted and never green, so proceeds don't read as gains.
+  const neutral = t.transaction_type === "Finance" || t.transaction_type === "Transfer";
   return (
-    <div className="flex items-center gap-3 py-1.5">
+    <div className={`flex items-center gap-3 py-1.5 ${neutral ? "opacity-60" : ""}`}>
       <span className="text-base w-6 text-center shrink-0">{emoji}</span>
       <span className="text-sm text-[#D4D4D8] flex-1 truncate">{t.name}</span>
-      <span className={`text-sm tabular-nums shrink-0 ${isPositive ? "text-[#22C55E]" : "text-[#A1A1AA]"}`}>
+      {neutral && (
+        <span className="text-[9px] uppercase tracking-widest text-[#71717A] shrink-0">
+          {t.transaction_type === "Finance" ? "portfolio" : "transfer"}
+        </span>
+      )}
+      <span className={`text-sm tabular-nums shrink-0 ${neutral ? "text-[#A1A1AA]" : isPositive ? "text-[#22C55E]" : "text-[#A1A1AA]"}`}>
         {isPositive ? "+" : "-"}{fmtAmount(t.amount)}
       </span>
     </div>

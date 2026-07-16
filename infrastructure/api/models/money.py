@@ -312,7 +312,15 @@ class SeasonalData(BaseModel):
 
 # ── Investment Portfolio (Track A-I) ─────────────────────────────────────────
 
-AssetClass = Literal["equity_etf", "stock", "crypto", "bond_etf", "cash", "commodity"]
+AssetClass = Literal[
+    "equity_etf", "stock", "crypto", "bond_etf", "cash", "commodity",
+    # Manual-valuation classes (no market ticker; value set by hand):
+    "fund", "real_estate", "pension", "private", "other",
+]
+
+# 'market' = priced nightly via yfinance; 'manual' = user sets the value
+# (real estate, pension plans, unlisted funds, private equity…)
+PricingMode = Literal["market", "manual"]
 
 
 class HoldingCreate(BaseModel):
@@ -326,6 +334,9 @@ class HoldingCreate(BaseModel):
     cost_basis_eur: Optional[float] = None
     first_bought_at: Optional[str] = None
     notes: Optional[str] = None
+    pricing_mode: PricingMode = "market"
+    # Initial value for manual holdings (total EUR, not per unit)
+    current_value_eur: Optional[float] = Field(default=None, gt=0)
 
 
 class HoldingPatch(BaseModel):
@@ -336,6 +347,7 @@ class HoldingPatch(BaseModel):
     isin: Optional[str] = None
     asset_class: Optional[AssetClass] = None
     account: Optional[str] = None
+    first_bought_at: Optional[str] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -353,6 +365,7 @@ class HoldingOut(BaseModel):
     first_bought_at: Optional[str]
     notes: Optional[str]
     is_active: bool
+    pricing_mode: PricingMode = "market"
     # Live computed:
     current_price_eur: Optional[float]          # None if no price cached yet
     market_value_eur: Optional[float]
@@ -379,6 +392,22 @@ class SellResult(BaseModel):
     quantity_sold: float
     price_eur: float
     proceeds_eur: float
+    realized_pnl_eur: Optional[float] = None  # None when cost basis was unknown
+
+
+class RealizedTradeOut(BaseModel):
+    """A completed sale — the gain/loss locked in at the moment of selling."""
+    id: int
+    holding_id: str
+    ticker: str
+    name: str
+    account: str
+    date: str
+    quantity: float
+    price_eur: float
+    proceeds_eur: float
+    cost_basis_sold_eur: Optional[float]
+    realized_pnl_eur: Optional[float]
 
 
 class BuyHoldingBody(BaseModel):
@@ -430,6 +459,12 @@ class PortfolioOverview(BaseModel):
     holdings_count: int
     # Cash-only accounts (no holdings) — surfaced as a strip
     liquid_accounts: list[AccountBalance]
+    # Total worth = investments + cash, so one number answers "what am I worth"
+    total_liquid_eur: float = 0.0
+    total_net_worth_eur: float = 0.0
+    # Locked-in gains from sales (all-time / current year)
+    realized_pnl_total_eur: float = 0.0
+    realized_pnl_ytd_eur: float = 0.0
 
 
 class PortfolioHistoryPoint(BaseModel):
@@ -452,11 +487,20 @@ class IsinCandidate(BaseModel):
     exchange: Optional[str] = None
     exchange_code: Optional[str] = None
     currency: Optional[str] = None
+    # Probed against yfinance: does this listing actually have price data?
+    has_data: Optional[bool] = None       # None = not probed
+    last_close_date: Optional[str] = None  # date of most recent close found
 
 
 class IsinLookupResult(BaseModel):
     isin: str
     candidates: list[IsinCandidate]
+
+
+class ManualValueBody(BaseModel):
+    """Set today's value of a manually-priced holding (total EUR)."""
+    value_eur: float = Field(gt=0)
+    date: Optional[str] = None  # YYYY-MM-DD, default today
 
 
 # ── Recurring Investment Plans (DCA) ─────────────────────────────────────────

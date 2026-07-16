@@ -24,7 +24,8 @@ from infrastructure.api.models.money import (
     HoldingCreate, HoldingHistoryPoint, HoldingOut, HoldingPatch,
     InvestmentPlanCreate, InvestmentPlanOut, InvestmentPlanPatch,
     IsinCandidate, IsinLookupResult,
-    LargeTxAnomaly, MerchantSuggestion, MoneyMeta,
+    LargeTxAnomaly, ManualValueBody, MerchantSuggestion, MoneyMeta,
+    RealizedTradeOut,
     MonthDetail, MonthHistory, MonthOverview, MonthSummary,
     BuyHoldingBody, BuyResult,
     MoverOut, PlanExecutionOut, PlanRunResult,
@@ -1298,7 +1299,7 @@ def daily_totals(
         FROM transactions
         WHERE date BETWEEN ? AND ?
           AND deleted_at IS NULL
-          AND transaction_type NOT IN ('income', 'transfer', 'finance')
+          AND LOWER(transaction_type) NOT IN ('income', 'transfer', 'finance')
         GROUP BY date, category
         ORDER BY date
         """,
@@ -1353,6 +1354,21 @@ def _price_on_or_before(conn: sqlite3.Connection, ticker: str, on_date: str) -> 
         (ticker, on_date),
     ).fetchone()
     return row["close_price_eur"] if row else None
+
+
+def _upsert_manual_price(conn: sqlite3.Connection, ticker: str, on_date: str, price_eur: float) -> None:
+    """Write a per-unit EUR price with source='manual' (real estate, pensions…)."""
+    conn.execute(
+        """INSERT INTO price_history (ticker, date, close_price, close_price_eur, currency, fx_rate, source)
+           VALUES (?, ?, ?, ?, 'EUR', 1.0, 'manual')
+           ON CONFLICT(ticker, date) DO UPDATE SET
+               close_price = excluded.close_price,
+               close_price_eur = excluded.close_price_eur,
+               currency = 'EUR', fx_rate = 1.0, source = 'manual',
+               fetched_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
+        (ticker, on_date, price_eur, price_eur),
+    )
+    conn.commit()
 
 
 def _holding_row_to_out(
@@ -1421,6 +1437,7 @@ def _holding_row_to_out(
         first_bought_at=row["first_bought_at"],
         notes=row["notes"],
         is_active=bool(row["is_active"]),
+        pricing_mode=(row["pricing_mode"] if "pricing_mode" in row.keys() else None) or "market",
         current_price_eur=current_price,
         market_value_eur=market_value,
         unrealized_pnl_eur=unrealized_pnl_eur,
@@ -1433,14 +1450,31 @@ def _holding_row_to_out(
     )
 
 
+def _probe_yf_ticker(ticker: str) -> Optional[str]:
+    """Return the date (ISO) of the most recent close yfinance has for ticker,
+    or None if the listing has no usable data. Used to avoid picking an
+    exchange listing Yahoo doesn't actually cover (thin German secondary
+    listings were silently never getting prices)."""
+    try:
+        import yfinance as yf
+        hist = yf.Ticker(ticker).history(period="1mo", auto_adjust=False)
+        if hist.empty:
+            return None
+        return hist.index[-1].date().isoformat()
+    except Exception:
+        return None
+
+
 @router.get("/portfolio/isin-lookup", response_model=IsinLookupResult)
 def isin_lookup(isin: str = Query(..., min_length=12, max_length=12)):
     """Resolve an ISIN to yfinance-compatible ticker candidates via OpenFIGI (free, no key).
 
-    Preferred exchanges are ranked first so the user sees a sensible default.
+    Each candidate is probed against yfinance so listings with real price data
+    rank first — an exchange Yahoo doesn't cover would otherwise never update.
     """
     import re
     import requests
+    from concurrent.futures import ThreadPoolExecutor
 
     isin_up = isin.upper().strip()
     if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}[0-9]", isin_up):
@@ -1494,12 +1528,52 @@ def isin_lookup(isin: str = Query(..., min_length=12, max_length=12)):
                 currency=item.get("currency"),
             ))
 
-        # Rank: EUR-quoted first, then Germany (XETRA), then anything else
+        # Deduplicate identical yfinance symbols (several MIC codes map to one suffix)
+        seen: set[str] = set()
+        candidates = [c for c in candidates if not (c.ticker in seen or seen.add(c.ticker))]
+
+        # Probe up to 8 listings in parallel so we know which ones Yahoo covers.
+        # If yfinance itself is missing, leave has_data = None (unknown) rather
+        # than falsely flagging every listing as dataless.
+        try:
+            import yfinance  # noqa: F401
+            yf_available = True
+        except ImportError:
+            yf_available = False
+        if yf_available:
+            to_probe = candidates[:8]
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                dates = list(pool.map(lambda c: _probe_yf_ticker(c.ticker), to_probe))
+            for c, d in zip(to_probe, dates):
+                c.has_data = d is not None
+                c.last_close_date = d
+
+        # Rank: listings with real price data first, then EUR-quoted, then XETRA
         def _rank(c: IsinCandidate) -> tuple:
+            data = 0 if c.has_data else 1
             eur = 0 if (c.currency or "").upper() == "EUR" else 1
             de = 0 if c.exchange_code in ("GY", "GR") else 1
-            return (eur, de)
+            return (data, eur, de)
         candidates.sort(key=_rank)
+
+    # Mutual funds often have no exchange listing at all, but Yahoo carries
+    # their NAV series under the raw ISIN as the symbol — offer that too.
+    try:
+        import yfinance  # noqa: F401
+        if not any(c.has_data for c in candidates):
+            d = _probe_yf_ticker(isin_up)
+            if d is not None:
+                candidates.insert(0, IsinCandidate(
+                    ticker=isin_up,
+                    name="Yahoo fund NAV (ISIN as symbol)",
+                    exchange="FUND",
+                    exchange_code="FUND",
+                    currency=None,
+                    has_data=True,
+                    last_close_date=d,
+                ))
+    except ImportError:
+        pass
 
     return IsinLookupResult(isin=isin_up, candidates=candidates)
 
@@ -1556,30 +1630,36 @@ def create_holding(body: HoldingCreate, conn: DB):
         conn.execute(
             """UPDATE holdings SET isin = ?, name = ?, asset_class = ?, currency = ?,
                      quantity = ?, cost_basis_eur = ?, first_bought_at = ?, notes = ?,
-                     is_active = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                     is_active = 1, pricing_mode = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                WHERE id = ?""",
             (body.isin.upper() if body.isin else None, body.name, body.asset_class,
              body.currency.upper(), body.quantity, body.cost_basis_eur,
-             body.first_bought_at, body.notes, holding_id),
+             body.first_bought_at, body.notes, body.pricing_mode, holding_id),
         )
     else:
         conn.execute(
             """INSERT INTO holdings (id, account, ticker, isin, name, asset_class, currency,
-                                     quantity, cost_basis_eur, first_bought_at, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                     quantity, cost_basis_eur, first_bought_at, notes, pricing_mode)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (holding_id, body.account, body.ticker.upper(),
              body.isin.upper() if body.isin else None,
              body.name, body.asset_class,
              body.currency.upper(), body.quantity, body.cost_basis_eur,
-             body.first_bought_at, body.notes),
+             body.first_bought_at, body.notes, body.pricing_mode),
         )
     conn.commit()
 
-    # Fetch today's price synchronously so the holding shows a real value
-    # immediately, rather than waiting for the nightly price_sync cron.
-    # Best-effort: a slow/failed yfinance call never blocks holding creation.
-    from domains.money.price_sync import sync_price_now
-    sync_price_now(conn, body.ticker.upper(), body.currency.upper())
+    if body.pricing_mode == "manual":
+        # No market data — record the user-supplied value as today's price
+        if body.current_value_eur:
+            _upsert_manual_price(conn, body.ticker.upper(), date.today().isoformat(),
+                                 body.current_value_eur / body.quantity)
+    else:
+        # Fetch today's price synchronously so the holding shows a real value
+        # immediately, rather than waiting for the nightly price_sync cron.
+        # Best-effort: a slow/failed yfinance call never blocks holding creation.
+        from domains.money.price_sync import sync_price_now
+        sync_price_now(conn, body.ticker.upper(), body.currency.upper())
 
     row = conn.execute("SELECT * FROM holdings WHERE id = ?", (holding_id,)).fetchone()
     return _holding_row_to_out(conn, row)
@@ -1597,6 +1677,10 @@ def patch_holding(holding_id: str, body: HoldingPatch, conn: DB):
 
     if "is_active" in fields:
         fields["is_active"] = 1 if fields["is_active"] else 0
+    if "ticker" in fields and fields["ticker"]:
+        fields["ticker"] = fields["ticker"].upper()
+    if "isin" in fields and fields["isin"]:
+        fields["isin"] = fields["isin"].upper()
 
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     params = list(fields.values()) + [holding_id]
@@ -1605,8 +1689,157 @@ def patch_holding(holding_id: str, body: HoldingPatch, conn: DB):
         params,
     )
     conn.commit()
+
+    # Ticker changed (e.g. switching a dead listing to one Yahoo covers) —
+    # fetch a price for the new symbol right away so the value doesn't blank
+    # out until the nightly sync. Best-effort, never blocks the edit.
+    new_ticker = fields.get("ticker")
+    if new_ticker and new_ticker != existing["ticker"]:
+        mode = (existing["pricing_mode"] if "pricing_mode" in existing.keys() else None) or "market"
+        if mode == "market":
+            from domains.money.price_sync import sync_price_now
+            sync_price_now(conn, new_ticker, existing["currency"])
+
     row = conn.execute("SELECT * FROM holdings WHERE id = ?", (holding_id,)).fetchone()
     return _holding_row_to_out(conn, row)
+
+
+@router.post("/portfolio/holdings/{holding_id}/value", response_model=HoldingOut)
+def set_holding_value(holding_id: str, body: ManualValueBody, conn: DB):
+    """Set the current total value of a manually-priced holding (real estate,
+    pension, unlisted fund). Stored as a price point so history charts work."""
+    row = conn.execute(
+        "SELECT * FROM holdings WHERE id = ? AND is_active = 1", (holding_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Holding not found")
+    mode = (row["pricing_mode"] if "pricing_mode" in row.keys() else None) or "market"
+    if mode != "manual":
+        raise HTTPException(status_code=400, detail="Holding is market-priced — its value comes from yfinance")
+
+    on_date = body.date or date.today().isoformat()
+    _upsert_manual_price(conn, row["ticker"], on_date, body.value_eur / row["quantity"])
+    return _holding_row_to_out(conn, row)
+
+
+@router.get("/portfolio/export")
+def export_portfolio(conn: DB):
+    """Download all positions + cash accounts as CSV — full enriched view
+    (price, value, P&L, allocation) for offline analysis."""
+    holding_rows = conn.execute(
+        "SELECT * FROM holdings WHERE is_active = 1 ORDER BY name"
+    ).fetchall()
+    prelim = [_holding_row_to_out(conn, r) for r in holding_rows]
+    total_value = sum((h.market_value_eur or 0.0) for h in prelim)
+    holdings = [_holding_row_to_out(conn, r, total_value) for r in holding_rows]
+    liquid = _compute_liquid_accounts(conn)
+
+    # Active DCA plans per holding: a holding can have several (e.g. weekly +
+    # monthly top-up) — amounts are summed, cadences/accounts joined, and the
+    # soonest execution date shown.
+    dca: dict[str, dict] = {}
+    for p in conn.execute(
+        """SELECT holding_id, source_account, amount_eur, cadence, next_execution_date
+           FROM investment_plans WHERE is_active = 1"""
+    ).fetchall():
+        d = dca.setdefault(p["holding_id"], {
+            "amount": 0.0, "cadences": [], "sources": [], "next": None})
+        d["amount"] += p["amount_eur"]
+        if p["cadence"] not in d["cadences"]:
+            d["cadences"].append(p["cadence"])
+        if p["source_account"] not in d["sources"]:
+            d["sources"].append(p["source_account"])
+        if d["next"] is None or p["next_execution_date"] < d["next"]:
+            d["next"] = p["next_execution_date"]
+
+    def generate():
+        buf = io.StringIO()
+        writer = _csv.writer(buf)
+        writer.writerow([
+            "type", "account", "ticker", "isin", "name", "asset_class", "currency",
+            "pricing_mode", "quantity", "cost_basis_eur", "current_price_eur",
+            "market_value_eur", "unrealized_pnl_eur", "unrealized_pnl_pct",
+            "day_change_pct", "ytd_change_pct", "allocation_pct", "price_as_of",
+            "first_bought_at", "notes",
+            "dca_cadence", "dca_amount_eur", "dca_source_account", "dca_next_execution",
+        ])
+        for h in holdings:
+            plan = dca.get(h.id)
+            writer.writerow([
+                "position", h.account, h.ticker, h.isin or "", h.name, h.asset_class,
+                h.currency, h.pricing_mode, h.quantity,
+                _fmt4(h.cost_basis_eur), _fmt4(h.current_price_eur),
+                _fmt4(h.market_value_eur), _fmt4(h.unrealized_pnl_eur),
+                _fmt4(h.unrealized_pnl_pct), _fmt4(h.day_change_pct),
+                _fmt4(h.ytd_change_pct), _fmt4(h.allocation_pct),
+                h.price_as_of or "", h.first_bought_at or "", h.notes or "",
+                "+".join(plan["cadences"]) if plan else "",
+                f"{plan['amount']:.2f}" if plan else "",
+                "+".join(plan["sources"]) if plan else "",
+                (plan["next"] or "") if plan else "",
+            ])
+        for a in liquid:
+            writer.writerow([
+                "cash", a.name, "", "", a.name, "cash", "EUR", "", "", "",
+                "", f"{a.balance:.2f}", "", "", "", "", "", "", "", a.account_type,
+                "", "", "", "",
+            ])
+        total_cash = sum(a.balance for a in liquid)
+        pad = [""] * 4
+        writer.writerow([])
+        writer.writerow(["total", "", "", "", "Investments", "", "EUR", "", "", "",
+                         "", f"{total_value:.2f}", "", "", "", "", "", "", "", ""] + pad)
+        writer.writerow(["total", "", "", "", "Cash & liquid", "", "EUR", "", "", "",
+                         "", f"{total_cash:.2f}", "", "", "", "", "", "", "", ""] + pad)
+        writer.writerow(["total", "", "", "", "Net worth", "", "EUR", "", "", "",
+                         "", f"{total_value + total_cash:.2f}", "", "", "", "", "", "", "", ""] + pad)
+        # Monthly DCA commitment across all active plans, normalised to €/month
+        monthly_factor = {"weekly": 52 / 12, "biweekly": 26 / 12, "monthly": 1.0,
+                          "quarterly": 1 / 3, "yearly": 1 / 12}
+        monthly_dca = sum(
+            p["amount_eur"] * monthly_factor.get(p["cadence"], 1.0)
+            for p in conn.execute(
+                "SELECT amount_eur, cadence FROM investment_plans WHERE is_active = 1"
+            ).fetchall()
+        )
+        writer.writerow(["total", "", "", "", "DCA commitment (per month)", "", "EUR", "", "", "",
+                         "", f"{monthly_dca:.2f}", "", "", "", "", "", "", "", ""] + pad)
+        # Completed sales: quantity/price/proceeds map onto the position
+        # columns; realized P&L sits in the pnl columns, sale date in price_as_of.
+        try:
+            sold = conn.execute(
+                """SELECT * FROM realized_trades ORDER BY date DESC, id DESC"""
+            ).fetchall()
+        except sqlite3.OperationalError:
+            sold = []
+        realized_sum = 0.0
+        for s in sold:
+            realized_sum += s["realized_pnl_eur"] or 0.0
+            pnl_pct = (
+                (s["proceeds_eur"] / s["cost_basis_sold_eur"] - 1.0) * 100.0
+                if s["cost_basis_sold_eur"] else None
+            )
+            writer.writerow([
+                "realized_sale", s["account"], s["ticker"], "", s["name"], "", "EUR",
+                "", s["quantity"], _fmt4(s["cost_basis_sold_eur"]), _fmt4(s["price_eur"]),
+                _fmt4(s["proceeds_eur"]), _fmt4(s["realized_pnl_eur"]), _fmt4(pnl_pct),
+                "", "", "", s["date"], "", "",
+            ] + pad)
+        if sold:
+            writer.writerow(["total", "", "", "", "Realized P&L (all time)", "", "EUR", "", "", "",
+                             "", f"{realized_sum:.2f}", "", "", "", "", "", "", "", ""] + pad)
+        yield buf.getvalue()
+
+    filename = f"portfolio_{date.today().isoformat()}.csv"
+    return StreamingResponse(
+        generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+def _fmt4(v: Optional[float]) -> str:
+    return f"{v:.4f}" if v is not None else ""
 
 
 @router.post("/portfolio/holdings/{holding_id}/sell", response_model=SellResult)
@@ -1653,6 +1886,22 @@ def sell_holding(holding_id: str, body: SellHoldingBody, conn: DB):
         ),
     )
 
+    # Record the realized gain/loss before the cost basis is pro-rated away —
+    # once the holding closes this is the only trace of how the trade went.
+    cost_sold = None
+    realized = None
+    if row["cost_basis_eur"] is not None and qty_held > 0:
+        cost_sold = round(row["cost_basis_eur"] * qty / qty_held, 2)
+        realized = round(proceeds - cost_sold, 2)
+    conn.execute(
+        """INSERT INTO realized_trades
+             (holding_id, ticker, name, account, date, quantity, price_eur,
+              proceeds_eur, cost_basis_sold_eur, realized_pnl_eur, transaction_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (holding_id, row["ticker"], row["name"], row["account"], sell_date,
+         qty, price, proceeds, cost_sold, realized, txn_id),
+    )
+
     new_qty = qty_held - qty
     if new_qty <= 1e-9:
         conn.execute(
@@ -1678,6 +1927,7 @@ def sell_holding(holding_id: str, body: SellHoldingBody, conn: DB):
         quantity_sold=qty,
         price_eur=price,
         proceeds_eur=proceeds,
+        realized_pnl_eur=realized,
     )
 
 
@@ -1759,6 +2009,36 @@ def delete_holding(holding_id: str, conn: DB):
     return {"ok": True, "id": holding_id}
 
 
+@router.get("/portfolio/realized", response_model=list[RealizedTradeOut])
+def list_realized_trades(conn: DB, limit: int = Query(100, le=500)):
+    """Completed sales, newest first — the gains/losses locked in on exit."""
+    try:
+        rows = conn.execute(
+            """SELECT id, holding_id, ticker, name, account, date, quantity,
+                      price_eur, proceeds_eur, cost_basis_sold_eur, realized_pnl_eur
+               FROM realized_trades ORDER BY date DESC, id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []  # table not migrated yet
+    return [RealizedTradeOut(**dict(r)) for r in rows]
+
+
+def _realized_totals(conn: sqlite3.Connection) -> tuple[float, float]:
+    """(all-time, current-year) realized P&L across sales with known cost basis."""
+    year_start = f"{date.today().year}-01-01"
+    try:
+        row = conn.execute(
+            """SELECT COALESCE(SUM(realized_pnl_eur), 0) AS total,
+                      COALESCE(SUM(CASE WHEN date >= ? THEN realized_pnl_eur END), 0) AS ytd
+               FROM realized_trades WHERE realized_pnl_eur IS NOT NULL""",
+            (year_start,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return 0.0, 0.0  # table not migrated yet
+    return row["total"], row["ytd"]
+
+
 @router.get("/portfolio/overview", response_model=PortfolioOverview)
 def portfolio_overview(conn: DB):
     """Full investor dashboard payload."""
@@ -1836,6 +2116,8 @@ def portfolio_overview(conn: DB):
 
     # Liquid accounts (from transactions, unchanged logic)
     liquid = _compute_liquid_accounts(conn)
+    total_liquid = sum(a.balance for a in liquid)
+    realized_total, realized_ytd = _realized_totals(conn)
 
     return PortfolioOverview(
         as_of=as_of,
@@ -1855,6 +2137,10 @@ def portfolio_overview(conn: DB):
         top_holdings=top_holdings,
         holdings_count=len(holdings),
         liquid_accounts=liquid,
+        total_liquid_eur=round(total_liquid, 2),
+        total_net_worth_eur=round(total_value + total_liquid, 2),
+        realized_pnl_total_eur=round(realized_total, 2),
+        realized_pnl_ytd_eur=round(realized_ytd, 2),
     )
 
 
@@ -2119,10 +2405,13 @@ def patch_plan(plan_id: int, body: InvestmentPlanPatch, conn: DB):
 
 @router.delete("/portfolio/plans/{plan_id}")
 def delete_plan(plan_id: int, conn: DB):
+    """Hard delete — pause (PATCH is_active=false) is the reversible option.
+    The execution log goes with the plan; booked ledger transactions remain."""
     existing = conn.execute("SELECT id FROM investment_plans WHERE id = ?", (plan_id,)).fetchone()
     if not existing:
         raise HTTPException(status_code=404, detail="Plan not found")
-    conn.execute("UPDATE investment_plans SET is_active = 0 WHERE id = ?", (plan_id,))
+    conn.execute("DELETE FROM investment_plan_executions WHERE plan_id = ?", (plan_id,))
+    conn.execute("DELETE FROM investment_plans WHERE id = ?", (plan_id,))
     conn.commit()
     return {"ok": True, "id": plan_id}
 

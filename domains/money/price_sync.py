@@ -70,6 +70,15 @@ def _fetch_close(ticker: str, on_date: date) -> Optional[tuple[float, str]]:
             auto_adjust=False,
         )
         if hist.empty:
+            # Thinly-traded listings (esp. German secondary exchanges) can go
+            # more than a week without a printed close — widen to a month
+            # before giving up so the holding doesn't show as stale forever.
+            hist = t.history(
+                start=(on_date - timedelta(days=31)).isoformat(),
+                end=(on_date + timedelta(days=1)).isoformat(),
+                auto_adjust=False,
+            )
+        if hist.empty:
             return None
         close = float(hist["Close"].iloc[-1])
         currency = t.fast_info.get("currency") or t.info.get("currency", "USD")
@@ -126,9 +135,16 @@ def sync_prices_for_date(conn: sqlite3.Connection, target_date: date) -> tuple[i
     if yf is None:
         raise RuntimeError("yfinance not installed — add to requirements.txt and pip install")
 
-    tickers = conn.execute(
-        "SELECT DISTINCT ticker, currency FROM holdings WHERE is_active = 1"
-    ).fetchall()
+    try:
+        tickers = conn.execute(
+            """SELECT DISTINCT ticker, currency FROM holdings
+               WHERE is_active = 1 AND COALESCE(pricing_mode, 'market') = 'market'"""
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # pricing_mode column not migrated yet — sync everything as before
+        tickers = conn.execute(
+            "SELECT DISTINCT ticker, currency FROM holdings WHERE is_active = 1"
+        ).fetchall()
 
     upserted = 0
     skipped = 0

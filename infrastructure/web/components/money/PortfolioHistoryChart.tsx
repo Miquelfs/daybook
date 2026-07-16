@@ -15,14 +15,16 @@ export function PortfolioHistoryChart({ data: initial }: Props) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (range === "1Y") return;
+    // "1Y" is what the server rendered — restore it rather than keeping
+    // whatever the previously selected range loaded.
+    if (range === "1Y") { setData(initial); return; }
     let alive = true;
     setLoading(true);
     moneyApi.portfolioHistory(range).then(d => {
       if (alive) { setData(d); setLoading(false); }
     }).catch(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [range]);
+  }, [range, initial]);
 
   if (data.length < 2) {
     return (
@@ -89,6 +91,9 @@ export function PortfolioHistoryChart({ data: initial }: Props) {
       )}
       <div className="flex justify-between text-[10px] text-[#52525B] mt-2 px-2">
         <span className="text-[#22C55E]/70">Value</span>
+        {/* Actual window covered — with young portfolios every range shows the
+            same span until enough daily snapshots accumulate */}
+        <span className="tabular-nums">{data[0].date} → {data[data.length - 1].date} · {data.length}d</span>
         <span>Invested (dashed)</span>
       </div>
     </div>
