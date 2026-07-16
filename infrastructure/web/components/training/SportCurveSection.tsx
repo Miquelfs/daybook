@@ -15,8 +15,16 @@ function fmtBucket(m: number): string {
   return `${m}m`;
 }
 
+function fmtPace100m(sPerKm: number): string {
+  // curve values are s/km; a swim 100m pace is s/km ÷ 10
+  const per100 = sPerKm / 10;
+  const m = Math.floor(per100 / 60);
+  const s = Math.round(per100 % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 type Props = {
-  sport: "run" | "ride";
+  sport: "run" | "ride" | "swim";
   distanceM: number | null;
   avgSpeedMps: number | null;
 };
@@ -66,12 +74,14 @@ export function SportCurveSection({ sport, distanceM, avgSpeedMps }: Props) {
       .map((b, i) => `${i === 0 ? "M" : "L"} ${px(Math.log(b.bucket)).toFixed(1)} ${py(toY(b[key]!)).toFixed(1)}`)
       .join(" ");
 
-  const fmtY = (v: number) => (isRide ? `${v.toFixed(0)} km/h` : `${fmtPaceMinKm(v)} /km`);
+  const isSwim = sport === "swim";
+  const fmtY = (v: number) =>
+    isRide ? `${v.toFixed(0)} km/h` : isSwim ? `${fmtPace100m(v)} /100m` : `${fmtPaceMinKm(v)} /km`;
 
   return (
     <section className="mb-8">
       <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">
-        {isRide ? "Speed curve" : "Pace curve"}
+        {isRide ? "Speed curve" : isSwim ? "Swim pace curve" : "Pace curve"}
       </p>
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3">
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full">

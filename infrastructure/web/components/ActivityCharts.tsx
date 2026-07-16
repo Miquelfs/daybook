@@ -53,10 +53,18 @@ export function ActivityCharts({ activityId, activityType }: Props) {
     staleTime: Infinity,
   });
 
+  // Personalized zones for the HR reference bands (max HR by sport)
+  const { data: zones } = useQuery<Record<string, { max_hr: number | null }>>({
+    queryKey: ["athlete-zones"],
+    queryFn: () => fetch(`${BASE}/training/zones`).then((r) => (r.ok ? r.json() : {})),
+    staleTime: 86_400_000,
+  });
+
   if (isLoading || !data || data.available.length === 0) return null;
 
-  const isCycling = (activityType ?? "").toLowerCase().includes("cycl") ||
-    (activityType ?? "").toLowerCase().includes("ride");
+  const at = (activityType ?? "").toLowerCase();
+  const isCycling = at.includes("cycl") || at.includes("ride");
+  const sportKey = isCycling ? "ride" : at.includes("swim") ? "swim" : "run";
 
   const dist = data.distance;
   const n = dist.length;
@@ -74,7 +82,7 @@ export function ActivityCharts({ activityId, activityType }: Props) {
   const step = Math.max(1, Math.floor(n / 500));
   const sampled = points.filter((_, i) => i % step === 0);
 
-  const maxHR = 195;
+  const maxHR = zones?.[sportKey]?.max_hr ?? 195;
   const hrBounds = [0.60, 0.70, 0.80, 0.90].map((p) => p * maxHR);
 
   const hasAlt = data.available.includes("altitude");

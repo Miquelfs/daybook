@@ -10,7 +10,7 @@ import {
 import { format, parseISO, subDays } from "date-fns";
 import { activityIcon, fmtDuration, fmtDistance } from "@/lib/api";
 import { injuriesApi, type Injury, ZONE_LABELS } from "@/lib/injuries-api";
-import { Activity, Zap, List, TrendingUp, Target, Map } from "lucide-react";
+import { Activity, Zap, List, TrendingUp, Target, Map, Droplet } from "lucide-react";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -233,6 +233,7 @@ import FitnessFreshnessChart from "@/components/training/FitnessFreshnessChart";
 import TrainingLogCalendar from "@/components/training/TrainingLogCalendar";
 import { VolumeChart, ProgressComparisonChart } from "@/components/training/ProgressChart";
 import OmyraTab from "@/components/training/OmyraTab";
+import FuelTab from "@/components/training/FuelTab";
 import { TrainingRouteMap } from "@/components/training/TrainingRouteMap";
 import RelativeEffortChart from "@/components/training/RelativeEffortChart";
 import { GoalRings } from "@/components/training/GoalRings";
@@ -240,6 +241,7 @@ import { GoalRings } from "@/components/training/GoalRings";
 const TABS = [
   { key: "overview", label: "Overview", icon: <Activity size={13} /> },
   { key: "omyra", label: "Omyra", icon: <Target size={13} /> },
+  { key: "fuel", label: "Fuel", icon: <Droplet size={13} /> },
   { key: "load", label: "Load", icon: <Zap size={13} /> },
   { key: "log", label: "Log", icon: <List size={13} /> },
   { key: "progress", label: "Progress", icon: <TrendingUp size={13} /> },
@@ -466,6 +468,9 @@ export default function TrainingPage() {
 
       {/* ── OMYRA tab ─────────────────────────────────────────────────────── */}
       {tab === "omyra" && <OmyraTab />}
+
+      {/* ── FUEL tab ──────────────────────────────────────────────────────── */}
+      {tab === "fuel" && <FuelTab />}
 
       {/* ── MAP tab ──────────────────────────────────────────────────────── */}
       {tab === "map" && (

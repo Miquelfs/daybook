@@ -2,7 +2,14 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { SectionLabel } from "@/components/MorningBrief";
-import { buildWorkoutDescription, PaceZones } from "@/lib/workout-description";
+import {
+  buildWorkoutDescription,
+  resolveStructure,
+  runZonesAsPaceZones,
+  DisciplineZones,
+  StructureStep,
+  WorkoutPhase,
+} from "@/lib/workout-description";
 
 // Zone badge colours
 const ZONE_STYLE: Record<string, { bg: string; text: string; label: string }> = {
@@ -33,6 +40,17 @@ const RPE_LABELS: Record<number, string> = {
 
 function disciplineIcon(disc: string) { return DISC_ICON[disc] ?? DISC_ICON.other; }
 
+interface FuelDuring { carbs_g_h: number; fluid_ml_h: number; sodium_mg_h: number; note: string; }
+interface FuelPrePost { carbs_g: number; protein_g?: number; timing?: string; window?: string; note: string; }
+interface GutTraining { is_target_session: boolean; target_carbs_g_h: number; note: string; }
+interface Fueling {
+  during: FuelDuring;
+  pre: FuelPrePost | null;
+  post: FuelPrePost | null;
+  gut_training: GutTraining | null;
+  duration_min: number;
+}
+
 interface PlanSession {
   id: number;
   goal_id: number;
@@ -50,6 +68,9 @@ interface PlanSession {
   current_phase: string | null;
   current_week: number | null;
   total_weeks: number | null;
+  structure: StructureStep[] | null;
+  days_until_race: number | null;
+  fueling: Fueling | null;
 }
 
 interface InjurySuggestion {
@@ -162,10 +183,218 @@ function ReadinessHeader({ ctx }: { ctx: ReadinessContext }) {
   );
 }
 
+// ── Benchmark test form ─────────────────────────────────────────────────────
+
+function testTypeOf(sessionType: string): { sport: string; test_type: string } | null {
+  if (/1\s*km|1k\b/i.test(sessionType)) return { sport: "run", test_type: "run_1k_tt" };
+  if (/20\s*min|field test|ftp/i.test(sessionType)) return { sport: "ride", test_type: "bike_20min" };
+  if (/css|400\s*\+\s*200/i.test(sessionType)) return { sport: "swim", test_type: "swim_css" };
+  return null;
+}
+
+function parseMMSS(v: string): number | null {
+  const t = v.trim();
+  if (!t) return null;
+  if (t.includes(":")) {
+    const [m, s] = t.split(":");
+    const mi = parseInt(m, 10), se = parseInt(s, 10);
+    if (isNaN(mi) || isNaN(se)) return null;
+    return mi * 60 + se;
+  }
+  const n = parseFloat(t);
+  return isNaN(n) ? null : n;
+}
+
+function BenchmarkForm({ session, date, onDone }: {
+  session: PlanSession; date: string; onDone: () => void;
+}) {
+  const meta = testTypeOf(session.session_type);
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [delta, setDelta] = useState<string | null>(null);
+  if (!meta) return null;
+  const m = meta;
+
+  async function submit() {
+    let result: Record<string, number> = {};
+    if (m.test_type === "run_1k_tt") {
+      const t = parseMMSS(a);
+      if (!t) { setErr("Enter your 1km time (m:ss)"); return; }
+      result = { time_s: t };
+    } else if (m.test_type === "bike_20min") {
+      const hr = parseFloat(a), sp = parseFloat(b);
+      if (!hr) { setErr("Enter average HR"); return; }
+      result = { avg_hr: hr, avg_speed_kmh: sp || 0 };
+    } else {
+      const t400 = parseMMSS(a), t200 = parseMMSS(b);
+      if (!t400 || !t200) { setErr("Enter 400m and 200m times (m:ss)"); return; }
+      result = { t400_s: t400, t200_s: t200 };
+    }
+    setSaving(true); setErr(null);
+    try {
+      const res = await fetch(`/api/race-plans/benchmarks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, sport: m.sport, test_type: m.test_type, session_id: session.id, result }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const d = await res.json();
+      const ch = d?.delta?.change;
+      setDelta(ch != null ? `Zones updated · Δ ${ch > 0 ? "+" : ""}${ch}` : "Zones updated ✓");
+      setTimeout(onDone, 1200);
+    } catch { setErr("Could not save result"); }
+    finally { setSaving(false); }
+  }
+
+  const fields = m.test_type === "run_1k_tt"
+    ? [{ v: a, set: setA, ph: "1km time (m:ss)" }]
+    : m.test_type === "bike_20min"
+    ? [{ v: a, set: setA, ph: "avg HR (bpm)" }, { v: b, set: setB, ph: "avg speed (km/h)" }]
+    : [{ v: a, set: setA, ph: "400m time (m:ss)" }, { v: b, set: setB, ph: "200m time (m:ss)" }];
+
+  return (
+    <div className="space-y-2 border-t border-[#18181B] pt-4">
+      <p className="text-xs text-[#71717A] uppercase tracking-wider">Log test result → updates your zones</p>
+      <div className="flex gap-2 flex-wrap">
+        {fields.map((f, i) => (
+          <input
+            key={i}
+            value={f.v}
+            onChange={(e) => f.set(e.target.value)}
+            placeholder={f.ph}
+            className="flex-1 min-w-[120px] bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#52525B]"
+          />
+        ))}
+        <button
+          onClick={submit}
+          disabled={saving}
+          className="px-4 py-2 bg-[#F59E0B] text-[#09090B] rounded-lg text-xs font-semibold hover:bg-[#D97706] disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save test"}
+        </button>
+      </div>
+      {delta && <p className="text-xs text-[#4ADE80]">{delta}</p>}
+      {err && <p className="text-xs text-[#F87171]">{err}</p>}
+    </div>
+  );
+}
+
+// ── Fueling ─────────────────────────────────────────────────────────────────
+
+function FuelingSection({ fueling }: { fueling: Fueling }) {
+  const { during, pre, post, gut_training } = fueling;
+  if (during.carbs_g_h === 0 && !pre && !post) {
+    return (
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+        <p className="text-xs text-[#71717A]">⚡ Water only — no fuel needed for this one.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] text-[#52525B] uppercase tracking-wider">Fueling</p>
+      {gut_training && (
+        <div className="bg-[#1C1700] border border-[#B45309] rounded-xl px-4 py-2.5">
+          <p className="text-xs text-[#FCD34D]">
+            🎯 Gut-training session — practise <b>{gut_training.target_carbs_g_h} g/h</b> with your race products.
+          </p>
+        </div>
+      )}
+      <div className="grid grid-cols-3 gap-2">
+        {pre && (
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-2.5">
+            <p className="text-[10px] text-[#52525B] uppercase">Before</p>
+            <p className="text-sm font-semibold text-[#FAFAFA] tabular-nums">{pre.carbs_g}g</p>
+            <p className="text-[10px] text-[#71717A] mt-0.5">{pre.timing}</p>
+          </div>
+        )}
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-2.5">
+          <p className="text-[10px] text-[#52525B] uppercase">During /h</p>
+          <p className="text-sm font-semibold text-[#FAFAFA] tabular-nums">
+            {during.carbs_g_h > 0 ? `${during.carbs_g_h}g` : "—"}
+          </p>
+          <p className="text-[10px] text-[#71717A] mt-0.5">{during.fluid_ml_h}ml{during.sodium_mg_h ? ` · ${during.sodium_mg_h}mg Na` : ""}</p>
+        </div>
+        {post && (
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-2.5">
+            <p className="text-[10px] text-[#52525B] uppercase">After</p>
+            <p className="text-sm font-semibold text-[#FAFAFA] tabular-nums">{post.carbs_g}g<span className="text-[10px] text-[#71717A]"> +{post.protein_g}g P</span></p>
+            <p className="text-[10px] text-[#71717A] mt-0.5">{post.window}</p>
+          </div>
+        )}
+      </div>
+      {during.note && during.carbs_g_h > 0 && <p className="text-[11px] text-[#71717A] leading-relaxed">{during.note}</p>}
+    </div>
+  );
+}
+
+function FuelQuickLog({ session, date, onLogged }: {
+  session: PlanSession; date: string; onLogged: () => void;
+}) {
+  const [carbs, setCarbs] = useState("");
+  const [fluids, setFluids] = useState("");
+  const [gi, setGi] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  async function submit() {
+    setSaving(true);
+    try {
+      await fetch(`/api/nutrition/fueling-logs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date,
+          plan_session_id: session.id,
+          carbs_g: carbs ? parseFloat(carbs) : null,
+          fluids_ml: fluids ? parseFloat(fluids) : null,
+          gi_severity: gi,
+        }),
+      });
+      setSaved(true);
+      onLogged();
+    } catch { /* non-fatal */ }
+    finally { setSaving(false); }
+  }
+
+  if (saved) return <p className="text-xs text-[#4ADE80] border-t border-[#18181B] pt-4">Fueling logged ✓</p>;
+
+  return (
+    <div className="space-y-2 border-t border-[#18181B] pt-4">
+      <p className="text-xs text-[#71717A] uppercase tracking-wider">Log what you actually took</p>
+      <div className="flex gap-2 flex-wrap">
+        <input value={carbs} onChange={(e) => setCarbs(e.target.value)} placeholder="carbs total (g)"
+          className="flex-1 min-w-[110px] bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#52525B]" />
+        <input value={fluids} onChange={(e) => setFluids(e.target.value)} placeholder="fluids (ml)"
+          className="flex-1 min-w-[110px] bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#52525B]" />
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-[#52525B] uppercase">Gut (1 fine → 5 bad)</span>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button key={n} onClick={() => setGi(n)}
+            className={`w-7 h-7 rounded-md text-xs font-semibold ${gi === n ? "bg-[#FAFAFA] text-[#09090B]" : "bg-[#18181B] text-[#71717A] hover:bg-[#27272A]"}`}>
+            {n}
+          </button>
+        ))}
+        <button onClick={submit} disabled={saving}
+          className="ml-auto px-4 py-1.5 bg-[#27272A] rounded-lg text-xs text-[#A1A1AA] hover:bg-[#3F3F46] disabled:opacity-50">
+          {saving ? "…" : "Log fuel"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Session detail sheet ────────────────────────────────────────────────────
 
-function SessionSheet({ session, date, onClose, onUpdate, paceZones }: {
-  session: PlanSession; date: string; onClose: () => void; onUpdate: () => void; paceZones?: PaceZones;
+const DISC_KEY: Record<string, "run" | "ride" | "swim"> = {
+  running: "run", cycling: "ride", ride: "ride", swimming: "swim", swim: "swim",
+};
+
+function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
+  session: PlanSession; date: string; onClose: () => void; onUpdate: () => void; disciplineZones?: DisciplineZones;
 }) {
   const [rpe, setRpe] = useState<number | null>(session.rpe_actual ?? null);
   const [marking, setMarking] = useState(false);
@@ -176,7 +405,14 @@ function SessionSheet({ session, date, onClose, onUpdate, paceZones }: {
   const [done, setDone] = useState(false);
 
   const zone = ZONE_STYLE[session.intensity_zone] ?? ZONE_STYLE.Z2;
-  const phases = buildWorkoutDescription(session, paceZones);
+  // Prefer the template's own structured workout; fall back to the heuristic.
+  const phases: WorkoutPhase[] = session.structure
+    ? resolveStructure(session.structure, disciplineZones, session.discipline)
+    : buildWorkoutDescription(session, runZonesAsPaceZones(disciplineZones));
+
+  const discKey = DISC_KEY[session.discipline] ?? "run";
+  const sessionZone = disciplineZones?.[discKey]?.zones?.[session.intensity_zone];
+  const isTest = session.session_type.startsWith("Test -");
 
   async function markDone() {
     if (!rpe) { setError("Pick an RPE first"); return; }
@@ -262,28 +498,29 @@ function SessionSheet({ session, date, onClose, onUpdate, paceZones }: {
               {session.intensity_zone}
             </span>
             <span className="text-xs text-[#52525B] tabular-nums">{session.effective_duration_min} min</span>
+            {session.days_until_race != null && session.days_until_race <= 42 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#1C0A0A] border border-[#7F1D1D] text-[#FCA5A5] whitespace-nowrap">
+                🏁 R−{session.days_until_race}{session.current_phase === "taper" ? " · Taper" : ""}
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Target pace banner — shown when pace zones are available */}
-        {paceZones?.zones[session.intensity_zone] && (
+        {/* Target banner — the session's own discipline zone (pace / HR+speed / CSS) */}
+        {sessionZone?.display && (
           <div
             className="rounded-xl px-4 py-3 flex items-center gap-3"
             style={{ background: `${ZONE_DOT[session.intensity_zone] ?? "#52525B"}10`, border: `1px solid ${ZONE_DOT[session.intensity_zone] ?? "#52525B"}30` }}
           >
             <span className="text-sm font-bold" style={{ color: ZONE_DOT[session.intensity_zone] }}>
-              {paceZones.zones[session.intensity_zone].display}
+              {sessionZone.display}
+              {discKey === "ride" && sessionZone.speed_kmh_hint ? ` · ~${sessionZone.speed_kmh_hint} km/h` : ""}
             </span>
             <div className="flex-1 min-w-0">
               <p className="text-[11px]" style={{ color: `${ZONE_DOT[session.intensity_zone] ?? "#52525B"}cc` }}>
-                {paceZones.zones[session.intensity_zone].label} · HR {paceZones.zones[session.intensity_zone].hr_pct} max · RPE {paceZones.zones[session.intensity_zone].rpe}
+                {sessionZone.label} · RPE {sessionZone.rpe}
+                {discKey === "ride" ? " · pace by HR/feel (no power)" : ""}
               </p>
-              {paceZones.source === "race_time" && paceZones.target_time && (
-                <p className="text-[10px] text-[#3F3F46] mt-0.5">Based on target {paceZones.target_time}</p>
-              )}
-              {paceZones.source === "activity_history" && (
-                <p className="text-[10px] text-[#3F3F46] mt-0.5">Derived from last {paceZones.window_days}d of training</p>
-              )}
             </div>
           </div>
         )}
@@ -318,6 +555,9 @@ function SessionSheet({ session, date, onClose, onUpdate, paceZones }: {
           </div>
         </div>
 
+        {/* Fueling */}
+        {session.fueling && <FuelingSection fueling={session.fueling} />}
+
         {/* Stats row */}
         {session.effective_duration_min !== session.duration_min && (
           <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-4">
@@ -347,6 +587,16 @@ function SessionSheet({ session, date, onClose, onUpdate, paceZones }: {
           <div className="bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-3">
             <p className="text-xs text-[#52525B]">Optional — skip freely if fatigue is high</p>
           </div>
+        )}
+
+        {/* Benchmark test form (Test sessions only) */}
+        {isTest && (
+          <BenchmarkForm session={session} date={date} onDone={() => { onUpdate(); onClose(); }} />
+        )}
+
+        {/* Fueling quick-log — for sessions that actually need fuel */}
+        {!isTest && session.fueling && session.fueling.during.carbs_g_h > 0 && (
+          <FuelQuickLog session={session} date={date} onLogged={onUpdate} />
         )}
 
         {/* RPE picker */}
@@ -435,7 +685,7 @@ export function DayTraining({ initialPrescription, date }: {
   const [openSession, setOpenSession] = useState<PlanSession | null>(null);
   const [dismissedInjuries, setDismissedInjuries] = useState<number[]>([]);
   const [applyingInjury, setApplyingInjury] = useState<number | null>(null);
-  const [paceZones, setPaceZones] = useState<PaceZones | undefined>(undefined);
+  const [disciplineZones, setDisciplineZones] = useState<DisciplineZones | undefined>(undefined);
 
   // Always client-fetch — SSR seed may fail on Pi (API_INTERNAL_URL unreachable from Next.js process).
   useEffect(() => {
@@ -448,12 +698,13 @@ export function DayTraining({ initialPrescription, date }: {
         if (d !== null) {
           setData(d);
           setLoading(false);
-          // Fetch pace zones for the first session's goal
+          // Fetch per-discipline zones for the first session's goal (run pace,
+          // bike HR+speed, swim CSS) to resolve structured-workout targets.
           const firstGoalId = d.sessions?.[0]?.goal_id;
           if (firstGoalId) {
-            fetch(`/api/race-plans/goals/${firstGoalId}/pace-zones`)
+            fetch(`/api/race-plans/goals/${firstGoalId}/discipline-zones`)
               .then((r) => r.ok ? r.json() : null)
-              .then((z) => { if (z) setPaceZones(z); })
+              .then((z) => { if (z) setDisciplineZones(z); })
               .catch(() => {});
           }
         }
@@ -585,6 +836,12 @@ export function DayTraining({ initialPrescription, date }: {
                           </span>
                         )}
                       </div>
+                      {s.fueling && s.fueling.during.carbs_g_h > 0 && (
+                        <p className="text-[10px] text-[#F59E0B] mt-1">
+                          ⚡ {s.fueling.during.carbs_g_h}g/h · {s.fueling.during.fluid_ml_h}ml/h
+                          {s.fueling.gut_training ? " · gut-train" : ""}
+                        </p>
+                      )}
                       {s.adaptation_note && (
                         <p className="text-xs text-[#71717A] mt-1 truncate">{s.adaptation_note}</p>
                       )}
@@ -617,7 +874,7 @@ export function DayTraining({ initialPrescription, date }: {
           date={date}
           onClose={() => setOpenSession(null)}
           onUpdate={refresh}
-          paceZones={paceZones}
+          disciplineZones={disciplineZones}
         />
       )}
     </>

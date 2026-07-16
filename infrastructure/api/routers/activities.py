@@ -578,6 +578,71 @@ def delete_tennis_session(
     conn.commit()
 
 
+def _linked_plan_session(conn: sqlite3.Connection, activity_id: str):
+    """Return (plan_session_with_structure_and_fueling, fueling_log) if this
+    activity completed a scheduled session. Best-effort — returns (None, None)
+    when the tables/link aren't present."""
+    if not _table_exists(conn, "plan_sessions"):
+        return None, None
+    try:
+        ps = conn.execute(
+            """SELECT ps.*, rg.race_date, rg.race_type
+               FROM plan_sessions ps JOIN race_goals rg ON rg.id = ps.goal_id
+               WHERE ps.completed_activity_id=?""",
+            (activity_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None, None
+    if not ps:
+        return None, None
+
+    from datetime import date as _date
+    structure = None
+    if "structure_json" in ps.keys() and ps["structure_json"]:
+        try:
+            structure = json.loads(ps["structure_json"])
+        except Exception:
+            structure = None
+
+    weeks_to_race = None
+    if ps["race_date"]:
+        try:
+            weeks_to_race = max(0, (_date.fromisoformat(ps["race_date"]) - _date.today()).days // 7)
+        except Exception:
+            weeks_to_race = None
+
+    fueling = None
+    try:
+        from domains.training import fueling as _fuel
+        fueling = _fuel.session_fuel_targets(
+            ps["effective_duration_min"] or ps["duration_min"],
+            ps["intensity_zone"], ps["discipline"], weeks_to_race,
+        )
+    except Exception:
+        fueling = None
+
+    out = {
+        "id": ps["id"], "goal_id": ps["goal_id"], "session_type": ps["session_type"],
+        "discipline": ps["discipline"], "intensity_zone": ps["intensity_zone"],
+        "duration_min": ps["duration_min"], "effective_duration_min": ps["effective_duration_min"],
+        "week_number": ps["week_number"], "structure": structure, "fueling": fueling,
+    }
+
+    flog = None
+    if _table_exists(conn, "fueling_logs"):
+        fl = conn.execute(
+            "SELECT * FROM fueling_logs WHERE activity_id=? OR plan_session_id=? ORDER BY id DESC LIMIT 1",
+            (activity_id, ps["id"]),
+        ).fetchone()
+        if fl:
+            flog = {
+                "carbs_g": fl["carbs_g"], "fluids_ml": fl["fluids_ml"],
+                "sodium_mg": fl["sodium_mg"], "gi_severity": fl["gi_severity"],
+                "gi_notes": fl["gi_notes"],
+            }
+    return out, flog
+
+
 @router.get("/{activity_id}", response_model=ActivityDetail)
 def get_activity(
     activity_id: str,
@@ -596,6 +661,7 @@ def get_activity(
     efforts = _segment_efforts(conn, activity_id)
     splits = _splits(conn, activity_id)
     computed = _computed_metrics(conn, activity_id)
+    plan_session, fueling_log = _linked_plan_session(conn, activity_id)
 
     return ActivityDetail(
         **_row_to_summary(row).__dict__,
@@ -606,4 +672,6 @@ def get_activity(
         splits=splits,
         computed=computed,
         tennis=_tennis_session(conn, activity_id),
+        plan_session=plan_session,
+        fueling_log=fueling_log,
     )

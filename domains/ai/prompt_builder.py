@@ -29,6 +29,7 @@ def morning_brief(
     weather_today: dict,
     week_summary: dict,
     last_intention: Optional[str],
+    todays_session: Optional[dict] = None,
 ) -> str:
     """
     Builds the 6am morning brief prompt.
@@ -71,12 +72,26 @@ def morning_brief(
 
     intention_line = f"\nLast night's intention: {last_intention}" if last_intention else ""
 
+    session_line = ""
+    if todays_session:
+        fuel = todays_session.get("fueling") or {}
+        during = fuel.get("during") or {}
+        carbs = during.get("carbs_g_h")
+        fuel_txt = f", fuel {carbs} g/h from ~20 min in" if carbs else ""
+        gut = (fuel.get("gut_training") or {}).get("is_target_session")
+        gut_txt = " (gut-training day — practise race products)" if gut else ""
+        session_line = (
+            f"\nToday's session: {todays_session['type']} "
+            f"({todays_session['duration_min']} min {todays_session['zone']}){fuel_txt}{gut_txt}"
+        )
+
     return f"""You are a concise personal daily assistant. Write a warm, grounded morning brief in 3-4 sentences using the data below.
 Mention the most notable numbers, flag anything worth attention (low HRV, poor sleep, high fatigue), and end with one actionable suggestion for the day.
+If there's a training session today, mention it and (if fuelling is given) a one-line fuelling reminder.
 Do not start with "Good morning". Do not repeat all numbers — pick the most meaningful ones.
 
 Today: {today}
-Weather: {weather_desc}, {temp_min}–{temp_max}°C
+Weather: {weather_desc}, {temp_min}–{temp_max}°C{session_line}
 
 Yesterday: energy {energy_yd}/10, mood {mood_yd}/10
 Sleep last night: {sleep_dur}, score {sleep_score}/100, deep {deep_pct}, REM {rem_pct}
@@ -174,6 +189,30 @@ Load index data (last {data.get('days', 7)} days):
 Write the analysis now:"""
 
     return f"Summarise the following personal health data in 3-4 sentences: {data}"
+
+
+def adaptation_narrative(data: dict) -> str:
+    """
+    Builds a short prompt explaining Omyra's weekly plan adaptation.
+    data keys: recommendation, readiness_score, risk_level, volume_factor,
+               intensity_factor, phase, week_number, total_weeks, weeks_to_race,
+               tsb, ramp_rate, compliance_pct, avg_rpe, key_sessions (list of str).
+    """
+    key_sessions = data.get("key_sessions") or []
+    sess_line = "; ".join(key_sessions[:4]) or "none scheduled"
+    return f"""You are Omyra, a calm, experienced triathlon coach. In 2-3 sentences, explain this week's plan adjustment to the athlete in plain language.
+Say what you changed and why, reference the most important signal (form, fatigue, compliance, or readiness), and end with one concrete cue for the week. Be encouraging but honest. Do not list every number.
+
+Plan context:
+- Phase: {data.get('phase', 'unknown')} (week {data.get('week_number', '?')}/{data.get('total_weeks', '?')}, {data.get('weeks_to_race', '?')} weeks to race)
+- Decision: {data.get('recommendation', 'maintain_course')} → volume ×{data.get('volume_factor', 1.0)}, intensity ×{data.get('intensity_factor', 1.0)}
+- Readiness score: {data.get('readiness_score', 'unknown')}/100
+- Risk level: {data.get('risk_level', 'unknown')}
+- Form (TSB): {data.get('tsb', 'unknown')} | CTL ramp: {data.get('ramp_rate', 'unknown')}/week
+- Recent compliance: {data.get('compliance_pct', 'unknown')}% | avg RPE: {data.get('avg_rpe', 'unknown')}
+- This week's key sessions: {sess_line}
+
+Write the explanation now:"""
 
 
 def weekly_expense_summary(week_start: str, data: dict) -> str:

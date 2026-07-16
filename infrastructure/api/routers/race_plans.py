@@ -52,6 +52,37 @@ def _phase_for_week(week_num: int, total_weeks: int) -> PlanPhase:
     return PlanPhase.TAPER
 
 
+def _plan_total_weeks(conn: sqlite3.Connection, goal_row: sqlite3.Row) -> int:
+    """
+    The real number of weeks in the materialized plan. After a trim (e.g. a goal
+    that starts mid-template), this is the authoritative span — MAX(week_number).
+    Falls back to the plan_start→race_date span, then the template constant.
+    Using this instead of RACE_TYPE_WEEKS keeps phase/taper detection correct when
+    the plan was trimmed (a 16-week restart of a 20-week template is really 16 weeks).
+    """
+    r = conn.execute(
+        "SELECT MAX(week_number) AS mw FROM plan_sessions WHERE goal_id=?",
+        (goal_row["id"],),
+    ).fetchone()
+    if r and r["mw"]:
+        return int(r["mw"])
+    plan_start = goal_row["plan_start_date"]
+    if plan_start:
+        ps = date.fromisoformat(plan_start)
+        rd = date.fromisoformat(goal_row["race_date"])
+        return max(1, ((rd - ps).days + 6) // 7)
+    return RACE_TYPE_WEEKS.get(goal_row["race_type"], 16)
+
+
+def _current_week(plan_start: Optional[str], total_weeks: int) -> int:
+    """1-based week index within the plan, clamped to [1, total_weeks]."""
+    if not plan_start:
+        return 1
+    ps = date.fromisoformat(plan_start)
+    wk = (date.today() - ps).days // 7 + 1
+    return max(1, min(wk, total_weeks))
+
+
 def _week_bounds(date_str: str):
     """Return (monday_str, sunday_str) for the calendar week containing date_str."""
     d = date.fromisoformat(date_str)
@@ -74,10 +105,105 @@ def _effective_duration(duration_min: int, volume_factor: float) -> int:
     return max(10, round(duration_min * volume_factor))
 
 
-def _materialize_sessions(conn: sqlite3.Connection, goal_id: int, goal_row: sqlite3.Row) -> int:
+# ── zone helpers (shared by pace-zones and discipline-zones) ─────────────────
+
+_ZONE_META = {
+    "Z1": {"hr_pct": "56–75%", "rpe": "2–3", "label": "Recovery"},
+    "Z2": {"hr_pct": "76–86%", "rpe": "4–5", "label": "Aerobic"},
+    "Z3": {"hr_pct": "87–91%", "rpe": "6–7", "label": "Tempo"},
+    "Z4": {"hr_pct": "92–95%", "rpe": "8",   "label": "Threshold"},
+    "Z5": {"hr_pct": "95–100%", "rpe": "9–10", "label": "VO2max"},
+}
+
+# threshold-pace multipliers (Z3 = threshold)
+_PACE_MULT = {"Z1": 1.37, "Z2": 1.15, "Z3": 1.00, "Z4": 0.885, "Z5": 0.80}
+# speed factors relative to a hard-steady reference speed (bike, no power meter)
+_SPEED_FACTOR = {"Z1": 0.72, "Z2": 0.85, "Z3": 0.93, "Z4": 1.00, "Z5": 1.06}
+# swim CSS offsets in seconds/100m (Z4 = CSS)
+_CSS_OFFSET = {"Z1": 16, "Z2": 10, "Z3": 5, "Z4": 0, "Z5": -3}
+
+
+def _s_per_km_to_display(s: float) -> str:
+    m = int(s) // 60
+    sec = int(s) % 60
+    return f"{m}:{sec:02d}/km"
+
+
+def _s_per_100m_to_display(s: float) -> str:
+    m = int(s) // 60
+    sec = int(s) % 60
+    return f"{m}:{sec:02d}/100m"
+
+
+def _run_zones_from_threshold(threshold_s_km: float) -> dict:
+    zones = {}
+    for z, mult in _PACE_MULT.items():
+        pace_s = threshold_s_km * mult
+        zones[z] = {
+            "pace_s_km": round(pace_s),
+            "display": _s_per_km_to_display(pace_s),
+            **_ZONE_META[z],
+        }
+    return zones
+
+
+def _latest_zone_row(conn: sqlite3.Connection, sport: str) -> Optional[sqlite3.Row]:
+    try:
+        return conn.execute(
+            "SELECT * FROM athlete_zones WHERE sport=? ORDER BY valid_from DESC LIMIT 1",
+            (sport,),
+        ).fetchone()
+    except Exception:
+        return None
+
+
+_HR_BANDS = [("Z1", 0.0, 0.65), ("Z2", 0.65, 0.75), ("Z3", 0.75, 0.82),
+             ("Z4", 0.82, 0.88), ("Z5", 0.88, 1.6)]
+
+
+def _zones_json_from_max(max_hr: int) -> str:
+    return json.dumps([
+        {"name": n, "min_hr": round(max_hr * lo), "max_hr": 999 if hi >= 1.5 else round(max_hr * hi)}
+        for n, lo, hi in _HR_BANDS
+    ])
+
+
+def _race_sweat_rate(conn: sqlite3.Connection) -> Optional[float]:
+    """Latest hot/humid sweat rate (fallback overall) for hydration targeting."""
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sweat_tests'").fetchone():
+        return None
+    row = conn.execute(
+        "SELECT sweat_rate_l_h FROM sweat_tests WHERE sweat_rate_l_h IS NOT NULL "
+        "ORDER BY (conditions IN ('hot','humid')) DESC, date DESC LIMIT 1"
+    ).fetchone()
+    return row["sweat_rate_l_h"] if row else None
+
+
+def _session_fuel(conn, duration_min, zone, discipline, weeks_to_race):
+    """Compute per-session fueling targets; returns None on any failure."""
+    try:
+        from domains.training import fueling
+        return fueling.session_fuel_targets(
+            duration_min or 0, zone, discipline, weeks_to_race,
+            sweat_rate_l_h=_race_sweat_rate(conn),
+        )
+    except Exception:
+        return None
+
+
+def _materialize_sessions(
+    conn: sqlite3.Connection,
+    goal_id: int,
+    goal_row: sqlite3.Row,
+    from_date: Optional[str] = None,
+) -> int:
     """
     Run the scheduler and INSERT sessions into plan_sessions.
     Returns the number of sessions inserted.
+
+    When from_date is set, sessions dated before it are skipped — used to rebuild
+    only the remaining plan (e.g. after a mid-plan template change) without
+    duplicating past weeks that still hold completed/skipped history.
     """
     race_type = goal_row["race_type"]
     variant = goal_row["variant"]
@@ -111,14 +237,21 @@ def _materialize_sessions(conn: sqlite3.Connection, goal_id: int, goal_row: sqli
             s_date = session.get("date", "")
             if not s_date:
                 continue
+            # Pin the race session to the actual race date (the scheduler otherwise
+            # spreads it onto an ordinary available day, which can miss race day).
+            if "race" in session["type"].lower():
+                s_date = race_date_str
+            if from_date and s_date < from_date:
+                continue
             discipline = _discipline_from_type(session["type"])
             eff_dur = _effective_duration(session["duration"], volume_factor)
+            structure = session.get("structure")
             conn.execute(
                 """INSERT INTO plan_sessions
                    (goal_id, session_date, original_date, week_number,
                     session_type, discipline, duration_min, intensity_zone,
-                    is_optional, effective_duration_min, status)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,'pending')""",
+                    is_optional, effective_duration_min, status, structure_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?)""",
                 (
                     goal_id,
                     s_date,
@@ -130,6 +263,7 @@ def _materialize_sessions(conn: sqlite3.Connection, goal_id: int, goal_row: sqli
                     session.get("intensity_zone", "Z2"),
                     1 if session.get("optional") else 0,
                     eff_dur,
+                    json.dumps(structure) if structure else None,
                 ),
             )
             count += 1
@@ -152,13 +286,8 @@ def _goal_out(row: sqlite3.Row, conn: sqlite3.Connection) -> dict:
         weeks_materialized = r["mw"] or 0
 
     race_type = row["race_type"]
-    total_weeks = RACE_TYPE_WEEKS.get(race_type, 16)
-    # current week number within the plan
-    current_week = 1
-    if plan_start:
-        ps = date.fromisoformat(plan_start)
-        delta = (today_d - ps).days
-        current_week = max(1, delta // 7 + 1)
+    total_weeks = _plan_total_weeks(conn, row)
+    current_week = _current_week(plan_start, total_weeks)
 
     phase = _phase_for_week(current_week, total_weeks)
 
@@ -207,6 +336,13 @@ def _goal_out(row: sqlite3.Row, conn: sqlite3.Connection) -> dict:
 
 
 def _session_out(row: sqlite3.Row) -> dict:
+    keys = row.keys()
+    structure = None
+    if "structure_json" in keys and row["structure_json"]:
+        try:
+            structure = json.loads(row["structure_json"])
+        except Exception:
+            structure = None
     return {
         "id": row["id"],
         "goal_id": row["goal_id"],
@@ -224,6 +360,7 @@ def _session_out(row: sqlite3.Row) -> dict:
         "completed_activity_id": row["completed_activity_id"],
         "rpe_actual": row["rpe_actual"],
         "notes": row["notes"],
+        "structure": structure,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -274,6 +411,7 @@ class GoalPatch(BaseModel):
     volume_factor: Optional[float] = None
     intensity_factor: Optional[float] = None
     target_time: Optional[str] = None
+    plan_start_date: Optional[str] = None  # restart the plan from a new (Monday) date
 
 
 class SessionPatch(BaseModel):
@@ -379,12 +517,23 @@ def patch_goal(goal_id: int, body: GoalPatch, conn: DB):
         params.append(body.target_time)
 
     regenerate = False
+    restart = False
     if body.available_days is not None:
         if len(body.available_days) < 3:
             raise HTTPException(status_code=422, detail="Need at least 3 available days")
         updates.append("available_days=?")
         params.append(",".join(body.available_days))
         regenerate = True
+
+    if body.plan_start_date is not None:
+        try:
+            date.fromisoformat(body.plan_start_date)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="plan_start_date must be ISO YYYY-MM-DD")
+        updates.append("plan_start_date=?")
+        params.append(body.plan_start_date)
+        regenerate = True
+        restart = True
 
     params.append(goal_id)
     conn.execute(
@@ -393,10 +542,15 @@ def patch_goal(goal_id: int, body: GoalPatch, conn: DB):
     conn.commit()
 
     if regenerate:
-        conn.execute(
-            "DELETE FROM plan_sessions WHERE goal_id=? AND status='pending'",
-            (goal_id,),
-        )
+        # A restart (new plan_start_date) wipes the whole schedule and rebuilds;
+        # an availability-only change preserves completed/skipped history.
+        if restart:
+            conn.execute("DELETE FROM plan_sessions WHERE goal_id=?", (goal_id,))
+        else:
+            conn.execute(
+                "DELETE FROM plan_sessions WHERE goal_id=? AND status='pending'",
+                (goal_id,),
+            )
         conn.commit()
         updated_row = _row(conn, "race_goals", goal_id)
         plan_start = updated_row["plan_start_date"]
@@ -433,20 +587,46 @@ def start_plan_early(goal_id: int, conn: DB):
 
 
 @router.post("/goals/{goal_id}/rematerialize", status_code=200)
-def rematerialize_goal(goal_id: int, conn: DB):
+def rematerialize_goal(
+    goal_id: int,
+    conn: DB,
+    from_date: Optional[str] = Query(None, alias="from"),
+):
     """
-    Delete all pending sessions and regenerate the full plan from plan_start_date.
-    Completed/skipped sessions are preserved. Use this after scheduler fixes or
-    availability changes to rebuild the schedule without losing logged history.
+    Delete pending sessions and regenerate the plan from plan_start_date.
+    Completed/skipped sessions are preserved.
+
+    Pass ?from=current_week (or ?from=YYYY-MM-DD) to only rebuild the remaining
+    plan from that date onward — used after a mid-plan template change so past
+    weeks (with their logged history) are left untouched and not duplicated.
     """
     row = _row(conn, "race_goals", goal_id)
-    deleted = conn.execute(
-        "DELETE FROM plan_sessions WHERE goal_id=? AND status='pending'",
-        (goal_id,),
-    ).rowcount
+
+    cutoff: Optional[str] = None
+    if from_date:
+        if from_date == "current_week":
+            today_d = date.today()
+            cutoff = (today_d - timedelta(days=today_d.weekday())).isoformat()
+        else:
+            try:
+                date.fromisoformat(from_date)
+            except ValueError:
+                raise HTTPException(status_code=422, detail="from must be 'current_week' or ISO YYYY-MM-DD")
+            cutoff = from_date
+
+    if cutoff:
+        deleted = conn.execute(
+            "DELETE FROM plan_sessions WHERE goal_id=? AND status='pending' AND session_date >= ?",
+            (goal_id, cutoff),
+        ).rowcount
+    else:
+        deleted = conn.execute(
+            "DELETE FROM plan_sessions WHERE goal_id=? AND status='pending'",
+            (goal_id,),
+        ).rowcount
     conn.commit()
-    count = _materialize_sessions(conn, goal_id, row)
-    return {"sessions_deleted": deleted, "sessions_created": count}
+    count = _materialize_sessions(conn, goal_id, row, from_date=cutoff)
+    return {"sessions_deleted": deleted, "sessions_created": count, "from": cutoff}
 
 
 @router.get("/goals/{goal_id}/pace-zones")
@@ -477,34 +657,30 @@ def get_pace_zones(goal_id: int, conn: DB):
         sport = "running"
         distance_km = 21.1
 
-    # Zone HR% labels and RPE (fixed per zone)
-    zone_meta = {
-        "Z1": {"hr_pct": "56–75%", "rpe": "2–3", "label": "Recovery"},
-        "Z2": {"hr_pct": "76–86%", "rpe": "4–5", "label": "Aerobic"},
-        "Z3": {"hr_pct": "87–91%", "rpe": "6–7", "label": "Tempo"},
-        "Z4": {"hr_pct": "92–95%", "rpe": "8",   "label": "Threshold"},
-        "Z5": {"hr_pct": "95–100%","rpe": "9–10", "label": "VO2max"},
-    }
+    _zones_from_threshold = _run_zones_from_threshold
 
-    def _s_per_km_to_display(s: float) -> str:
-        m = int(s) // 60
-        sec = int(s) % 60
-        return f"{m}:{sec:02d}/km"
+    # Tier 0: a measured/benchmarked run threshold in athlete_zones (non-placeholder)
+    # reflects current fitness best and wins over everything else.
+    run_zone = _latest_zone_row(conn, "run")
+    if (run_zone and run_zone["valid_from"] != "2019-01-01"
+            and run_zone["threshold_pace_s_per_km"]):
+        threshold_s_km = float(run_zone["threshold_pace_s_per_km"])
+        return {
+            "sport": sport,
+            "source": "athlete_zones",
+            "target_time": target_time,
+            "threshold_pace_s_km": round(threshold_s_km),
+            "threshold_pace_display": _s_per_km_to_display(threshold_s_km),
+            "zones": _zones_from_threshold(threshold_s_km),
+            "activities_analyzed": None,
+            "window_days": None,
+        }
 
-    def _zones_from_threshold(threshold_s_km: float) -> dict:
-        multipliers = {"Z1": 1.37, "Z2": 1.15, "Z3": 1.00, "Z4": 0.885, "Z5": 0.80}
-        zones = {}
-        for z, mult in multipliers.items():
-            pace_s = threshold_s_km * mult
-            zones[z] = {
-                "pace_s_km": round(pace_s),
-                "display": _s_per_km_to_display(pace_s),
-                **zone_meta[z],
-            }
-        return zones
-
-    # Tier 1: derive from target race time
-    if target_time:
+    # Tier 1: derive from target race time — ONLY for pure running races.
+    # For triathlons, target_time is the whole-race time (swim+bike+run), so it
+    # cannot be read as a 21.1km run split; fall through to activity history.
+    is_running_race = race_type in ("half_marathon", "marathon", "5k", "10k")
+    if target_time and is_running_race:
         try:
             parts = target_time.split(":")
             if len(parts) == 3:
@@ -598,6 +774,200 @@ def get_pace_zones(goal_id: int, conn: DB):
     }
 
 
+@router.get("/goals/{goal_id}/discipline-zones")
+def get_discipline_zones(goal_id: int, conn: DB):
+    """
+    Per-discipline training targets resolved from athlete_zones, used to render
+    structured-workout steps. Run = pace/km; ride = HR bands + RPE + a flat-speed
+    hint (no power meter this year); swim = CSS-offset pace/100m.
+    """
+    _row(conn, "race_goals", goal_id)
+    out: dict = {}
+
+    # ---- RUN: reuse the /pace-zones tiering for the threshold, then bands ----
+    pace = get_pace_zones(goal_id, conn)
+    out["run"] = {
+        "source": pace.get("source"),
+        "threshold_pace_s_km": pace.get("threshold_pace_s_km"),
+        "threshold_pace_display": pace.get("threshold_pace_display"),
+        "zones": pace.get("zones"),
+    }
+
+    # ---- RIDE: HR bands from athlete_zones + speed hint from reference pace ----
+    ride_row = _latest_zone_row(conn, "ride")
+    ride_zones: dict = {}
+    ref_speed_kmh = None
+    threshold_hr = ride_row["threshold_hr"] if ride_row else None
+    if ride_row and ride_row["threshold_pace_s_per_km"]:
+        ref_speed_kmh = round(3600.0 / ride_row["threshold_pace_s_per_km"], 1)  # 1000m/s→km/h
+    zone_bands = []
+    if ride_row and ride_row["zones_json"]:
+        try:
+            zone_bands = json.loads(ride_row["zones_json"])
+        except Exception:
+            zone_bands = []
+    band_by_name = {b["name"]: b for b in zone_bands}
+    for z in ("Z1", "Z2", "Z3", "Z4", "Z5"):
+        band = band_by_name.get(z)
+        entry = dict(_ZONE_META[z])
+        if band:
+            hr_lo, hr_hi = band.get("min_hr"), band.get("max_hr")
+            entry["hr_lo"] = hr_lo
+            entry["hr_hi"] = None if hr_hi and hr_hi >= 999 else hr_hi
+            if hr_lo is not None:
+                hi_disp = "+" if (hr_hi and hr_hi >= 999) else f"–{entry['hr_hi']}"
+                entry["display"] = f"{hr_lo}{hi_disp} bpm"
+        if ref_speed_kmh:
+            entry["speed_kmh_hint"] = round(ref_speed_kmh * _SPEED_FACTOR[z], 1)
+        ride_zones[z] = entry
+    out["ride"] = {
+        "source": (ride_row and ("placeholder" if ride_row["valid_from"] == "2019-01-01" else "derived")),
+        "threshold_hr": threshold_hr,
+        "ref_speed_kmh": ref_speed_kmh,
+        "zones": ride_zones,
+        "note": "No power meter — pace by HR + RPE + speed feel.",
+    }
+
+    # ---- SWIM: CSS-offset pace/100m ----
+    swim_row = _latest_zone_row(conn, "swim")
+    css = swim_row["css_pace_s_per_100m"] if swim_row else None
+    swim_zones: dict = {}
+    for z in ("Z1", "Z2", "Z3", "Z4", "Z5"):
+        entry = dict(_ZONE_META[z])
+        if css:
+            pace_100 = css + _CSS_OFFSET[z]
+            entry["pace_s_100m"] = round(pace_100)
+            entry["display"] = _s_per_100m_to_display(pace_100)
+        swim_zones[z] = entry
+    out["swim"] = {
+        "source": (swim_row and ("placeholder" if swim_row["valid_from"] == "2019-01-01" else "derived")),
+        "css_s_100m": css,
+        "css_display": _s_per_100m_to_display(css) if css else None,
+        "zones": swim_zones,
+    }
+
+    return out
+
+
+# ── Benchmark tests ──────────────────────────────────────────────────────────
+
+class BenchmarkCreate(BaseModel):
+    date: Optional[str] = None
+    sport: str            # run | ride | swim
+    test_type: str        # run_1k_tt | bike_20min | swim_css
+    session_id: Optional[int] = None
+    result: dict          # run: {time_s}; bike: {avg_hr, avg_speed_kmh}; swim: {t400_s, t200_s}
+
+
+@router.post("/benchmarks", status_code=201)
+def create_benchmark(body: BenchmarkCreate, conn: DB):
+    """
+    Log a field-test result → derive the new threshold, write a fresh
+    athlete_zones row (valid from the test date), record it in benchmark_results,
+    mark the linked session completed, and return old→new deltas.
+    """
+    sport = body.sport
+    if sport not in ("run", "ride", "swim"):
+        raise HTTPException(status_code=422, detail="sport must be run|ride|swim")
+    test_date = body.date or _today()
+    r = body.result or {}
+    prev = _latest_zone_row(conn, sport)
+    max_hr = (prev["max_hr"] if prev else None) or 195
+
+    derived: dict = {}
+    old_val = None
+    new_val = None
+    if body.test_type == "run_1k_tt":
+        time_s = float(r.get("time_s") or 0)
+        if time_s <= 0:
+            raise HTTPException(status_code=422, detail="run_1k_tt needs result.time_s")
+        threshold = round(time_s * 1.12)  # 1k pace × 1.12 ≈ threshold pace
+        derived = {"threshold_pace_s_per_km": threshold}
+        old_val = prev["threshold_pace_s_per_km"] if prev else None
+        new_val = threshold
+    elif body.test_type == "bike_20min":
+        avg_hr = float(r.get("avg_hr") or 0)
+        avg_speed = float(r.get("avg_speed_kmh") or 0)
+        if avg_hr <= 0:
+            raise HTTPException(status_code=422, detail="bike_20min needs result.avg_hr")
+        threshold_hr = round(avg_hr * 0.98)
+        ref_s_km = round(3600.0 / avg_speed) if avg_speed > 0 else (prev["threshold_pace_s_per_km"] if prev else None)
+        derived = {"threshold_hr": threshold_hr, "threshold_pace_s_per_km": ref_s_km}
+        old_val = prev["threshold_hr"] if prev else None
+        new_val = threshold_hr
+    elif body.test_type == "swim_css":
+        t400 = float(r.get("t400_s") or 0)
+        t200 = float(r.get("t200_s") or 0)
+        if t400 <= 0 or t200 <= 0:
+            raise HTTPException(status_code=422, detail="swim_css needs result.t400_s and t200_s")
+        css = round((t400 - t200) / 2.0)  # per-100m
+        derived = {"css_pace_s_per_100m": css}
+        old_val = prev["css_pace_s_per_100m"] if prev else None
+        new_val = css
+    else:
+        raise HTTPException(status_code=422, detail="Unknown test_type")
+
+    # Build the new athlete_zones row (carry forward unspecified fields)
+    row_vals = {
+        "max_hr": max_hr,
+        "threshold_hr": derived.get("threshold_hr", prev["threshold_hr"] if prev else None),
+        "ftp_w": prev["ftp_w"] if prev else None,
+        "threshold_pace_s_per_km": derived.get("threshold_pace_s_per_km",
+                                               prev["threshold_pace_s_per_km"] if prev else None),
+        "css_pace_s_per_100m": derived.get("css_pace_s_per_100m",
+                                           prev["css_pace_s_per_100m"] if prev else None),
+    }
+    conn.execute(
+        """INSERT OR REPLACE INTO athlete_zones
+           (valid_from, sport, max_hr, threshold_hr, ftp_w,
+            threshold_pace_s_per_km, css_pace_s_per_100m, zones_json)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (test_date, sport, row_vals["max_hr"], row_vals["threshold_hr"], row_vals["ftp_w"],
+         row_vals["threshold_pace_s_per_km"], row_vals["css_pace_s_per_100m"],
+         _zones_json_from_max(row_vals["max_hr"])),
+    )
+
+    delta = {"old": old_val, "new": new_val,
+             "change": (round(new_val - old_val, 1) if (old_val is not None and new_val is not None) else None)}
+    conn.execute(
+        """INSERT INTO benchmark_results (date, sport, test_type, result_json, derived_json, session_id)
+           VALUES (?,?,?,?,?,?)""",
+        (test_date, sport, body.test_type, json.dumps(r), json.dumps({**derived, "delta": delta}),
+         body.session_id),
+    )
+
+    # Mark the linked test session completed
+    if body.session_id:
+        conn.execute(
+            "UPDATE plan_sessions SET status='completed', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?",
+            (body.session_id,),
+        )
+    conn.commit()
+
+    return {"date": test_date, "sport": sport, "test_type": body.test_type,
+            "derived": derived, "delta": delta}
+
+
+@router.get("/benchmarks")
+def list_benchmarks(conn: DB, sport: Optional[str] = Query(None)):
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='benchmark_results'").fetchone():
+        return []
+    where = "WHERE sport=?" if sport else ""
+    params = [sport] if sport else []
+    rows = conn.execute(
+        f"SELECT * FROM benchmark_results {where} ORDER BY date DESC, id DESC", params
+    ).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "id": r["id"], "date": r["date"], "sport": r["sport"], "test_type": r["test_type"],
+            "result": json.loads(r["result_json"]) if r["result_json"] else None,
+            "derived": json.loads(r["derived_json"]) if r["derived_json"] else None,
+            "session_id": r["session_id"],
+        })
+    return out
+
+
 # ── Day endpoint ─────────────────────────────────────────────────────────────
 
 @router.get("/day/{date_str}")
@@ -614,9 +984,11 @@ def day_prescription(date_str: str, conn: DB):
     hrv = conn.execute(
         "SELECT status FROM hrv WHERE date=?", (date_str,)
     ).fetchone()
-    roster = conn.execute(
-        "SELECT duty_type FROM roster WHERE date=?", (date_str,)
-    ).fetchone()
+    roster = None
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name='roster'").fetchone():
+        roster = conn.execute(
+            "SELECT duty_type FROM roster WHERE date=?", (date_str,)
+        ).fetchone()
     daily = conn.execute(
         "SELECT body_battery_high FROM daily_stats WHERE date=?", (date_str,)
     ).fetchone()
@@ -682,13 +1054,20 @@ def day_prescription(date_str: str, conn: DB):
 
         # Compute current phase for display
         plan_start = r["plan_start_date"]
-        total_weeks = RACE_TYPE_WEEKS.get(r["race_type"], 16)
-        current_week_num = 1
-        if plan_start:
-            ps_d = date.fromisoformat(plan_start)
-            delta = (date.today() - ps_d).days
-            current_week_num = max(1, delta // 7 + 1)
+        total_weeks = _plan_total_weeks(conn, {"id": r["goal_id"], "plan_start_date": plan_start,
+                                               "race_date": r["rg_race_date"], "race_type": r["race_type"]})
+        current_week_num = _current_week(plan_start, total_weeks)
         phase = _phase_for_week(current_week_num, total_weeks)
+        race_date_val = r["rg_race_date"]
+        days_until_race = None
+        weeks_to_race = None
+        if race_date_val:
+            days_until_race = max(0, (date.fromisoformat(race_date_val) - date.today()).days)
+            weeks_to_race = days_until_race // 7
+
+        # Per-session fueling targets (uses the latest hot-conditions sweat rate if known)
+        fuel = _session_fuel(conn, r["effective_duration_min"] or r["duration_min"],
+                             r["intensity_zone"], r["discipline"], weeks_to_race)
 
         sessions.append({
             **_session_out(r),
@@ -698,6 +1077,8 @@ def day_prescription(date_str: str, conn: DB):
             "current_phase": phase.value,
             "current_week": current_week_num,
             "total_weeks": total_weeks,
+            "days_until_race": days_until_race,
+            "fueling": fuel,
         })
 
     # Combined load warning for multiple active goals
@@ -915,6 +1296,77 @@ def goal_sessions(
     return [_session_out(r) for r in rows]
 
 
+# ── Race-day nutrition plan ──────────────────────────────────────────────────
+
+class NutritionPlanGenerate(BaseModel):
+    weight_kg: float = 85.0
+    target_splits: Optional[dict] = None
+    carbs_g_h_override: Optional[int] = None
+
+
+def _trained_carbs_g_h(conn, goal_id: int) -> Optional[int]:
+    """Best carbs/h actually logged on a gut-training session for this goal."""
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='fueling_logs'").fetchone():
+        return None
+    row = conn.execute(
+        """SELECT MAX(fl.carbs_g / (fl.duration_min/60.0)) AS best
+           FROM fueling_logs fl JOIN plan_sessions ps ON ps.id = fl.plan_session_id
+           WHERE ps.goal_id=? AND fl.carbs_g IS NOT NULL AND fl.duration_min>0""",
+        (goal_id,),
+    ).fetchone()
+    return round(row["best"]) if row and row["best"] else None
+
+
+@router.post("/goals/{goal_id}/nutrition-plan/generate")
+def generate_nutrition_plan(goal_id: int, body: NutritionPlanGenerate, conn: DB):
+    goal_row = _row(conn, "race_goals", goal_id)
+    from domains.training import race_nutrition
+    plan = race_nutrition.build_race_plan(
+        goal_row,
+        weight_kg=body.weight_kg,
+        race_sweat_rate_l_h=_race_sweat_rate(conn),
+        trained_carbs_g_h=body.carbs_g_h_override or _trained_carbs_g_h(conn, goal_id),
+        target_splits=body.target_splits,
+    )
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='race_nutrition_plans'").fetchone():
+        conn.execute(
+            """INSERT INTO race_nutrition_plans (goal_id, plan_json, updated_at)
+               VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+               ON CONFLICT(goal_id) DO UPDATE SET plan_json=excluded.plan_json, updated_at=excluded.updated_at""",
+            (goal_id, json.dumps(plan)),
+        )
+        conn.commit()
+    return plan
+
+
+@router.get("/goals/{goal_id}/nutrition-plan")
+def get_nutrition_plan(goal_id: int, conn: DB):
+    _row(conn, "race_goals", goal_id)
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='race_nutrition_plans'").fetchone():
+        return None
+    row = conn.execute("SELECT plan_json, updated_at FROM race_nutrition_plans WHERE goal_id=?", (goal_id,)).fetchone()
+    if not row:
+        return None
+    return {"plan": json.loads(row["plan_json"]), "updated_at": row["updated_at"]}
+
+
+class NutritionPlanPut(BaseModel):
+    plan: dict
+
+
+@router.put("/goals/{goal_id}/nutrition-plan")
+def put_nutrition_plan(goal_id: int, body: NutritionPlanPut, conn: DB):
+    _row(conn, "race_goals", goal_id)
+    conn.execute(
+        """INSERT INTO race_nutrition_plans (goal_id, plan_json, updated_at)
+           VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+           ON CONFLICT(goal_id) DO UPDATE SET plan_json=excluded.plan_json, updated_at=excluded.updated_at""",
+        (goal_id, json.dumps(body.plan)),
+    )
+    conn.commit()
+    return {"plan": body.plan}
+
+
 # ── Adaptation ───────────────────────────────────────────────────────────────
 
 @router.post("/goals/{goal_id}/adapt")
@@ -926,11 +1378,9 @@ def adapt_goal(goal_id: int, conn: DB):
 
     race_date_d = date.fromisoformat(goal_row["race_date"])
     plan_start_str = goal_row["plan_start_date"] or _today()
-    total_weeks = RACE_TYPE_WEEKS.get(goal_row["race_type"], 16)
+    total_weeks = _plan_total_weeks(conn, goal_row)
     today_d = date.today()
-    plan_start_d = date.fromisoformat(plan_start_str)
-    weeks_elapsed = max(0, (today_d - plan_start_d).days // 7)
-    current_week = weeks_elapsed + 1
+    current_week = _current_week(plan_start_str, total_weeks)
     weeks_remaining = max(1, (race_date_d - today_d).days // 7)
     phase = _phase_for_week(current_week, total_weeks)
 
@@ -970,13 +1420,105 @@ def adapt_goal(goal_id: int, conn: DB):
             "UPDATE plan_sessions SET effective_duration_min=?, updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?",
             (new_dur, fs["id"]),
         )
+
+    # Optional LLM narrative explaining the decision — deterministic explanation
+    # is always present in `result`; the narrative is a graceful-fallback bonus.
+    narrative = _adaptation_narrative(conn, goal_id, week_start, week_end, result,
+                                      week_data, phase, current_week, total_weeks, weeks_remaining)
+    result["narrative"] = narrative
+
+    # Adaptation history log (never let logging failures break the endpoint)
+    try:
+        conn.execute(
+            """INSERT INTO adaptation_log
+               (goal_id, date, week_number, readiness_score, risk_level, recommendation,
+                volume_factor, intensity_factor, inputs_json, narrative)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (goal_id, _today(), current_week, result["readiness_score"], result["risk_level"],
+             result["recommendation"], new_volume, new_intensity,
+             json.dumps({
+                 "tsb": week_data.tsb, "ramp_rate": week_data.ramp_rate,
+                 "compliance": round(week_data.compliance_score, 3),
+                 "avg_rpe": round(week_data.avg_rpe, 1),
+                 "sleep_debt": round(week_data.sleep_debt, 1),
+                 "hrv_trend": week_data.hrv_trend,
+             }), narrative),
+        )
+    except Exception:
+        pass
+
     conn.commit()
 
     return {
         **result,
-        "sessions_updated": len(future_sessions),
+        "sessions_updated": len(week_sessions),
         "goal_id": goal_id,
     }
+
+
+def _adaptation_narrative(conn, goal_id, week_start, week_end, result, week_data,
+                          phase, current_week, total_weeks, weeks_remaining):
+    """Build a short coach narrative via Ollama; return None on any failure."""
+    try:
+        from domains.ai import ollama_client, prompt_builder
+        if not ollama_client.is_available():
+            return None
+        key_rows = conn.execute(
+            """SELECT session_type, effective_duration_min, duration_min, intensity_zone
+               FROM plan_sessions WHERE goal_id=? AND session_date BETWEEN ? AND ?
+               ORDER BY CASE intensity_zone WHEN 'Z5' THEN 5 WHEN 'Z4' THEN 4 WHEN 'Z3' THEN 3
+                        WHEN 'Z2' THEN 2 ELSE 1 END DESC LIMIT 4""",
+            (goal_id, week_start, week_end),
+        ).fetchall()
+        key_sessions = [
+            f"{r['session_type']} ({r['effective_duration_min'] or r['duration_min']}min {r['intensity_zone']})"
+            for r in key_rows
+        ]
+        prompt = prompt_builder.adaptation_narrative({
+            "recommendation": result["recommendation"],
+            "readiness_score": result["readiness_score"],
+            "risk_level": result["risk_level"],
+            "volume_factor": result["volume_factor"],
+            "intensity_factor": result["intensity_factor"],
+            "phase": phase.value,
+            "week_number": current_week,
+            "total_weeks": total_weeks,
+            "weeks_to_race": weeks_remaining,
+            "tsb": week_data.tsb,
+            "ramp_rate": week_data.ramp_rate,
+            "compliance_pct": round(week_data.compliance_score * 100),
+            "avg_rpe": round(week_data.avg_rpe, 1),
+            "key_sessions": key_sessions,
+        })
+        text = ollama_client.generate(prompt)
+        return text.strip() if text else None
+    except Exception:
+        return None
+
+
+@router.get("/goals/{goal_id}/adaptations")
+def goal_adaptations(goal_id: int, conn: DB, limit: int = Query(8)):
+    """Recent adaptation-log entries for the goal (most recent first)."""
+    _row(conn, "race_goals", goal_id)
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='adaptation_log'").fetchone():
+        return []
+    rows = conn.execute(
+        """SELECT id, date, week_number, readiness_score, risk_level, recommendation,
+                  volume_factor, intensity_factor, inputs_json, narrative, created_at
+           FROM adaptation_log WHERE goal_id=? ORDER BY id DESC LIMIT ?""",
+        (goal_id, limit),
+    ).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "id": r["id"], "date": r["date"], "week_number": r["week_number"],
+            "readiness_score": r["readiness_score"], "risk_level": r["risk_level"],
+            "recommendation": r["recommendation"], "volume_factor": r["volume_factor"],
+            "intensity_factor": r["intensity_factor"],
+            "inputs": json.loads(r["inputs_json"]) if r["inputs_json"] else None,
+            "narrative": r["narrative"], "created_at": r["created_at"],
+        })
+    return out
 
 
 # ── Compliance ───────────────────────────────────────────────────────────────
@@ -985,24 +1527,33 @@ def adapt_goal(goal_id: int, conn: DB):
 def goal_compliance(goal_id: int, conn: DB):
     goal_row = _row(conn, "race_goals", goal_id)
     # Determine current week number so we only show elapsed weeks (not future)
-    today_d = date.today()
+    total_weeks = _plan_total_weeks(conn, goal_row)
     plan_start = goal_row["plan_start_date"]
-    current_week_num = 1
-    if plan_start:
-        ps_d = date.fromisoformat(plan_start)
-        current_week_num = max(1, (today_d - ps_d).days // 7 + 1)
+    current_week_num = _current_week(plan_start, total_weeks)
+
+    # A session is only counted "missed" once it's on/after the plan actually
+    # started (or the goal was created) — sessions dated before that are backfill
+    # artifacts (e.g. a goal created with a backdated plan_start) and must not
+    # pollute compliance or the adaptation engine.
+    counts_missed_from = plan_start or _today()
+    created = goal_row["created_at"]
+    if created:
+        created_date = created[:10]
+        if created_date > counts_missed_from:
+            counts_missed_from = created_date
 
     rows = conn.execute(
         """SELECT week_number,
                   COUNT(*) as planned,
                   SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
                   SUM(CASE WHEN status='skipped'   THEN 1 ELSE 0 END) as skipped,
-                  SUM(CASE WHEN status='pending' AND original_date < date('now') THEN 1 ELSE 0 END) as missed
+                  SUM(CASE WHEN status='pending' AND original_date < date('now')
+                            AND original_date >= ? THEN 1 ELSE 0 END) as missed
            FROM plan_sessions
            WHERE goal_id=? AND week_number <= ?
            GROUP BY week_number
            ORDER BY week_number""",
-        (goal_id, current_week_num),
+        (counts_missed_from, goal_id, current_week_num),
     ).fetchall()
 
     weeks = []
@@ -1027,5 +1578,6 @@ def goal_compliance(goal_id: int, conn: DB):
         "overall_compliance": overall_rate,
         "total_planned": total_planned,
         "total_completed": total_completed,
+        "counts_missed_from": counts_missed_from,
         "weeks": weeks,
     }

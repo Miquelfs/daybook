@@ -43,6 +43,8 @@ class WeekData:
     rhr_trend: Optional[float] = None   # % change from baseline
     monotony_index: float = 0.0
     performance_indicator: float = 1.0
+    tsb: Optional[float] = None         # training stress balance (CTL−ATL); negative = fatigued
+    ramp_rate: Optional[float] = None   # weekly CTL ramp; high = injury-risk territory
 
 
 class ReadinessCalculator:
@@ -109,7 +111,12 @@ class ReadinessCalculator:
                 + self.calculate_rpe_alignment_score(week) * self.component_weights["rpe_alignment"]
             )
             weekly_scores.append(score)
-        weighted = sum(s * w for s, w in zip(weekly_scores, time_weights))
+        # Normalise by the weights actually used so that having only 1–3 weeks of
+        # history doesn't artificially deflate the score (weights sum to 1 only at
+        # 4 weeks). Without this, a fresh/restarted plan reads as permanently
+        # low-readiness and Omyra keeps cutting volume.
+        denom = sum(time_weights) or 1.0
+        weighted = sum(s * w for s, w in zip(weekly_scores, time_weights)) / denom
         return round(weighted, 1)
 
 
@@ -205,16 +212,29 @@ class RiskAssessment:
 
         total_weight = sum(self.signal_weights.get(k, 0) for k in signals)
         if total_weight == 0:
-            return 0.0, RiskLevel.LOW
-
-        risk_score = sum(v * self.signal_weights.get(k, 0) for k, v in signals.items()) / total_weight
-
-        if risk_score >= 0.6:
-            level = RiskLevel.HIGH
-        elif risk_score >= 0.3:
-            level = RiskLevel.MODERATE
-        else:
+            risk_score = 0.0
             level = RiskLevel.LOW
+        else:
+            risk_score = sum(v * self.signal_weights.get(k, 0) for k, v in signals.items()) / total_weight
+            if risk_score >= 0.6:
+                level = RiskLevel.HIGH
+            elif risk_score >= 0.3:
+                level = RiskLevel.MODERATE
+            else:
+                level = RiskLevel.LOW
+
+        # TSB / ramp overlay — deep fatigue (very negative TSB) or an aggressive
+        # CTL ramp bumps the risk tier one level regardless of the other signals.
+        heavy = (
+            (week_data.ramp_rate is not None and week_data.ramp_rate > 8)
+            or (week_data.tsb is not None and week_data.tsb < -25)
+        )
+        if heavy:
+            if level == RiskLevel.LOW:
+                level = RiskLevel.MODERATE
+            elif level == RiskLevel.MODERATE:
+                level = RiskLevel.HIGH
+            risk_score = max(risk_score, 0.45)
 
         return round(risk_score, 3), level
 
@@ -257,7 +277,12 @@ class SafetyConstraints:
             or (week_data.compliance_score < 0.6)
         )
 
-    def validate(self, recommendation: str, week_data: WeekData, risk_level: RiskLevel) -> str:
+    def validate(self, recommendation: str, week_data: WeekData, risk_level: RiskLevel,
+                 plan_phase: Optional["PlanPhase"] = None) -> str:
+        # Taper protection: never add volume in the taper — the work is done,
+        # the goal is freshness. Downgrade any overload to holding the course.
+        if plan_phase == PlanPhase.TAPER and recommendation in ("progressive_overload", "maintain_intensity"):
+            recommendation = "maintain_course"
         if self._should_override(week_data, risk_level) and recommendation in self.overrides:
             options = self.overrides[recommendation]
             return options[-1] if risk_level == RiskLevel.HIGH else options[0]
@@ -310,9 +335,12 @@ class OMYRATrainingEngine:
         readiness_score = self.readiness_calculator.calculate(recent_weeks, plan_phase, weeks_remaining)
         risk_score, risk_level = self.risk_assessor.calculate_risk(current_week, recent_rpe, daily_loads)
         raw_rec = self.decision_engine.get_recommendation(readiness_score, risk_level)
-        final_rec = self.safety_constraints.validate(raw_rec, current_week, risk_level)
+        final_rec = self.safety_constraints.validate(raw_rec, current_week, risk_level, plan_phase)
 
-        factors = RECOMMENDATION_FACTORS.get(final_rec, {"volume": 1.0, "intensity": 1.0})
+        factors = dict(RECOMMENDATION_FACTORS.get(final_rec, {"volume": 1.0, "intensity": 1.0}))
+        # Hard cap: never scale volume above baseline in the taper.
+        if plan_phase == PlanPhase.TAPER:
+            factors["volume"] = min(factors["volume"], 1.0)
         explanation = RECOMMENDATION_EXPLANATIONS.get(final_rec, "Maintaining current plan.")
         if raw_rec != final_rec:
             explanation += " (Safety override applied.)"
@@ -349,13 +377,26 @@ def map_daybook_data(conn, goal_id: int) -> WeekData:
     today = date.today().isoformat()
     week_ago = (date.today() - timedelta(days=7)).isoformat()
 
+    # Only count sessions from on/after the plan actually started (or the goal was
+    # created) as compliance denominators. Sessions dated before that are backfill
+    # artifacts (e.g. a backdated plan_start) and would otherwise read as 0%
+    # compliance and wrongly trigger a volume cut.
+    goal_meta = conn.execute(
+        "SELECT plan_start_date, created_at FROM race_goals WHERE id=?", (goal_id,)
+    ).fetchone()
+    counts_from = week_ago
+    if goal_meta:
+        for candidate in (goal_meta["plan_start_date"], (goal_meta["created_at"] or "")[:10]):
+            if candidate and candidate > counts_from:
+                counts_from = candidate
+
     # Compliance: sessions completed or skipped vs total planned
     row = conn.execute(
         """SELECT COUNT(*) as total,
                   SUM(CASE WHEN status IN ('completed','skipped') THEN 1 ELSE 0 END) as done
            FROM plan_sessions
            WHERE goal_id=? AND original_date BETWEEN ? AND ?""",
-        (goal_id, week_ago, today),
+        (goal_id, counts_from, today),
     ).fetchone()
     total = row["total"] or 1
     compliance = (row["done"] or 0) / total
@@ -420,6 +461,18 @@ def map_daybook_data(conn, goal_id: int) -> WeekData:
     ).fetchall()
     daily_loads = [r["daily_tss"] for r in tss_rows if r["daily_tss"] is not None]
 
+    # Current TSB / ramp rate (latest combined load row) for the risk overlay
+    tsb = None
+    ramp_rate = None
+    load_row = conn.execute(
+        "SELECT tsb, ramp_rate FROM training_load_daily WHERE sport='combined' "
+        "AND date <= ? ORDER BY date DESC LIMIT 1",
+        (today,),
+    ).fetchone()
+    if load_row:
+        tsb = load_row["tsb"]
+        ramp_rate = load_row["ramp_rate"]
+
     # Aviation fatigue from Load Index — fuses duty load + timezone penalty + sleep debt
     load_rows = conn.execute(
         "SELECT fatigue_score, duty_load, timezone_penalty, sleep_debt FROM load_index "
@@ -445,4 +498,6 @@ def map_daybook_data(conn, goal_id: int) -> WeekData:
         hrv_trend=hrv_trend,
         rhr_trend=rhr_trend,
         monotony_index=0.0,  # Computed internally by RiskAssessment using daily_loads
+        tsb=tsb,
+        ramp_rate=ramp_rate,
     ), daily_loads

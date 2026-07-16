@@ -124,6 +124,8 @@ class ActivityDetail(ActivitySummary):
     splits: list[SplitOut] = []
     computed: ActivityComputedMetrics | None = None
     tennis: TennisSession | None = None
+    plan_session: dict | None = None      # linked training session (structure + fueling) if any
+    fueling_log: dict | None = None       # what was actually fuelled, if logged
 
 
 class SyncStatusOut(BaseModel):

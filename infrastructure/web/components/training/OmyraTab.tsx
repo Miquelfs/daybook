@@ -4,7 +4,13 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import RaceReadinessPanel from "@/components/training/RaceReadinessPanel";
 import { Target, ChevronDown, ChevronUp, Plus, X, RefreshCw, Calendar } from "lucide-react";
-import { buildWorkoutDescription, PaceZones } from "@/lib/workout-description";
+import {
+  buildWorkoutDescription,
+  resolveStructure,
+  runZonesAsPaceZones,
+  DisciplineZones,
+  StructureStep,
+} from "@/lib/workout-description";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -62,6 +68,7 @@ interface PlanSession {
   session_date: string;
   rpe_actual: number | null;
   notes: string | null;
+  structure: StructureStep[] | null;
 }
 
 interface GoalCreate {
@@ -110,8 +117,12 @@ function discIcon(d: string) { return DISC_ICON[d] ?? DISC_ICON.other; }
 
 // ── Inline session detail sheet ────────────────────────────────────────────
 
-function SessionDetailSheet({ session, onClose, onUpdate, paceZones }: {
-  session: PlanSession; onClose: () => void; onUpdate: () => void; paceZones?: PaceZones;
+const DISC_KEY: Record<string, "run" | "ride" | "swim"> = {
+  running: "run", cycling: "ride", ride: "ride", swimming: "swim", swim: "swim",
+};
+
+function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
+  session: PlanSession; onClose: () => void; onUpdate: () => void; disciplineZones?: DisciplineZones;
 }) {
   const [rpe, setRpe] = useState<number | null>(session.rpe_actual ?? null);
   const [saving, setSaving] = useState(false);
@@ -120,6 +131,8 @@ function SessionDetailSheet({ session, onClose, onUpdate, paceZones }: {
   const [err, setErr] = useState<string | null>(null);
 
   const zone = session.intensity_zone;
+  const discKey = DISC_KEY[session.discipline] ?? "run";
+  const sessionZone = disciplineZones?.[discKey]?.zones?.[zone];
 
   async function markDone() {
     if (!rpe) { setErr("Pick an RPE first"); return; }
@@ -176,13 +189,15 @@ function SessionDetailSheet({ session, onClose, onUpdate, paceZones }: {
         >
           <span className="text-lg font-bold" style={{ color: ZONE_COLOUR[zone] }}>{zone}</span>
           <div className="flex-1 min-w-0">
-            {paceZones?.zones[zone] ? (
+            {sessionZone?.display ? (
               <>
                 <p className="text-sm font-semibold" style={{ color: ZONE_COLOUR[zone] }}>
-                  Target: {paceZones.zones[zone].display}
+                  Target: {sessionZone.display}
+                  {discKey === "ride" && sessionZone.speed_kmh_hint ? ` · ~${sessionZone.speed_kmh_hint} km/h` : ""}
                 </p>
                 <p className="text-[10px] mt-0.5" style={{ color: `${ZONE_COLOUR[zone]}99` }}>
-                  {paceZones.zones[zone].label} · HR {paceZones.zones[zone].hr_pct} max · RPE {paceZones.zones[zone].rpe}
+                  {sessionZone.label} · RPE {sessionZone.rpe}
+                  {discKey === "ride" ? " · pace by HR/feel (no power)" : ""}
                 </p>
               </>
             ) : (
@@ -193,7 +208,9 @@ function SessionDetailSheet({ session, onClose, onUpdate, paceZones }: {
 
         {/* Workout phases */}
         {(() => {
-          const phases = buildWorkoutDescription(session, paceZones);
+          const phases = session.structure
+            ? resolveStructure(session.structure, disciplineZones, session.discipline)
+            : buildWorkoutDescription(session, runZonesAsPaceZones(disciplineZones));
           return (
             <div className="space-y-1.5">
               <p className="text-[10px] text-[#52525B] uppercase tracking-wider">Workout structure</p>
@@ -511,6 +528,70 @@ function FullSchedule({ goal, onSelectSession, onClose }: {
 
 // ── Goal card ──────────────────────────────────────────────────────────────
 
+interface AdaptationLogRow {
+  id: number;
+  date: string;
+  week_number: number | null;
+  readiness_score: number | null;
+  risk_level: string | null;
+  recommendation: string;
+  volume_factor: number | null;
+  intensity_factor: number | null;
+  narrative: string | null;
+}
+
+const REC_LABEL: Record<string, string> = {
+  progressive_overload: "Push", maintain_intensity: "Hold intensity", maintain_course: "Stay the course",
+  reduce_volume: "Cut volume", reduce_intensity: "Ease intensity", active_recovery: "Active recovery",
+  complete_rest: "Rest",
+};
+
+function AdaptationHistory({ goalId }: { goalId: number }) {
+  const [open, setOpen] = useState(false);
+  const { data } = useQuery<AdaptationLogRow[]>({
+    queryKey: ["omyra-adaptations", goalId],
+    queryFn: () =>
+      fetch(`${BASE}/race-plans/goals/${goalId}/adaptations`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : [])),
+    enabled: open,
+    staleTime: 60_000,
+  });
+  const rows = data ?? [];
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 text-xs text-[#52525B] uppercase tracking-wider hover:text-[#A1A1AA]"
+      >
+        {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Adaptation history
+      </button>
+      {open &&
+        (rows.length === 0 ? (
+          <p className="text-xs text-[#3F3F46] mt-2">No adaptations logged yet — hit Re-evaluate.</p>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {rows.map((r) => (
+              <div key={r.id} className="bg-[#18181B] rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] text-[#52525B] tabular-nums">{r.date}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#0D0D0F] text-[#A1A1AA]">
+                    {REC_LABEL[r.recommendation] ?? r.recommendation}
+                  </span>
+                  <span className="text-[10px] text-[#3F3F46]">
+                    V×{(r.volume_factor ?? 1).toFixed(2)} I×{(r.intensity_factor ?? 1).toFixed(2)}
+                  </span>
+                  {r.readiness_score != null && (
+                    <span className="text-[10px] text-[#3F3F46]">R {Math.round(r.readiness_score)}</span>
+                  )}
+                </div>
+                {r.narrative && <p className="text-[11px] text-[#71717A] mt-1 leading-relaxed">{r.narrative}</p>}
+              </div>
+            ))}
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [adapting, setAdapting] = useState(false);
@@ -541,12 +622,12 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
     staleTime: 60_000,
   });
 
-  const { data: paceZones } = useQuery<PaceZones>({
-    queryKey: ["omyra-pace-zones", goal.id],
+  const { data: disciplineZones } = useQuery<DisciplineZones>({
+    queryKey: ["omyra-discipline-zones", goal.id],
     queryFn: () =>
-      fetch(`${BASE}/race-plans/goals/${goal.id}/pace-zones`, { cache: "no-store" }).then((r) => r.json()),
+      fetch(`${BASE}/race-plans/goals/${goal.id}/discipline-zones`, { cache: "no-store" }).then((r) => r.json()),
     enabled: !goal.waiting,
-    staleTime: 86_400_000, // 24h — pace zones don't change often
+    staleTime: 86_400_000, // 24h — zones don't change often
   });
 
   async function abandon() {
@@ -665,6 +746,9 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
         {/* Expanded */}
         {expanded && (
           <div className="border-t border-[#18181B] px-4 py-4 space-y-5">
+
+            {/* Adaptation history */}
+            {!goal.waiting && <AdaptationHistory goalId={goal.id} />}
 
             {/* This week calendar */}
             {!goal.waiting && !dim && (
@@ -821,7 +905,7 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
           session={selectedSession}
           onClose={() => setSelectedSession(null)}
           onUpdate={() => { invalidateWeek(); setSelectedSession(null); }}
-          paceZones={paceZones}
+          disciplineZones={disciplineZones}
         />
       )}
 

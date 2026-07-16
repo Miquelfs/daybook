@@ -43,14 +43,16 @@ def calculate_weeks_between_dates(start_date: datetime, goal_date: datetime) -> 
 
 def get_discipline(session_type: str) -> str:
     t = session_type.lower()
+    # Brick first: a "Brick - Bike + Run" contains "bike"/"run" but must classify
+    # as its own discipline (the scheduler isolates it to its own day).
+    if "brick" in t:
+        return "brick"
     if "swim" in t:
         return "swimming"
     if "bike" in t or "cycling" in t:
         return "cycling"
     if "run" in t:
         return "running"
-    if "brick" in t:
-        return "brick"
     return "other"
 
 

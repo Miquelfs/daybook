@@ -101,7 +101,43 @@ def _fetch_data(conn, target_date: str, yesterday: str) -> dict:
     elif yesterday_day and yesterday_day["notes"]:
         last_intention = yesterday_day["notes"][:200]
 
+    # Today's key training session + its fueling target
+    todays_session = None
+    try:
+        has_plan = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='plan_sessions'"
+        ).fetchone()
+        if has_plan:
+            sess = conn.execute(
+                """SELECT ps.session_type, ps.discipline, ps.intensity_zone,
+                          COALESCE(ps.effective_duration_min, ps.duration_min) AS dur,
+                          rg.race_date
+                   FROM plan_sessions ps JOIN race_goals rg ON rg.id = ps.goal_id
+                   WHERE ps.session_date=? AND rg.status='active' AND ps.status='pending'
+                   ORDER BY CASE ps.intensity_zone WHEN 'Z5' THEN 5 WHEN 'Z4' THEN 4
+                            WHEN 'Z3' THEN 3 WHEN 'Z2' THEN 2 ELSE 1 END DESC
+                   LIMIT 1""",
+                (target_date,),
+            ).fetchone()
+            if sess:
+                weeks_to_race = None
+                if sess["race_date"]:
+                    weeks_to_race = max(0, (date.fromisoformat(sess["race_date"]) - date.fromisoformat(target_date)).days // 7)
+                fuel = None
+                try:
+                    from domains.training import fueling
+                    fuel = fueling.session_fuel_targets(sess["dur"], sess["intensity_zone"], sess["discipline"], weeks_to_race)
+                except Exception:
+                    fuel = None
+                todays_session = {
+                    "type": sess["session_type"], "discipline": sess["discipline"],
+                    "zone": sess["intensity_zone"], "duration_min": sess["dur"], "fueling": fuel,
+                }
+    except Exception as e:
+        log.warning("Could not fetch today's session: %s", e)
+
     return {
+        "todays_session": todays_session,
         "sleep": dict(sleep) if sleep else {},
         "daily_stats": dict(daily_stats) if daily_stats else {},
         "hrv": dict(hrv) if hrv else {},
@@ -149,6 +185,7 @@ def run(target_date: str, force: bool = False) -> None:
             weather_today=data["weather_today"],
             week_summary=data["week_summary"],
             last_intention=data["last_intention"],
+            todays_session=data.get("todays_session"),
         )
 
         log.info("Calling Ollama (model: %s)...", ollama_client.MODEL_FAST)

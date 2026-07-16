@@ -576,25 +576,30 @@ _RIDE_SPORT_TYPES = (
 # Standard distance buckets used for fallback curve (metres)
 _RUN_PACE_BUCKETS = [400, 500, 1000, 1609, 2000, 5000, 10000, 15000, 21097, 42195]
 _RIDE_PACE_BUCKETS = [10000, 20000, 40000, 50000, 80000, 100000, 160000, 200000]
+_SWIM_PACE_BUCKETS = [400, 750, 1000, 1500, 1900, 3800]
 
 
 def _fallback_curve(conn: sqlite3.Connection, sport: str, cutoff_90d: str) -> list[dict]:
     """
     Compute a best-effort pace curve directly from activities.avg_speed_mps
     and distance_meters when the best_effort table is missing or empty.
-    Returns the same shape as the best_effort table query.
+    Returns the same shape as the best_effort table query. Curve values are
+    seconds/km (run/ride); the swim client renders these ÷10 as seconds/100m.
     """
     if sport == "run":
         buckets = _RUN_PACE_BUCKETS
+        type_filter = "LOWER(activity_type) LIKE '%run%' OR LOWER(activity_type) LIKE '%trail%' OR LOWER(activity_type) LIKE '%jog%'"
+        min_dist = 400
     elif sport == "ride":
         buckets = _RIDE_PACE_BUCKETS
+        type_filter = "LOWER(activity_type) LIKE '%cycl%' OR LOWER(activity_type) LIKE '%bik%' OR LOWER(activity_type) LIKE '%ride%'"
+        min_dist = 400
+    elif sport == "swim":
+        buckets = _SWIM_PACE_BUCKETS
+        type_filter = "LOWER(activity_type) LIKE '%swim%'"
+        min_dist = 200
     else:
         return []
-
-    if sport == "run":
-        type_filter = "LOWER(activity_type) LIKE '%run%' OR LOWER(activity_type) LIKE '%trail%' OR LOWER(activity_type) LIKE '%jog%'"
-    else:
-        type_filter = "LOWER(activity_type) LIKE '%cycl%' OR LOWER(activity_type) LIKE '%bik%' OR LOWER(activity_type) LIKE '%ride%'"
 
     rows = conn.execute(
         f"""SELECT date, distance_meters, duration_seconds, moving_time_seconds, avg_speed_mps
@@ -616,7 +621,7 @@ def _fallback_curve(conn: sqlite3.Connection, sport: str, cutoff_90d: str) -> li
 
     for row in rows:
         dist = row["distance_meters"] or 0
-        if dist < 400:
+        if dist < min_dist:
             continue
         speed = row["avg_speed_mps"]
         dur = row["moving_time_seconds"] or row["duration_seconds"] or 0
@@ -1281,3 +1286,98 @@ def activity_records(conn: DB):
         "longest_run": _q("distance_meters", _RUN_TYPES),
         "highest_elevation_ride": _q("elevation_gain_meters", _RIDE_TYPES),
     }
+
+
+# ─── Athlete zones (HR/pace/FTP/CSS) ─────────────────────────────────────────
+
+_PLACEHOLDER_VALID_FROM = "2019-01-01"
+
+
+def _zone_row_out(row: sqlite3.Row) -> dict:
+    zones = None
+    if row["zones_json"]:
+        try:
+            zones = json.loads(row["zones_json"])
+        except Exception:
+            zones = None
+    return {
+        "sport": row["sport"],
+        "valid_from": row["valid_from"],
+        "max_hr": row["max_hr"],
+        "threshold_hr": row["threshold_hr"],
+        "ftp_w": row["ftp_w"],
+        "threshold_pace_s_per_km": row["threshold_pace_s_per_km"],
+        "css_pace_s_per_100m": row["css_pace_s_per_100m"],
+        "zones": zones,
+        "source": "placeholder" if row["valid_from"] == _PLACEHOLDER_VALID_FROM else "derived",
+    }
+
+
+@router.get("/zones")
+def get_athlete_zones(conn: DB):
+    """Latest athlete_zones row per sport (run/ride/swim), with parsed HR bands."""
+    if not _table_exists(conn, "athlete_zones"):
+        return {}
+    rows = conn.execute(
+        """SELECT az.* FROM athlete_zones az
+           JOIN (SELECT sport, MAX(valid_from) AS mv FROM athlete_zones GROUP BY sport) latest
+             ON az.sport = latest.sport AND az.valid_from = latest.mv"""
+    ).fetchall()
+    return {r["sport"]: _zone_row_out(r) for r in rows}
+
+
+class ZonePut(BaseModel):
+    max_hr: Optional[int] = None
+    threshold_hr: Optional[int] = None
+    ftp_w: Optional[float] = None
+    threshold_pace_s_per_km: Optional[float] = None
+    css_pace_s_per_100m: Optional[float] = None
+
+
+_HR_BANDS = [("Z1", 0.0, 0.65), ("Z2", 0.65, 0.75), ("Z3", 0.75, 0.82),
+             ("Z4", 0.82, 0.88), ("Z5", 0.88, 1.6)]
+
+
+def _zones_json_from_max(max_hr: int) -> str:
+    return json.dumps([
+        {"name": n, "min_hr": round(max_hr * lo), "max_hr": 999 if hi >= 1.5 else round(max_hr * hi)}
+        for n, lo, hi in _HR_BANDS
+    ])
+
+
+@router.put("/zones/{sport}")
+def put_athlete_zones(sport: str, body: ZonePut, conn: DB):
+    """
+    Manually set zones for a sport — inserts a new athlete_zones row valid from
+    today, carrying forward any field not specified from the latest existing row.
+    """
+    if sport not in ("run", "ride", "swim"):
+        raise HTTPException(status_code=422, detail="sport must be run|ride|swim")
+    prev = conn.execute(
+        "SELECT * FROM athlete_zones WHERE sport=? ORDER BY valid_from DESC LIMIT 1", (sport,)
+    ).fetchone()
+
+    def pick(field, new):
+        if new is not None:
+            return new
+        return prev[field] if prev else None
+
+    max_hr = pick("max_hr", body.max_hr) or 195
+    threshold_hr = pick("threshold_hr", body.threshold_hr)
+    ftp_w = pick("ftp_w", body.ftp_w)
+    thr_pace = pick("threshold_pace_s_per_km", body.threshold_pace_s_per_km)
+    css = pick("css_pace_s_per_100m", body.css_pace_s_per_100m)
+
+    today = date.today().isoformat()
+    conn.execute(
+        """INSERT OR REPLACE INTO athlete_zones
+           (valid_from, sport, max_hr, threshold_hr, ftp_w,
+            threshold_pace_s_per_km, css_pace_s_per_100m, zones_json)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (today, sport, max_hr, threshold_hr, ftp_w, thr_pace, css, _zones_json_from_max(max_hr)),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM athlete_zones WHERE sport=? AND valid_from=?", (sport, today)
+    ).fetchone()
+    return _zone_row_out(row)

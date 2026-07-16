@@ -8,6 +8,7 @@ import { ActivityNotes } from "@/components/ActivityNotes";
 import { TennisSessionPanel } from "@/components/TennisSessionPanel";
 import { ActivitySplitsChart } from "@/components/ActivitySplitsChart";
 import { SportCurveSection } from "@/components/training/SportCurveSection";
+import { PlannedVsActual } from "@/components/PlannedVsActual";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
 
 interface Props {
@@ -219,6 +220,21 @@ export default async function ActivityPage({ params }: Props) {
         </section>
       )}
 
+      {/* Planned vs actual — when this activity completed a scheduled session */}
+      {activity.plan_session && (
+        <PlannedVsActual
+          planSession={activity.plan_session}
+          splits={activity.splits ?? []}
+          activity={{
+            duration_seconds: activity.duration_seconds,
+            moving_time_seconds: activity.moving_time_seconds,
+            avg_heart_rate: activity.avg_heart_rate,
+            avg_speed_mps: activity.avg_speed_mps,
+            activity_type: activity.activity_type,
+          }}
+        />
+      )}
+
       {/* Activity stream charts */}
       <ActivityCharts activityId={decodedId} activityType={activity.activity_type} />
 
@@ -230,8 +246,8 @@ export default async function ActivityPage({ params }: Props) {
         </section>
       )}
 
-      {/* Where this effort sits on your own curve (runs & rides) */}
-      {(sport === "run" || sport === "ride") && (
+      {/* Where this effort sits on your own curve (runs, rides & swims) */}
+      {(sport === "run" || sport === "ride" || sport === "swim") && (
         <SportCurveSection
           sport={sport}
           distanceM={activity.distance_meters ?? null}

@@ -126,6 +126,42 @@ export type TennisSessionWrite = {
   coach_ids: number[];
 };
 
+export type PlanSessionStep = {
+  kind: "steady" | "intervals" | "swim_set";
+  label: string;
+  zone?: string;
+  work_zone?: string;
+  rest_zone?: string;
+  duration_min?: number;
+  reps?: number;
+  work_min?: number;
+  rest_min?: number;
+  distance_m?: number;
+  rest_s?: number;
+  cue?: string;
+};
+
+export type LinkedPlanSession = {
+  id: number;
+  goal_id: number;
+  session_type: string;
+  discipline: string;
+  intensity_zone: string;
+  duration_min: number;
+  effective_duration_min: number | null;
+  week_number: number;
+  structure: PlanSessionStep[] | null;
+  fueling: Record<string, unknown> | null;
+};
+
+export type FuelingLog = {
+  carbs_g: number | null;
+  fluids_ml: number | null;
+  sodium_mg: number | null;
+  gi_severity: number | null;
+  gi_notes: string | null;
+};
+
 export type ActivityDetail = Activity & {
   moving_time_seconds: number | null;
   avg_speed_mps: number | null;
@@ -138,6 +174,8 @@ export type ActivityDetail = Activity & {
   computed: ActivityComputedMetrics | null;
   splits: ActivitySplit[];
   tennis: TennisSession | null;
+  plan_session: LinkedPlanSession | null;
+  fueling_log: FuelingLog | null;
 };
 
 export type SegmentEffort = {
@@ -933,7 +971,7 @@ export const api = {
     get<{ cards: FunFactCard[] }>(`/locations/fun-facts${year ? `?year=${year}` : ""}`),
   trips: (limit = 100, year?: number) =>
     get<{ trips: Trip[]; total: number }>(`/locations/trips?limit=${limit}${year ? `&year=${year}` : ""}`),
-  trainingCurve: (sport: "run" | "ride") =>
+  trainingCurve: (sport: "run" | "ride" | "swim") =>
     get<CurveBucket[]>(`/training/curve?sport=${sport}&channel=pace`),
 
   activity: (id: string) => get<ActivityDetail>(`/activities/${id}`),
