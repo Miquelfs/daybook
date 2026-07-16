@@ -23,20 +23,32 @@ const APP_START = new Date(2026, 4, 18); // 18 May 2026 (a Monday; month is 0-in
 
 const DAY_MS = 86400000;
 
-// Default tags/people shown when first landing on the "All" view, so the page
-// doesn't dump every tag at once. Matched against normalised slug OR name, so
-// they resolve regardless of exact slug. Everything else is one click away.
-const DEFAULT_TAG_KEYS = new Set([
-  "no_instagram", "noinstagram", "instagram", "personal", "candy",
-  "cycling", "swimming", "running", "tennis",
-]);
-const DEFAULT_PERSON_KEYS = new Set(["alice", "milo"]);
+// The "Default" group: a curated, user-editable set of tags/people shown when
+// the page lands, so it doesn't dump every tag. Membership is persisted in
+// localStorage (per mode) and editable from the picker — add any tag, or remove
+// a seeded one. On first run it's seeded from the keys below, matched against a
+// tag/person's normalised name OR slug so they resolve regardless of exact slug.
+const DEFAULT_SEED_KEYS: Record<"tags" | "people", string[]> = {
+  tags: ["no_instagram", "noinstagram", "instagram", "candy", "personal", "swimming", "running", "cycling", "tennis"],
+  people: ["alice", "milo"],
+};
+const defaultStoreKey = (mode: "tags" | "people") => `habit-default-members:${mode}`;
 
 function norm(s: string): string {
   return s.trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
-function isDefaultItem(item: GridItem, keys: Set<string>): boolean {
-  return keys.has(norm(item.name)) || (item.slug ? keys.has(norm(item.slug)) : false);
+function matchesKey(item: GridItem, key: string): boolean {
+  return norm(item.name) === key || (item.slug ? norm(item.slug) === key : false);
+}
+/** Items matching any of the seed keys, in key order, deduped (aliases collapse). */
+function seedItems(items: GridItem[], keys: string[]): GridItem[] {
+  const out: GridItem[] = [];
+  for (const key of keys) {
+    for (const it of items) {
+      if (matchesKey(it, key) && !out.includes(it)) out.push(it);
+    }
+  }
+  return out;
 }
 
 type GridItem = {
@@ -291,9 +303,11 @@ function Dropdown({
 export function HabitCalendar() {
   const [mode, setMode] = useState<"tags" | "people">("tags");
   const [weeks, setWeeks] = useState(26);
-  const [cat, setCat] = useState("all");
+  const [cat, setCat] = useState("default");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showAllChips, setShowAllChips] = useState(false);
+  // Persisted, editable membership of the "Default" group — itemKeys in order.
+  const [defaultKeys, setDefaultKeys] = useState<Set<string>>(new Set());
 
   const { data: items = [], isLoading } = useQuery<GridItem[]>({
     queryKey: ["habit-grid", mode, weeks],
@@ -301,51 +315,95 @@ export function HabitCalendar() {
       fetch(`${BASE_URL}/${mode === "tags" ? "tags" : "contacts"}/grid?days=${weeks * 7}`).then((r) => r.json()),
   });
 
-  // Category / group options built from the data. Items with no category are
-  // not given an "Other" bucket — they're still reachable under "All".
+  const byKey = useMemo(() => new Map(items.map((it) => [itemKey(it), it])), [items]);
+
+  // Load the Default group from localStorage; seed it on first run.
+  useEffect(() => {
+    let stored: string[] | null = null;
+    try {
+      const raw = localStorage.getItem(defaultStoreKey(mode));
+      if (raw) stored = JSON.parse(raw);
+    } catch { /* ignore malformed/unavailable storage */ }
+    if (stored) {
+      setDefaultKeys(new Set(stored));
+    } else if (items.length) {
+      const seeded = seedItems(items, DEFAULT_SEED_KEYS[mode]).map(itemKey);
+      setDefaultKeys(new Set(seeded));
+      try { localStorage.setItem(defaultStoreKey(mode), JSON.stringify(seeded)); } catch { /* ignore */ }
+    }
+  }, [mode, items]);
+
+  function updateDefault(next: Set<string>) {
+    setDefaultKeys(next);
+    try { localStorage.setItem(defaultStoreKey(mode), JSON.stringify([...next])); } catch { /* ignore */ }
+  }
+
+  // The Default group's members, in their stored order, resolved to live items.
+  const defaultItems = useMemo(
+    () => [...defaultKeys].map((k) => byKey.get(k)).filter((it): it is GridItem => !!it),
+    [defaultKeys, byKey],
+  );
+
+  // Items that make up a category: the persisted Default group (ordered), the
+  // data-driven categories, or everything for "All".
+  const catItems = useMemo((): GridItem[] => {
+    if (cat === "all") return items;
+    if (cat === "default") return defaultItems;
+    return items.filter((it) => (it.category ?? "other") === cat);
+  }, [items, cat, defaultItems]);
+
+  // Dropdown options: All, Default, then the data categories. Items with no
+  // category are still reachable under "All".
   const options = useMemo(() => {
     const counts = new Map<string, number>();
     for (const it of items) {
       if (!it.category) continue;
       counts.set(it.category, (counts.get(it.category) ?? 0) + 1);
     }
-    const opts = [...counts.entries()]
+    const dataOpts = [...counts.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([value, count]) => ({ value, label: catLabel(value), count }));
-    return [{ value: "all", label: "All", count: items.length }, ...opts];
-  }, [items]);
+    return [
+      { value: "all", label: "All", count: items.length },
+      { value: "default", label: "Default", count: defaultItems.length },
+      ...dataOpts,
+    ];
+  }, [items, defaultItems]);
 
-  const visible = useMemo(
-    () => (cat === "all" ? items : items.filter((it) => (it.category ?? "other") === cat)),
-    [items, cat],
-  );
+  // Pool the "+ Add" picker draws from. For "All" and "Default" you can add any
+  // item; for a data category, its own items.
+  const pickerPool = useMemo((): GridItem[] => {
+    if (cat === "all" || cat === "default") return items;
+    return catItems;
+  }, [items, cat, catItems]);
 
   // Reset category + collapse the picker when switching Tags/People
-  useEffect(() => { setCat("all"); setShowAllChips(false); }, [mode]);
+  useEffect(() => { setCat("default"); setShowAllChips(false); }, [mode]);
 
-  // Default selection: a curated set on the "All" view, else everything in the category
+  // Session display selection for non-Default categories ("All" shows
+  // everything). Default is driven directly by the persisted group.
   useEffect(() => {
-    let base: GridItem[];
-    if (cat === "all") {
-      const keys = mode === "tags" ? DEFAULT_TAG_KEYS : DEFAULT_PERSON_KEYS;
-      const matched = items.filter((it) => isDefaultItem(it, keys));
-      base = matched.length > 0 ? matched : items.slice(0, 6);
-    } else {
-      base = items.filter((it) => (it.category ?? "other") === cat);
-    }
-    setSelected(new Set(base.map(itemKey)));
-  }, [mode, cat, items]);
+    if (cat === "default") return;
+    setSelected(new Set(catItems.map(itemKey)));
+  }, [mode, cat, catItems]);
+
+  // In the Default group a toggle edits (and persists) membership; elsewhere it
+  // just toggles what's displayed for the session.
+  const isDefaultCat = cat === "default";
+  const shownKeys = isDefaultCat ? defaultKeys : selected;
 
   function toggle(key: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    const next = new Set(shownKeys);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    if (isDefaultCat) updateDefault(next);
+    else setSelected(next);
   }
 
-  const shown = items.filter((it) => selected.has(itemKey(it)));
+  const shown = useMemo((): GridItem[] => {
+    if (isDefaultCat) return defaultItems;
+    return items.filter((it) => selected.has(itemKey(it)));
+  }, [isDefaultCat, defaultItems, items, selected]);
 
   return (
     <div className="space-y-4">
@@ -409,12 +467,12 @@ export function HabitCalendar() {
         <>
           {/* Selected chips by default; the full pick list is one tap away */}
           {(() => {
-            const chipItems = showAllChips ? visible : shown;
+            const chipItems = showAllChips ? pickerPool : shown;
             return (
               <div className="flex flex-wrap items-center gap-1.5">
                 {chipItems.map((it) => {
                   const key = itemKey(it);
-                  const on = selected.has(key);
+                  const on = shownKeys.has(key);
                   const color = stableColor(it);
                   return (
                     <button
@@ -431,7 +489,7 @@ export function HabitCalendar() {
                     </button>
                   );
                 })}
-                {visible.length > 1 && (
+                {pickerPool.length > 1 && (
                   <button
                     onClick={() => setShowAllChips((s) => !s)}
                     className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-dashed border-[#3F3F46] text-[#71717A] hover:text-[#A1A1AA] transition-colors"
@@ -442,6 +500,12 @@ export function HabitCalendar() {
               </div>
             );
           })()}
+
+          {isDefaultCat && showAllChips && (
+            <p className="text-[10px] text-[#3F3F46]">
+              Tap to add or remove from your Default group — changes are saved.
+            </p>
+          )}
 
           {/* Grid cards */}
           <div className="space-y-3">
