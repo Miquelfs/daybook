@@ -34,6 +34,12 @@ def _today() -> str:
     return date.today().isoformat()
 
 
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return bool(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone())
+
+
 def _row(conn: sqlite3.Connection, table: str, row_id: int) -> sqlite3.Row:
     r = conn.execute(f"SELECT * FROM {table} WHERE id=?", (row_id,)).fetchone()
     if not r:
@@ -335,7 +341,146 @@ def _goal_out(row: sqlite3.Row, conn: sqlite3.Connection) -> dict:
     }
 
 
-def _session_out(row: sqlite3.Row) -> dict:
+# ── Auto-match activities → plan sessions ────────────────────────────────────
+#
+# A planned session and the real activity that fulfilled it should be one thing.
+# When a Garmin/Strava activity is logged on the same day as a pending session of
+# the matching discipline, we link it automatically (status→completed), leaving
+# RPE blank for the user to fill. The activity detail page then surfaces the
+# linked session via activities._linked_plan_session → PlannedVsActual panel.
+
+# Discipline (get_discipline output) → activity_type family. Reused from the
+# training router so both stay in sync.
+from infrastructure.api.routers.training import (
+    _RUN_TYPES as _RUN_ACT_TYPES,
+    _RIDE_TYPES as _RIDE_ACT_TYPES,
+    _SWIM_TYPES as _SWIM_ACT_TYPES,
+)
+
+_DISCIPLINE_ACT_FAMILY: dict[str, tuple[str, ...]] = {
+    "running": _RUN_ACT_TYPES,
+    "cycling": _RIDE_ACT_TYPES,
+    "swimming": _SWIM_ACT_TYPES,
+    "brick": tuple(_RUN_ACT_TYPES) + tuple(_RIDE_ACT_TYPES),
+}
+
+# Exclude Strava rows that duplicate a Garmin activity (same rule as the training
+# router's _DEDUP), so a single workout can't be double-counted.
+_ACT_DEDUP = """
+    AND NOT (source='strava' AND EXISTS (
+      SELECT 1 FROM activities g
+      WHERE g.date = activities.date
+        AND g.source = 'garmin'
+        AND g.strava_id = CAST(SUBSTR(activities.id, 8) AS TEXT)
+    ))
+"""
+
+
+def autolink_sessions(
+    conn: sqlite3.Connection,
+    goal_id: Optional[int] = None,
+    on_date: Optional[str] = None,
+) -> int:
+    """
+    Link pending plan sessions to a same-day real activity of the matching
+    discipline. Marks matched sessions completed (auto_matched=1), leaving
+    rpe_actual untouched. Idempotent — only touches pending, unlinked sessions
+    of active goals, and never reuses an activity already linked elsewhere.
+    Returns the number of sessions newly linked.
+    """
+    if not _table_exists(conn, "plan_sessions") or not _table_exists(conn, "activities"):
+        return 0
+
+    has_auto = "auto_matched" in {r["name"] for r in conn.execute("PRAGMA table_info(plan_sessions)")}
+
+    clauses = ["ps.status='pending'", "ps.completed_activity_id IS NULL", "rg.status='active'"]
+    params: list = []
+    if goal_id is not None:
+        clauses.append("ps.goal_id=?")
+        params.append(goal_id)
+    if on_date is not None:
+        clauses.append("ps.session_date=?")
+        params.append(on_date)
+
+    sessions = conn.execute(
+        f"""SELECT ps.id, ps.session_date, ps.discipline
+            FROM plan_sessions ps JOIN race_goals rg ON rg.id = ps.goal_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY ps.session_date, ps.discipline""",
+        params,
+    ).fetchall()
+    if not sessions:
+        return 0
+
+    # Activities already linked to any session must not be reused.
+    consumed: set[str] = {
+        r["completed_activity_id"]
+        for r in conn.execute(
+            "SELECT completed_activity_id FROM plan_sessions WHERE completed_activity_id IS NOT NULL"
+        ).fetchall()
+    }
+
+    linked = 0
+    for s in sessions:
+        family = _DISCIPLINE_ACT_FAMILY.get(s["discipline"])
+        if not family:
+            continue  # 'other' (strength/yoga) — skip auto-match
+        placeholders = ",".join("?" for _ in family)
+        candidates = conn.execute(
+            f"""SELECT id FROM activities
+                WHERE date = ?
+                  AND activity_type IN ({placeholders})
+                  {_ACT_DEDUP}
+                ORDER BY COALESCE(moving_time_seconds, duration_seconds, 0) DESC""",
+            [s["session_date"], *family],
+        ).fetchall()
+        match_id = next((c["id"] for c in candidates if c["id"] not in consumed), None)
+        if not match_id:
+            continue
+        consumed.add(match_id)
+        auto_set = ", auto_matched=1" if has_auto else ""
+        conn.execute(
+            f"""UPDATE plan_sessions
+                SET completed_activity_id=?, status='completed'{auto_set},
+                    updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
+                WHERE id=?""",
+            (match_id, s["id"]),
+        )
+        linked += 1
+
+    if linked:
+        conn.commit()
+    return linked
+
+
+def _session_actual(conn: sqlite3.Connection, activity_id: Optional[str]) -> Optional[dict]:
+    """Real stats of the activity that completed a session, for the merged view."""
+    if not activity_id:
+        return None
+    row = conn.execute(
+        f"""SELECT id, name, activity_type, distance_meters, moving_time_seconds,
+                   duration_seconds, avg_heart_rate, max_heart_rate, avg_speed_mps,
+                   COALESCE(training_stress_score, 0) AS tss
+            FROM activities WHERE id=?""",
+        (activity_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "activity_id": row["id"],
+        "name": row["name"],
+        "activity_type": row["activity_type"],
+        "distance_m": row["distance_meters"],
+        "moving_time_s": row["moving_time_seconds"],
+        "duration_s": row["duration_seconds"],
+        "avg_hr": row["avg_heart_rate"],
+        "max_hr": row["max_heart_rate"],
+        "avg_speed_mps": row["avg_speed_mps"],
+        "tss": row["tss"],
+    }
+
+
+def _session_out(row: sqlite3.Row, conn: Optional[sqlite3.Connection] = None) -> dict:
     keys = row.keys()
     structure = None
     if "structure_json" in keys and row["structure_json"]:
@@ -343,6 +488,7 @@ def _session_out(row: sqlite3.Row) -> dict:
             structure = json.loads(row["structure_json"])
         except Exception:
             structure = None
+    completed_activity_id = row["completed_activity_id"]
     return {
         "id": row["id"],
         "goal_id": row["goal_id"],
@@ -357,10 +503,12 @@ def _session_out(row: sqlite3.Row) -> dict:
         "is_optional": bool(row["is_optional"]),
         "is_displaced": bool(row["is_displaced"]),
         "status": row["status"],
-        "completed_activity_id": row["completed_activity_id"],
+        "completed_activity_id": completed_activity_id,
+        "auto_matched": bool(row["auto_matched"]) if "auto_matched" in keys else False,
         "rpe_actual": row["rpe_actual"],
         "notes": row["notes"],
         "structure": structure,
+        "actual": _session_actual(conn, completed_activity_id) if conn is not None else None,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -976,6 +1124,9 @@ def day_prescription(date_str: str, conn: DB):
     Returns all sessions scheduled for a given date across all active goals,
     plus readiness context, load warnings, and injury suggestions.
     """
+    # Auto-link any same-day real activity to a pending session before reading.
+    autolink_sessions(conn, on_date=date_str)
+
     # Readiness context — gather from multiple tables
     tl = conn.execute(
         "SELECT ctl, atl, tsb, ramp_rate FROM training_load_daily WHERE date=?",
@@ -1070,7 +1221,7 @@ def day_prescription(date_str: str, conn: DB):
                              r["intensity_zone"], r["discipline"], weeks_to_race)
 
         sessions.append({
-            **_session_out(r),
+            **_session_out(r, conn),
             "goal_name": r["goal_name"],
             "adaptation_note": adaptation_note,
             "roster_warning": roster_warning,
@@ -1227,7 +1378,29 @@ def patch_session(session_id: int, body: SessionPatch, conn: DB):
             )
         conn.commit()
 
-    return _session_out(_row(conn, "plan_sessions", session_id))
+    return _session_out(_row(conn, "plan_sessions", session_id), conn)
+
+
+@router.post("/sessions/{session_id}/unlink", status_code=200)
+def unlink_session(session_id: int, conn: DB):
+    """
+    Break an auto-matched (or manual) activity link. Clears completed_activity_id
+    and reverts the session to 'skipped' so the auto-matcher won't immediately
+    re-link the same activity on the next read. Re-link a different activity via
+    PATCH /sessions/{id} with completed_activity_id.
+    """
+    row = _row(conn, "plan_sessions", session_id)
+    has_auto = "auto_matched" in {r["name"] for r in conn.execute("PRAGMA table_info(plan_sessions)")}
+    auto_clear = ", auto_matched=0" if has_auto else ""
+    conn.execute(
+        f"""UPDATE plan_sessions
+            SET completed_activity_id=NULL, status='skipped'{auto_clear},
+                updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
+            WHERE id=?""",
+        (session_id,),
+    )
+    conn.commit()
+    return _session_out(_row(conn, "plan_sessions", session_id), conn)
 
 
 # ── Week view ────────────────────────────────────────────────────────────────
@@ -1235,6 +1408,7 @@ def patch_session(session_id: int, body: SessionPatch, conn: DB):
 @router.get("/goals/{goal_id}/week")
 def goal_week(goal_id: int, conn: DB, date: Optional[str] = Query(None)):
     _row(conn, "race_goals", goal_id)
+    autolink_sessions(conn, goal_id=goal_id)
     ref = date or _today()
     mon, sun = _week_bounds(ref)
     rows = conn.execute(
@@ -1256,7 +1430,7 @@ def goal_week(goal_id: int, conn: DB, date: Optional[str] = Query(None)):
     d = datetime.fromisoformat(mon)
     sessions_by_date: dict[str, list] = {}
     for r in rows:
-        sessions_by_date.setdefault(r["session_date"], []).append(_session_out(r))
+        sessions_by_date.setdefault(r["session_date"], []).append(_session_out(r, conn))
 
     for _ in range(7):
         ds = d.strftime("%Y-%m-%d")
@@ -1281,6 +1455,7 @@ def goal_sessions(
     status: Optional[str] = Query(None),
 ):
     _row(conn, "race_goals", goal_id)
+    autolink_sessions(conn, goal_id=goal_id)
     clauses = ["goal_id=?"]
     params: list = [goal_id]
     if week is not None:
@@ -1293,7 +1468,7 @@ def goal_sessions(
         f"SELECT * FROM plan_sessions WHERE {' AND '.join(clauses)} ORDER BY session_date, discipline",
         params,
     ).fetchall()
-    return [_session_out(r) for r in rows]
+    return [_session_out(r, conn) for r in rows]
 
 
 # ── Race-day nutrition plan ──────────────────────────────────────────────────
@@ -1526,6 +1701,7 @@ def goal_adaptations(goal_id: int, conn: DB, limit: int = Query(8)):
 @router.get("/goals/{goal_id}/compliance")
 def goal_compliance(goal_id: int, conn: DB):
     goal_row = _row(conn, "race_goals", goal_id)
+    autolink_sessions(conn, goal_id=goal_id)
     # Determine current week number so we only show elapsed weeks (not future)
     total_weeks = _plan_total_weeks(conn, goal_row)
     plan_start = goal_row["plan_start_date"]

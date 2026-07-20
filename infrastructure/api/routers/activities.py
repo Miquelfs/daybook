@@ -652,6 +652,14 @@ def get_activity(
     if row is None:
         raise HTTPException(status_code=404, detail=f"Activity {activity_id!r} not found")
 
+    # Auto-link this day's pending plan session(s) to their real activity so the
+    # Planned-vs-Actual panel appears even if no training view was opened first.
+    try:
+        from infrastructure.api.routers.race_plans import autolink_sessions
+        autolink_sessions(conn, on_date=row["date"])
+    except Exception:
+        pass
+
     stream_rows = conn.execute(
         "SELECT stream_type, data_json FROM activity_streams WHERE activity_id=?",
         (activity_id,),

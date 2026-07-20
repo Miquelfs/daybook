@@ -154,6 +154,22 @@ export type LinkedPlanSession = {
   fueling: Record<string, unknown> | null;
 };
 
+// Real activity stats merged onto a plan session that was completed by (auto- or
+// manually) linking the activity logged that day. Present when a session has a
+// completed_activity_id.
+export type SessionActual = {
+  activity_id: string;
+  name: string | null;
+  activity_type: string | null;
+  distance_m: number | null;
+  moving_time_s: number | null;
+  duration_s: number | null;
+  avg_hr: number | null;
+  max_hr: number | null;
+  avg_speed_mps: number | null;
+  tss: number | null;
+};
+
 export type FuelingLog = {
   carbs_g: number | null;
   fluids_ml: number | null;

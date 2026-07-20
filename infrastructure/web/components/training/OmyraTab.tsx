@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import RaceReadinessPanel from "@/components/training/RaceReadinessPanel";
+import { SessionActualStats } from "@/components/training/SessionActualStats";
+import type { SessionActual } from "@/lib/api";
 import { Target, ChevronDown, ChevronUp, Plus, X, RefreshCw, Calendar } from "lucide-react";
 import {
   buildWorkoutDescription,
@@ -69,6 +71,8 @@ interface PlanSession {
   rpe_actual: number | null;
   notes: string | null;
   structure: StructureStep[] | null;
+  auto_matched: boolean;
+  actual: SessionActual | null;
 }
 
 interface GoalCreate {
@@ -163,6 +167,22 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
     finally { setSkipping(false); }
   }
 
+  // Log RPE on an already-completed session (e.g. one auto-matched from Garmin).
+  async function saveRpe() {
+    if (!rpe) { setErr("Pick an RPE first"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${BASE}/race-plans/sessions/${session.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rpe_actual: rpe }),
+      });
+      if (!res.ok) throw new Error();
+      onUpdate(); onClose();
+    } catch { setErr("Could not save"); }
+    finally { setSaving(false); }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70" onClick={onClose}>
       <div
@@ -205,6 +225,16 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
             )}
           </div>
         </div>
+
+        {/* Actual — the real activity that fulfilled this session */}
+        {session.actual && (
+          <SessionActualStats
+            actual={session.actual}
+            autoMatched={session.auto_matched}
+            sessionId={session.id}
+            onUnlinked={() => { onUpdate(); onClose(); }}
+          />
+        )}
 
         {/* Workout phases */}
         {(() => {
@@ -259,17 +289,19 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
           </p>
         )}
 
-        {done ? (
+        {done && session.rpe_actual ? (
           <div className="bg-[#052E16] border border-[#14532D] rounded-xl px-4 py-4 text-center">
             <p className="text-2xl mb-1">✅</p>
             <p className="text-sm font-semibold text-[#4ADE80]">Session completed</p>
-            {session.rpe_actual && <p className="text-xs text-[#52525B] mt-0.5">RPE {session.rpe_actual} · {RPE_LABELS[session.rpe_actual]}</p>}
+            <p className="text-xs text-[#52525B] mt-0.5">RPE {session.rpe_actual} · {RPE_LABELS[session.rpe_actual]}</p>
           </div>
         ) : (
           <>
-            {/* RPE */}
+            {/* RPE — logged after completing (auto-matched sessions start blank) */}
             <div className="space-y-2">
-              <p className="text-xs text-[#71717A] uppercase tracking-wider">Rate effort (RPE)</p>
+              <p className="text-xs text-[#71717A] uppercase tracking-wider">
+                {done ? "Log your effort (RPE)" : "Rate effort (RPE)"}
+              </p>
               <div className="flex gap-1.5 flex-wrap">
                 {[1,2,3,4,5,6,7,8,9,10].map((n) => (
                   <button key={n} onClick={() => setRpe(n)}
@@ -283,16 +315,23 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
 
             {err && <p className="text-xs text-[#F87171]">{err}</p>}
 
-            <div className="flex gap-2">
-              <button onClick={markDone} disabled={saving}
-                className="flex-1 py-3 bg-[#FAFAFA] text-[#09090B] text-sm font-semibold rounded-xl hover:bg-[#E4E4E7] disabled:opacity-50">
-                {saving ? "Saving…" : "Mark done"}
+            {done ? (
+              <button onClick={saveRpe} disabled={saving}
+                className="w-full py-3 bg-[#FAFAFA] text-[#09090B] text-sm font-semibold rounded-xl hover:bg-[#E4E4E7] disabled:opacity-50">
+                {saving ? "Saving…" : "Save RPE"}
               </button>
-              <button onClick={skip} disabled={skipping}
-                className="px-5 py-3 bg-[#18181B] border border-[#27272A] text-[#71717A] text-sm rounded-xl hover:bg-[#27272A] disabled:opacity-50">
-                {skipping ? "…" : "Skip"}
-              </button>
-            </div>
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={markDone} disabled={saving}
+                  className="flex-1 py-3 bg-[#FAFAFA] text-[#09090B] text-sm font-semibold rounded-xl hover:bg-[#E4E4E7] disabled:opacity-50">
+                  {saving ? "Saving…" : "Mark done"}
+                </button>
+                <button onClick={skip} disabled={skipping}
+                  className="px-5 py-3 bg-[#18181B] border border-[#27272A] text-[#71717A] text-sm rounded-xl hover:bg-[#27272A] disabled:opacity-50">
+                  {skipping ? "…" : "Skip"}
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -470,18 +509,22 @@ function FullSchedule({ goal, onSelectSession, onClose }: {
                   const isCompleted = s.status === "completed";
                   const isSkipped = s.status === "skipped";
                   const isMissed = s.status === "pending" && s.session_date < today;
-                  const isFuture = s.status === "pending" && s.session_date >= today;
+                  // Everything except a skipped session is tappable: future to
+                  // plan/complete, completed to log RPE / see the linked activity,
+                  // missed to submit retroactively or move.
+                  const openable = !isSkipped;
                   return (
                     <button
                       key={s.id}
-                      onClick={() => isFuture && onSelectSession(s)}
+                      onClick={() => openable && onSelectSession(s)}
+                      disabled={!openable}
                       className={`w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors ${
                         isCompleted
-                          ? "bg-[#052E16] border-[#14532D] opacity-70"
+                          ? "bg-[#052E16] border-[#14532D] opacity-70 hover:opacity-100"
                           : isSkipped
-                          ? "bg-[#18181B] border-[#27272A] opacity-30"
+                          ? "bg-[#18181B] border-[#27272A] opacity-30 cursor-default"
                           : isMissed
-                          ? "bg-[#18181B] border-[#27272A] opacity-40 cursor-default"
+                          ? "bg-[#18181B] border-[#27272A] opacity-50 hover:opacity-100 hover:border-[#3F3F46]"
                           : "bg-[#0D0D0F] border-[#27272A] hover:border-[#3F3F46]"
                       }`}
                     >
@@ -503,7 +546,7 @@ function FullSchedule({ goal, onSelectSession, onClose }: {
                         <span className="text-[10px] text-[#52525B] tabular-nums w-8 text-right">
                           {s.effective_duration_min}m
                         </span>
-                        {isFuture && <span className="text-[#3F3F46] text-xs">›</span>}
+                        {openable && <span className="text-[#3F3F46] text-xs">›</span>}
                       </div>
                     </button>
                   );

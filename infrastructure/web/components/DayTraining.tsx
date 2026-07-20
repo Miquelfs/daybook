@@ -2,6 +2,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { SectionLabel } from "@/components/MorningBrief";
+import { SessionActualStats } from "@/components/training/SessionActualStats";
+import type { SessionActual } from "@/lib/api";
 import {
   buildWorkoutDescription,
   resolveStructure,
@@ -71,6 +73,8 @@ interface PlanSession {
   structure: StructureStep[] | null;
   days_until_race: number | null;
   fueling: Fueling | null;
+  auto_matched: boolean;
+  actual: SessionActual | null;
 }
 
 interface InjurySuggestion {
@@ -523,6 +527,16 @@ function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
               </p>
             </div>
           </div>
+        )}
+
+        {/* Actual — the real activity that fulfilled this session */}
+        {session.actual && (
+          <SessionActualStats
+            actual={session.actual}
+            autoMatched={session.auto_matched}
+            sessionId={session.id}
+            onUnlinked={() => { onUpdate(); onClose(); }}
+          />
         )}
 
         {/* Workout phases */}
