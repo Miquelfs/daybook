@@ -252,6 +252,7 @@ export type DaySubjective = {
   learning: string | null;
   focus_score: number | null;
   error_log: string | null;
+  photo_caption: string | null;
 };
 
 export type WeatherData = {
@@ -313,6 +314,7 @@ export type DaySummary = {
   daily_question: string | null;
   daily_answer: string | null;
   photo_path: string | null;
+  photo_caption: string | null;
   tags: string | null;
   tags_list: string[];
 };
@@ -349,6 +351,7 @@ export type DayPatch = Partial<{
   learning: string;
   focus_score: number;
   error_log: string;
+  photo_caption: string;
 }>;
 
 // ─── Aviation types ───────────────────────────────────────────────────────────
@@ -559,6 +562,26 @@ export type FlightAnalytics = {
   operators: { op_label: string; sectors: number; block_hours: number }[];
   delay_stats: { delayed_flights: number; avg_delay_min: number; max_delay_min: number; total_delay_min: number } | null;
   delay_by_code: { delay_code: string; cnt: number; avg_min: number }[];
+};
+
+export type PunctualityGroup = {
+  flights: number;
+  avg_delay_min: number | null;
+  on_time_pct: number | null;
+};
+
+export type FlightPunctuality = {
+  available: boolean;
+  total_flights: number;
+  on_time_pct?: number;
+  avg_delay_min?: number;
+  median_delay_min?: number;
+  distribution?: { on_time: number; "16_30": number; "31_60": number; over_60: number };
+  top_causes?: { code: string; reason: string | null; count: number; avg_min: number }[];
+  by_departure_hour?: { hour: number; flights: number; avg_delay_min: number; on_time_pct: number }[];
+  earlies_vs_lates?: { split_hour_utc: number; earlies: PunctualityGroup; lates: PunctualityGroup };
+  worst_routes?: { route: string; flights: number; avg_delay_min: number }[];
+  by_month?: { month: string; flights: number; avg_delay_min: number }[];
 };
 
 export type FlightIn = {
@@ -1105,6 +1128,8 @@ export const api = {
     if (!res.ok) throw new Error(`deleteLicense failed ${res.status}`);
   },
   flightAnalytics: () => get<FlightAnalytics>("/flights/analytics"),
+  flightPunctuality: (year?: string) =>
+    get<FlightPunctuality>(`/flights/punctuality${year ? `?year=${year}` : ""}`),
   flightRoutes: (year?: string) => get<RouteFrequency[]>(`/flights/routes${year ? `?year=${year}` : ""}`),
   flightAirports: (year?: string) => get<AirportVisit[]>(`/flights/airports${year ? `?year=${year}` : ""}`),
   searchAirports: (q: string) => get<AirportInfo[]>(`/flights/airports/search?q=${encodeURIComponent(q)}`),
@@ -1180,6 +1205,18 @@ export const api = {
       last_flight: string;
       flights: Record<string, unknown>[];
     }>(`/flights/aircraft/${encodeURIComponent(reg)}`).catch(() => null),
+
+  countryFlights: (country: string) =>
+    get<{
+      country: string;
+      total_movements: number;
+      airports: number;
+      total_block_seconds: number;
+      total_night_seconds: number;
+      first_visit: string | null;
+      last_visit: string | null;
+      flights: Record<string, unknown>[];
+    }>(`/flights/countries/${encodeURIComponent(country)}/flights`).catch(() => null),
 
   // ─── Restaurants ────────────────────────────────────────────────────────────
 

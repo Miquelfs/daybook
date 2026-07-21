@@ -380,13 +380,24 @@ def get_analytics(conn: DB):
         GROUP BY f.arr_icao ORDER BY visits DESC LIMIT 5
     """).fetchall()
 
-    # Aircraft types breakdown
-    aircraft = conn.execute("""
-        SELECT aircraft_type, COUNT(*) AS sectors,
-               ROUND(SUM(block_seconds)/3600.0, 2) AS block_hours
+    # Aircraft types breakdown — merge equivalent type strings (e.g.
+    # "Boeing 737-8AS" ≡ "Boeing 737-800") via _normalise_aircraft_type.
+    _acft_raw = conn.execute("""
+        SELECT aircraft_type, COUNT(*) AS sectors, SUM(block_seconds) AS block_seconds
         FROM flights WHERE aircraft_type IS NOT NULL AND is_sim = 0
-        GROUP BY aircraft_type ORDER BY block_hours DESC
+        GROUP BY aircraft_type
     """).fetchall()
+    _acft_merged: dict[str, dict] = {}
+    for r in _acft_raw:
+        name = _normalise_aircraft_type(r["aircraft_type"])
+        m = _acft_merged.setdefault(name, {"aircraft_type": name, "sectors": 0, "_bs": 0})
+        m["sectors"] += r["sectors"]
+        m["_bs"] += r["block_seconds"] or 0
+    aircraft = sorted(
+        ({"aircraft_type": m["aircraft_type"], "sectors": m["sectors"],
+          "block_hours": round(m["_bs"] / 3600.0, 2)} for m in _acft_merged.values()),
+        key=lambda x: x["block_hours"], reverse=True,
+    )
 
     # Average block hours per sector per year
     avg_sector = conn.execute("""
@@ -414,16 +425,31 @@ def get_analytics(conn: DB):
         FROM flights WHERE fuel_burn_kg IS NOT NULL AND is_sim = 0
     """).fetchone()
 
-    # Burn efficiency by aircraft type
-    burn_by_type = conn.execute("""
+    # Burn efficiency by aircraft type — merge equivalent type strings, then
+    # recompute the averages over the combined set so the numbers stay correct.
+    _burn_raw = conn.execute("""
         SELECT aircraft_type,
-               ROUND(AVG(fuel_burn_kg), 0) AS avg_burn_kg,
-               ROUND(AVG(fuel_burn_kg / NULLIF(distance_nm, 0)), 2) AS kg_per_nm,
+               SUM(fuel_burn_kg) AS sum_burn,
+               SUM(fuel_burn_kg / NULLIF(distance_nm, 0)) AS sum_ratio,
                COUNT(*) AS flights
         FROM flights
         WHERE fuel_burn_kg IS NOT NULL AND distance_nm > 0 AND is_sim = 0
-        GROUP BY aircraft_type ORDER BY flights DESC
+        GROUP BY aircraft_type
     """).fetchall()
+    _burn_merged: dict[str, dict] = {}
+    for r in _burn_raw:
+        name = _normalise_aircraft_type(r["aircraft_type"])
+        m = _burn_merged.setdefault(name, {"aircraft_type": name, "_burn": 0.0, "_ratio": 0.0, "flights": 0})
+        m["_burn"] += r["sum_burn"] or 0
+        m["_ratio"] += r["sum_ratio"] or 0
+        m["flights"] += r["flights"]
+    burn_by_type = sorted(
+        ({"aircraft_type": m["aircraft_type"],
+          "avg_burn_kg": round(m["_burn"] / m["flights"]) if m["flights"] else 0,
+          "kg_per_nm": round(m["_ratio"] / m["flights"], 2) if m["flights"] else 0,
+          "flights": m["flights"]} for m in _burn_merged.values()),
+        key=lambda x: x["flights"], reverse=True,
+    )
 
     # Pax stats
     pax_stats = conn.execute("""
@@ -445,14 +471,33 @@ def get_analytics(conn: DB):
         FROM flights WHERE delay_minutes > 0 AND is_sim = 0
     """).fetchone()
 
-    # Delay by code (top codes)
-    delay_by_code = conn.execute("""
-        SELECT delay_code, COUNT(*) AS cnt,
-               ROUND(AVG(delay_minutes), 0) AS avg_min
+    # Delay by code (top codes) — the same code can be stored as "18", 18 or
+    # 18.0, which SQL GROUP BY treats as different buckets. Normalise each code
+    # to a canonical string and re-aggregate in Python.
+    def _norm_delay_code(c) -> str:
+        s = str(c).strip()
+        try:
+            return str(int(float(s)))
+        except (ValueError, TypeError):
+            return s
+
+    _delay_raw = conn.execute("""
+        SELECT delay_code, COUNT(*) AS cnt, SUM(delay_minutes) AS sum_min
         FROM flights
         WHERE delay_minutes > 0 AND delay_code IS NOT NULL AND is_sim = 0
-        GROUP BY delay_code ORDER BY cnt DESC LIMIT 10
+        GROUP BY delay_code
     """).fetchall()
+    _delay_merged: dict[str, dict] = {}
+    for r in _delay_raw:
+        code = _norm_delay_code(r["delay_code"])
+        m = _delay_merged.setdefault(code, {"delay_code": code, "cnt": 0, "_sum": 0.0})
+        m["cnt"] += r["cnt"]
+        m["_sum"] += r["sum_min"] or 0
+    delay_by_code = sorted(
+        ({"delay_code": m["delay_code"], "cnt": m["cnt"],
+          "avg_min": round(m["_sum"] / m["cnt"]) if m["cnt"] else 0} for m in _delay_merged.values()),
+        key=lambda x: x["cnt"], reverse=True,
+    )[:10]
 
     # Night flying stats
     night_stats = conn.execute("""
@@ -665,18 +710,23 @@ def get_routes(conn: DB, year: str | None = Query(None, description="4-digit yea
     if year:
         filters += " AND substr(f.date,1,4) = ?"
         params.append(year)
+    # Group purely by the directional city-pair. Operator/source are NOT part of
+    # the key, otherwise the same route imported from two sources (e.g. Norwegian
+    # + manual) shows up as duplicate rows. A representative operator/source is
+    # kept via MAX() for colouring only.
     rows = conn.execute(f"""
-        SELECT f.dep_icao, f.arr_icao, f.dep_iata, f.arr_iata,
+        SELECT f.dep_icao, f.arr_icao,
+               MAX(f.dep_iata) AS dep_iata, MAX(f.arr_iata) AS arr_iata,
                COUNT(*) AS count,
                ROUND(SUM(f.block_seconds)/3600.0, 2) AS total_block_hours,
-               a1.latitude AS dep_lat, a1.longitude AS dep_lon,
-               a2.latitude AS arr_lat, a2.longitude AS arr_lon,
-               f.operator, f.source
+               MAX(a1.latitude) AS dep_lat, MAX(a1.longitude) AS dep_lon,
+               MAX(a2.latitude) AS arr_lat, MAX(a2.longitude) AS arr_lon,
+               MAX(f.operator) AS operator, MAX(f.source) AS source
         FROM flights f
         LEFT JOIN airports a1 ON a1.icao = f.dep_icao
         LEFT JOIN airports a2 ON a2.icao = f.arr_icao
         {filters}
-        GROUP BY f.dep_icao, f.arr_icao, f.operator, f.source
+        GROUP BY f.dep_icao, f.arr_icao
         ORDER BY count DESC
     """, params).fetchall()
     return [
@@ -820,6 +870,43 @@ def airport_flights(icao: str, conn: DB):
     }
 
 
+@router.get("/countries/{country}/flights")
+def country_flights(country: str, conn: DB):
+    """Return all flights departing or arriving in a country, newest first."""
+    name = country.strip()
+    rows = conn.execute("""
+        SELECT f.id, f.date, f.dep_icao, f.arr_icao, f.dep_iata, f.arr_iata,
+               f.flight_number, f.aircraft_type, f.aircraft_reg, f.crew_role,
+               f.pic_name, f.block_seconds, f.night_seconds,
+               a1.country AS dep_country, a1.city AS dep_city,
+               a2.country AS arr_country, a2.city AS arr_city
+        FROM flights f
+        LEFT JOIN airports a1 ON a1.icao = f.dep_icao
+        LEFT JOIN airports a2 ON a2.icao = f.arr_icao
+        WHERE (a1.country = ? OR a2.country = ?) AND f.is_sim = 0
+        ORDER BY f.date DESC, f.off_block_utc DESC
+    """, (name, name)).fetchall()
+
+    flights = [dict(r) for r in rows]
+    airports = set()
+    for f in flights:
+        if f["dep_country"] == name and f["dep_icao"]:
+            airports.add(f["dep_icao"])
+        if f["arr_country"] == name and f["arr_icao"]:
+            airports.add(f["arr_icao"])
+
+    return {
+        "country": name,
+        "total_movements": len(rows),
+        "airports": len(airports),
+        "total_block_seconds": sum(r["block_seconds"] or 0 for r in rows),
+        "total_night_seconds": sum(r["night_seconds"] or 0 for r in rows),
+        "first_visit": flights[-1]["date"] if flights else None,
+        "last_visit": flights[0]["date"] if flights else None,
+        "flights": flights,
+    }
+
+
 # ─── Export ───────────────────────────────────────────────────────────────────
 
 @router.get("/export/easa")
@@ -927,6 +1014,164 @@ def captain_history(name: str, conn: DB):
         "last_flight": rows[-1]["date"],
         "aircraft_types": types,
         "flights": flights,
+    }
+
+
+# ─── Punctuality ─────────────────────────────────────────────────────────────
+
+# On-time is the industry D15 standard: a flight is "on time" if it pushed back
+# no more than 15 minutes late.
+_ON_TIME_THRESHOLD_MIN = 15
+# Off-block hour (UTC) splitting an "early" duty from a "late" one — later
+# departures inherit the day's accumulated delay, so this cut is the point.
+_EARLY_LATE_SPLIT_HOUR = 13
+
+
+def _off_block_hour(ts: str | None) -> int | None:
+    """Hour-of-day (0–23) from an ISO off-block timestamp; None if unparseable."""
+    if not ts or len(ts) < 13:
+        return None
+    try:
+        return int(ts[11:13])
+    except ValueError:
+        return None
+
+
+@router.get("/punctuality")
+def punctuality(conn: DB, year: int | None = Query(None)):
+    """
+    Delay/punctuality analytics over real (non-sim) flights that carry delay data.
+    Surfaces on-time rate, delay distribution, top delay causes, and — the most
+    actionable cut — how delay scales with departure hour / earlies-vs-lates.
+    """
+    where = "WHERE is_sim = 0 AND delay_minutes IS NOT NULL"
+    params: list = []
+    if year:
+        where += " AND substr(date,1,4) = ?"
+        params.append(str(year))
+
+    rows = conn.execute(
+        f"""SELECT date, delay_minutes, delay_code, delay_reason,
+                   off_block_utc, dep_iata, arr_iata, dep_icao, arr_icao
+            FROM flights {where}""",
+        params,
+    ).fetchall()
+
+    total = len(rows)
+    if total == 0:
+        return {"total_flights": 0, "available": False}
+
+    delays = sorted(r["delay_minutes"] for r in rows)
+    on_time = sum(1 for d in delays if d <= _ON_TIME_THRESHOLD_MIN)
+    median = delays[total // 2]
+
+    # Delay-size distribution (on_time bucket aligns with the ≤15 headline metric)
+    buckets = {"on_time": 0, "16_30": 0, "31_60": 0, "over_60": 0}
+    for d in delays:
+        if d <= _ON_TIME_THRESHOLD_MIN:
+            buckets["on_time"] += 1
+        elif d <= 30:
+            buckets["16_30"] += 1
+        elif d <= 60:
+            buckets["31_60"] += 1
+        else:
+            buckets["over_60"] += 1
+
+    # Top delay causes (code + human reason), by frequency then average size
+    causes: dict[str, dict] = {}
+    for r in rows:
+        code = (r["delay_code"] or "").strip()
+        if not code or r["delay_minutes"] <= _ON_TIME_THRESHOLD_MIN:
+            continue
+        c = causes.setdefault(code, {"code": code, "reason": r["delay_reason"], "count": 0, "total_min": 0})
+        c["count"] += 1
+        c["total_min"] += r["delay_minutes"]
+    top_causes = sorted(causes.values(), key=lambda c: (-c["count"], -c["total_min"]))[:8]
+    for c in top_causes:
+        c["avg_min"] = round(c["total_min"] / c["count"], 1)
+        del c["total_min"]
+
+    # By departure hour (UTC) — count, avg delay, on-time %
+    by_hour: dict[int, dict] = {}
+    early = {"flights": 0, "on_time": 0, "total_delay": 0}
+    late = {"flights": 0, "on_time": 0, "total_delay": 0}
+    for r in rows:
+        h = _off_block_hour(r["off_block_utc"])
+        if h is None:
+            continue
+        b = by_hour.setdefault(h, {"hour": h, "flights": 0, "on_time": 0, "total_delay": 0})
+        b["flights"] += 1
+        b["total_delay"] += r["delay_minutes"]
+        grp = early if h < _EARLY_LATE_SPLIT_HOUR else late
+        grp["flights"] += 1
+        grp["total_delay"] += r["delay_minutes"]
+        if r["delay_minutes"] <= _ON_TIME_THRESHOLD_MIN:
+            b["on_time"] += 1
+            grp["on_time"] += 1
+    hourly = []
+    for h in sorted(by_hour):
+        b = by_hour[h]
+        hourly.append({
+            "hour": h,
+            "flights": b["flights"],
+            "avg_delay_min": round(b["total_delay"] / b["flights"], 1),
+            "on_time_pct": round(100 * b["on_time"] / b["flights"], 1),
+        })
+
+    def _grp(g: dict) -> dict:
+        if not g["flights"]:
+            return {"flights": 0, "avg_delay_min": None, "on_time_pct": None}
+        return {
+            "flights": g["flights"],
+            "avg_delay_min": round(g["total_delay"] / g["flights"], 1),
+            "on_time_pct": round(100 * g["on_time"] / g["flights"], 1),
+        }
+
+    # Worst routes (min 3 flights for signal)
+    routes: dict[str, dict] = {}
+    for r in rows:
+        dep = r["dep_iata"] or r["dep_icao"] or "?"
+        arr = r["arr_iata"] or r["arr_icao"] or "?"
+        key = f"{dep}–{arr}"
+        rt = routes.setdefault(key, {"route": key, "flights": 0, "total_delay": 0})
+        rt["flights"] += 1
+        rt["total_delay"] += r["delay_minutes"]
+    worst_routes = sorted(
+        ({"route": v["route"], "flights": v["flights"],
+          "avg_delay_min": round(v["total_delay"] / v["flights"], 1)}
+         for v in routes.values() if v["flights"] >= 3),
+        key=lambda x: -x["avg_delay_min"],
+    )[:8]
+
+    # By month (YYYY-MM)
+    months: dict[str, dict] = {}
+    for r in rows:
+        m = r["date"][:7]
+        mo = months.setdefault(m, {"month": m, "flights": 0, "total_delay": 0})
+        mo["flights"] += 1
+        mo["total_delay"] += r["delay_minutes"]
+    by_month = [
+        {"month": v["month"], "flights": v["flights"],
+         "avg_delay_min": round(v["total_delay"] / v["flights"], 1)}
+        for v in sorted(months.values(), key=lambda x: x["month"])
+    ]
+
+    return {
+        "available": True,
+        "total_flights": total,
+        "on_time_pct": round(100 * on_time / total, 1),
+        "avg_delay_min": round(sum(delays) / total, 1),
+        "median_delay_min": median,
+        "distribution": buckets,
+        "top_causes": top_causes,
+        "by_departure_hour": hourly,
+        "earlies_vs_lates": {
+            "split_hour_utc": _EARLY_LATE_SPLIT_HOUR,
+            "earlies": _grp(early),
+            "lates": _grp(late),
+        },
+        "worst_routes": worst_routes,
+        "by_month": by_month,
     }
 
 

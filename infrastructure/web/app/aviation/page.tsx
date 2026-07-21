@@ -23,10 +23,11 @@ const FlightRouteMap = dynamic(
 );
 import type { MapStyle } from "@/components/aviation/FlightRouteMap";
 import { LicensesCard } from "@/components/aviation/LicensesCard";
+import { PunctualityTab } from "@/components/aviation/PunctualityTab";
 
 const MAP_STYLE_KEY = "daybook_aviation_map_style";
 
-type Tab = "overview" | "logbook" | "map" | "stats";
+type Tab = "overview" | "logbook" | "map" | "stats" | "punctuality";
 type CodeMode = "icao" | "iata";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -171,7 +172,7 @@ function OpPill({ label, color }: { label: string; color: string }) {
   );
 }
 
-type LookupKind = "airport" | "aircraft" | "captain";
+type LookupKind = "airport" | "aircraft" | "captain" | "country";
 type LookupPanel = { kind: LookupKind; query: string } | null;
 
 export default function AviationPage() {
@@ -251,6 +252,12 @@ export default function AviationPage() {
     enabled: lookup?.kind === "aircraft" && !!lookup.query,
   });
 
+  const { data: countryData, isLoading: countryLoading } = useQuery({
+    queryKey: ["countryFlights", lookup?.query],
+    queryFn: () => api.countryFlights(lookup!.query),
+    enabled: lookup?.kind === "country" && !!lookup.query,
+  });
+
   const { data: captainData, isLoading: captainLoading } = useQuery({
     queryKey: ["captainHistory", lookup?.query],
     queryFn: () => api.captainHistory(lookup!.query),
@@ -325,6 +332,7 @@ export default function AviationPage() {
         <button className={tabCls("logbook")} onClick={() => setTab("logbook")}><BarChart2 size={13} />EASA</button>
         <button className={tabCls("map")} onClick={() => setTab("map")}><MapPin size={13} />Routes</button>
         <button className={tabCls("stats")} onClick={() => setTab("stats")}><TrendingUp size={13} />Analytics</button>
+        <button className={tabCls("punctuality")} onClick={() => setTab("punctuality")}><Clock size={13} />Punctuality</button>
         <Link href="/aviation/roster" className={tabCls("roster" as Tab)}><CalendarDays size={13} />Roster</Link>
       </div>
 
@@ -822,10 +830,14 @@ export default function AviationPage() {
               </div>
               <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
                 {analytics.countries.map(c => (
-                  <div key={c} className="flex items-center gap-1.5 bg-[#09090B] rounded-lg px-2 py-1.5">
+                  <button
+                    key={c}
+                    onClick={() => setLookup({ kind: "country", query: c })}
+                    className="flex items-center gap-1.5 bg-[#09090B] rounded-lg px-2 py-1.5 hover:bg-[#18181B] hover:ring-1 hover:ring-sky-800 transition-colors text-left"
+                  >
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0" />
                     <span className="text-xs text-[#A1A1AA] truncate">{c}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -872,10 +884,10 @@ export default function AviationPage() {
                 <>
                   <p className="text-xs text-[#52525B] mb-2">Burn efficiency by aircraft</p>
                   {analytics.burn_by_type.map(b => (
-                    <div key={b.aircraft_type} className="flex items-center justify-between py-1 border-b border-[#27272A] last:border-0 text-xs">
-                      <span className="text-[#A1A1AA]">{b.aircraft_type}</span>
-                      <span className="text-[#71717A]">{fmt(b.avg_burn_kg)} kg avg</span>
-                      {b.kg_per_nm && <span className="text-[#52525B]">{b.kg_per_nm} kg/NM</span>}
+                    <div key={b.aircraft_type} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 py-1 border-b border-[#27272A] last:border-0 text-xs">
+                      <span className="text-[#A1A1AA] truncate">{b.aircraft_type}</span>
+                      <span className="text-[#71717A] tabular-nums text-right w-24">{fmt(b.avg_burn_kg)} kg avg</span>
+                      <span className="text-[#52525B] tabular-nums text-right w-20">{b.kg_per_nm ? `${b.kg_per_nm} kg/NM` : "—"}</span>
                     </div>
                   ))}
                 </>
@@ -916,12 +928,10 @@ export default function AviationPage() {
             <div className="bg-[#18181B] rounded-lg p-4">
               <SectionTitle icon={<Plane size={14} />}>Aircraft Types</SectionTitle>
               {analytics.aircraft_breakdown.map(a => (
-                <div key={a.aircraft_type} className="flex items-center justify-between py-1.5 border-b border-[#27272A] last:border-0">
-                  <span className="text-[#A1A1AA] text-sm">{a.aircraft_type}</span>
-                  <div className="flex items-center gap-4">
-                    <span className="text-[#52525B] text-xs tabular-nums">{a.sectors} sectors</span>
-                    <span className="text-[#71717A] text-xs tabular-nums w-16 text-right">{hToHHMM(a.block_hours)}</span>
-                  </div>
+                <div key={a.aircraft_type} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 py-1.5 border-b border-[#27272A] last:border-0">
+                  <span className="text-[#A1A1AA] text-sm truncate">{a.aircraft_type}</span>
+                  <span className="text-[#52525B] text-xs tabular-nums text-right w-20">{a.sectors} sectors</span>
+                  <span className="text-[#71717A] text-xs tabular-nums w-16 text-right">{hToHHMM(a.block_hours)}</span>
                 </div>
               ))}
             </div>
@@ -1010,6 +1020,8 @@ export default function AviationPage() {
         <div className="flex items-center justify-center h-32 text-[#52525B] text-sm">Loading analytics…</div>
       )}
 
+      {tab === "punctuality" && <PunctualityTab />}
+
       <AddFlightSheet date={TODAY} isOpen={addOpen} onClose={() => setAddOpen(false)} />
 
       {/* Inline lookup panel — slide in from bottom */}
@@ -1022,6 +1034,7 @@ export default function AviationPage() {
               {lookup.kind === "airport" && <MapPin size={15} className="text-sky-400" />}
               {lookup.kind === "aircraft" && <Plane size={15} className="text-violet-400" />}
               {lookup.kind === "captain" && <User size={15} className="text-amber-400" />}
+              {lookup.kind === "country" && <Flag size={15} className="text-sky-400" />}
               <span className="font-mono text-sm text-[#FAFAFA] font-medium">{lookup.query}</span>
               <button onClick={() => setLookup(null)} className="ml-auto text-[#52525B] hover:text-[#A1A1AA] transition-colors">
                 <X size={16} />
@@ -1175,6 +1188,56 @@ export default function AviationPage() {
                     </div>
                     <div className="space-y-1">
                       {(captainData.flights as Record<string, unknown>[]).map((f, i) => {
+                        const dep = (f.dep_icao as string) || "—";
+                        const arr = (f.arr_icao as string) || "—";
+                        const block = secToHHMM((f.block_seconds as number) || 0);
+                        const isPIC = (f.crew_role as string) === "pic";
+                        const acft = shortAircraftType(f.aircraft_type as string);
+                        return (
+                          <Link key={i} href={`/aviation/${f.id}`}
+                            className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#18181B] transition-colors text-xs"
+                            onClick={() => setLookup(null)}
+                          >
+                            <span className="text-[#52525B] w-20 shrink-0 tabular-nums">{f.date as string}</span>
+                            <span className="text-[#FAFAFA] font-mono">{dep} → {arr}</span>
+                            <span className="text-[#52525B] ml-auto">{acft}</span>
+                            <span className="text-[#A1A1AA] tabular-nums">{block}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-xs ${isPIC ? "bg-violet-950/50 text-violet-300" : "bg-[#27272A] text-[#71717A]"}`}>
+                              {isPIC ? "PIC" : "FO"}
+                            </span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )
+              )}
+
+              {/* Country panel */}
+              {lookup.kind === "country" && (
+                countryLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-sky-500" />
+                  </div>
+                ) : !countryData || countryData.flights.length === 0 ? (
+                  <p className="text-[#71717A] text-sm text-center py-10">No flights found in <span className="text-[#FAFAFA]">{lookup.query}</span>.</p>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-4 gap-2">
+                      {[
+                        { label: "Flights", value: String(countryData.total_movements) },
+                        { label: "Airports", value: String(countryData.airports) },
+                        { label: "Block time", value: secToHHMM(countryData.total_block_seconds) },
+                        { label: "Night", value: secToHHMM(countryData.total_night_seconds) },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-center">
+                          <p className="text-lg font-semibold tabular-nums">{value}</p>
+                          <p className="text-xs text-[#52525B] mt-0.5">{label}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-1">
+                      {(countryData.flights as Record<string, unknown>[]).map((f, i) => {
                         const dep = (f.dep_icao as string) || "—";
                         const arr = (f.arr_icao as string) || "—";
                         const block = secToHHMM((f.block_seconds as number) || 0);
