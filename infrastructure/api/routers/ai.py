@@ -23,13 +23,18 @@ DB = Annotated[sqlite3.Connection, Depends(get_connection)]
 
 @router.get("/status")
 def ai_status():
-    """Check if Ollama is reachable on the HP."""
+    """Check if the active LLM backend (Ollama local or Groq cloud) is reachable."""
     available = ollama_client.is_available()
+    provider = ollama_client.LLM_PROVIDER
+    is_groq = provider == "groq"
     return {
+        # `ollama_available` kept for client back-compat; it means "LLM available".
         "ollama_available": available,
+        "provider": provider,
+        "host": ollama_client.GROQ_BASE if is_groq else ollama_client.OLLAMA_HOST,
         "ollama_host": ollama_client.OLLAMA_HOST,
-        "model_fast": ollama_client.MODEL_FAST,
-        "model_default": ollama_client.MODEL_DEFAULT,
+        "model_fast": ollama_client.GROQ_MODEL_FAST if is_groq else ollama_client.MODEL_FAST,
+        "model_default": ollama_client.GROQ_MODEL if is_groq else ollama_client.MODEL_DEFAULT,
     }
 
 
@@ -72,8 +77,9 @@ def regenerate_morning_brief(date_str: str, conn: DB):
 # ─── Health narratives ────────────────────────────────────────────────────────
 
 class NarrativeRequest(BaseModel):
-    topic: str          # sleep | hrv | training | load
+    topic: str          # sleep | hrv | training | load | money | insights
     days: int = 14
+    force: bool = False  # bypass today's cache (the Regenerate button)
 
 
 @router.post("/health-narrative")
@@ -96,7 +102,7 @@ def health_narrative(req: NarrativeRequest, conn: DB):
         (req.topic, date_range),
     ).fetchone()
 
-    if cached and cached["generated_at"][:10] == date.today().isoformat():
+    if not req.force and cached and cached["generated_at"][:10] == date.today().isoformat():
         return {
             "topic": req.topic,
             "text": cached["text"],
@@ -107,8 +113,9 @@ def health_narrative(req: NarrativeRequest, conn: DB):
     if not ollama_client.is_available():
         return {"topic": req.topic, "text": None, "available": False}
 
-    data = _fetch_narrative_data(conn, req.topic, start.isoformat(), end.isoformat(), req.days)
-    prompt = build_narrative_prompt(req.topic, data)
+    prompt = _build_prompt_for_topic(conn, req.topic, start.isoformat(), end.isoformat(), req.days)
+    if prompt is None:
+        return {"topic": req.topic, "text": None, "available": False}
     text = ollama_client.generate(prompt)
 
     if not text:
@@ -127,6 +134,96 @@ def health_narrative(req: NarrativeRequest, conn: DB):
         "generated_at": date.today().isoformat(),
         "cached": False,
     }
+
+
+@router.get("/health-narrative")
+def get_health_narrative(conn: DB, topic: str = Query(...), days: int = Query(14)):
+    """Return today's cached narrative for a topic without generating one.
+    Lets the UI restore a previously generated narrative on page load."""
+    end = date.today()
+    start = end - timedelta(days=days - 1)
+    date_range = f"{start.isoformat()}:{end.isoformat()}"
+    cached = conn.execute(
+        """
+        SELECT text, generated_at FROM ai_narratives
+        WHERE topic = ? AND date_range = ?
+        ORDER BY generated_at DESC LIMIT 1
+        """,
+        (topic, date_range),
+    ).fetchone()
+    if cached and cached["generated_at"][:10] == date.today().isoformat():
+        return {"topic": topic, "text": cached["text"], "generated_at": cached["generated_at"], "cached": True}
+    return {"topic": topic, "text": None, "cached": False}
+
+
+# Training-load and other keys the correlation catalog doesn't label — spelled out
+# so the LLM never has to guess what a cryptic code means (it was reading "tsb" as
+# "screen time"). Everything else falls back to the shared catalog.
+_EXTRA_METRIC_LABELS = {
+    "ctl": "Fitness (CTL, 42-day training load)",
+    "atl": "Fatigue (ATL, 7-day training load)",
+    "tsb": "Form (TSB = fitness minus fatigue)",
+    "daily_spend": "Daily spend",
+}
+
+
+def _metric_label(key: str) -> str:
+    """Human-readable label for a correlation metric key."""
+    try:
+        from infrastructure.api.routers.correlations import _STATIC_CATALOG
+        if key in _STATIC_CATALOG:
+            return _STATIC_CATALOG[key]["label"]
+    except Exception:
+        pass
+    if key in _EXTRA_METRIC_LABELS:
+        return _EXTRA_METRIC_LABELS[key]
+    if ":" in key:  # dynamic keys like money:Transportation, tag:running, person:Anna
+        pref, _, rest = key.partition(":")
+        pretty = {"money": "Spend", "cat": "Spend", "tag": "Tag", "person": "Time with"}.get(pref, pref.capitalize())
+        return f"{pretty}: {rest}"
+    return key.replace("_", " ").capitalize()
+
+
+def _fetch_insights_data(conn) -> dict:
+    """Strongest correlations from the latest snapshot, for the insights narrative."""
+    latest = conn.execute("SELECT MAX(computed_at) AS c FROM correlation_snapshots").fetchone()
+    if not latest or not latest["c"]:
+        return {}
+    rows = conn.execute(
+        """
+        SELECT metric_a, metric_b, r, lag, n, is_new FROM correlation_snapshots
+        WHERE computed_at = ?
+        ORDER BY ABS(r) DESC LIMIT 8
+        """,
+        (latest["c"],),
+    ).fetchall()
+    corrs = [dict(r) for r in rows]
+    for c in corrs:
+        c["label_a"] = _metric_label(c["metric_a"])
+        c["label_b"] = _metric_label(c["metric_b"])
+    return {"computed_at": latest["c"], "correlations": corrs}
+
+
+def _build_prompt_for_topic(conn, topic: str, start: str, end: str, days: int):
+    """Route a narrative topic to the right data-fetch + prompt. Returns None if
+    there's not enough data to generate (caller reports unavailable)."""
+    if topic == "money":
+        from domains.ai.weekly_expense_summary import _fetch_week_spend
+        from domains.ai.prompt_builder import weekly_expense_summary as build_money_prompt
+        mdata = _fetch_week_spend(start, end)
+        if not mdata or not mdata.get("total_spent"):
+            return None
+        return build_money_prompt(start, mdata)
+
+    if topic == "insights":
+        from domains.ai.prompt_builder import insights_narrative as build_insights_prompt
+        idata = _fetch_insights_data(conn)
+        if not idata.get("correlations"):
+            return None
+        return build_insights_prompt(idata)
+
+    data = _fetch_narrative_data(conn, topic, start, end, days)
+    return build_narrative_prompt(topic, data)
 
 
 def _fetch_narrative_data(conn, topic: str, start: str, end: str, days: int) -> dict:

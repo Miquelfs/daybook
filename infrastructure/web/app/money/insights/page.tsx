@@ -9,6 +9,7 @@ import { MonthlyAnomalies } from "@/components/money/MonthlyAnomalies";
 import { MonthHeatGrid } from "@/components/money/MonthHeatGrid";
 import { MonthlyChart } from "@/components/money/MonthlyChart";
 import { ForecastCard } from "@/components/money/ForecastCard";
+import { AINarrative } from "@/components/AINarrative";
 
 interface Props {
   searchParams: Promise<{ month?: string }>;
@@ -51,6 +52,16 @@ export default async function InsightsPage({ searchParams }: Props) {
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">Insights</h1>
         <p className="text-xs text-[#52525B] mt-0.5">{monthLabel}</p>
+      </div>
+
+      <div className="mb-8">
+        <AINarrative
+          topic="money"
+          days={7}
+          label="AI Recommendations"
+          blurb="Get a plain-English read on this week's spending — what's on track, what to watch, and one practical action."
+          cta="Analyse my spending"
+        />
       </div>
 
       {/* 1 · This month at a glance */}

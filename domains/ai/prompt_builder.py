@@ -30,6 +30,7 @@ def morning_brief(
     week_summary: dict,
     last_intention: Optional[str],
     todays_session: Optional[dict] = None,
+    tags: Optional[list] = None,
 ) -> str:
     """
     Builds the 6am morning brief prompt.
@@ -71,6 +72,7 @@ def morning_brief(
         energy_trend = f" ({'+' if diff >= 0 else ''}{diff} vs last week)"
 
     intention_line = f"\nLast night's intention: {last_intention}" if last_intention else ""
+    tags_line = f"\nYesterday you did / logged: {', '.join(tags)}" if tags else ""
 
     session_line = ""
     if todays_session:
@@ -88,12 +90,13 @@ def morning_brief(
     return f"""You are a concise personal daily assistant. Write a warm, grounded morning brief in 3-4 sentences using the data below.
 Mention the most notable numbers, flag anything worth attention (low HRV, poor sleep, high fatigue), and end with one actionable suggestion for the day.
 If there's a training session today, mention it and (if fuelling is given) a one-line fuelling reminder.
-Do not start with "Good morning". Do not repeat all numbers — pick the most meaningful ones.
+Reference what you actually did yesterday (from the "Yesterday you did / logged" list) — name one or two of the notable activities and connect them to today's state or suggestion (e.g. a hard training day → recovery focus, a late night or nap → energy, alcohol/travel → hydration).
+Address the reader directly as "you". Do not start with "Good morning". Do not repeat all numbers — pick the most meaningful ones.
 
 Today: {today}
 Weather: {weather_desc}, {temp_min}–{temp_max}°C{session_line}
 
-Yesterday: energy {energy_yd}/10, mood {mood_yd}/10
+Yesterday: energy {energy_yd}/10, mood {mood_yd}/10{tags_line}
 Sleep last night: {sleep_dur}, score {sleep_score}/100, deep {deep_pct}, REM {rem_pct}
 HRV: {hrv_val}ms (weekly avg {hrv_weekly}ms)
 Resting HR: {resting_hr}bpm | Steps: {steps} | Body battery: {body_battery}
@@ -130,6 +133,9 @@ Sleep data (last {data.get('days', 14)} days):
 - Sleep debt (cumulative vs 8h target): {_fmt_duration(data.get('sleep_debt_seconds'))}
 - Correlation sleep duration → next-day energy: r={data.get('r_sleep_energy') or 'unknown'}
 
+Write in the SECOND PERSON — address the reader directly as "you"/"your", never "the user", "the sleeper", "the person", or third person. Be specific; skip filler and repetitive hedging.
+Format as 3-4 short labelled sections in the form "**Label:** one or two sentences", each separated by a BLANK LINE. No preamble, no bullet lists.
+
 Write the analysis now:"""
 
     if topic == "hrv":
@@ -149,6 +155,9 @@ HRV data (last {data.get('days', 14)} days):
 - Recent sleep avg: {_fmt_duration(data.get('avg_sleep_seconds'))}
 - Recent training load (ATL): {data.get('atl') or 'unknown'}
 
+Write in the SECOND PERSON — address the reader directly as "you"/"your", never "the user", "the sleeper", "the person", or third person. Be specific; skip filler and repetitive hedging.
+Format as 3-4 short labelled sections in the form "**Label:** one or two sentences", each separated by a BLANK LINE. No preamble, no bullet lists.
+
 Write the analysis now:"""
 
     if topic == "training":
@@ -166,6 +175,9 @@ Training load data (combined sports):
 - Last 7 days TSS: {data.get('weekly_tss') or 'unknown'}
 - Last 7 days workouts: {data.get('weekly_workouts') or 'unknown'}
 - Sports this week: {data.get('sports_this_week') or 'unknown'}
+
+Write in the SECOND PERSON — address the reader directly as "you"/"your", never "the user", "the sleeper", "the person", or third person. Be specific; skip filler and repetitive hedging.
+Format as 3-4 short labelled sections in the form "**Label:** one or two sentences", each separated by a BLANK LINE. No preamble, no bullet lists.
 
 Write the analysis now:"""
 
@@ -185,6 +197,9 @@ Load index data (last {data.get('days', 7)} days):
 - Timezone penalty: {data.get('timezone_penalty') or 'unknown'}/25
 - Duty load: {data.get('duty_load') or 'unknown'}/25
 - 7-day trend: {data.get('trend') or 'unknown'}
+
+Write in the SECOND PERSON — address the reader directly as "you"/"your", never "the user", "the sleeper", "the person", or third person. Be specific; skip filler and repetitive hedging.
+Format as 3-4 short labelled sections in the form "**Label:** one or two sentences", each separated by a BLANK LINE. No preamble, no bullet lists.
 
 Write the analysis now:"""
 
@@ -215,6 +230,37 @@ Plan context:
 Write the explanation now:"""
 
 
+def insights_narrative(data: dict) -> str:
+    """
+    Builds a prompt summarising the strongest cross-domain correlations.
+    data keys: computed_at, correlations [{metric_a, metric_b, r, lag, n, is_new}].
+    """
+    corrs = data.get("correlations", [])
+    lines = "\n".join(
+        f"  - {c.get('label_a', c['metric_a'])} ↔ {c.get('label_b', c['metric_b'])}: r={c['r']:+.2f}"
+        + (f" (lag {c['lag']}d)" if c.get("lag") else "")
+        + f", n={c['n']}"
+        + (" [new this week]" if c.get("is_new") else "")
+        for c in corrs
+    ) or "  (no correlations computed yet)"
+
+    return f"""You are a sharp personal-data analyst talking directly to the person whose data this is — years of daily self-tracking (sleep, HRV, mood, energy, training, spending, screen time, aviation duty). Below are your strongest correlations. Write an analysis that:
+1. Leads with the 2-3 most ROBUST, actionable patterns. Weight by sample size (n): an |r| near 1 with small n is almost certainly noise — deprioritise those and say so plainly. Prefer larger-n findings.
+2. For the single best pattern, proposes ONE concrete experiment: what to change, for how long, and what to watch.
+3. Names the correlations most likely to be confounds or mechanically linked (e.g. two measures of the same thing, like activity calories and moving time).
+Note correlation-is-not-causation ONCE, then be specific instead of hedging every sentence.
+
+Note: r>0 = move together, r<0 = inversely; "lag Nd" means metric_a relates to metric_b N days later; n = paired days (higher = more trustworthy).
+
+Strongest correlations:
+{lines}
+
+Write in the SECOND PERSON — address the reader directly as "you"/"your", never "the user", "the sleeper", "the person", or third person. Be specific; skip filler and repetitive hedging.
+Format as 3-4 short labelled sections in the form "**Label:** one or two sentences", each separated by a BLANK LINE. No preamble, no bullet lists.
+
+Write the analysis now:"""
+
+
 def weekly_expense_summary(week_start: str, data: dict) -> str:
     """
     Builds a weekly expense summary prompt.
@@ -232,9 +278,9 @@ def weekly_expense_summary(week_start: str, data: dict) -> str:
     vs_last = data.get("vs_last_week_pct")
     vs_last_line = f"- vs last week: {'+' if vs_last and vs_last >= 0 else ''}{vs_last:.0f}%" if vs_last is not None else ""
 
-    return f"""You are a concise personal finance coach. Summarise the following weekly spending in 3-4 sentences.
-Mention whether the person is on track for the month, flag any overspent categories, and give one practical tip.
-Do not list all categories — pick the most notable ones. Be direct and use euros.
+    return f"""You are a concise personal finance coach talking directly to the person whose money this is. Summarise the following weekly spending in 3-4 sentences.
+Say whether YOU are on track for the month, flag any overspent categories, and give one practical tip.
+Write in the SECOND PERSON — "you"/"your", never "the person" or "the user". Do not list all categories — pick the most notable ones. Be direct and use euros.
 
 Week of {week_start}:
 - Total spent: €{data.get('total_spent', 0):.2f} / €{data.get('total_budget', 0):.2f} weekly budget ({data.get('budget_pct', 0):.0f}% of budget)

@@ -1,3 +1,7 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { ChevronDown } from "lucide-react";
 import { fmtDuration } from "@/lib/api";
 import type { SleepData, DailyStats, HRVData, LoadIndexData } from "@/lib/api";
 
@@ -7,6 +11,7 @@ interface Props {
   hrv: HRVData | null;
   loadIndex?: LoadIndexData | null;
   brief?: string | null;
+  aiAvailable?: boolean;
 }
 
 function Stat({
@@ -43,7 +48,7 @@ const RECOVERY_COLOR: Record<string, string> = {
   accumulating:"text-rose-400 border-rose-900",
 };
 
-export function MorningBrief({ sleep, stats, hrv, loadIndex, brief }: Props) {
+export function MorningBrief({ sleep, stats, hrv, loadIndex, brief, aiAvailable }: Props) {
   const sleepDuration = fmtDuration(sleep?.duration_seconds ?? null);
   const deepPct = sleep?.duration_seconds && sleep.deep_seconds
     ? Math.round((sleep.deep_seconds / sleep.duration_seconds) * 100)
@@ -53,9 +58,24 @@ export function MorningBrief({ sleep, stats, hrv, loadIndex, brief }: Props) {
   const recoveryStatus = loadIndex?.recovery_status ?? null;
   const recoveryColor = recoveryStatus ? (RECOVERY_COLOR[recoveryStatus] ?? RECOVERY_COLOR.balanced) : null;
 
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined" && localStorage.getItem("morning-brief-collapsed") === "1") {
+      setCollapsed(true);
+    }
+  }, []);
+  const toggle = useCallback(() => {
+    setCollapsed((c) => {
+      const next = !c;
+      try { localStorage.setItem("morning-brief-collapsed", next ? "1" : "0"); } catch {}
+      return next;
+    });
+  }, []);
+
   return (
     <section>
-      <SectionLabel>Morning brief</SectionLabel>
+      <p className="text-xs text-[#F59E0B] uppercase tracking-[0.2em] mb-4">Morning brief</p>
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
         <Stat label="Sleep" value={sleepDuration} accent />
         <Stat
@@ -93,11 +113,34 @@ export function MorningBrief({ sleep, stats, hrv, loadIndex, brief }: Props) {
         </div>
       )}
 
-      {brief && (
-        <p className="mt-5 text-sm text-[#A1A1AA] leading-relaxed border-l-2 border-[#F59E0B]/30 pl-3">
-          {brief}
+      {brief ? (
+        collapsed ? (
+          <button
+            onClick={toggle}
+            className="mt-4 flex items-center gap-1 text-xs text-[#52525B] hover:text-[#A1A1AA] transition-colors"
+          >
+            Show insight
+            <ChevronDown size={14} />
+          </button>
+        ) : (
+          <div className="mt-5">
+            <p className="text-sm text-[#A1A1AA] leading-relaxed text-justify border-l-2 border-[#F59E0B]/30 pl-3">
+              {brief}
+            </p>
+            <button
+              onClick={toggle}
+              className="mt-2 ml-auto flex items-center gap-1 text-xs text-[#52525B] hover:text-[#A1A1AA] transition-colors"
+            >
+              Hide insight
+              <ChevronDown size={14} className="rotate-180" />
+            </button>
+          </div>
+        )
+      ) : aiAvailable === false ? (
+        <p className="mt-5 text-xs text-[#52525B] leading-relaxed border-l-2 border-[#27272A] pl-3">
+          Narrative offline — AI node unreachable.
         </p>
-      )}
+      ) : null}
     </section>
   );
 }

@@ -68,7 +68,7 @@ def _fetch_week_spend(week_start: str, week_end: str) -> dict:
 
     top_tx = conn.execute(
         """
-        SELECT description, ABS(amount) AS amount
+        SELECT name AS description, ABS(amount) AS amount
         FROM transactions
         WHERE date BETWEEN ? AND ?
           AND transaction_type = 'Expense'

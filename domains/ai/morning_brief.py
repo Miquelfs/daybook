@@ -25,8 +25,11 @@ log = logging.getLogger(__name__)
 
 
 def _fetch_data(conn, target_date: str, yesterday: str) -> dict:
+    # Sleep & HRV are overnight/recovery metrics — take the most recent available
+    # up to today so the brief reflects LAST NIGHT's sleep, not the night before
+    # (Garmin may key the just-finished night under today or yesterday).
     sleep = conn.execute(
-        "SELECT * FROM sleep WHERE date = ?", (yesterday,)
+        "SELECT * FROM sleep WHERE date <= ? ORDER BY date DESC LIMIT 1", (target_date,)
     ).fetchone()
 
     daily_stats = conn.execute(
@@ -34,8 +37,17 @@ def _fetch_data(conn, target_date: str, yesterday: str) -> dict:
     ).fetchone()
 
     hrv = conn.execute(
-        "SELECT * FROM hrv WHERE date = ?", (yesterday,)
+        "SELECT * FROM hrv WHERE date <= ? ORDER BY date DESC LIMIT 1", (target_date,)
     ).fetchone()
+
+    # Yesterday's tags (travel, alcohol, social, rest day, …) for context
+    tags = [
+        r["name"] for r in conn.execute(
+            "SELECT t.name FROM day_tags dt JOIN tags t ON t.id = dt.tag_id "
+            "WHERE dt.date = ? ORDER BY t.name",
+            (yesterday,),
+        ).fetchall()
+    ]
 
     load_index = conn.execute(
         "SELECT * FROM load_index WHERE date = ?", (yesterday,)
@@ -143,6 +155,7 @@ def _fetch_data(conn, target_date: str, yesterday: str) -> dict:
         "hrv": dict(hrv) if hrv else {},
         "load_index": dict(load_index) if load_index else {},
         "yesterday": dict(yesterday_day) if yesterday_day else {},
+        "tags": tags,
         "weather_today": dict(weather_today) if weather_today else {},
         "week_summary": {
             "avg_energy": week_row["avg_energy"] if week_row else None,
@@ -161,7 +174,7 @@ def run(target_date: str, force: bool = False) -> None:
     log.info("Generating morning brief for %s (using yesterday=%s)", target_date, yesterday)
 
     if not ollama_client.is_available():
-        log.warning("Ollama not reachable at %s — skipping morning brief", ollama_client.OLLAMA_HOST)
+        log.warning("LLM backend (%s) not reachable — skipping morning brief", ollama_client.LLM_PROVIDER)
         return
 
     conn = get_connection()
@@ -186,6 +199,7 @@ def run(target_date: str, force: bool = False) -> None:
             week_summary=data["week_summary"],
             last_intention=data["last_intention"],
             todays_session=data.get("todays_session"),
+            tags=data.get("tags"),
         )
 
         log.info("Calling Ollama (model: %s)...", ollama_client.MODEL_FAST)
