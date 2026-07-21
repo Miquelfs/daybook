@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ChevronRight, Globe, PersonStanding, Database } from "lucide-react";
 import { api } from "@/lib/api";
 import { HeatMap } from "@/components/HeatMap";
+import { WorldCoverageMap } from "@/components/WorldCoverageMap";
+import { TripCard } from "@/components/TripCard";
 import { YearSelect } from "@/components/YearSelect";
 import type { TopPlace, CityStay, WorldCoverage, FunFactCard, Trip } from "@/lib/api";
 
@@ -142,6 +144,9 @@ export default async function ExplorePage({ searchParams }: Props) {
                 ))}
             </div>
           </div>
+          <div className="mt-3">
+            <WorldCoverageMap details={coverage.country_details} />
+          </div>
         </section>
       )}
 
@@ -189,33 +194,7 @@ export default async function ExplorePage({ searchParams }: Props) {
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {trips.map((t) => (
-                    <Link
-                      key={t.id}
-                      href={`/day/${t.start_date}`}
-                      className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 hover:border-[#3F3F46] transition-colors group"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm text-[#D4D4D8] group-hover:text-[#FAFAFA] font-medium truncate transition-colors">
-                          {FLAG[t.primary_country ?? ""] ?? "🌍"} {t.name}
-                        </p>
-                        {t.max_distance_from_home_km != null && (
-                          <span className="text-[10px] text-[#3F3F46] tabular-nums shrink-0">
-                            {Math.round(t.max_distance_from_home_km)} km out
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-[#52525B] mt-0.5">
-                        {new Date(t.start_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                        {" – "}
-                        {new Date(t.end_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                        {t.cities.length > 0 && (
-                          <span className="text-[#3F3F46]"> · {t.cities.slice(0, 3).join(", ")}</span>
-                        )}
-                        {t.home_at_start && (
-                          <span className="text-[#3F3F46]"> · from {t.home_at_start}</span>
-                        )}
-                      </p>
-                    </Link>
+                    <TripCard key={t.id} trip={t} flag={FLAG[t.primary_country ?? ""] ?? "🌍"} />
                   ))}
                 </div>
               </div>

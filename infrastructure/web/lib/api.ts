@@ -810,6 +810,8 @@ export type WorldCoverage = {
     last_visit: string;
     total_days: number;
     cities_visited: number;
+    lat: number | null;
+    lng: number | null;
   }[];
   all_countries: Record<string, { iso2: string; continent: string }>;
 };

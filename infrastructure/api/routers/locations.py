@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from pydantic import BaseModel
 
 from domains.locations.country_names import to_english
 from domains.locations.locations_query import tracks_for_date
@@ -839,6 +840,17 @@ def world_coverage(year: int | None = None):
         yp + yp,
     ):
         cities.setdefault(_en(r["c"]), set()).add(_norm_city(r["city"]))
+
+    # Representative coordinate per country (mean of named-place coords) for the
+    # geographic coverage map — self-contained, from the user's own visits.
+    _cc: dict[str, list] = {}
+    for r in con.execute(
+        "SELECT country AS c, lat, lng FROM place_names "
+        "WHERE country IS NOT NULL AND lat IS NOT NULL AND lat != 0"
+    ):
+        a = _cc.setdefault(_en(r["c"]), [0.0, 0.0, 0])
+        a[0] += r["lat"]; a[1] += r["lng"]; a[2] += 1
+    coords = {c: (round(s[0] / s[2], 4), round(s[1] / s[2], 4)) for c, s in _cc.items() if s[2] > 0}
     con.close()
 
     meta = _country_meta()
@@ -846,6 +858,7 @@ def world_coverage(year: int | None = None):
     continents: dict[str, list[str]] = {}
     for country, dates in sorted(days_by_country.items(), key=lambda kv: -len(kv[1])):
         m = meta.get(country, {})
+        latlng = coords.get(country)
         details.append({
             "country": country,
             "iso2": m.get("iso2"),
@@ -854,6 +867,8 @@ def world_coverage(year: int | None = None):
             "last_visit": max(dates),
             "total_days": len(dates),
             "cities_visited": len(cities.get(country, set())),
+            "lat": latlng[0] if latlng else None,
+            "lng": latlng[1] if latlng else None,
         })
         continents.setdefault(m.get("continent", "Unknown"), []).append(country)
 
@@ -1101,3 +1116,28 @@ def list_trips(limit: int = 100, offset: int = 0, year: int | None = None):
         t["n_nights"] = n_nights        # nights away from home
         trips.append(t)
     return {"trips": trips, "total": total}
+
+
+class TripRename(BaseModel):
+    user_name: str | None = None
+
+
+@router.patch("/trips/{start_date}/{end_date}")
+def rename_trip(start_date: str, end_date: str, body: TripRename):
+    """Set a custom name for a trip (keyed by its start/end dates). Empty clears
+    it back to the auto-generated name."""
+    con = _daybook_conn()
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='trips'").fetchone():
+        con.close()
+        raise HTTPException(404, "No trips table")
+    name = (body.user_name or "").strip() or None
+    cur = con.execute(
+        "UPDATE trips SET user_name = ? WHERE start_date = ? AND end_date = ?",
+        (name, start_date, end_date),
+    )
+    con.commit()
+    updated = cur.rowcount
+    con.close()
+    if not updated:
+        raise HTTPException(404, "Trip not found")
+    return {"status": "ok", "name": name}
