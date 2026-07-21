@@ -60,6 +60,7 @@ _STATIC_CATALOG: dict[str, dict] = {
     "battery_low":   {"label": "Body battery low",  "unit": "score",  "category": "health",     "_type": "simple", "table": "daily_stats", "col": "body_battery_low"},
     "battery_high":  {"label": "Body battery high", "unit": "score",  "category": "health",     "_type": "simple", "table": "daily_stats", "col": "body_battery_high"},
     "steps":         {"label": "Steps",             "unit": "steps",  "category": "health",     "_type": "simple", "table": "daily_stats", "col": "steps"},
+    "weight":        {"label": "Weight",            "unit": "kg",     "category": "health",     "_type": "simple", "table": "weight_log",  "col": "weight_kg"},
     "active_cal":    {"label": "Active calories",   "unit": "kcal",   "category": "health",     "_type": "simple", "table": "daily_stats", "col": "active_calories"},
     # Activity
     "activity_count":    {"label": "Activity count",    "unit": "count",   "category": "activity", "_type": "activity_agg", "agg": "COUNT", "col": "*",                    "scale": 1.0},
@@ -81,6 +82,8 @@ _STATIC_CATALOG: dict[str, dict] = {
     "flight_night_hours":{"label": "Night hours flown", "unit": "hours",   "category": "aviation", "_type": "flight_agg", "agg": "SUM", "col": "night_seconds",  "scale": 1/3600},
     # Money (reads from money.db)
     "daily_spend":       {"label": "Daily spend",       "unit": "€",       "category": "money",    "_type": "money_spend"},
+    # Lifestyle (derived from dedicated database sections)
+    "dining_out":        {"label": "Meals out",         "unit": "count",   "category": "lifestyle", "_type": "row_count", "table": "restaurants", "date_col": "date_visited"},
     # Load Index (Horizon 1)
     "fatigue_score":     {"label": "Fatigue load",      "unit": "0-100",   "category": "health",   "_type": "simple", "table": "load_index", "col": "fatigue_score"},
     # Weather
@@ -101,7 +104,7 @@ _TOP_CANDIDATES = [
     "duty_day", "flight_block_hours", "flight_night_hours",
     "screen_total", "screen_unlocks",
     "distance_km", "unique_places",
-    "daily_spend",
+    "daily_spend", "dining_out",
     "fatigue_score",
     "temp_mean", "precipitation",
     "hr_daytime_avg", "hr_daytime_peak", "hr_duty_avg",
@@ -288,6 +291,18 @@ def _fetch_metric(conn: sqlite3.Connection, key: str, start: str, end: str) -> d
             (start, end, time_from, time_to),
         ).fetchall()
         return {r["date"]: float(r["val"]) for r in rows if r["val"] is not None}
+
+    if t == "row_count":
+        # Count of rows in a dedicated table per day (e.g. restaurants visited).
+        # Days with no rows are absent → treated as no-data, not zero, which keeps
+        # the correlation on days where the activity actually happened.
+        date_col = meta["date_col"]
+        rows = conn.execute(
+            f"SELECT {date_col} AS date, COUNT(*) AS val FROM {meta['table']} "
+            f"WHERE {date_col} BETWEEN ? AND ? GROUP BY {date_col}",
+            (start, end),
+        ).fetchall()
+        return {r["date"]: float(r["val"]) for r in rows if r["val"]}
 
     if t == "money_spend":
         try:

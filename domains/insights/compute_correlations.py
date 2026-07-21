@@ -34,7 +34,7 @@ _STATIC_METRICS = [
     "energy", "mood", "stress", "sleep_quality",
     # Health
     "hrv_avg", "sleep_duration", "resting_hr", "steps",
-    "battery_low", "battery_high", "stress_avg",
+    "battery_low", "battery_high", "stress_avg", "weight",
     # Activity
     "activity_count", "total_dist_km", "elevation_gain_m",
     "activity_cal", "training_stress", "moving_time_hours", "activity_avg_hr",
@@ -166,6 +166,7 @@ def _fetch(conn, key: str, start: str, end: str) -> dict[str, float]:
         "active_cal":    ("daily_stats",  "active_calories"),
         "screen_total":  ("screen_time",  "total_minutes"),
         "screen_unlocks":("screen_time",  "unlocks"),
+        "weight":        ("weight_log",   "weight_kg"),
     }
     if key in _SIMPLE:
         table, col = _SIMPLE[key]

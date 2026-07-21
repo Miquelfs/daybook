@@ -34,6 +34,9 @@ class ExperimentCreate(BaseModel):
     tag: Optional[str] = None              # tag slug for compliance (treatment days)
     metric: Optional[str] = None           # outcome metric key OR "tag:<slug>" for tag-rate outcome
     outcome_threshold: Optional[float] = None  # for metric outcomes: "days where metric >= X"
+    condition_metric: Optional[str] = None     # metric-condition treatment (alt to tag)
+    condition_op: Optional[str] = None         # < | <= | > | >=
+    condition_value: Optional[float] = None
     start_date: str
     end_date: Optional[str] = None
 
@@ -44,6 +47,9 @@ class ExperimentPatch(BaseModel):
     tag: Optional[str] = None
     metric: Optional[str] = None
     outcome_threshold: Optional[float] = None
+    condition_metric: Optional[str] = None
+    condition_op: Optional[str] = None
+    condition_value: Optional[float] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     status: Optional[str] = None       # active | concluded | abandoned
@@ -60,6 +66,9 @@ class ExperimentOut(BaseModel):
     tag: Optional[str]
     metric: Optional[str]
     outcome_threshold: Optional[float]
+    condition_metric: Optional[str] = None
+    condition_op: Optional[str] = None
+    condition_value: Optional[float] = None
     start_date: str
     end_date: Optional[str]
     status: str
@@ -92,6 +101,9 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
             tag                TEXT,
             metric             TEXT,
             outcome_threshold  REAL,
+            condition_metric   TEXT,
+            condition_op       TEXT,
+            condition_value    REAL,
             start_date         TEXT NOT NULL,
             end_date           TEXT,
             status             TEXT NOT NULL DEFAULT 'active',
@@ -103,6 +115,11 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
             updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         )
     """)
+    # Add metric-condition columns to tables created before this feature.
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(experiments)")}
+    for col, decl in (("condition_metric", "TEXT"), ("condition_op", "TEXT"), ("condition_value", "REAL")):
+        if col not in existing:
+            conn.execute(f"ALTER TABLE experiments ADD COLUMN {col} {decl}")
     conn.commit()
 
 
@@ -116,10 +133,12 @@ def create_experiment(body: ExperimentCreate, conn: DB):
     exp_id = str(uuid.uuid4())
     conn.execute(
         """
-        INSERT INTO experiments (id, title, hypothesis, protocol, tag, metric, outcome_threshold, start_date, end_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO experiments (id, title, hypothesis, protocol, tag, metric, outcome_threshold,
+                                 condition_metric, condition_op, condition_value, start_date, end_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (exp_id, body.title, body.hypothesis, body.protocol, body.tag, body.metric, body.outcome_threshold, body.start_date, body.end_date),
+        (exp_id, body.title, body.hypothesis, body.protocol, body.tag, body.metric, body.outcome_threshold,
+         body.condition_metric, body.condition_op, body.condition_value, body.start_date, body.end_date),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM experiments WHERE id=?", (exp_id,)).fetchone()
@@ -197,6 +216,9 @@ _METRIC_MAP: dict[str, dict] = {
     "stress_avg":    {"label": "Garmin stress",    "unit": "score", "table": "daily_stats", "col": "stress_avg"},
     "battery_high":  {"label": "Body battery",     "unit": "score", "table": "daily_stats", "col": "body_battery_high"},
     "steps":         {"label": "Steps",            "unit": "steps", "table": "daily_stats", "col": "steps"},
+    "screen_total":  {"label": "Screen time",      "unit": "min",   "table": "screen_time", "col": "total_minutes"},
+    "screen_unlocks":{"label": "Phone unlocks",    "unit": "count", "table": "screen_time", "col": "unlocks"},
+    "weight":        {"label": "Weight",           "unit": "kg",    "table": "weight_log",  "col": "weight_kg"},
 }
 
 
@@ -238,6 +260,43 @@ def _get_treatment_dates(conn: sqlite3.Connection, tag: str, start: str, end: st
     return {r[0] for r in rows}
 
 
+_COND_OPS = {
+    "<": lambda a, b: a < b,
+    "<=": lambda a, b: a <= b,
+    ">": lambda a, b: a > b,
+    ">=": lambda a, b: a >= b,
+}
+
+
+def _treatment_dates_by_metric(conn, metric: str, op: str, value: float, start: str, end: str) -> set[str]:
+    """Treatment days = days where a metric satisfies a threshold condition
+    (e.g. Screen time < 120). Alternative to a compliance tag."""
+    if metric not in _METRIC_MAP or value is None:
+        return set()
+    m = _METRIC_MAP[metric]
+    fn = _COND_OPS.get(op, _COND_OPS["<"])
+    scale = m.get("scale", 1.0)
+    rows = conn.execute(
+        f"SELECT date, {m['col']} AS v FROM {m['table']} "
+        f"WHERE date BETWEEN ? AND ? AND {m['col']} IS NOT NULL",
+        (start, end),
+    ).fetchall()
+    return {r["date"] for r in rows if fn(r["v"] * scale, value)}
+
+
+def _resolve_treatment_dates(conn, exp: dict, start: str, end: str) -> set[str]:
+    """Treatment group: a metric condition if set, else the compliance tag."""
+    cond_metric = exp.get("condition_metric")
+    if cond_metric:
+        return _treatment_dates_by_metric(
+            conn, cond_metric, exp.get("condition_op") or "<", exp.get("condition_value"), start, end
+        )
+    tag = exp.get("tag")
+    if tag:
+        return _get_treatment_dates(conn, tag, start, end)
+    return set()
+
+
 @router.get("/{exp_id}/compute", response_model=ExperimentResult)
 def compute_experiment(exp_id: str, conn: DB):
     """
@@ -262,10 +321,12 @@ def compute_experiment(exp_id: str, conn: DB):
     start = exp.get("start_date")
     end = exp.get("end_date") or date.today().isoformat()
 
-    if not tag or not metric:
-        raise HTTPException(422, "Experiment must have both tag and metric defined")
+    if not metric:
+        raise HTTPException(422, "Experiment must have an outcome metric defined")
+    if not tag and not exp.get("condition_metric"):
+        raise HTTPException(422, "Experiment needs a treatment: a compliance tag or a metric condition")
 
-    treatment_dates = _get_treatment_dates(conn, tag, start, end)
+    treatment_dates = _resolve_treatment_dates(conn, exp, start, end)
 
     # ── TAG-RATE outcome: metric = "tag:<slug>" ────────────────────────────
     if metric.startswith("tag:"):

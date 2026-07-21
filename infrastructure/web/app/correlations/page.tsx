@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { format, parseISO } from "date-fns";
 import { correlationsApi } from "@/lib/correlations-api";
+import { AINarrative } from "@/components/AINarrative";
 import type { MetricMeta, TopCorrelation, TagImpact, PrecomputedCorrelation } from "@/lib/correlations-api";
 import { TrendingUp, Minus, ArrowUpRight, ArrowDownRight, Plus, X, CheckCircle, Trash2, Sparkles, GitCompare, CalendarDays, BarChart2, Flame, FlaskConical } from "lucide-react";
 import { TagStatsDrawer } from "@/components/TagStatsDrawer";
@@ -102,13 +103,17 @@ const DAYS_OPTIONS = [
   { label: "All", value: 365 },
 ];
 
-const CATEGORY_ORDER = ["subjective", "health", "activity", "aviation", "environment", "tags", "tag_values", "people"];
+const CATEGORY_ORDER = ["subjective", "health", "activity", "screen", "location", "aviation", "money", "environment", "lifestyle", "tags", "tag_values", "people"];
 const CATEGORY_LABELS: Record<string, string> = {
   subjective: "Subjective",
   health: "Health",
   activity: "Activity",
+  screen: "Screen time",
+  location: "Location",
   aviation: "Aviation",
+  money: "Money",
   environment: "Environment",
+  lifestyle: "Lifestyle",
   tags: "Tags",
   tag_values: "Tag Values",
   people: "People",
@@ -156,6 +161,34 @@ const PERIOD_METRICS = [
 ];
 
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+// Whether a higher value is *good* for a metric — drives the up/down colour so a
+// drop in screen time / stress / resting HR reads as positive (green), not red.
+const HIGHER_IS_BETTER: Record<string, boolean> = {
+  mood: true, energy: true, sleep_quality: true, hrv_avg: true, steps: true,
+  stress: false, resting_hr: false, screen_total: false,
+};
+
+function fmtMinutesHM(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// Format a period value for display — screen time as h:m, everything else raw.
+function fmtPeriodValue(key: string, val: number | null | undefined): string {
+  if (val == null) return "—";
+  if (key === "screen_total") return fmtMinutesHM(val);
+  return String(val);
+}
+
+// Colour a change by whether it's *good* for this metric, not just its sign.
+function periodChangeColor(key: string, change: number): string {
+  if (change === 0) return "text-[#71717A]";
+  const better = HIGHER_IS_BETTER[key] ?? true;
+  const isGood = better ? change > 0 : change < 0;
+  return isGood ? "text-emerald-400" : "text-red-400";
+}
 
 function directionBadge(c: PrecomputedCorrelation) {
   if (c.direction === "new") return <span className="text-[10px] text-amber-400 font-semibold">✦ new</span>;
@@ -299,6 +332,15 @@ export default function CorrelationsPage() {
         <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Today</Link>
         <h1 className="text-2xl font-semibold tracking-tight">Insights</h1>
         <p className="text-sm text-[#71717A] mt-0.5">Patterns in your data.</p>
+      </div>
+
+      <div className="mb-6">
+        <AINarrative
+          topic="insights"
+          label="AI Interpretation"
+          blurb="Let AI read your strongest cross-domain correlations — surfacing the interesting patterns, one experiment to try, and any likely confounds."
+          cta="Interpret my correlations"
+        />
       </div>
 
       {/* Tabs */}
@@ -684,7 +726,7 @@ export default function CorrelationsPage() {
 
           {/* Period type */}
           <div className="flex gap-1">
-            {(["month", "week", "year"] as const).map((p) => (
+            {(["week", "month", "year"] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPeriodType(p)}
@@ -719,7 +761,7 @@ export default function CorrelationsPage() {
                       )}
                     </p>
                     <p className="text-3xl font-semibold tabular-nums text-[#FAFAFA]">
-                      {periodData.current.avg ?? "—"}
+                      {fmtPeriodValue(periodMetric, periodData.current.avg)}
                     </p>
                     {periodData.current.stddev != null && (
                       <p className="text-[10px] text-[#52525B] mt-0.5">±{periodData.current.stddev} σ</p>
@@ -735,7 +777,7 @@ export default function CorrelationsPage() {
                       )}
                     </p>
                     <p className="text-3xl font-semibold tabular-nums text-[#71717A]">
-                      {periodData.prior.avg ?? "—"}
+                      {fmtPeriodValue(periodMetric, periodData.prior.avg)}
                     </p>
                     {periodData.prior.stddev != null && (
                       <p className="text-[10px] text-[#52525B] mt-0.5">±{periodData.prior.stddev} σ</p>
@@ -744,9 +786,7 @@ export default function CorrelationsPage() {
                 </div>
 
                 {periodData.pct_change != null && (
-                  <div className={`mt-4 flex items-center gap-1.5 text-sm font-semibold ${
-                    periodData.pct_change > 0 ? "text-emerald-400" : periodData.pct_change < 0 ? "text-red-400" : "text-[#71717A]"
-                  }`}>
+                  <div className={`mt-4 flex items-center gap-1.5 text-sm font-semibold ${periodChangeColor(periodMetric, periodData.pct_change)}`}>
                     {periodData.pct_change > 0 ? <ArrowUpRight size={14} /> : periodData.pct_change < 0 ? <ArrowDownRight size={14} /> : null}
                     {periodData.pct_change > 0 ? "+" : ""}{periodData.pct_change}% vs last {periodData.period}
                   </div>
@@ -766,15 +806,14 @@ export default function CorrelationsPage() {
                       )}
                     </p>
                     <p className="text-2xl font-semibold tabular-nums text-[#71717A]">
-                      {periodData.same_period_last_year.avg}
+                      {fmtPeriodValue(periodMetric, periodData.same_period_last_year.avg)}
                     </p>
                   </div>
                   {periodData.current.avg != null && (
                     <div className="text-right">
                       <p className="text-[10px] text-[#52525B] mb-1">YoY change</p>
                       <p className={`text-sm font-semibold ${
-                        periodData.current.avg > periodData.same_period_last_year.avg ? "text-emerald-400" :
-                        periodData.current.avg < periodData.same_period_last_year.avg ? "text-red-400" : "text-[#71717A]"
+                        periodChangeColor(periodMetric, periodData.current.avg - periodData.same_period_last_year.avg)
                       }`}>
                         {periodData.current.avg > periodData.same_period_last_year.avg ? "+" : ""}
                         {(periodData.current.avg - periodData.same_period_last_year.avg).toFixed(1)} {periodData.unit}

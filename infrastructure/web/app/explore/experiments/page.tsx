@@ -11,6 +11,11 @@ interface Experiment {
   hypothesis: string;
   protocol: string | null;
   tag: string | null;
+  metric: string | null;
+  outcome_threshold: number | null;
+  condition_metric: string | null;
+  condition_op: string | null;
+  condition_value: number | null;
   start_date: string;
   end_date: string | null;
   status: string;    // active | concluded | abandoned
@@ -23,6 +28,24 @@ interface Experiment {
 }
 
 const TODAY = new Date().toISOString().slice(0, 10);
+
+// Outcome metrics available for experiments (mirrors backend _METRIC_MAP).
+const METRIC_OPTIONS = [
+  { value: "", label: "— Tag occurrence rate (no metric) —" },
+  { value: "energy", label: "Energy" },
+  { value: "mood", label: "Mood" },
+  { value: "stress", label: "Stress" },
+  { value: "sleep_quality", label: "Sleep quality" },
+  { value: "hrv_avg", label: "HRV" },
+  { value: "sleep_duration", label: "Sleep duration" },
+  { value: "resting_hr", label: "Resting HR" },
+  { value: "stress_avg", label: "Garmin stress" },
+  { value: "battery_high", label: "Body battery" },
+  { value: "steps", label: "Steps" },
+  { value: "screen_total", label: "Screen time" },
+  { value: "screen_unlocks", label: "Phone unlocks" },
+  { value: "weight", label: "Weight" },
+];
 
 const STATUS_STYLE = {
   active:     { label: "Active",     dot: "bg-green-400",  text: "text-green-400",  badge: "bg-green-950 text-green-300" },
@@ -47,6 +70,10 @@ function ExperimentSheet({
     hypothesis: experiment?.hypothesis ?? "",
     protocol: experiment?.protocol ?? "",
     tag: experiment?.tag ?? "",
+    metric: experiment?.metric ?? "",
+    condition_metric: experiment?.condition_metric ?? "",
+    condition_op: experiment?.condition_op ?? "<",
+    condition_value: experiment?.condition_value != null ? String(experiment.condition_value) : "",
     start_date: experiment?.start_date ?? TODAY,
     end_date: experiment?.end_date ?? "",
     notes: experiment?.notes ?? "",
@@ -55,7 +82,7 @@ function ExperimentSheet({
   const [error, setError] = useState<string | null>(null);
 
   function set(k: keyof typeof form) {
-    return (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    return (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value }));
   }
 
@@ -68,6 +95,10 @@ function ExperimentSheet({
       hypothesis: form.hypothesis.trim(),
       protocol: form.protocol.trim() || null,
       tag: form.tag.trim() || null,
+      metric: form.metric || null,
+      condition_metric: form.condition_metric || null,
+      condition_op: form.condition_metric ? form.condition_op : null,
+      condition_value: form.condition_metric && form.condition_value ? parseFloat(form.condition_value) : null,
       start_date: form.start_date,
       end_date: form.end_date || null,
       notes: form.notes.trim() || null,
@@ -143,6 +174,58 @@ function ExperimentSheet({
               value={form.tag}
               onChange={set("tag")}
             />
+          </div>
+
+          <div className="border-t border-[#27272A] pt-3">
+            <label className="text-xs text-[#71717A] mb-1 block">…or a metric condition (treatment = days meeting it)</label>
+            <div className="flex gap-2">
+              <select
+                className="flex-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] outline-none focus:border-[#F59E0B] transition-colors"
+                value={form.condition_metric}
+                onChange={set("condition_metric")}
+              >
+                <option value="">— none —</option>
+                {METRIC_OPTIONS.filter((o) => o.value).map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <select
+                className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-2 text-sm text-[#FAFAFA] outline-none focus:border-[#F59E0B] transition-colors disabled:opacity-40"
+                value={form.condition_op}
+                onChange={set("condition_op")}
+                disabled={!form.condition_metric}
+              >
+                <option value="<">{"<"}</option>
+                <option value="<=">{"≤"}</option>
+                <option value=">">{">"}</option>
+                <option value=">=">{"≥"}</option>
+              </select>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="any"
+                placeholder="value"
+                value={form.condition_value}
+                onChange={set("condition_value")}
+                disabled={!form.condition_metric}
+                className="w-20 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#F59E0B] transition-colors disabled:opacity-40"
+              />
+            </div>
+            <p className="text-[10px] text-[#3F3F46] mt-1">e.g. Screen time {"<"} 120 → treatment = your low-screen days.</p>
+          </div>
+
+          <div>
+            <label className="text-xs text-[#71717A] mb-1 block">Outcome metric</label>
+            <select
+              className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] outline-none focus:border-[#F59E0B] transition-colors"
+              value={form.metric}
+              onChange={set("metric")}
+            >
+              {METRIC_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-[#3F3F46] mt-1">What to measure on treatment vs. control days (e.g. Screen time, Energy).</p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
