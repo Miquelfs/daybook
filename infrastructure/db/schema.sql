@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS days (
     social            BOOLEAN,                     -- meaningful social time
     outdoors          BOOLEAN,                     -- meaningful outdoor time
     photo_path        TEXT,                        -- relative path to photo of the day
+    photo_caption     TEXT,                        -- user comment on the photo of the day
     -- aviation context
     duty_day          BOOLEAN NOT NULL DEFAULT 0,
     away_from_base    BOOLEAN NOT NULL DEFAULT 0,
@@ -643,3 +644,12 @@ CREATE TABLE IF NOT EXISTS garmin_physio (
 );
 
 CREATE INDEX IF NOT EXISTS idx_garmin_physio_date ON garmin_physio(date);
+
+-- Manual weigh-ins (sparse; one per date, upserted via /health/weight)
+CREATE TABLE IF NOT EXISTS weight_log (
+    date        TEXT PRIMARY KEY,
+    weight_kg   REAL NOT NULL,
+    note        TEXT,
+    created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at  TEXT
+);

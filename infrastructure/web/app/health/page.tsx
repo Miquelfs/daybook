@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { format, parseISO, subDays } from "date-fns";
 import { HRContext } from "@/components/HRContext";
+import { WeightSection } from "@/components/health/WeightSection";
 import { injuriesApi, type ActiveSummaryItem, ZONE_LABELS } from "@/lib/injuries-api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -230,6 +231,8 @@ export default function HealthPage() {
           </ResponsiveContainer>
         </div>
       </section>
+
+      <WeightSection />
 
       <HRContext days={days} />
 

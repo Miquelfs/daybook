@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 from infrastructure.db.connection import get_connection
 from infrastructure.api.utils.stats import pearson
@@ -21,6 +22,80 @@ def _default_range() -> tuple[str, str]:
     end = date.today()
     start = end - timedelta(days=29)
     return start.isoformat(), end.isoformat()
+
+
+# ─── Weight log ────────────────────────────────────────────────────────────────
+
+class WeightIn(BaseModel):
+    date: str
+    weight_kg: float
+    note: Optional[str] = None
+
+
+def _ensure_weight_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS weight_log (
+            date        TEXT PRIMARY KEY,
+            weight_kg   REAL NOT NULL,
+            note        TEXT,
+            created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+            updated_at  TEXT
+        )
+        """
+    )
+    conn.commit()
+
+
+@router.get("/weight")
+def get_weight(conn: DB, days: int = Query(365)):
+    """Weight entries over the window + summary stats (latest, change, min/max)."""
+    _ensure_weight_table(conn)
+    start = (date.today() - timedelta(days=days - 1)).isoformat()
+    rows = conn.execute(
+        "SELECT date, weight_kg, note FROM weight_log WHERE date >= ? ORDER BY date",
+        (start,),
+    ).fetchall()
+    entries = [dict(r) for r in rows]
+    stats = None
+    if entries:
+        weights = [e["weight_kg"] for e in entries]
+        stats = {
+            "latest": entries[-1]["weight_kg"],
+            "latest_date": entries[-1]["date"],
+            "change": round(entries[-1]["weight_kg"] - entries[0]["weight_kg"], 1) if len(entries) > 1 else None,
+            "min": min(weights),
+            "max": max(weights),
+            "count": len(entries),
+        }
+    return {"entries": entries, "stats": stats}
+
+
+@router.post("/weight")
+def add_weight(body: WeightIn, conn: DB):
+    """Upsert a weigh-in (one per date)."""
+    _ensure_weight_table(conn)
+    conn.execute(
+        """
+        INSERT INTO weight_log (date, weight_kg, note, updated_at)
+        VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        ON CONFLICT(date) DO UPDATE SET
+            weight_kg = excluded.weight_kg,
+            note      = excluded.note,
+            updated_at = excluded.updated_at
+        """,
+        (body.date, body.weight_kg, body.note),
+    )
+    conn.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/weight/{date_str}")
+def delete_weight(date_str: str, conn: DB):
+    _ensure_weight_table(conn)
+    conn.execute("DELETE FROM weight_log WHERE date = ?", (date_str,))
+    conn.commit()
+    return {"status": "ok"}
 
 
 @router.get("/trends")
@@ -246,10 +321,14 @@ def hr_context(conn: DB, days: int = Query(30)):
     flight_avgs: list[float] = []
     flight_peaks: list[int] = []
     top_peaks: list[dict] = []
+    # date → list of (from, to) HH:MM windows that are NOT rest (flights + workouts),
+    # so the "rest" bucket can exclude them (otherwise a 10am workout reads as resting).
+    busy: dict[str, list[tuple[str, str]]] = {}
 
     for f in flight_rows:
         t_from = f["off_block_utc"][11:16]
         t_to = f["on_block_utc"][11:16]
+        busy.setdefault(f["date"], []).append((t_from, t_to))
         hr_rows = conn.execute(
             "SELECT heart_rate FROM intraday_hr WHERE date=? AND time>=? AND time<=?",
             (f["date"], t_from, t_to),
@@ -286,6 +365,7 @@ def hr_context(conn: DB, days: int = Query(30)):
         start_mins = int(start_hm[:2]) * 60 + int(start_hm[3:5])
         end_mins = start_mins + int((a["moving_time_seconds"] or 0) / 60)
         end_hm = f"{(end_mins // 60) % 24:02d}:{end_mins % 60:02d}"
+        busy.setdefault(a["date"], []).append((start_hm, end_hm))
         hr_rows = conn.execute(
             "SELECT heart_rate FROM intraday_hr WHERE date=? AND time>=? AND time<=?",
             (a["date"], start_hm, end_hm),
@@ -306,14 +386,22 @@ def hr_context(conn: DB, days: int = Query(30)):
         top_peaks.append({"label": label, "date": a["date"], "peak_bpm": peak,
                           "avg_bpm": round(avg_v), "context": "training"})
 
-    # ── Rest HR (non-flight, non-training daytime hours) ──────────────────────
-    rest_rows = conn.execute(
-        """SELECT AVG(heart_rate) AS avg_bpm, MAX(heart_rate) AS peak_bpm
-           FROM intraday_hr
+    # ── Rest HR (daytime hours, EXCLUDING flight + workout windows) ────────────
+    # Pull daytime readings and drop any that fall inside a busy window for that
+    # date — otherwise a workout/flight spike is miscounted as a "resting" peak.
+    daytime_rows = conn.execute(
+        """SELECT date, time, heart_rate FROM intraday_hr
            WHERE date BETWEEN ? AND ?
              AND time >= '09:00' AND time <= '22:00'""",
         (start, end_str),
-    ).fetchone()
+    ).fetchall()
+    rest_vals = [
+        r["heart_rate"] for r in daytime_rows
+        if r["heart_rate"] is not None
+        and not any(wf <= r["time"] <= wt for (wf, wt) in busy.get(r["date"], []))
+    ]
+    rest_avg_bpm = round(sum(rest_vals) / len(rest_vals)) if rest_vals else None
+    rest_peak_bpm = max(rest_vals) if rest_vals else None
 
     # Sort top peaks descending, keep top 10
     top_peaks.sort(key=lambda x: x["peak_bpm"], reverse=True)
@@ -335,8 +423,8 @@ def hr_context(conn: DB, days: int = Query(30)):
             "days_sampled": len(training_avgs),
         },
         "rest": {
-            "avg_bpm": round(rest_rows["avg_bpm"]) if rest_rows["avg_bpm"] else None,
-            "peak_bpm": rest_rows["peak_bpm"],
+            "avg_bpm": rest_avg_bpm,
+            "peak_bpm": rest_peak_bpm,
             "days_sampled": None,
         },
         "top_peaks": top_peaks,
