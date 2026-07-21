@@ -600,10 +600,29 @@ def month_overview(
     daily_burn = total_spent / days_elapsed if days_elapsed > 0 else 0.0
     projected = daily_burn * dim
     projected_savings = total_income - projected
-    # Adjusted projection: discretionary extrapolates by pace; fixed bills count
-    # as the full monthly amount (or actual, once it exceeds the budget).
-    disc_burn = disc_spent / days_elapsed if days_elapsed > 0 else 0.0
-    projected_adj = disc_burn * dim + max(fixed_spent, fixed_budget)
+
+    # Adjusted projection: fixed bills count as the full monthly amount; the
+    # discretionary part is paced forward — but a large one-off purchase that
+    # already happened must NOT be extrapolated as if it recurs every day.
+    # So split discretionary spend into recurring (paced) and one-off (lumps):
+    # one-offs count once (they're already in disc_spent); only the recurring
+    # rate is projected onto the remaining days.
+    disc_amts = sorted(
+        abs(r["amount"]) for r in conn.execute(
+            """SELECT amount, category FROM transactions
+               WHERE strftime('%Y-%m', date)=? AND transaction_type='Expense'
+                 AND deleted_at IS NULL AND amount < 0""",
+            (month,),
+        ).fetchall()
+        if (r["category"] or "Other") not in FIXED_RECURRING_CATEGORIES
+    )
+    median_txn = disc_amts[len(disc_amts) // 2] if disc_amts else 0.0
+    oneoff_threshold = max(100.0, 4.0 * median_txn)
+    oneoff_disc = sum(a for a in disc_amts if a >= oneoff_threshold)
+    recurring_disc = max(0.0, disc_spent - oneoff_disc)
+    remaining_days = max(0, dim - days_elapsed)
+    recurring_daily = recurring_disc / days_elapsed if days_elapsed > 0 else 0.0
+    projected_adj = disc_spent + recurring_daily * remaining_days + max(fixed_spent, fixed_budget)
     projected_savings_adj = total_income - projected_adj
 
     return MonthOverview(
@@ -1867,10 +1886,13 @@ def sell_holding(holding_id: str, body: SellHoldingBody, conn: DB):
             )
         price = latest["close_price_eur"]
 
-    proceeds = round(qty * price, 2)
+    fee = body.fee_eur or 0.0
+    gross = round(qty * price, 2)
+    proceeds = round(gross - fee, 2)  # net of fee — what actually lands in the account
     sell_date = body.date or date.today().isoformat()
     txn_id = "local-" + str(uuid.uuid4())
     txn_type = classify("Finance")
+    fee_note = f" (net of €{fee:.2f} fee)" if fee else ""
 
     conn.execute(
         """INSERT INTO transactions
@@ -1881,7 +1903,7 @@ def sell_holding(holding_id: str, body: SellHoldingBody, conn: DB):
             txn_id, "local", None, sell_date,
             f"Sell {row['ticker']} × {qty:g}",
             proceeds, body.to_account, "Finance", None, txn_type,
-            body.notes or f"Sold {qty:g} × {row['name']} @ {price:.2f} €",
+            body.notes or f"Sold {qty:g} × {row['name']} @ {price:.2f} €{fee_note}",
             None,
         ),
     )
@@ -1926,6 +1948,7 @@ def sell_holding(holding_id: str, body: SellHoldingBody, conn: DB):
         transaction_id=txn_id,
         quantity_sold=qty,
         price_eur=price,
+        fee_eur=fee,
         proceeds_eur=proceeds,
         realized_pnl_eur=realized,
     )
@@ -1957,10 +1980,13 @@ def buy_holding(holding_id: str, body: BuyHoldingBody, conn: DB):
                 detail="No live or cached price for this ticker — pass price_eur explicitly",
             )
 
-    cost = round(body.quantity * price, 2)
+    fee = body.fee_eur or 0.0
+    gross = round(body.quantity * price, 2)
+    cost = round(gross + fee, 2)  # total debited — the fee is part of what you paid to own this
     buy_date = body.date or date.today().isoformat()
     txn_id = "local-" + str(uuid.uuid4())
     txn_type = classify("Finance")
+    fee_note = f" (incl. €{fee:.2f} fee)" if fee else ""
 
     conn.execute(
         """INSERT INTO transactions
@@ -1971,7 +1997,7 @@ def buy_holding(holding_id: str, body: BuyHoldingBody, conn: DB):
             txn_id, "local", None, buy_date,
             f"Buy {row['ticker']} × {body.quantity:g}",
             -cost, body.from_account, "Finance", None, txn_type,
-            body.notes or f"Bought {body.quantity:g} × {row['name']} @ {price:.2f} €",
+            body.notes or f"Bought {body.quantity:g} × {row['name']} @ {price:.2f} €{fee_note}",
             None,
         ),
     )
@@ -1979,6 +2005,8 @@ def buy_holding(holding_id: str, body: BuyHoldingBody, conn: DB):
     old_qty = row["quantity"]
     old_cost_basis = row["cost_basis_eur"] or 0.0
     new_qty = old_qty + body.quantity
+    # Fee folds into cost basis — the average buy-in price correctly reflects
+    # what you actually paid per unit, not just the market price.
     new_cost_basis = round(old_cost_basis + cost, 2)
 
     conn.execute(
@@ -1994,6 +2022,7 @@ def buy_holding(holding_id: str, body: BuyHoldingBody, conn: DB):
         transaction_id=txn_id,
         quantity_bought=body.quantity,
         price_eur=price,
+        fee_eur=fee,
         cost_eur=cost,
     )
 
