@@ -39,6 +39,8 @@ _LOCATIONS_DB = _ROOT / "infrastructure" / "db" / "locations.db"
 
 MIN_AWAY_KM = 40.0        # floor for the "not sleeping at home" radius
 BRIDGE_UNKNOWN_DAYS = 3   # no-data days between away nights assumed still away
+TRIP_LOOKBACK_DAYS = 60   # buffer scanned before the window to catch a trip
+                          # already in progress at `start` (longest plausible trip)
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -133,7 +135,14 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
     lcon = _conn(_LOCATIONS_DB)
     dcon = _conn(_DAYBOOK_DB)
     try:
-        nights = _night_coords(lcon, start, end)
+        # Scan a buffer *before* the requested window so a trip already in
+        # progress at `start` is detected from its true beginning, not split
+        # into a duplicate fragment. (The old code wiped only start_date >= start
+        # and re-detected from start, leaving the earlier half of a straddling
+        # trip behind AND creating an overlapping fragment for the same days.)
+        scan_start = (date.fromisoformat(start) - timedelta(days=TRIP_LOOKBACK_DAYS)).isoformat()
+
+        nights = _night_coords(lcon, scan_start, end)
 
         # Classify each observed date: away night / home night
         away: dict[str, float] = {}   # date → distance from home that night
@@ -167,17 +176,25 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
                     continue
             runs.append([d])
 
-        # Wipe the recompute window first — the nightly upsert must also remove
-        # trips that no longer exist under current data/rules.
-        dcon.execute("DELETE FROM trips WHERE start_date >= ?", (start,))
+        # Only trips reaching into the requested window are this run's
+        # responsibility. A run that started in the look-back buffer but
+        # continues past `start` is rewritten whole from its true start; runs
+        # living entirely in the buffer (end < start) are left untouched.
+        relevant = [run for run in runs if run[-1] >= start]
+        effective_start = relevant[0][0] if relevant else start
 
-        context = _day_context(lcon, start, end)
+        # Wipe every existing trip that OVERLAPS [effective_start, end] before
+        # re-inserting, so rule/data changes, merged trips, and straddling trips
+        # never leave stale or overlapping rows behind.
+        dcon.execute("DELETE FROM trips WHERE end_date >= ?", (effective_start,))
+
+        context = _day_context(lcon, scan_start, end)
         has_location_days = bool(lcon.execute(
             "SELECT name FROM sqlite_master WHERE name='location_days'"
         ).fetchone())
 
         written = 0
-        for run in runs:
+        for run in relevant:
             start_d, end_d = run[0], run[-1]
             n_nights = (date.fromisoformat(end_d) - date.fromisoformat(start_d)).days + 1
 
