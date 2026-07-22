@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 interface Props {
   date: string;
   initialPhotoUrl: string | null;
+  initialCaption?: string | null;
 }
 
 // Photos are served through the Next.js proxy (/api/photos/...) so the browser
@@ -18,13 +19,32 @@ function toProxyUrl(url: string | null): string | null {
   return `/api/photos/${filename}`;
 }
 
-export function PhotoOfDay({ date, initialPhotoUrl }: Props) {
+export function PhotoOfDay({ date, initialPhotoUrl, initialCaption = null }: Props) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(toProxyUrl(initialPhotoUrl));
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [caption, setCaption] = useState<string>(initialCaption ?? "");
+  const [savedCaption, setSavedCaption] = useState<string>(initialCaption ?? "");
+  const [savingCaption, setSavingCaption] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  async function saveCaption() {
+    const trimmed = caption.trim();
+    if (trimmed === savedCaption) return;
+    setSavingCaption(true);
+    setError(null);
+    try {
+      await api.patch(date, { photo_caption: trimmed });
+      setSavedCaption(trimmed);
+    } catch (e) {
+      console.error("Caption save error:", e);
+      setError(e instanceof Error ? e.message : "Failed to save caption");
+    } finally {
+      setSavingCaption(false);
+    }
+  }
 
   async function handleFile(file: File) {
     setUploading(true);
@@ -95,6 +115,21 @@ export function PhotoOfDay({ date, initialPhotoUrl }: Props) {
             >
               <Trash2 size={14} />
             </button>
+          </div>
+
+          {/* Caption — comment on the photo of the day */}
+          <div className="relative">
+            <textarea
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              onBlur={saveCaption}
+              rows={2}
+              placeholder="Add a comment…"
+              className="w-full bg-[#0D0D0F] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#A1A1AA] placeholder-[#3F3F46] focus:outline-none focus:border-[#3F3F46] resize-none"
+            />
+            {savingCaption && (
+              <span className="absolute bottom-2 right-2 text-[10px] text-[#52525B]">Saving…</span>
+            )}
           </div>
 
           {/* Expanded overlay — rendered outside the thumbnail so clicks don't re-trigger setExpanded(true) */}

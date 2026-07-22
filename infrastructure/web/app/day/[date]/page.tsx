@@ -109,7 +109,7 @@ export default async function DayPage({ params }: Props) {
 
         <section>
           <SectionLabel>Photo of the day</SectionLabel>
-          <PhotoOfDay date={date} initialPhotoUrl={day.photo_url ?? null} />
+          <PhotoOfDay date={date} initialPhotoUrl={day.photo_url ?? null} initialCaption={day.subjective.photo_caption ?? null} />
         </section>
 
         <section>

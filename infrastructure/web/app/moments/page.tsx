@@ -227,10 +227,13 @@ export default function MomentsPage() {
             className="max-w-full max-h-[80vh] object-contain rounded-xl"
             onClick={(e) => e.stopPropagation()}
           />
-          <div className="mt-4 text-center" onClick={(e) => e.stopPropagation()}>
+          <div className="mt-4 text-center max-w-lg" onClick={(e) => e.stopPropagation()}>
             <p className="text-sm text-[#D4D4D8]">
               {format(parseISO(lightbox.date), "EEEE, d MMMM yyyy")}
             </p>
+            {lightbox.photo_caption && (
+              <p className="text-sm text-[#A1A1AA] italic mt-1.5">&ldquo;{lightbox.photo_caption}&rdquo;</p>
+            )}
             <Link
               href={`/day/${lightbox.date}`}
               className="text-xs text-[#F59E0B] hover:text-[#FCD34D] mt-1 inline-block"

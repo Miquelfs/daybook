@@ -67,6 +67,7 @@ def _subjective(row: sqlite3.Row) -> DaySubjective:
         learning=row["learning"] if "learning" in row.keys() else None,
         focus_score=row["focus_score"] if "focus_score" in row.keys() else None,
         error_log=row["error_log"] if "error_log" in row.keys() else None,
+        photo_caption=row["photo_caption"] if "photo_caption" in row.keys() else None,
     )
 
 
@@ -299,6 +300,7 @@ def get_range(
             daily_question=row["daily_question"],
             daily_answer=row["daily_answer"],
             photo_path=row["photo_path"] if "photo_path" in row.keys() else None,
+            photo_caption=row["photo_caption"] if "photo_caption" in row.keys() else None,
             tags=row["tags"] if "tags" in row.keys() else None,
             tags_list=tag_slugs,
         ))

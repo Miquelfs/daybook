@@ -90,6 +90,7 @@ class DaySubjective(BaseModel):
     learning: str | None = None
     focus_score: int | None = Field(None, ge=1, le=10)
     error_log: str | None = None
+    photo_caption: str | None = None
 
 
 class DaySummary(BaseModel):
@@ -110,6 +111,7 @@ class DaySummary(BaseModel):
     daily_question: str | None = None
     daily_answer: str | None = None
     photo_path: str | None = None
+    photo_caption: str | None = None
     tags: str | None = None
     tags_list: list[str] = []
 
@@ -176,3 +178,4 @@ class DayPatch(BaseModel):
     learning: str | None = None
     focus_score: int | None = Field(None, ge=1, le=10)
     error_log: str | None = None
+    photo_caption: str | None = None
