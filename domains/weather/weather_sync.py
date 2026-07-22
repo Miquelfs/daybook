@@ -270,7 +270,10 @@ def sync(start: str, end: str) -> None:
              row["precipitation"], row["wind_speed_max"], row["weather_code"],
              row["condition"], row["raw_payload"]),
         )
-        _auto_tag(conn, date_str, row["condition"])
+        # Auto-tagging disabled — weather condition tags are now added manually.
+        # Temperature / precipitation / condition are still stored above so they
+        # can be mapped or used for manual tagging in the future.
+        # _auto_tag(conn, date_str, row["condition"])
         temp = f"{row['temp_mean']:.1f}°C" if row["temp_mean"] is not None else "?°C"
         print(f"  ✓ {date_str}: {row['condition']} {temp} @ ({lat:.3f},{lon:.3f})")
         inserted += 1

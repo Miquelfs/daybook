@@ -90,3 +90,5 @@ The Pi API is the single contract. Both the web app (`infrastructure/web/`) and 
 - Exception: structs with explicit `CodingKeys` enums bypass the strategy — all keys must be listed manually
 
 **The data flow is always:** iOS app → PATCH/POST → Pi API → SQLite → GET → web app (and vice versa). There is no direct iOS↔web communication. A mood logged on iOS is immediately visible on the web because both read the same DB row.
+
+**Push always the written code into github**
