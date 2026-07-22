@@ -3,7 +3,7 @@
 import { useState, Suspense } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { format, subDays, parseISO, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachWeekOfInterval, eachMonthOfInterval } from "date-fns";
-import { api, moodEmoji, type DaySummary } from "@/lib/api";
+import { api, type DaySummary } from "@/lib/api";
 import Link from "next/link";
 import { DayCard } from "@/components/DayCard";
 import { LifeGridClient } from "@/app/life/LifeGridClient";
@@ -217,7 +217,35 @@ function WeeksTab() {
 
 function avgMood(days: DaySummary[]): number | null {
   const moods = days.map((d) => d.mood).filter((m): m is number => m != null);
-  return moods.length ? Math.round(moods.reduce((a, b) => a + b, 0) / moods.length) : null;
+  return moods.length ? moods.reduce((a, b) => a + b, 0) / moods.length : null;
+}
+
+// Progress ring around the average rating: fill = value/10, colour ramps
+// red (low) → amber → green (high) on a continuous hue scale.
+function MoodRing({ value }: { value: number }) {
+  const pct = Math.max(0, Math.min(1, value / 10));
+  const size = 42, stroke = 4;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const color = `hsl(${Math.round(pct * 120)}, 68%, 46%)`;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90 block">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#27272A" strokeWidth={stroke} />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none"
+          stroke={color} strokeWidth={stroke} strokeLinecap="round"
+          strokeDasharray={c} strokeDashoffset={c * (1 - pct)}
+        />
+      </svg>
+      <span
+        className="absolute inset-0 flex items-center justify-center text-xs font-semibold tabular-nums"
+        style={{ color }}
+      >
+        {value.toFixed(1)}
+      </span>
+    </div>
+  );
 }
 
 function WeekReviewList({ days, year }: { days: DaySummary[]; year: number }) {
@@ -288,11 +316,7 @@ function ReviewCard({ label, days, start, end }: { label: string; days: DaySumma
         <div className="flex-1 min-w-0">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-0.5">{label}</p>
           <div className="flex items-center gap-3 flex-wrap">
-            {mood != null && (
-              <span className="text-sm font-medium text-[#A1A1AA]">
-                {moodEmoji(mood)} {mood}/10
-              </span>
-            )}
+            {mood != null && <MoodRing value={mood} />}
             {totalFlights > 0 && (
               <span className="text-xs text-sky-400">✈ {totalFlights} sector{totalFlights > 1 ? "s" : ""}</span>
             )}

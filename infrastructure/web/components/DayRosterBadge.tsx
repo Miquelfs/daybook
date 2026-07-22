@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 
 interface RosterBrief {
   duty_type: string;
@@ -15,30 +18,17 @@ const DUTY_STYLE: Record<string, { bg: string; border: string; text: string; lab
   unknown:     { bg: "bg-[#18181B]", border: "border-[#27272A]", text: "text-[#71717A]", label: "Duty"        },
 };
 
-const BASE =
-  process.env.API_INTERNAL_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  "http://localhost:8000";
-
-async function fetchRosterBrief(date: string): Promise<RosterBrief | null> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const res = await fetch(`${BASE}/roster/day/${date}/brief`, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(4000),
-      });
-      if (res.status === 404) return null;
-      if (!res.ok) continue;
-      return await res.json();
-    } catch {
-      // retry on timeout or connection error
-    }
-  }
-  return null;
-}
-
-export async function DayRosterBadge({ date }: { date: string }) {
-  const brief = await fetchRosterBrief(date);
+export function DayRosterBadge({ date }: { date: string }) {
+  const { data: brief } = useQuery<RosterBrief | null>({
+    queryKey: ["roster-brief", date],
+    queryFn: async () => {
+      const res = await fetch(`/api/roster/day/${date}?brief=1`);
+      if (!res.ok) throw new Error(`${res.status}`);
+      return res.json();
+    },
+    staleTime: 0,
+    retry: 2,
+  });
 
   if (!brief || brief.duty_type === "day_off") return null;
 

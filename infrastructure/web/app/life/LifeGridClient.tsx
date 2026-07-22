@@ -32,6 +32,7 @@ export function LifeGridClient({ grid, periods, events }: Props) {
   const [editingEvent, setEditingEvent]       = useState<LifeEvent | null>(null);
   const [fabOpen, setFabOpen]                 = useState(false);
   const [showArchive, setShowArchive]         = useState(false);
+  const [mergeByLabel, setMergeByLabel]       = useState(false);
 
   // Category filter: empty set = all visible
   const [visibleCategories, setVisibleCategories] = useState<Set<string>>(new Set());
@@ -111,6 +112,32 @@ export function LifeGridClient({ grid, periods, events }: Props) {
     periodsByCategory[cat].sort((a, b) => a.start_date.localeCompare(b.start_date));
   });
 
+  // Combined view — aggregate periods that share a label (e.g. two "Barcelona"
+  // stints, two "Iberia" jobs) into a single summary row per label.
+  function combinedStats(list: LifePeriod[]) {
+    const durDays = list.reduce((s, p) => {
+      const start = new Date(p.start_date).getTime();
+      const end = p.end_date ? new Date(p.end_date).getTime() : new Date(todayStr).getTime();
+      return s + (end - start) / 86400000;
+    }, 0);
+    const pctLife = Math.round((durDays / totalLifeDays) * 100 * 10) / 10;
+    const pctLived = Math.round((durDays / livedDays) * 100 * 10) / 10;
+    const ongoing = list.some((p) => !p.end_date);
+    const earliest = list.reduce((m, p) => (p.start_date < m ? p.start_date : m), list[0].start_date);
+    const latest = ongoing ? null : list.reduce((m, p) => ((p.end_date ?? "") > m ? (p.end_date ?? "") : m), "");
+    return { pctLife, pctLived, ongoing, stints: list.length, earliest, latest, color: list[0].color };
+  }
+
+  // For each category, group its periods by label, ordered by earliest start.
+  const labelGroupsByCategory: Record<string, [string, LifePeriod[]][]> = {};
+  categoryOrder.forEach((cat) => {
+    const groups: Record<string, LifePeriod[]> = {};
+    periodsByCategory[cat].forEach((p) => { (groups[p.label] ??= []).push(p); });
+    labelGroupsByCategory[cat] = Object.entries(groups).sort(
+      (a, b) => a[1][0].start_date.localeCompare(b[1][0].start_date)
+    );
+  });
+
   // Events sorted by date descending (most recent first)
   const sortedEvents = [...events].sort((a, b) => b.event_date.localeCompare(a.event_date));
 
@@ -167,8 +194,58 @@ export function LifeGridClient({ grid, periods, events }: Props) {
 
           {showArchive && (
             <div className="flex flex-col gap-6">
+              {/* View toggle: chronological vs combined-by-name */}
+              {periods.length > 0 && (
+                <div className="inline-flex self-start rounded-lg border border-[#27272A] p-0.5 bg-[#09090B] -mb-2">
+                  <button
+                    onClick={() => setMergeByLabel(false)}
+                    className={`px-3 py-1 text-xs rounded-md transition-colors ${!mergeByLabel ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}
+                  >
+                    Chronological
+                  </button>
+                  <button
+                    onClick={() => setMergeByLabel(true)}
+                    className={`px-3 py-1 text-xs rounded-md transition-colors ${mergeByLabel ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}
+                  >
+                    Combined by name
+                  </button>
+                </div>
+              )}
+
+              {/* Combined-by-name view: one aggregated row per label */}
+              {mergeByLabel && categoryOrder.map((cat) => (
+                <div key={cat}>
+                  <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">{cat}</p>
+                  <div className="flex flex-col gap-1.5">
+                    {labelGroupsByCategory[cat].map(([label, list]) => {
+                      const { pctLife, pctLived, ongoing, stints, earliest, latest, color } = combinedStats(list);
+                      return (
+                        <div key={label} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-[#18181B] bg-[#0D0D0F]">
+                          <span className="inline-block h-3 w-3 rounded-sm flex-shrink-0" style={{ background: colorHex(color) }} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-[#A1A1AA] truncate">
+                              {label}
+                              {stints > 1 && <span className="text-[#52525B] font-normal"> · {stints} stints</span>}
+                            </p>
+                            <p className="text-xs text-[#3F3F46]">
+                              {earliest} → {latest ?? "ongoing"}
+                            </p>
+                            <p className="text-xs text-[#52525B] mt-0.5">
+                              <span className="text-[#71717A]">{pctLife}%</span> of 90yr life
+                              <span className="mx-1.5 text-[#27272A]">·</span>
+                              <span className="text-[#71717A]">{pctLived}%</span> of life so far
+                              {ongoing && <span className="text-[#3F3F46]"> · ongoing</span>}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
               {/* Periods grouped by category */}
-              {categoryOrder.map((cat) => (
+              {!mergeByLabel && categoryOrder.map((cat) => (
                 <div key={cat}>
                   <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">{cat}</p>
                   <div className="flex flex-col gap-1.5">
