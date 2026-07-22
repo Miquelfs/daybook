@@ -44,25 +44,31 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
   const [price, setPrice] = useState(
     holding.current_price_eur != null ? String(holding.current_price_eur) : ""
   );
+  const [sellFee, setSellFee] = useState("");
   const [account, setAccount] = useState(accounts[0] ?? "");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
 
   const [buyQty, setBuyQty] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
+  const [buyFee, setBuyFee] = useState("");
   const [buyAccount, setBuyAccount] = useState(accounts[0] ?? "");
   const [buyDate, setBuyDate] = useState(new Date().toISOString().slice(0, 10));
 
   const qtyNum = parseFloat(qty);
   const priceNum = parseFloat(price);
-  const valid = !isNaN(qtyNum) && qtyNum > 0 && !isNaN(priceNum) && priceNum > 0 && !!account;
-  const proceeds = valid ? qtyNum * priceNum : null;
+  const sellFeeNum = sellFee.trim() === "" ? 0 : parseFloat(sellFee);
+  const valid = !isNaN(qtyNum) && qtyNum > 0 && !isNaN(priceNum) && priceNum > 0 && !!account && !isNaN(sellFeeNum) && sellFeeNum >= 0;
+  const grossProceeds = valid ? qtyNum * priceNum : null;
+  const proceeds = grossProceeds !== null ? grossProceeds - sellFeeNum : null;
   const sellingAll = valid && qtyNum >= holding.quantity - 1e-9;
 
   const buyQtyNum = parseFloat(buyQty);
   const buyPriceNum = buyPrice ? parseFloat(buyPrice) : null;
+  const buyFeeNum = buyFee.trim() === "" ? 0 : parseFloat(buyFee);
   const buyValid = !isNaN(buyQtyNum) && buyQtyNum > 0 && !!buyAccount &&
-    (buyPrice === "" || (buyPriceNum != null && buyPriceNum > 0));
-  const buyCost = buyValid && buyPriceNum != null ? buyQtyNum * buyPriceNum : null;
+    (buyPrice === "" || (buyPriceNum != null && buyPriceNum > 0)) && !isNaN(buyFeeNum) && buyFeeNum >= 0;
+  const buyGrossCost = buyValid && buyPriceNum != null ? buyQtyNum * buyPriceNum : null;
+  const buyCost = buyGrossCost !== null ? buyGrossCost + buyFeeNum : null;
 
   async function sell() {
     if (!valid) return;
@@ -73,6 +79,7 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
         to_account: account,
         quantity: Math.min(qtyNum, holding.quantity),
         price_eur: priceNum,
+        fee_eur: sellFeeNum || undefined,
         date,
       });
       setSellOpen(false);
@@ -93,11 +100,13 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
         from_account: buyAccount,
         quantity: buyQtyNum,
         price_eur: buyPriceNum ?? undefined,
+        fee_eur: buyFeeNum || undefined,
         date: buyDate,
       });
       setBuyOpen(false);
       setBuyQty("");
       setBuyPrice("");
+      setBuyFee("");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Buy failed");
@@ -185,7 +194,7 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
         ) : (
           <button
             type="button"
-            title={`Buy more ${holding.ticker}`}
+            title={`Buy more ${holding.name}`}
             onClick={(e) => { e.stopPropagation(); setBuyOpen(true); }}
             className="p-1.5 rounded-lg text-[#3F3F46] hover:text-[#3B82F6] hover:bg-[#18181B] transition-colors"
           >
@@ -194,7 +203,7 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
         )}
         <button
           type="button"
-          title={`Sell ${holding.ticker}`}
+          title={`Sell ${holding.name}`}
           onClick={(e) => { e.stopPropagation(); setSellOpen(true); }}
           className="p-1.5 rounded-lg text-[#3F3F46] hover:text-[#22C55E] hover:bg-[#18181B] transition-colors"
         >
@@ -202,7 +211,7 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
         </button>
         <button
           type="button"
-          title={`Edit ${holding.ticker} — quantity, cost, ticker, account`}
+          title={`Edit ${holding.name} — quantity, cost, ticker, account`}
           onClick={(e) => { e.stopPropagation(); setEditOpen(true); }}
           className="p-1.5 rounded-lg text-[#3F3F46] hover:text-[#A1A1AA] hover:bg-[#18181B] transition-colors"
         >
@@ -212,7 +221,7 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
           <span className="flex items-center">
             <button
               type="button"
-              title={`Delete ${holding.ticker} — removes it and its history`}
+              title={`Delete ${holding.name} — removes it and its history`}
               onClick={(e) => { e.stopPropagation(); remove(); }}
               disabled={busy}
               className="p-1.5 rounded-lg bg-[#EF4444]/15 text-[#EF4444] hover:bg-[#EF4444]/25 transition-colors"
@@ -422,9 +431,9 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
             </div>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-sm font-semibold text-[#FAFAFA]">Buy more {holding.ticker}</p>
+                <p className="text-sm font-semibold text-[#FAFAFA]">Buy more {holding.name}</p>
                 <p className="text-xs text-[#52525B]">
-                  {holding.name} · currently {holding.quantity.toLocaleString()} units
+                  currently {holding.quantity.toLocaleString()} units
                   {holding.cost_basis_eur != null && ` · avg €${(holding.cost_basis_eur / holding.quantity).toFixed(2)}/unit`}
                 </p>
               </div>
@@ -458,6 +467,18 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
               </div>
 
               <label className="block">
+                <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Broker/management fee € (optional)</span>
+                <input
+                  value={buyFee}
+                  onChange={(e) => setBuyFee(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="0"
+                  className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                />
+                <p className="text-[10px] text-[#52525B] mt-1">Folded into the cost basis, so avg. buy-in stays accurate.</p>
+              </label>
+
+              <label className="block">
                 <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Funding account</span>
                 <select
                   value={buyAccount}
@@ -480,7 +501,11 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
 
               <div className="bg-[#18181B] rounded-lg px-3 py-2.5 flex items-center justify-between">
                 <span className="text-xs text-[#71717A]">
-                  {buyCost != null ? "New avg. buy-in updates automatically" : "Leave price blank to use today's live quote"}
+                  {buyCost != null
+                    ? buyFeeNum > 0
+                      ? `New avg. buy-in updates automatically (incl. €${buyFeeNum.toFixed(2)} fee)`
+                      : "New avg. buy-in updates automatically"
+                    : "Leave price blank to use today's live quote"}
                 </span>
                 {buyCost != null && (
                   <span className="text-sm font-semibold text-[#3B82F6] tabular-nums">−{fmtAmount(buyCost)}</span>
@@ -511,8 +536,8 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
             </div>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-sm font-semibold text-[#FAFAFA]">Sell {holding.ticker}</p>
-                <p className="text-xs text-[#52525B]">{holding.name} · holding {holding.quantity.toLocaleString()} units</p>
+                <p className="text-sm font-semibold text-[#FAFAFA]">Sell {holding.name}</p>
+                <p className="text-xs text-[#52525B]">holding {holding.quantity.toLocaleString()} units</p>
               </div>
               <button onClick={() => setSellOpen(false)} className="p-1.5 rounded-lg hover:bg-[#27272A] transition-colors">
                 <X size={16} className="text-[#71717A]" />
@@ -552,6 +577,18 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
               </div>
 
               <label className="block">
+                <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Broker/management fee € (optional)</span>
+                <input
+                  value={sellFee}
+                  onChange={(e) => setSellFee(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="0"
+                  className="w-full mt-1 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+                />
+                <p className="text-[10px] text-[#52525B] mt-1">Subtracted from proceeds — realized P&amp;L reflects the net result.</p>
+              </label>
+
+              <label className="block">
                 <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Proceeds to account</span>
                 <select
                   value={account}
@@ -576,6 +613,7 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
                 <div className="bg-[#18181B] rounded-lg px-3 py-2.5 flex items-center justify-between">
                   <span className="text-xs text-[#71717A]">
                     {sellingAll ? "Selling everything — holding will close" : `Keeping ${(holding.quantity - qtyNum).toLocaleString()} units`}
+                    {sellFeeNum > 0 && ` · net of €${sellFeeNum.toFixed(2)} fee`}
                   </span>
                   <span className="text-sm font-semibold text-[#22C55E] tabular-nums">+{fmtAmount(proceeds)}</span>
                 </div>

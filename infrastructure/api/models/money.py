@@ -382,6 +382,7 @@ class SellHoldingBody(BaseModel):
     to_account: str                                    # liquid account receiving proceeds
     quantity: Optional[float] = Field(default=None, gt=0)   # None = sell everything
     price_eur: Optional[float] = Field(default=None, gt=0)  # None = latest cached close
+    fee_eur: Optional[float] = Field(default=None, ge=0)    # broker/management fee, subtracted from proceeds
     date: Optional[str] = None                         # YYYY-MM-DD, default today
     notes: Optional[str] = None
 
@@ -391,8 +392,9 @@ class SellResult(BaseModel):
     transaction_id: str
     quantity_sold: float
     price_eur: float
-    proceeds_eur: float
-    realized_pnl_eur: Optional[float] = None  # None when cost basis was unknown
+    fee_eur: float = 0.0
+    proceeds_eur: float                       # net of fee — what actually lands in the account
+    realized_pnl_eur: Optional[float] = None  # None when cost basis was unknown; already fee-adjusted
 
 
 class RealizedTradeOut(BaseModel):
@@ -414,6 +416,7 @@ class BuyHoldingBody(BaseModel):
     from_account: str                                   # liquid account funding the purchase
     quantity: float = Field(gt=0)                        # units added
     price_eur: Optional[float] = Field(default=None, gt=0)   # None = fetch today's live price
+    fee_eur: Optional[float] = Field(default=None, ge=0)     # broker/management fee, added to cost basis
     date: Optional[str] = None                           # YYYY-MM-DD, default today
     notes: Optional[str] = None
 
@@ -423,7 +426,8 @@ class BuyResult(BaseModel):
     transaction_id: str
     quantity_bought: float
     price_eur: float
-    cost_eur: float
+    fee_eur: float = 0.0
+    cost_eur: float             # total debited, including fee — this is what the cost basis moves by
 
 
 class AllocationSlice(BaseModel):

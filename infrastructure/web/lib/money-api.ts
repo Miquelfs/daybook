@@ -504,6 +504,7 @@ export type SellHoldingBody = {
   to_account: string;
   quantity?: number;    // omit = sell everything
   price_eur?: number;   // omit = latest cached close
+  fee_eur?: number;     // broker/management fee, subtracted from proceeds
   date?: string;
   notes?: string;
 };
@@ -513,7 +514,8 @@ export type SellResult = {
   transaction_id: string;
   quantity_sold: number;
   price_eur: number;
-  proceeds_eur: number;
+  fee_eur: number;
+  proceeds_eur: number;  // net of fee
   realized_pnl_eur: number | null;
 };
 
@@ -535,6 +537,7 @@ export type BuyHoldingBody = {
   from_account: string;
   quantity: number;
   price_eur?: number;   // omit = fetch today's live price
+  fee_eur?: number;     // broker/management fee, added to cost basis
   date?: string;
   notes?: string;
 };
@@ -544,7 +547,8 @@ export type BuyResult = {
   transaction_id: string;
   quantity_bought: number;
   price_eur: number;
-  cost_eur: number;
+  fee_eur: number;
+  cost_eur: number;   // total debited, including fee
 };
 
 export type IsinCandidate = {

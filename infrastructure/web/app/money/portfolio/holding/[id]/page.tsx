@@ -27,17 +27,19 @@ export default async function HoldingDetailPage({ params }: Props) {
 
       <div className="mb-6">
         <div className="flex items-baseline gap-3 flex-wrap">
-          <h1 className="text-2xl font-semibold tracking-tight">{h.ticker}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{h.name}</h1>
           <span className="text-xs text-[#71717A]">{h.currency}</span>
           {!h.is_active && <span className="text-[10px] uppercase tracking-widest text-[#EF4444] bg-[#EF4444]/10 px-2 py-0.5 rounded-full">Closed</span>}
         </div>
-        <p className="text-sm text-[#A1A1AA] mt-0.5">{h.name}</p>
         <p className="text-xs text-[#52525B] mt-1">
           {h.account} · {h.asset_class.replace("_", " ")} · {h.quantity} units
         </p>
-        {h.isin && (
-          <p className="text-[10px] font-mono text-[#52525B] mt-1 uppercase tracking-widest">ISIN {h.isin}</p>
-        )}
+        {/* ISIN is the stable identifier — the ticker carries exchange
+            suffixes (VWCE.DE, FEP3.MU) that mean nothing at a glance.
+            Fall back to the ticker only when there's no ISIN to show. */}
+        <p className="text-[10px] font-mono text-[#52525B] mt-1 uppercase tracking-widest">
+          {h.isin ? `ISIN ${h.isin}` : `Ticker ${h.ticker}`}
+        </p>
       </div>
 
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-6 py-6 mb-4">

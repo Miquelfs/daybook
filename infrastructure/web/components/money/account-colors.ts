@@ -19,3 +19,23 @@ export const ACCOUNT_COLORS: Record<string, { bg: string; text: string }> = {
 export function accountBadgeClass(account: string): { bg: string; text: string } {
   return ACCOUNT_COLORS[account] ?? { bg: "bg-zinc-800/60", text: "text-zinc-400" };
 }
+
+// Human labels for asset_class, shared between the Add-holding drawer and the
+// Holdings filter dropdown.
+export const ASSET_CLASS_LABELS: Record<string, string> = {
+  equity_etf: "Equity ETF",
+  stock: "Stock",
+  crypto: "Crypto",
+  bond_etf: "Bond ETF",
+  commodity: "Commodity",
+  cash: "Cash / MMF",
+  fund: "Fund (unlisted)",
+  pension: "Pension plan",
+  real_estate: "Real estate",
+  private: "Private equity / business",
+  other: "Other asset",
+};
+
+export function assetClassLabel(assetClass: string): string {
+  return ASSET_CLASS_LABELS[assetClass] ?? assetClass.replace(/_/g, " ");
+}

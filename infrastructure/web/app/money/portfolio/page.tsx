@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { moneyApi, fmtAmount, type Holding, type AllocationSlice, type Mover, type AccountBalance, type RealizedTrade } from "@/lib/money-api";
-import { accountBadgeClass } from "@/components/money/account-colors";
 import { AddHoldingDrawer } from "@/components/money/AddHoldingDrawer";
 import { PortfolioHistoryChart } from "@/components/money/PortfolioHistoryChart";
 import { RecurringPlansSection } from "@/components/money/RecurringPlansSection";
-import { HoldingActions } from "@/components/money/HoldingActions";
+import { HoldingsTable } from "@/components/money/HoldingsTable";
 
 export default async function PortfolioPage() {
   const [overview, holdings, history, plans, realized] = await Promise.all([
@@ -229,7 +228,7 @@ function MoverList({ title, movers, positive }: { title: string; movers: Mover[]
           {movers.map(m => (
             <li key={m.holding_id} className="flex items-center gap-2 text-xs">
               <Link href={`/money/portfolio/holding/${encodeURIComponent(m.holding_id)}`} className="text-[#D4D4D8] hover:text-[#FAFAFA] truncate flex-1">
-                {m.ticker}
+                {m.name}
               </Link>
               <span className={`tabular-nums ${color}`}>
                 {positive ? "+" : ""}{m.day_change_pct.toFixed(2)}%
@@ -239,78 +238,6 @@ function MoverList({ title, movers, positive }: { title: string; movers: Mover[]
         </ul>
       )}
     </div>
-  );
-}
-
-// Market prices older than this many days get an "as of" warning — either the
-// listing has no recent Yahoo data or the nightly sync is failing for it.
-const STALE_DAYS = 3;
-
-function staleLabel(h: Holding): string | null {
-  if (h.pricing_mode === "manual") return null; // manual values age by design
-  if (!h.price_as_of) return "no price";
-  const ageDays = (Date.now() - new Date(h.price_as_of).getTime()) / 86_400_000;
-  return ageDays > STALE_DAYS ? `as of ${h.price_as_of}` : null;
-}
-
-function HoldingsTable({ holdings, liquidAccounts }: { holdings: Holding[]; liquidAccounts: string[] }) {
-  const sorted = [...holdings].sort((a, b) => (b.market_value_eur ?? 0) - (a.market_value_eur ?? 0));
-  return (
-    <section className="mb-6">
-      <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Holdings</h2>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
-        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2 text-[10px] text-[#52525B] uppercase tracking-widest border-b border-[#18181B]">
-          <span>Name</span>
-          <span className="text-right">Value</span>
-          <span className="text-right">Today</span>
-          <span className="text-right">P&amp;L</span>
-          <span />
-        </div>
-        <div className="divide-y divide-[#18181B]">
-          {sorted.map(h => {
-            const dayPos = (h.day_change_pct ?? 0) >= 0;
-            const pnlPos = (h.unrealized_pnl_pct ?? 0) >= 0;
-            return (
-              <div
-                key={h.id}
-                className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-3 items-center hover:bg-[#131316] transition-colors"
-              >
-                <Link href={`/money/portfolio/holding/${encodeURIComponent(h.id)}`} className="min-w-0">
-                  <p className="text-sm text-[#FAFAFA] truncate">
-                    {h.ticker}
-                    {h.pricing_mode === "manual" && (
-                      <span className="ml-1.5 text-[9px] text-[#71717A] uppercase tracking-widest border border-[#27272A] rounded px-1 py-0.5 align-middle">manual</span>
-                    )}
-                    {(() => {
-                      const { bg, text } = accountBadgeClass(h.account);
-                      return (
-                        <span className={`ml-1.5 text-[9px] px-1.5 py-0.5 rounded-full align-middle ${bg} ${text}`}>
-                          {h.account}
-                        </span>
-                      );
-                    })()}
-                  </p>
-                  <p className="text-xs text-[#71717A] truncate">{h.name}</p>
-                </Link>
-                <span className="text-sm tabular-nums text-[#D4D4D8] text-right">
-                  {h.market_value_eur !== null ? fmtAmount(h.market_value_eur) : "—"}
-                  {staleLabel(h) && (
-                    <span className="block text-[9px] text-[#F59E0B]/80 tabular-nums">{staleLabel(h)}</span>
-                  )}
-                </span>
-                <span className={`text-xs tabular-nums text-right ${dayPos ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
-                  {h.day_change_pct !== null ? `${dayPos ? "+" : ""}${h.day_change_pct.toFixed(2)}%` : "—"}
-                </span>
-                <span className={`text-xs tabular-nums text-right ${pnlPos ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
-                  {h.unrealized_pnl_pct !== null ? `${pnlPos ? "+" : ""}${h.unrealized_pnl_pct.toFixed(1)}%` : "—"}
-                </span>
-                <HoldingActions holding={h} accounts={liquidAccounts} />
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -336,7 +263,7 @@ function RealizedSection({ trades, totalAllTime, totalYtd }: { trades: RealizedT
             <div key={t.id} className="flex items-center gap-3 px-4 py-2.5">
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-[#D4D4D8] truncate">
-                  {t.ticker}
+                  {t.name}
                   <span className="text-xs text-[#52525B]"> × {t.quantity.toLocaleString()}</span>
                 </p>
                 <p className="text-xs text-[#52525B] truncate">{t.date} · sold for {fmtAmount(t.proceeds_eur)}</p>
