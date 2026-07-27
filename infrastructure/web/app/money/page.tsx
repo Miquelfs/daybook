@@ -3,7 +3,7 @@ import { moneyApi, fmtAmount } from "@/lib/money-api";
 import { MonthBudgetBar } from "@/components/money/MonthBudgetBar";
 import { TransactionList } from "@/components/money/TransactionList";
 import { MoneyFab } from "@/components/money/MoneyFab";
-import { format, addMonths, subMonths } from "date-fns";
+import { format, addMonths, subMonths, endOfMonth } from "date-fns";
 
 interface Props {
   searchParams: Promise<{ month?: string }>;
@@ -198,7 +198,25 @@ export default async function MoneyPage({ searchParams }: Props) {
 
       {/* Transactions explorer */}
       <section>
-        <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Transactions</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xs text-[#52525B] uppercase tracking-widest">Transactions</h2>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/api/money/export?start=${month}-01&end=${format(endOfMonth(monthDate), "yyyy-MM-dd")}`}
+              download
+              className="text-xs font-medium px-3 py-1.5 rounded-full bg-[#27272A] text-[#A1A1AA] hover:bg-[#3F3F46] hover:text-[#FAFAFA] transition-colors"
+            >
+              ↓ {monthLabel.split(" ")[0]}
+            </a>
+            <a
+              href="/api/money/export"
+              download
+              className="text-xs font-medium px-3 py-1.5 rounded-full bg-[#3B82F6]/10 text-[#3B82F6] hover:bg-[#3B82F6]/20 transition-colors"
+            >
+              ↓ All CSV
+            </a>
+          </div>
+        </div>
         <TransactionList limit={50} showDate={true} filterable />
       </section>
 

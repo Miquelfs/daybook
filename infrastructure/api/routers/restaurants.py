@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from infrastructure.api.db import get_db
 from infrastructure.api.models.restaurants import (
+    RestaurantFacets,
     RestaurantIn,
     RestaurantOut,
     RestaurantPatch,
@@ -160,6 +161,26 @@ def list_restaurants(
         params,
     ).fetchall()
     return [_row_to_restaurant(r) for r in rows]
+
+
+@router.get("/facets", response_model=RestaurantFacets)
+def get_facets(conn: DB):
+    """Distinct cuisines / cities / countries already logged, most-used first."""
+    _ensure_table(conn)
+
+    def _distinct(column: str) -> list[str]:
+        rows = conn.execute(
+            f"""SELECT {column} AS v, COUNT(*) AS n FROM restaurants
+                WHERE {column} IS NOT NULL AND TRIM({column}) != ''
+                GROUP BY {column} ORDER BY n DESC, v ASC"""
+        ).fetchall()
+        return [r["v"] for r in rows]
+
+    return RestaurantFacets(
+        cuisines=_distinct("cuisine"),
+        cities=_distinct("city"),
+        countries=_distinct("country"),
+    )
 
 
 @router.get("/{restaurant_id}", response_model=RestaurantOut)

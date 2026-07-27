@@ -20,6 +20,20 @@ CREATE TABLE IF NOT EXISTS transactions (
     updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
+-- User-managed finance accounts. Historically account names + their types were
+-- hardcoded in money_config.py (INVESTMENT_ACCOUNTS / LIQUID_ACCOUNTS). This
+-- table lets the user create new accounts from the UI and pick their type, so a
+-- freshly-created account is classified correctly (net-worth bucketing, liquid
+-- strip) instead of falling through to "Unknown". Classification code reads this
+-- table first and falls back to the config dicts for legacy accounts.
+CREATE TABLE IF NOT EXISTS accounts (
+    name          TEXT PRIMARY KEY,
+    account_type  TEXT NOT NULL,   -- 'Checking'|'Savings'|'Investment'|'Crypto Investment'
+    is_active     INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS budgets (
     year_month  TEXT NOT NULL,   -- YYYY-MM (most-recent applicable version logic in code)
     category    TEXT NOT NULL,

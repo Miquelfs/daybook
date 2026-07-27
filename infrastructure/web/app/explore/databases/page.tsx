@@ -3,12 +3,14 @@ import { Globe, PersonStanding, Database } from "lucide-react";
 import { api } from "@/lib/api";
 import { booksApi } from "@/lib/books-api";
 import { showsApi } from "@/lib/shows-api";
+import { songsApi } from "@/lib/songs-api";
 
 export default async function DatabasesPage() {
-  const [restaurantStats, bookStats, showStats] = await Promise.all([
+  const [restaurantStats, bookStats, showStats, songStats] = await Promise.all([
     api.restaurantStats().catch(() => null),
     booksApi.stats().catch(() => null),
     showsApi.stats().catch(() => null),
+    songsApi.stats().catch(() => null),
   ]);
 
   return (
@@ -22,7 +24,7 @@ export default async function DatabasesPage() {
           ← Today
         </Link>
         <h1 className="text-2xl font-semibold tracking-tight">Explore</h1>
-        <p className="text-sm text-[#71717A] mt-0.5">Restaurants, books & shows</p>
+        <p className="text-sm text-[#71717A] mt-0.5">Restaurants, books, shows & songs</p>
 
         {/* Section tabs */}
         <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mt-4 overflow-x-auto">
@@ -82,6 +84,22 @@ export default async function DatabasesPage() {
               {showStats
                 ? `${showStats.total} watched · avg ${showStats.avg_rating_mf ?? "—"}/10`
                 : "Watching log with ratings"}
+            </p>
+          </div>
+          <span className="text-[#52525B] text-sm">→</span>
+        </Link>
+
+        <Link
+          href="/explore/songs"
+          className="flex items-center gap-4 bg-[#18181B] border border-[#27272A] rounded-xl px-5 py-4 hover:border-[#3F3F46] transition-colors"
+        >
+          <span className="text-3xl">🎵</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-semibold text-[#FAFAFA]">Song of the day</p>
+            <p className="text-xs text-[#52525B] mt-0.5">
+              {songStats
+                ? `${songStats.current_year.songs} this year · ${songStats.total_songs} total`
+                : "Daily soundtrack + year playlists"}
             </p>
           </div>
           <span className="text-[#52525B] text-sm">→</span>

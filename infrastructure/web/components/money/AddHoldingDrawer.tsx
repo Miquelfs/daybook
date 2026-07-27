@@ -1,8 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { moneyApi, type AssetClass, type IsinCandidate } from "@/lib/money-api";
+import { moneyApi, INVESTMENT_ACCOUNT_TYPES, type AssetClass, type IsinCandidate, type AccountType } from "@/lib/money-api";
+
+// Sentinel select value that reveals the "create a new account" inline form.
+const NEW_ACCOUNT = "__new__";
 
 const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: "equity_etf", label: "Equity ETF" },
@@ -34,12 +37,30 @@ interface Props {
   accounts?: string[];
 }
 
-export function AddHoldingDrawer({ accounts = INVESTMENT_ACCOUNTS }: Props) {
+export function AddHoldingDrawer({ accounts: accountsProp }: Props) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<"market" | "manual">("market");
   const router = useRouter();
+
+  // Live list of investment accounts (table + config), so accounts created here
+  // or elsewhere show up without a redeploy. Falls back to the hardcoded set.
+  const [accounts, setAccounts] = useState<string[]>(accountsProp ?? INVESTMENT_ACCOUNTS);
+  // Inline new-account creation (market mode uses a <select>, so "new" needs a form).
+  const [newAccountName, setNewAccountName] = useState("");
+  const [newAccountType, setNewAccountType] = useState<AccountType>("Investment");
+
+  useEffect(() => {
+    if (!open || accountsProp) return;
+    moneyApi
+      .accounts(true)
+      .then((rows) => {
+        const inv = rows.filter((a) => INVESTMENT_ACCOUNT_TYPES.has(a.account_type)).map((a) => a.name);
+        if (inv.length) setAccounts(Array.from(new Set([...inv, ...INVESTMENT_ACCOUNTS])).sort());
+      })
+      .catch(() => {});
+  }, [open, accountsProp]);
 
   const [form, setForm] = useState({
     account: accounts[0] ?? "",
@@ -130,6 +151,8 @@ export function AddHoldingDrawer({ accounts = INVESTMENT_ACCOUNTS }: Props) {
     setCandidates([]);
     setLookupMsg(null);
     setMode("market");
+    setNewAccountName("");
+    setNewAccountType("Investment");
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -155,8 +178,16 @@ export function AddHoldingDrawer({ accounts = INVESTMENT_ACCOUNTS }: Props) {
           current_value_eur: Number(manualValue),
         });
       } else {
+        // Resolve the account — creating it first if the user chose "New account".
+        let account = form.account;
+        if (account === NEW_ACCOUNT) {
+          const name = newAccountName.trim();
+          if (!name) throw new Error("Enter a name for the new account");
+          await moneyApi.createAccount({ name, account_type: newAccountType });
+          account = name;
+        }
         await moneyApi.createHolding({
-          account: form.account,
+          account,
           ticker: form.ticker.trim().toUpperCase(),
           isin: form.isin.trim() ? form.isin.trim().toUpperCase() : null,
           name: form.name.trim(),
@@ -228,14 +259,43 @@ export function AddHoldingDrawer({ accounts = INVESTMENT_ACCOUNTS }: Props) {
                     className="mt-1 w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm"
                   />
                 ) : (
-                  <select
-                    required
-                    value={form.account}
-                    onChange={e => update("account", e.target.value)}
-                    className="mt-1 w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm"
-                  >
-                    {accounts.map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
+                  <>
+                    <select
+                      required
+                      value={form.account}
+                      onChange={e => {
+                        const v = e.target.value;
+                        update("account", v);
+                        if (v === NEW_ACCOUNT) {
+                          setNewAccountType(form.asset_class === "crypto" ? "Crypto Investment" : "Investment");
+                        }
+                      }}
+                      className="mt-1 w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm"
+                    >
+                      {accounts.map(a => <option key={a} value={a}>{a}</option>)}
+                      <option value={NEW_ACCOUNT}>＋ New account…</option>
+                    </select>
+                    {form.account === NEW_ACCOUNT && (
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <input
+                          required
+                          autoFocus
+                          placeholder="Account name"
+                          value={newAccountName}
+                          onChange={e => setNewAccountName(e.target.value)}
+                          className="bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm"
+                        />
+                        <select
+                          value={newAccountType}
+                          onChange={e => setNewAccountType(e.target.value as AccountType)}
+                          className="bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm"
+                        >
+                          <option value="Investment">Investment</option>
+                          <option value="Crypto Investment">Crypto Investment</option>
+                        </select>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 

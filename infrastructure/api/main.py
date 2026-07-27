@@ -25,6 +25,7 @@ from infrastructure.api.routers import correlations as correlations_module
 from infrastructure.api.routers import weather as weather_module
 from infrastructure.api.routers import screen_time as screen_time_module
 from infrastructure.api.routers import books as books_module
+from infrastructure.api.routers import songs as songs_module
 from infrastructure.api.routers import life as life_module
 from infrastructure.api.routers import aviation as aviation_module
 from infrastructure.api.routers import restaurants as restaurants_module
@@ -85,6 +86,7 @@ app.include_router(correlations_module.router)
 app.include_router(weather_module.router)
 app.include_router(screen_time_module.router)
 app.include_router(books_module.router)
+app.include_router(songs_module.router)
 app.include_router(life_module.router)
 app.include_router(aviation_module.router)
 app.include_router(restaurants_module.router)

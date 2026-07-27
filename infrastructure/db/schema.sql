@@ -301,6 +301,25 @@ CREATE INDEX IF NOT EXISTS idx_books_date_finished ON books(date_finished);
 CREATE INDEX IF NOT EXISTS idx_books_author        ON books(author);
 CREATE INDEX IF NOT EXISTS idx_books_genre         ON books(genre);
 
+-- ─── Songs (song of the day) ──────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS songs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    date         TEXT NOT NULL,      -- YYYY-MM-DD, the day it soundtracked
+    title        TEXT NOT NULL,
+    artist       TEXT,
+    album        TEXT,
+    url          TEXT,               -- YouTube Music (or any) link, optional
+    rating       INTEGER,            -- 1-5, NULL = unrated
+    mood         TEXT,               -- optional vibe/context
+    notes        TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_songs_date   ON songs(date);
+CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs(artist);
+
 -- ─── Restaurants ──────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS restaurants (

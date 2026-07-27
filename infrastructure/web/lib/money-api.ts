@@ -245,6 +245,30 @@ export type AccountBalance = {
   account_type: string;
 };
 
+// Account types a user may assign when creating an account. Mirrors ACCOUNT_TYPES
+// in domains/money/money_config.py. "Unknown" is reserved for legacy accounts and
+// is never offered in the UI.
+export const ACCOUNT_TYPES = ["Checking", "Savings", "Investment", "Crypto Investment"] as const;
+export type AccountType = (typeof ACCOUNT_TYPES)[number];
+export const INVESTMENT_ACCOUNT_TYPES = new Set<string>(["Investment", "Crypto Investment"]);
+
+export type AccountInfo = {
+  name: string;
+  account_type: string;
+  is_active: boolean;
+};
+
+export type AccountCreate = {
+  name: string;
+  account_type: AccountType;
+};
+
+export type TransferHoldingsResult = {
+  moved: number;
+  merged: number;
+  to_account: string;
+};
+
 export type PortfolioSummary = {
   accounts: AccountBalance[];
   total_net_worth: number;
@@ -695,6 +719,22 @@ export const moneyApi = {
 
   portfolio: () =>
     get<PortfolioSummary>("/money/portfolio"),
+
+  // Account management
+  accounts: (activeOnly = false) =>
+    get<AccountInfo[]>(`/money/accounts${activeOnly ? "?active_only=true" : ""}`),
+
+  createAccount: (body: AccountCreate) =>
+    proxyPost<AccountInfo>("/api/money/accounts", body),
+
+  patchAccount: (name: string, body: { account_type?: AccountType; is_active?: boolean }) =>
+    proxyPatch<AccountInfo>(`/api/money/accounts/${encodeURIComponent(name)}`, body),
+
+  transferAccountHoldings: (fromAccount: string, toAccount: string) =>
+    proxyPost<TransferHoldingsResult>(
+      `/api/money/accounts/${encodeURIComponent(fromAccount)}/transfer-holdings`,
+      { to_account: toAccount },
+    ),
 
   portfolioOverview: () =>
     get<PortfolioOverview>("/money/portfolio/overview"),

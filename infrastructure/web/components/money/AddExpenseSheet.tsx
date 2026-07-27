@@ -238,10 +238,10 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
           </div>
 
           {/* Account */}
-          {meta.accounts.length > 0 && (
-            <div>
-              <label className="text-xs text-[#52525B] uppercase tracking-widest mb-2 block">Account</label>
-              <div className="flex gap-2 flex-wrap">
+          <div>
+            <label className="text-xs text-[#52525B] uppercase tracking-widest mb-2 block">Account</label>
+            {meta.accounts.length > 0 && (
+              <div className="flex gap-2 flex-wrap mb-3">
                 {meta.accounts.map((acc) => {
                   const colors = accountBadgeClass(acc);
                   const isSelected = account === acc;
@@ -261,8 +261,18 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
+            {/* Free-text so a brand-new account can be used straight from the entry
+                sheet — the account is created implicitly by the first transaction,
+                and can be given a type later in Portfolio → Manage accounts. */}
+            <input
+              type="text"
+              value={account}
+              onChange={(e) => setAccount(e.target.value)}
+              placeholder="Type a new account…"
+              className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-2.5 text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#52525B]"
+            />
+          </div>
 
           {/* Date + Notes in a row */}
           <div className="grid grid-cols-2 gap-3">

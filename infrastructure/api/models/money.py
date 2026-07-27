@@ -177,6 +177,32 @@ class AccountBalance(BaseModel):
     account_type: str  # "Investment" | "Checking" | "Savings" | "Crypto Investment" | "Unknown"
 
 
+class AccountInfo(BaseModel):
+    name: str
+    account_type: str  # "Checking" | "Savings" | "Investment" | "Crypto Investment" | "Unknown"
+    is_active: bool = True
+
+
+class AccountCreate(BaseModel):
+    name: str
+    account_type: str  # must be one of ACCOUNT_TYPES
+
+
+class AccountPatch(BaseModel):
+    account_type: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class TransferHoldingsBody(BaseModel):
+    to_account: str
+
+
+class TransferHoldingsResult(BaseModel):
+    moved: int          # holdings reassigned outright
+    merged: int         # holdings folded into an existing position in to_account
+    to_account: str
+
+
 class PortfolioSummary(BaseModel):
     accounts: list[AccountBalance]
     total_net_worth: float

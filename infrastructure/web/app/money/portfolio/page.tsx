@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { moneyApi, fmtAmount, type Holding, type AllocationSlice, type Mover, type AccountBalance, type RealizedTrade } from "@/lib/money-api";
 import { AddHoldingDrawer } from "@/components/money/AddHoldingDrawer";
+import { AccountsManager } from "@/components/money/AccountsManager";
 import { PortfolioHistoryChart } from "@/components/money/PortfolioHistoryChart";
 import { RecurringPlansSection } from "@/components/money/RecurringPlansSection";
 import { HoldingsTable } from "@/components/money/HoldingsTable";
@@ -38,6 +39,7 @@ export default async function PortfolioPage() {
           >
             ↓ CSV
           </a>
+          <AccountsManager />
           <AddHoldingDrawer />
         </div>
       </div>

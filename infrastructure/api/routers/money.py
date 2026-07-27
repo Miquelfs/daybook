@@ -16,7 +16,9 @@ from fastapi.responses import StreamingResponse
 
 from infrastructure.api.db_money import get_money_db
 from infrastructure.api.models.money import (
-    AccountBalance, AllocationSlice, AnomalyReport, BudgetAlert,
+    AccountBalance, AccountCreate, AccountInfo, AccountPatch,
+    TransferHoldingsBody, TransferHoldingsResult,
+    AllocationSlice, AnomalyReport, BudgetAlert,
     CategoryBudget, CategoryMeta, CategoryMonthSpend, CategorySpikeAnomaly, CategoryStats, CategoryTrendsData, SubcategoryBreakdown,
     DaySpend, EfficiencyData, EfficiencyRow, ForecastData, HistoricalData,
     MonthlyAnomaly, MonthlyAnomalyReport, MonthlySeriesPoint,
@@ -39,6 +41,7 @@ from domains.money.money_config import (
     CATEGORY_EMOJI, EXPENSE_CATEGORIES, classify, get_budget_for_month,
     FIXED_RECURRING_CATEGORIES,
     INCOME_CATEGORIES, LIQUID_ACCOUNTS, INVESTMENT_ACCOUNTS,
+    ACCOUNT_TYPES, INVESTMENT_TYPES, LIQUID_TYPES,
 )
 
 router = APIRouter(prefix="/money", tags=["money"])
@@ -47,6 +50,32 @@ DB = Annotated[sqlite3.Connection, Depends(get_money_db)]
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _account_types(conn: sqlite3.Connection) -> dict[str, str]:
+    """Resolve every account name to its type.
+
+    The user-managed `accounts` table wins; the hardcoded config dicts are the
+    fallback for any legacy account not yet in the table. Anything unresolved is
+    "Unknown". This replaces the old hardcoded-only classification so accounts
+    created from the UI are bucketed correctly.
+    """
+    types: dict[str, str] = {**LIQUID_ACCOUNTS, **INVESTMENT_ACCOUNTS}
+    try:
+        for r in conn.execute("SELECT name, account_type FROM accounts").fetchall():
+            types[r["name"]] = r["account_type"]
+    except sqlite3.OperationalError:
+        pass  # accounts table not migrated yet — fall back to config dicts
+    return types
+
+
+def _is_investment_type(acct_type: str) -> bool:
+    return acct_type in INVESTMENT_TYPES
+
+
+def _investment_account_names(conn: sqlite3.Connection) -> set[str]:
+    """Names of all accounts classified as investment (table + config)."""
+    return {name for name, t in _account_types(conn).items() if _is_investment_type(t)}
+
 
 def _row_to_txn(row: sqlite3.Row) -> TransactionOut:
     return TransactionOut(
@@ -757,6 +786,7 @@ def get_portfolio(conn: DB):
            WHERE account IS NOT NULL AND deleted_at IS NULL"""
     ).fetchall()
 
+    types = _account_types(conn)
     accounts: list[AccountBalance] = []
 
     for ar in account_rows:
@@ -787,13 +817,8 @@ def get_portfolio(conn: DB):
                 (acct,)
             ).fetchone()["net"]
 
-        # Classify account type
-        if acct in INVESTMENT_ACCOUNTS:
-            acct_type = INVESTMENT_ACCOUNTS[acct]
-        elif acct in LIQUID_ACCOUNTS:
-            acct_type = LIQUID_ACCOUNTS[acct]
-        else:
-            acct_type = "Unknown"
+        # Classify account type (user-managed table wins over config dicts)
+        acct_type = types.get(acct, "Unknown")
 
         accounts.append(AccountBalance(name=acct, balance=round(balance, 2), account_type=acct_type))
 
@@ -801,8 +826,8 @@ def get_portfolio(conn: DB):
     accounts.sort(key=lambda a: a.balance, reverse=True)
 
     total_net = sum(a.balance for a in accounts)
-    total_inv = sum(a.balance for a in accounts if a.account_type in ("Investment", "Crypto Investment"))
-    total_liq = sum(a.balance for a in accounts if a.account_type in ("Checking", "Savings"))
+    total_inv = sum(a.balance for a in accounts if a.account_type in INVESTMENT_TYPES)
+    total_liq = sum(a.balance for a in accounts if a.account_type in LIQUID_TYPES)
 
     return PortfolioSummary(
         accounts=accounts,
@@ -812,6 +837,201 @@ def get_portfolio(conn: DB):
         investment_pct=round(total_inv / total_net * 100, 1) if total_net > 0 else 0.0,
         liquid_pct=round(total_liq / total_net * 100, 1) if total_net > 0 else 0.0,
     )
+
+
+# ── Account management (user-created accounts) ────────────────────────────────
+
+@router.get("/accounts", response_model=list[AccountInfo])
+def list_accounts(conn: DB, active_only: bool = Query(False)):
+    """Every known account with its resolved type.
+
+    Merges three sources so the UI can offer a complete picture:
+      1. the user-managed `accounts` table,
+      2. account names appearing on transactions,
+      3. account names appearing on holdings.
+    Accounts not in the table are reported with their config-derived type (or
+    "Unknown"). Sorted so investment accounts group after cash, then by name.
+    """
+    types = _account_types(conn)
+
+    inactive: set[str] = set()
+    table_names: set[str] = set()
+    try:
+        for r in conn.execute("SELECT name, account_type, is_active FROM accounts").fetchall():
+            table_names.add(r["name"])
+            if not r["is_active"]:
+                inactive.add(r["name"])
+    except sqlite3.OperationalError:
+        pass
+
+    names: set[str] = set(table_names)
+    for r in conn.execute(
+        """SELECT DISTINCT account FROM transactions
+             WHERE account IS NOT NULL AND deleted_at IS NULL
+           UNION SELECT DISTINCT account FROM holdings"""
+    ).fetchall():
+        if r["account"]:
+            names.add(r["account"])
+
+    out = [
+        AccountInfo(
+            name=n,
+            account_type=types.get(n, "Unknown"),
+            is_active=n not in inactive,
+        )
+        for n in names
+    ]
+    if active_only:
+        out = [a for a in out if a.is_active]
+    out.sort(key=lambda a: (a.account_type in INVESTMENT_TYPES, a.name.lower()))
+    return out
+
+
+@router.post("/accounts", response_model=AccountInfo, status_code=201)
+def create_account(body: AccountCreate, conn: DB):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Account name is required")
+    if body.account_type not in ACCOUNT_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"account_type must be one of {', '.join(ACCOUNT_TYPES)}",
+        )
+    # Upsert: creating an account that already exists just (re)sets its type and
+    # reactivates it — idempotent, and lets a legacy "Unknown" account be typed.
+    conn.execute(
+        """INSERT INTO accounts (name, account_type, is_active) VALUES (?, ?, 1)
+           ON CONFLICT(name) DO UPDATE SET
+             account_type = excluded.account_type,
+             is_active = 1,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
+        (name, body.account_type),
+    )
+    conn.commit()
+    return AccountInfo(name=name, account_type=body.account_type, is_active=True)
+
+
+@router.patch("/accounts/{name}", response_model=AccountInfo)
+def patch_account(name: str, body: AccountPatch, conn: DB):
+    row = conn.execute("SELECT * FROM accounts WHERE name = ?", (name,)).fetchone()
+    fields: dict = {}
+    if body.account_type is not None:
+        if body.account_type not in ACCOUNT_TYPES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"account_type must be one of {', '.join(ACCOUNT_TYPES)}",
+            )
+        fields["account_type"] = body.account_type
+    if body.is_active is not None:
+        fields["is_active"] = 1 if body.is_active else 0
+
+    if not row:
+        # Typing a legacy (config/derived) account for the first time — insert it.
+        if "account_type" not in fields:
+            raise HTTPException(status_code=404, detail="Account not found")
+        conn.execute(
+            "INSERT INTO accounts (name, account_type, is_active) VALUES (?, ?, ?)",
+            (name, fields["account_type"], fields.get("is_active", 1)),
+        )
+    elif fields:
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(
+            f"UPDATE accounts SET {set_clause}, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
+            list(fields.values()) + [name],
+        )
+    conn.commit()
+    types = _account_types(conn)
+    is_active = True
+    r2 = conn.execute("SELECT is_active FROM accounts WHERE name = ?", (name,)).fetchone()
+    if r2:
+        is_active = bool(r2["is_active"])
+    return AccountInfo(name=name, account_type=types.get(name, "Unknown"), is_active=is_active)
+
+
+@router.post("/accounts/{from_account}/transfer-holdings", response_model=TransferHoldingsResult)
+def transfer_account_holdings(from_account: str, body: TransferHoldingsBody, conn: DB):
+    """Move ("traspàs") every active holding from one account to another.
+
+    Used when a broker transfers positions between accounts without a sale —
+    the shares are unchanged, only the custody account differs. No cash txn is
+    booked and no realized P&L is recorded, unlike a sell. When the destination
+    already holds the same ticker, the two positions are merged (quantities and
+    cost bases summed, earliest purchase date kept) so there's one clean lot.
+    """
+    to_account = body.to_account.strip()
+    if not to_account:
+        raise HTTPException(status_code=422, detail="Destination account is required")
+    if to_account == from_account:
+        raise HTTPException(status_code=422, detail="Source and destination are the same account")
+
+    sources = conn.execute(
+        "SELECT * FROM holdings WHERE account = ? AND is_active = 1", (from_account,)
+    ).fetchall()
+    if not sources:
+        raise HTTPException(status_code=404, detail=f"No active holdings in {from_account}")
+
+    moved = merged = 0
+    for src in sources:
+        # Destination holding with the same ticker (active) → merge into it.
+        target = conn.execute(
+            """SELECT * FROM holdings
+               WHERE account = ? AND ticker = ? AND is_active = 1 AND id != ?""",
+            (to_account, src["ticker"], src["id"]),
+        ).fetchone()
+
+        if target:
+            new_qty = target["quantity"] + src["quantity"]
+            # Cost basis is additive; keep NULL only if BOTH are unknown.
+            if src["cost_basis_eur"] is None and target["cost_basis_eur"] is None:
+                new_cost = None
+            else:
+                new_cost = (target["cost_basis_eur"] or 0.0) + (src["cost_basis_eur"] or 0.0)
+            first_bought = min(
+                d for d in (target["first_bought_at"], src["first_bought_at"]) if d
+            ) if (target["first_bought_at"] or src["first_bought_at"]) else None
+
+            conn.execute(
+                """UPDATE holdings SET quantity = ?, cost_basis_eur = ?, first_bought_at = ?,
+                       updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                   WHERE id = ?""",
+                (new_qty, new_cost, first_bought, target["id"]),
+            )
+            # Re-home any DCA plans, then retire the source lot.
+            conn.execute(
+                "UPDATE investment_plans SET holding_id = ? WHERE holding_id = ?",
+                (target["id"], src["id"]),
+            )
+            conn.execute("DELETE FROM holdings WHERE id = ?", (src["id"],))
+            merged += 1
+        else:
+            # No collision — reassign the account and regenerate the id slug so
+            # it stays consistent with the "{account}-{ticker}" convention.
+            new_id = f"{_slugify(to_account)}-{_slugify(src['ticker'])}"
+            if new_id != src["id"] and conn.execute(
+                "SELECT 1 FROM holdings WHERE id = ?", (new_id,)
+            ).fetchone():
+                # Slug already taken (e.g. an inactive lot) — keep the old id to
+                # avoid a primary-key clash; only the account column changes.
+                new_id = src["id"]
+            if new_id != src["id"]:
+                conn.execute(
+                    "UPDATE holding_snapshots SET holding_id = ? WHERE holding_id = ?",
+                    (new_id, src["id"]),
+                )
+                conn.execute(
+                    "UPDATE investment_plans SET holding_id = ? WHERE holding_id = ?",
+                    (new_id, src["id"]),
+                )
+            conn.execute(
+                """UPDATE holdings SET id = ?, account = ?,
+                       updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                   WHERE id = ?""",
+                (new_id, to_account, src["id"]),
+            )
+            moved += 1
+
+    conn.commit()
+    return TransferHoldingsResult(moved=moved, merged=merged, to_account=to_account)
 
 
 # ── Spending patterns (by day-of-week and week-of-month) ──────────────────────
@@ -947,28 +1167,54 @@ def get_category_stats(
 # ── CSV Export ────────────────────────────────────────────────────────────────
 
 @router.get("/transactions/export")
-def export_transactions(conn: DB):
-    """Download all transactions as CSV."""
+def export_transactions(
+    conn: DB,
+    start: Optional[str] = Query(None, description="YYYY-MM-DD inclusive lower bound"),
+    end: Optional[str] = Query(None, description="YYYY-MM-DD inclusive upper bound"),
+    category: Optional[str] = Query(None),
+    account: Optional[str] = Query(None),
+):
+    """Download transactions as CSV for offline pattern analysis.
+
+    Unfiltered by default (full history). Optional start/end/category/account
+    narrow the export so the button can hand off the month currently on screen.
+    Includes subcategory so spending can be drilled down in a spreadsheet.
+    """
+    clauses = ["deleted_at IS NULL"]
+    params: list = []
+    if start:
+        clauses.append("date >= ?"); params.append(start)
+    if end:
+        clauses.append("date <= ?"); params.append(end)
+    if category:
+        clauses.append("category = ?"); params.append(category)
+    if account:
+        clauses.append("account = ?"); params.append(account)
+
     rows = conn.execute(
-        """SELECT date, name, amount, category, account, transaction_type, notes, source
+        f"""SELECT date, name, amount, category, subcategory, account, transaction_type, notes, source
            FROM transactions
-           WHERE deleted_at IS NULL
-           ORDER BY date DESC, created_at DESC"""
+           WHERE {' AND '.join(clauses)}
+           ORDER BY date DESC, created_at DESC""",
+        params,
     ).fetchall()
 
     def generate():
         buf = io.StringIO()
         writer = _csv.writer(buf)
-        writer.writerow(["date", "name", "amount", "category", "account", "transaction_type", "notes", "source"])
+        writer.writerow(["date", "name", "amount", "category", "subcategory",
+                         "account", "transaction_type", "notes", "source"])
         for r in rows:
             writer.writerow([r["date"], r["name"], r["amount"], r["category"] or "",
-                             r["account"] or "", r["transaction_type"], r["notes"] or "", r["source"]])
+                             r["subcategory"] or "", r["account"] or "", r["transaction_type"],
+                             r["notes"] or "", r["source"]])
         yield buf.getvalue()
 
+    suffix = f"_{start}_{end}" if (start or end) else ""
     return StreamingResponse(
         generate(),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=transactions.csv"},
+        headers={"Content-Disposition": f"attachment; filename=transactions{suffix}.csv"},
     )
 
 
@@ -2180,10 +2426,11 @@ def _compute_liquid_accounts(conn: sqlite3.Connection) -> list[AccountBalance]:
            WHERE account IS NOT NULL AND deleted_at IS NULL"""
     ).fetchall()
 
+    types = _account_types(conn)
     out: list[AccountBalance] = []
     for ar in account_rows:
         acct = ar["account"]
-        if acct in INVESTMENT_ACCOUNTS:
+        if _is_investment_type(types.get(acct, "Unknown")):
             continue  # investment accounts are now covered by holdings
 
         setup = conn.execute(
@@ -2205,11 +2452,7 @@ def _compute_liquid_accounts(conn: sqlite3.Connection) -> list[AccountBalance]:
                 (acct,),
             ).fetchone()["net"]
 
-        if acct in LIQUID_ACCOUNTS:
-            acct_type = LIQUID_ACCOUNTS[acct]
-        else:
-            acct_type = "Unknown"
-
+        acct_type = types.get(acct, "Unknown")
         out.append(AccountBalance(name=acct, balance=round(balance, 2), account_type=acct_type))
 
     out.sort(key=lambda a: a.balance, reverse=True)
@@ -2245,7 +2488,7 @@ def portfolio_history(
     # Cumulative invested proxy: sum of Account Setup + Finance transactions into investment accounts up to that date
     # (simple approximation — refined later if needed)
     invested_by_date: dict[str, float] = {}
-    inv_accts = set(INVESTMENT_ACCOUNTS.keys())
+    inv_accts = _investment_account_names(conn)
     if inv_accts:
         placeholders = ",".join("?" * len(inv_accts))
         cum_rows = conn.execute(

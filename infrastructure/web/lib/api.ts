@@ -890,6 +890,12 @@ export type RestaurantStats = {
   top_rated: { id: number; name: string; city: string | null; country: string | null; cuisine: string | null; rating_mf: number; rating_ad: number | null }[];
 };
 
+export type RestaurantFacets = {
+  cuisines: string[];
+  cities: string[];
+  countries: string[];
+};
+
 export type RestaurantIn = {
   name: string;
   date_visited?: string;
@@ -1234,6 +1240,9 @@ export const api = {
   },
   restaurantStats: (year?: number) =>
     get<RestaurantStats>(`/restaurants/stats${year ? `?year=${year}` : ""}`),
+
+  restaurantFacets: () =>
+    get<RestaurantFacets>(`/restaurants/facets`),
 
   createRestaurant: async (body: RestaurantIn): Promise<Restaurant> => {
     const res = await fetch(`${PROXY_BASE}/api/restaurants`, {

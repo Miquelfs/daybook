@@ -49,6 +49,15 @@ class RestaurantOut(BaseModel):
     updated_at: str
 
 
+class RestaurantFacets(BaseModel):
+    """Distinct values already used, most-frequent first — powers add-form
+    autocomplete so you can reuse an existing cuisine/city/country instead of
+    typing it blind."""
+    cuisines: list[str]
+    cities: list[str]
+    countries: list[str]
+
+
 class RestaurantStats(BaseModel):
     total: int
     by_year: dict           # {year: count}

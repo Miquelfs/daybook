@@ -61,6 +61,14 @@ LIQUID_ACCOUNTS: dict[str, str] = {
     "Cash":                         "Checking",
 }
 
+# Valid account_type values a user may assign to an account they create.
+# "Unknown" is reserved for legacy/unclassified accounts and is never offered
+# in the UI. Investment types are bucketed into net-worth investments; Checking
+# and Savings into liquid/cash.
+ACCOUNT_TYPES: tuple[str, ...] = ("Checking", "Savings", "Investment", "Crypto Investment")
+INVESTMENT_TYPES: frozenset[str] = frozenset({"Investment", "Crypto Investment"})
+LIQUID_TYPES: frozenset[str] = frozenset({"Checking", "Savings"})
+
 # ── UI metadata ───────────────────────────────────────────────────────────────
 
 CATEGORY_EMOJI: dict[str, str] = {

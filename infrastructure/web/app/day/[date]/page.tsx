@@ -15,6 +15,7 @@ import { DaySpendSummary } from "@/components/money/DaySpendSummary";
 import { DayRestaurants } from "@/components/DayRestaurants";
 import { DayShows } from "@/components/DayShows";
 import { DayBooks } from "@/components/DayBooks";
+import { DaySongs } from "@/components/DaySongs";
 import { PhotoOfDay } from "@/components/PhotoOfDay";
 import { ScreenTimeBlock } from "@/components/ScreenTimeBlock";
 import { ApiOffline } from "@/components/ApiOffline";
@@ -106,6 +107,7 @@ export default async function DayPage({ params }: Props) {
 <DayRestaurants date={date} />
         <DayShows date={date} />
         <DayBooks date={date} />
+        <DaySongs date={date} />
 
         <section>
           <SectionLabel>Photo of the day</SectionLabel>

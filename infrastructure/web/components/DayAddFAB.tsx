@@ -1,16 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { X, Plus, UtensilsCrossed, Tv, BookOpen } from "lucide-react";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
+import { X, Plus, UtensilsCrossed, Tv, BookOpen, Music } from "lucide-react";
 import { api, type RestaurantIn } from "@/lib/api";
 import { showsApi, type ShowIn } from "@/lib/shows-api";
 import { booksApi, type BookIn } from "@/lib/books-api";
+import { songsApi, type SongIn } from "@/lib/songs-api";
 
-type Mode = "restaurant" | "show" | "book";
+type Mode = "restaurant" | "show" | "book" | "song";
 
 function RestaurantForm({ date, onDone }: { date: string; onDone: () => void }) {
   const qc = useQueryClient();
+  // Existing cuisines/cities/countries → native autocomplete so you reuse a
+  // category instead of typing it blind (and spawning near-duplicates).
+  const { data: facets } = useQuery({
+    queryKey: ["restaurant-facets"],
+    queryFn: () => api.restaurantFacets(),
+    staleTime: 5 * 60 * 1000,
+  });
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
@@ -56,15 +64,27 @@ function RestaurantForm({ date, onDone }: { date: string; onDone: () => void }) 
         className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
       <div className="grid grid-cols-2 gap-2">
         <input value={city} onChange={e => setCity(e.target.value)}
-          placeholder="City"
+          placeholder="City" list="restaurant-cities" autoComplete="off"
           className="bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
         <input value={country} onChange={e => setCountry(e.target.value)}
-          placeholder="Country"
+          placeholder="Country" list="restaurant-countries" autoComplete="off"
           className="bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
       </div>
       <input value={cuisine} onChange={e => setCuisine(e.target.value)}
-        placeholder="Cuisine"
+        placeholder="Cuisine" list="restaurant-cuisines" autoComplete="off"
         className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
+      {cuisine.trim() && facets?.cuisines && !facets.cuisines.some(c => c.toLowerCase() === cuisine.trim().toLowerCase()) && (
+        <p className="text-[11px] text-[#71717A] -mt-1">New cuisine — will be added to the list</p>
+      )}
+      <datalist id="restaurant-cuisines">
+        {(facets?.cuisines ?? []).map(c => <option key={c} value={c} />)}
+      </datalist>
+      <datalist id="restaurant-cities">
+        {(facets?.cities ?? []).map(c => <option key={c} value={c} />)}
+      </datalist>
+      <datalist id="restaurant-countries">
+        {(facets?.countries ?? []).map(c => <option key={c} value={c} />)}
+      </datalist>
       <div className="grid grid-cols-2 gap-2">
         <input value={ratingMf} onChange={e => setRatingMf(e.target.value)}
           type="number" min="0" max="10" step="0.5" placeholder="My rating (0–10)"
@@ -234,10 +254,90 @@ function BookForm({ date, onDone }: { date: string; onDone: () => void }) {
   );
 }
 
+function SongForm({ date, onDone }: { date: string; onDone: () => void }) {
+  const qc = useQueryClient();
+  const [title, setTitle] = useState("");
+  const [artist, setArtist] = useState("");
+  const [url, setUrl] = useState("");
+  const [rating, setRating] = useState<number | null>(null);
+  const [mood, setMood] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // One-tap: open a YouTube Music search for what's typed so the link is easy
+  // to grab and paste back into the URL field.
+  const searchQuery = [title, artist].filter(Boolean).join(" ").trim();
+  const ytMusicSearch = `https://music.youtube.com/search?q=${encodeURIComponent(searchQuery)}`;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) return;
+    setSaving(true);
+    try {
+      const body: SongIn = {
+        date,
+        title: title.trim(),
+        artist: artist.trim() || undefined,
+        url: url.trim() || undefined,
+        rating: rating ?? undefined,
+        mood: mood.trim() || undefined,
+        notes: notes.trim() || undefined,
+      };
+      await songsApi.create(body);
+      qc.invalidateQueries({ queryKey: ["day-songs", date] });
+      onDone();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <input required value={title} onChange={e => setTitle(e.target.value)}
+        placeholder="Song title *"
+        className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
+      <input value={artist} onChange={e => setArtist(e.target.value)}
+        placeholder="Artist"
+        className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
+      <div className="flex gap-2">
+        <input value={url} onChange={e => setUrl(e.target.value)}
+          placeholder="YouTube Music URL (optional)"
+          className="flex-1 min-w-0 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
+        <a href={ytMusicSearch} target="_blank" rel="noopener noreferrer"
+          onClick={e => { if (!searchQuery) e.preventDefault(); }}
+          className={`shrink-0 flex items-center gap-1 px-3 rounded-lg text-xs font-medium transition-colors ${
+            searchQuery ? "bg-[#FF0033]/10 text-[#FF6B81] hover:bg-[#FF0033]/20" : "bg-[#18181B] text-[#3F3F46] cursor-not-allowed"
+          }`}>
+          🔎 Search
+        </a>
+      </div>
+      <div className="flex gap-2">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button key={n} type="button" onClick={() => setRating(rating === n ? null : n)}
+            className={`flex-1 py-2 rounded-lg text-sm transition-colors ${
+              rating != null && n <= rating ? "bg-[#FAFAFA] text-[#09090B]" : "bg-[#18181B] text-[#71717A] border border-[#27272A] hover:border-[#3F3F46]"
+            }`}>⭐</button>
+        ))}
+      </div>
+      <input value={mood} onChange={e => setMood(e.target.value)}
+        placeholder="Mood / vibe (optional)"
+        className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
+      <textarea value={notes} onChange={e => setNotes(e.target.value)}
+        placeholder="Notes (optional)" rows={2}
+        className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46] resize-none" />
+      <button type="submit" disabled={saving || !title.trim()}
+        className="w-full bg-[#F59E0B] hover:bg-[#FBBF24] disabled:opacity-40 text-black font-semibold text-sm rounded-lg py-2.5 transition-colors">
+        {saving ? "Saving…" : "Add song of the day"}
+      </button>
+    </form>
+  );
+}
+
 const MODE_META: Record<Mode, { label: string; icon: React.ReactNode; color: string }> = {
   restaurant: { label: "Restaurant", icon: <UtensilsCrossed size={15} />, color: "text-orange-400" },
   show:       { label: "Show / Movie", icon: <Tv size={15} />, color: "text-blue-400" },
   book:       { label: "Book", icon: <BookOpen size={15} />, color: "text-emerald-400" },
+  song:       { label: "Song", icon: <Music size={15} />, color: "text-pink-400" },
 };
 
 export function DayAddFAB({ date }: { date: string }) {
@@ -277,7 +377,7 @@ export function DayAddFAB({ date }: { date: string }) {
               </div>
 
               {/* Type selector */}
-              <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mb-5">
+              <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mb-5 overflow-x-auto">
                 {(Object.keys(MODE_META) as Mode[]).map(m => (
                   <button key={m} onClick={() => setMode(m)}
                     className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap ${
@@ -292,6 +392,7 @@ export function DayAddFAB({ date }: { date: string }) {
               {mode === "restaurant" && <RestaurantForm date={date} onDone={close} />}
               {mode === "show"       && <ShowForm date={date} onDone={close} />}
               {mode === "book"       && <BookForm date={date} onDone={close} />}
+              {mode === "song"       && <SongForm date={date} onDone={close} />}
             </div>
           </div>
         </>
