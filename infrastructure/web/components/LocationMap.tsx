@@ -8,6 +8,7 @@ interface Props {
   editable?: boolean;
   date?: string;
   onVisitAdded?: () => void;
+  showLabels?: boolean;   // permanent place-name tooltips on named stops
 }
 
 const SEMANTIC_ICON: Record<string, string> = {
@@ -19,7 +20,7 @@ const STOP_COLOR  = "#EA580C";
 const MOVE_COLOR  = "#94A3B8";
 const PIN_COLOR   = "#F59E0B";
 
-export function LocationMap({ geojson, editable = false, date, onVisitAdded }: Props) {
+export function LocationMap({ geojson, editable = false, date, onVisitAdded, showLabels = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef       = useRef<any>(null);
@@ -194,6 +195,12 @@ export function LocationMap({ geojson, editable = false, date, onVisitAdded }: P
             </div>`,
             { maxWidth: 240 }
           );
+          if (showLabels && isStop) {
+            dot.bindTooltip(`${icon ? icon + " " : ""}${name}`, {
+              permanent: true, direction: "top", offset: [0, -6],
+              className: "db-place-label",
+            });
+          }
         }
       });
 
@@ -207,7 +214,7 @@ export function LocationMap({ geojson, editable = false, date, onVisitAdded }: P
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [geojson.features.length]);
+  }, [geojson.features.length, showLabels]);
 
   return (
     <div className="flex flex-col gap-3">

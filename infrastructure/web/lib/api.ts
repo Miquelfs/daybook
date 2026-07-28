@@ -747,6 +747,7 @@ export type GeoFeature = {
     | { type: "LineString"; coordinates: [number, number][] }
     | { type: "Point"; coordinates: [number, number] };
   properties: {
+    date?: string;               // present on /tracks-range (which day the segment is from)
     segment_start: string;
     segment_end: string;
     place_name: string | null;

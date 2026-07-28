@@ -211,11 +211,13 @@ def get_tracks_range(start: str, end: str):
     features = []
     cur = d0
     while cur <= d1:
-        for seg in tracks_for_date(cur.isoformat()):
+        iso = cur.isoformat()
+        for seg in tracks_for_date(iso):
             coords = seg["coordinates"]
             if not coords:
                 continue
             props = {
+                "date": iso,
                 "segment_start": seg["segment_start"],
                 "segment_end": seg["segment_end"],
                 "place_name": seg["place_name"],

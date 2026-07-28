@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, ImagePlus } from "lucide-react";
 import { api } from "@/lib/api";
-import { LocationMap } from "@/components/LocationMap";
+import { TripJourney } from "@/components/TripJourney";
 import { TripExpenses } from "@/components/TripExpenses";
 import { SectionLabel } from "@/components/MorningBrief";
 
@@ -35,6 +35,12 @@ export default async function TripDetailPage({ params }: Props) {
 
   if (!trip) notFound();
 
+  // Every date in the trip window (inclusive), for the day scrubber.
+  const tripDates: string[] = [];
+  for (let t = new Date(start + "T12:00:00"); t <= new Date(end + "T12:00:00"); t.setDate(t.getDate() + 1)) {
+    tripDates.push(t.toISOString().slice(0, 10));
+  }
+
   const withPhotos = days.filter((d) => d.photo_path);
 
   return (
@@ -60,10 +66,10 @@ export default async function TripDetailPage({ params }: Props) {
       </div>
 
       <div className="flex flex-col gap-10">
-        {/* Combined map of the whole trip */}
+        {/* Interactive day-by-day journey */}
         <section>
           <SectionLabel>Where I went</SectionLabel>
-          <LocationMap geojson={tracks} />
+          <TripJourney dates={tripDates} geojson={tracks} />
         </section>
 
         {/* Spending across the trip */}

@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { ChevronRight, Globe, PersonStanding, Database } from "lucide-react";
 import { api } from "@/lib/api";
-import { HeatMap } from "@/components/HeatMap";
-import { WorldCoverageMap } from "@/components/WorldCoverageMap";
+import { ExploreMap } from "@/components/ExploreMap";
 import { ManualCountries } from "@/components/ManualCountries";
 import { TripCard } from "@/components/TripCard";
 import { YearSelect } from "@/components/YearSelect";
@@ -112,43 +111,38 @@ export default async function ExplorePage({ searchParams }: Props) {
         </div>
       </div>
 
-      {/* Heatmap */}
-      <section className="mb-8">
-        <HeatMap data={data} />
-      </section>
-
-      {/* World coverage */}
-      {coverage && coverage.countries_visited > 0 && (
+      {/* Combined travel map — coverage choropleth / GPS heatmap, one toggle */}
+      {(data.points.length > 0 || (coverage && coverage.countries_visited > 0)) && (
         <section className="mb-8">
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
-            <div className="flex items-baseline justify-between mb-3">
-              <p className="text-xs text-[#52525B] uppercase tracking-widest">World coverage</p>
-              <p className="text-sm tabular-nums">
-                <span className="text-[#F59E0B] font-semibold">{coverage.countries_visited}</span>
-                <span className="text-[#52525B]"> of {coverage.countries_total} countries · </span>
-                <span className="text-[#FAFAFA] font-semibold">{coverage.pct_world}%</span>
-              </p>
+          {coverage && coverage.countries_visited > 0 && (
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 mb-3">
+              <div className="flex items-baseline justify-between mb-3">
+                <p className="text-xs text-[#52525B] uppercase tracking-widest">World coverage</p>
+                <p className="text-sm tabular-nums">
+                  <span className="text-[#F59E0B] font-semibold">{coverage.countries_visited}</span>
+                  <span className="text-[#52525B]"> of {coverage.countries_total} countries · </span>
+                  <span className="text-[#FAFAFA] font-semibold">{coverage.pct_world}%</span>
+                </p>
+              </div>
+              <div className="h-1.5 rounded-full bg-[#18181B] mb-4">
+                <div className="h-full rounded-full bg-[#F59E0B]" style={{ width: `${Math.max(coverage.pct_world, 1)}%` }} />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
+                {Object.entries(coverage.continents)
+                  .filter(([cont]) => cont !== "Unknown")
+                  .map(([cont, c]) => (
+                    <div key={cont} className="flex items-center justify-between gap-2" title={c.visited.join(", ") || "none yet"}>
+                      <span className="text-xs text-[#71717A] truncate">{cont}</span>
+                      <span className="text-xs tabular-nums shrink-0" style={{ color: c.visited_count > 0 ? "#A1A1AA" : "#3F3F46" }}>
+                        {c.visited_count}/{c.total}
+                      </span>
+                    </div>
+                  ))}
+              </div>
             </div>
-            <div className="h-1.5 rounded-full bg-[#18181B] mb-4">
-              <div className="h-full rounded-full bg-[#F59E0B]" style={{ width: `${Math.max(coverage.pct_world, 1)}%` }} />
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
-              {Object.entries(coverage.continents)
-                .filter(([cont]) => cont !== "Unknown")
-                .map(([cont, c]) => (
-                  <div key={cont} className="flex items-center justify-between gap-2" title={c.visited.join(", ") || "none yet"}>
-                    <span className="text-xs text-[#71717A] truncate">{cont}</span>
-                    <span className="text-xs tabular-nums shrink-0" style={{ color: c.visited_count > 0 ? "#A1A1AA" : "#3F3F46" }}>
-                      {c.visited_count}/{c.total}
-                    </span>
-                  </div>
-                ))}
-            </div>
-          </div>
-          <div className="mt-3">
-            <WorldCoverageMap details={coverage.country_details} />
-          </div>
-          {!year && (
+          )}
+          <ExploreMap points={data.points} details={coverage?.country_details ?? []} />
+          {coverage && coverage.countries_visited > 0 && !year && (
             <ManualCountries
               allCountries={coverage.all_countries}
               visitedIso2={coverage.country_details.map((c) => c.iso2).filter((x): x is string => !!x)}
