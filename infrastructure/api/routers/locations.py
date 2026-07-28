@@ -196,6 +196,43 @@ def get_tracks(date_str: str):
     return {"type": "FeatureCollection", "features": features}
 
 
+@router.get("/tracks-range")
+def get_tracks_range(start: str, end: str):
+    """Combined GeoJSON of GPS track segments across a date range (inclusive).
+    Used by the trip detail view to draw the whole trip on one map."""
+    try:
+        d0 = datetime.fromisoformat(start).date()
+        d1 = datetime.fromisoformat(end).date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="start and end must be YYYY-MM-DD")
+    if d1 < d0:
+        d0, d1 = d1, d0
+    from datetime import timedelta as _td
+    features = []
+    cur = d0
+    while cur <= d1:
+        for seg in tracks_for_date(cur.isoformat()):
+            coords = seg["coordinates"]
+            if not coords:
+                continue
+            props = {
+                "segment_start": seg["segment_start"],
+                "segment_end": seg["segment_end"],
+                "place_name": seg["place_name"],
+                "semantic_type": seg["semantic_type"],
+                "city": seg["city"],
+                "country": seg["country"],
+            }
+            geometry = (
+                {"type": "LineString", "coordinates": coords}
+                if len(coords) >= 2
+                else {"type": "Point", "coordinates": coords[0]}
+            )
+            features.append({"type": "Feature", "geometry": geometry, "properties": props})
+        cur += _td(days=1)
+    return {"type": "FeatureCollection", "features": features}
+
+
 # ── Location day summaries ────────────────────────────────────────────────────
 
 @router.get("/summary/{date_str}")
@@ -872,8 +909,31 @@ def world_coverage(year: int | None = None):
         })
         continents.setdefault(m.get("continent", "Unknown"), []).append(country)
 
+    # Manually-added countries (visited before tracking existed) — all-time only.
+    existing = set(days_by_country.keys())
+    if year is None:
+        for r in _manual_countries():
+            name = r["country"]
+            if name in existing:
+                continue
+            m = meta.get(name, {})
+            details.append({
+                "country": name,
+                "iso2": r["iso2"] or m.get("iso2"),
+                "continent": m.get("continent", "Unknown"),
+                "first_visit": r["first_visit"] or "",
+                "last_visit": r["first_visit"] or "",
+                "total_days": 0,
+                "cities_visited": 0,
+                "lat": None,
+                "lng": None,
+                "manual": True,
+            })
+            continents.setdefault(m.get("continent", "Unknown"), []).append(name)
+            existing.add(name)
+
     total = len(meta)
-    visited = len(days_by_country)
+    visited = len(existing)
     all_by_continent: dict[str, int] = {}
     for m in meta.values():
         all_by_continent[m["continent"]] = all_by_continent.get(m["continent"], 0) + 1
@@ -1093,29 +1153,56 @@ def list_trips(limit: int = 100, offset: int = 0, year: int | None = None):
     if not con.execute("SELECT name FROM sqlite_master WHERE name='trips'").fetchone():
         con.close()
         return {"trips": [], "total": 0}
-    yc = "WHERE substr(start_date,1,4) = ? OR substr(end_date,1,4) = ?" if year else ""
-    yp: tuple = (str(year), str(year)) if year else ()
+    # `hidden` may not exist on older DBs — tolerate its absence.
+    has_hidden = any(
+        r["name"] == "hidden" for r in con.execute("PRAGMA table_info(trips)")
+    )
+    hide = "hidden = 0" if has_hidden else "1=1"
+    if year:
+        yc = f"WHERE {hide} AND (substr(start_date,1,4) = ? OR substr(end_date,1,4) = ?)"
+        yp: tuple = (str(year), str(year))
+    else:
+        yc = f"WHERE {hide}"
+        yp = ()
     total = con.execute(f"SELECT COUNT(*) AS n FROM trips {yc}", yp).fetchone()["n"]
     rows = con.execute(
         f"""SELECT * FROM trips {yc} ORDER BY start_date DESC LIMIT ? OFFSET ?""",
         yp + (limit, offset),
     ).fetchall()
     con.close()
-    trips = []
-    for r in rows:
-        t = dict(r)
-        t["countries"] = json.loads(t.pop("countries_json") or "[]")
-        t["cities"] = json.loads(t.pop("cities_json") or "[]")
-        t["name"] = t["user_name"] or t["auto_name"]
-        t["countries"] = [_en(c) for c in t["countries"]]
-        t["primary_country"] = _en(t["primary_country"])
-        n_nights = 1 + (
-            datetime.fromisoformat(t["end_date"]) - datetime.fromisoformat(t["start_date"])
-        ).days
-        t["n_days"] = n_nights          # kept for backward compatibility
-        t["n_nights"] = n_nights        # nights away from home
-        trips.append(t)
+    trips = [_trip_row_to_dict(r) for r in rows]
     return {"trips": trips, "total": total}
+
+
+def _trip_row_to_dict(r: sqlite3.Row) -> dict:
+    t = dict(r)
+    t["countries"] = [_en(c) for c in json.loads(t.pop("countries_json") or "[]")]
+    t["cities"] = json.loads(t.pop("cities_json") or "[]")
+    t["name"] = t["user_name"] or t["auto_name"]
+    t["primary_country"] = _en(t["primary_country"])
+    n_nights = 1 + (
+        datetime.fromisoformat(t["end_date"]) - datetime.fromisoformat(t["start_date"])
+    ).days
+    t["n_days"] = n_nights          # kept for backward compatibility
+    t["n_nights"] = n_nights        # nights away from home
+    return t
+
+
+@router.get("/trips/{start_date}/{end_date}")
+def get_trip(start_date: str, end_date: str):
+    """A single trip by its start/end dates."""
+    con = _daybook_conn()
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='trips'").fetchone():
+        con.close()
+        raise HTTPException(404, "No trips table")
+    row = con.execute(
+        "SELECT * FROM trips WHERE start_date = ? AND end_date = ?",
+        (start_date, end_date),
+    ).fetchone()
+    con.close()
+    if row is None:
+        raise HTTPException(404, "Trip not found")
+    return _trip_row_to_dict(row)
 
 
 class TripRename(BaseModel):
@@ -1141,3 +1228,105 @@ def rename_trip(start_date: str, end_date: str, body: TripRename):
     if not updated:
         raise HTTPException(404, "Trip not found")
     return {"status": "ok", "name": name}
+
+
+@router.delete("/trips/{start_date}/{end_date}")
+def delete_trip(start_date: str, end_date: str):
+    """Dismiss a trip. Soft-delete via `hidden` so the nightly detector (which
+    upserts by start/end and never touches `hidden`) can't resurrect it. The
+    underlying days are untouched."""
+    con = _daybook_conn()
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='trips'").fetchone():
+        con.close()
+        raise HTTPException(404, "No trips table")
+    has_hidden = any(
+        r["name"] == "hidden" for r in con.execute("PRAGMA table_info(trips)")
+    )
+    if has_hidden:
+        cur = con.execute(
+            "UPDATE trips SET hidden = 1 WHERE start_date = ? AND end_date = ?",
+            (start_date, end_date),
+        )
+    else:
+        cur = con.execute(
+            "DELETE FROM trips WHERE start_date = ? AND end_date = ?",
+            (start_date, end_date),
+        )
+    con.commit()
+    updated = cur.rowcount
+    con.close()
+    if not updated:
+        raise HTTPException(404, "Trip not found")
+    return {"status": "ok"}
+
+
+# ── Manual country visits (visited before tracking existed) ───────────────────
+
+_MANUAL_DDL = """CREATE TABLE IF NOT EXISTS manual_country_visits (
+    iso2 TEXT PRIMARY KEY,
+    country TEXT NOT NULL,
+    first_visit TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)"""
+
+
+def _manual_countries() -> list[sqlite3.Row]:
+    con = _daybook_conn()
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='manual_country_visits'").fetchone():
+        con.close()
+        return []
+    rows = con.execute("SELECT iso2, country, first_visit, note FROM manual_country_visits ORDER BY country").fetchall()
+    con.close()
+    return rows
+
+
+class ManualCountryIn(BaseModel):
+    iso2: str | None = None
+    country: str | None = None
+    first_visit: str | None = None
+    note: str | None = None
+
+
+@router.get("/manual-countries")
+def get_manual_countries():
+    return [dict(r) for r in _manual_countries()]
+
+
+@router.post("/manual-countries")
+def add_manual_country(body: ManualCountryIn):
+    """Mark a country visited by hand. Resolves the ISO2 ↔ English-name pair from
+    countries.json so it dedupes cleanly against tracked visits."""
+    meta = _country_meta()
+    country = body.country
+    iso2 = (body.iso2 or "").upper() or None
+    if country and country in meta and not iso2:
+        iso2 = meta[country]["iso2"]
+    if iso2 and not country:
+        for name, m in meta.items():
+            if m.get("iso2") == iso2:
+                country = name
+                break
+    if not iso2 or not country:
+        raise HTTPException(422, "Provide a known country or iso2")
+    con = _daybook_conn()
+    con.execute(_MANUAL_DDL)
+    con.execute(
+        "INSERT OR REPLACE INTO manual_country_visits (iso2, country, first_visit, note) VALUES (?,?,?,?)",
+        (iso2, country, (body.first_visit or None), (body.note or None)),
+    )
+    con.commit()
+    con.close()
+    _NARRATIVE_CACHE.clear()  # coverage is cached 6h — refresh it now
+    return {"status": "ok", "iso2": iso2, "country": country}
+
+
+@router.delete("/manual-countries/{iso2}")
+def delete_manual_country(iso2: str):
+    con = _daybook_conn()
+    if con.execute("SELECT name FROM sqlite_master WHERE name='manual_country_visits'").fetchone():
+        con.execute("DELETE FROM manual_country_visits WHERE iso2 = ?", (iso2.upper(),))
+        con.commit()
+    con.close()
+    _NARRATIVE_CACHE.clear()
+    return {"status": "ok"}

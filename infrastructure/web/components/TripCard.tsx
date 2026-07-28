@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Check, X } from "lucide-react";
+import { Pencil, Check, X, Trash2 } from "lucide-react";
 import type { Trip } from "@/lib/api";
 
 function fmtRange(start: string, end: string): string {
@@ -17,6 +17,21 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
   const [name, setName] = useState(trip.name);
   const [draft, setDraft] = useState(trip.user_name ?? "");
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function remove() {
+    setDeleting(true);
+    const res = await fetch(`/api/locations/trips/${trip.start_date}/${trip.end_date}`, {
+      method: "DELETE",
+    }).catch(() => null);
+    if (res && res.ok) {
+      router.refresh();
+    } else {
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -33,7 +48,7 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
     }
   }
 
-  const go = () => router.push(`/day/${trip.start_date}`);
+  const go = () => router.push(`/explore/trip/${trip.start_date}/${trip.end_date}`);
 
   if (editing) {
     return (
@@ -65,13 +80,30 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
           {trip.max_distance_from_home_km != null && (
             <span className="text-[10px] text-[#3F3F46] tabular-nums">{Math.round(trip.max_distance_from_home_km)} km out</span>
           )}
-          <button
-            onClick={() => { setDraft(trip.user_name ?? ""); setEditing(true); }}
-            className="text-[#3F3F46] hover:text-[#A1A1AA] transition-colors opacity-0 group-hover:opacity-100"
-            aria-label="Rename trip"
-          >
-            <Pencil size={12} />
-          </button>
+          {confirmDelete ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-[#71717A]">Delete?</span>
+              <button onClick={remove} disabled={deleting} className="text-red-400 hover:text-red-300 disabled:opacity-40" aria-label="Confirm delete"><Check size={13} /></button>
+              <button onClick={() => setConfirmDelete(false)} disabled={deleting} className="text-[#52525B] hover:text-[#A1A1AA]" aria-label="Cancel delete"><X size={13} /></button>
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => { setDraft(trip.user_name ?? ""); setEditing(true); }}
+                className="text-[#3F3F46] hover:text-[#A1A1AA] transition-colors opacity-0 group-hover:opacity-100"
+                aria-label="Rename trip"
+              >
+                <Pencil size={12} />
+              </button>
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="text-[#3F3F46] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                aria-label="Delete trip"
+              >
+                <Trash2 size={12} />
+              </button>
+            </>
+          )}
         </div>
       </div>
       <button onClick={go} className="text-xs text-[#52525B] mt-0.5 text-left block w-full">

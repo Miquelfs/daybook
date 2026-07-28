@@ -812,6 +812,7 @@ export type WorldCoverage = {
     cities_visited: number;
     lat: number | null;
     lng: number | null;
+    manual?: boolean;   // added by hand (visited before tracking existed)
   }[];
   all_countries: Record<string, { iso2: string; continent: string }>;
 };
@@ -1018,6 +1019,10 @@ export const api = {
     get<{ cards: FunFactCard[] }>(`/locations/fun-facts${year ? `?year=${year}` : ""}`),
   trips: (limit = 100, year?: number) =>
     get<{ trips: Trip[]; total: number }>(`/locations/trips?limit=${limit}${year ? `&year=${year}` : ""}`),
+  trip: (start: string, end: string) =>
+    get<Trip>(`/locations/trips/${start}/${end}`),
+  tracksRange: (start: string, end: string) =>
+    get<TracksGeoJSON>(`/locations/tracks-range?start=${start}&end=${end}`),
   trainingCurve: (sport: "run" | "ride" | "swim") =>
     get<CurveBucket[]>(`/training/curve?sport=${sport}&channel=pace`),
 

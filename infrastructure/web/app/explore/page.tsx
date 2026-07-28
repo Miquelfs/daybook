@@ -3,6 +3,7 @@ import { ChevronRight, Globe, PersonStanding, Database } from "lucide-react";
 import { api } from "@/lib/api";
 import { HeatMap } from "@/components/HeatMap";
 import { WorldCoverageMap } from "@/components/WorldCoverageMap";
+import { ManualCountries } from "@/components/ManualCountries";
 import { TripCard } from "@/components/TripCard";
 import { YearSelect } from "@/components/YearSelect";
 import type { TopPlace, CityStay, WorldCoverage, FunFactCard, Trip } from "@/lib/api";
@@ -147,6 +148,13 @@ export default async function ExplorePage({ searchParams }: Props) {
           <div className="mt-3">
             <WorldCoverageMap details={coverage.country_details} />
           </div>
+          {!year && (
+            <ManualCountries
+              allCountries={coverage.all_countries}
+              visitedIso2={coverage.country_details.map((c) => c.iso2).filter((x): x is string => !!x)}
+              manual={coverage.country_details.filter((c) => c.manual).map((c) => ({ country: c.country, iso2: c.iso2 }))}
+            />
+          )}
         </section>
       )}
 

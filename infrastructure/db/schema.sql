@@ -399,10 +399,22 @@ CREATE TABLE IF NOT EXISTS trips (
     user_name TEXT,                          -- overrides auto_name if user edits
     cover_photo_path TEXT,                   -- best photo from the trip window
     home_at_start TEXT,                      -- label of home period active on start_date
+    hidden INTEGER NOT NULL DEFAULT 0,       -- user-dismissed; nightly upsert leaves this untouched
     created_at TEXT DEFAULT (datetime('now')),
     UNIQUE(start_date, end_date)
 );
 CREATE INDEX IF NOT EXISTS idx_trips_dates ON trips(start_date, end_date);
+
+-- Countries visited before location tracking existed (Google Maps / Overland
+-- history), added by hand. Unioned into world-coverage so the choropleth and
+-- counts reflect them. Keyed by ISO2 to dedupe against tracked visits.
+CREATE TABLE IF NOT EXISTS manual_country_visits (
+    iso2 TEXT PRIMARY KEY,                    -- uppercase ISO 3166-1 alpha-2
+    country TEXT NOT NULL,                    -- English name (matches countries.json key)
+    first_visit TEXT,                         -- optional YYYY or YYYY-MM-DD
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Single-week pins rendered as dots/icons on top of period fills.
 -- event_date is the raw date of the event; week-cell assignment is computed at query time.
