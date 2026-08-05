@@ -87,6 +87,13 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
       qc.invalidateQueries({ queryKey: ["food-summary", date] });
       qc.invalidateQueries({ queryKey: ["food-entries", date] });
       qc.invalidateQueries({ queryKey: ["food-week"] });
+      // Reset back to the input state so the next item can be added (on the
+      // dashboard there's no sheet to close; the Analyze button is gated on !items).
+      setText("");
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = "";
+      setItems(null);
+      setConfidence(null);
       onDone?.();
     } finally {
       setSaving(false);
@@ -154,11 +161,20 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
 
       {items && (
         <div className="space-y-2">
-          {confidence != null && (
+          <div className="flex items-center justify-between">
             <p className="text-[11px] text-[#52525B]">
-              AI estimate · confidence {Math.round(confidence * 100)}% — edit anything below.
+              {confidence != null
+                ? `AI estimate · confidence ${Math.round(confidence * 100)}% — edit anything below.`
+                : "Edit the values below."}
             </p>
-          )}
+            <button
+              type="button"
+              onClick={() => { setItems(null); setConfidence(null); }}
+              className="text-[11px] text-[#71717A] hover:text-[#A1A1AA]"
+            >
+              ↺ start over
+            </button>
+          </div>
           {items.map((it) => (
             <div key={it._key} className="bg-[#0D0D0F] border border-[#27272A] rounded-lg p-2.5 space-y-2">
               <div className="flex gap-2 items-center">

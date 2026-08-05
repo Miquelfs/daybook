@@ -11,16 +11,62 @@ import {
   foodApi, type FoodEntry, type FoodSummary, type FoodTargetsResponse, type MealPlan,
 } from "@/lib/food-api";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
+import { WeightSection } from "@/components/health/WeightSection";
 
 const AMBER = "#F59E0B";
 const GREEN = "#34D399";
 const RED = "#F87171";
+const TEAL = "#22D3EE";
 
 function Bar2({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
     <div className="h-2 rounded-full bg-[#18181B] overflow-hidden">
       <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
+    </div>
+  );
+}
+
+// In (eaten) vs Out (Garmin burned), with the net deficit/surplus called out.
+function EnergyBalance({
+  eaten, burned, active, net,
+}: {
+  eaten: number;
+  burned: number | null;
+  active: number | null;
+  net: number | null;
+}) {
+  const scale = Math.max(eaten, burned ?? 0, 1);
+  const deficit = net != null && net <= 0;
+  return (
+    <div className="pt-3 border-t border-[#18181B]">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs text-[#52525B] uppercase tracking-widest">Energy balance</span>
+        {net != null ? (
+          <span className={`text-sm font-semibold tabular-nums ${deficit ? "text-[#34D399]" : "text-[#F87171]"}`}>
+            {Math.abs(Math.round(net))} kcal {deficit ? "deficit" : "surplus"}
+          </span>
+        ) : (
+          <span className="text-xs text-[#3F3F46]">no Garmin burn yet</span>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <div>
+          <div className="flex justify-between text-[11px] mb-0.5">
+            <span className="text-[#71717A]">Eaten (in)</span>
+            <span className="tabular-nums text-[#A1A1AA]">{Math.round(eaten)}</span>
+          </div>
+          <Bar2 value={eaten} max={scale} color={AMBER} />
+        </div>
+        <div>
+          <div className="flex justify-between text-[11px] mb-0.5">
+            <span className="text-[#71717A]">Burned (out){active != null && <span className="text-[#3F3F46]"> · {Math.round(active)} active</span>}</span>
+            <span className="tabular-nums text-[#A1A1AA]">{burned != null ? Math.round(burned) : "—"}</span>
+          </div>
+          <Bar2 value={burned ?? 0} max={scale} color={TEAL} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -142,20 +188,20 @@ export function FoodDashboard() {
         </div>
 
         <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs tabular-nums pt-1 border-t border-[#18181B]">
-          <span className="text-[#A1A1AA]">C {Math.round(summary?.consumed_carbs_g ?? 0)}g</span>
-          <span className="text-[#A1A1AA]">F {Math.round(summary?.consumed_fat_g ?? 0)}g</span>
-          {summary?.burned_total_kcal != null && (
-            <span className="text-[#52525B]">burned {Math.round(summary.burned_total_kcal)}</span>
-          )}
-          {summary?.net_vs_burn_kcal != null && (
-            <span className={summary.net_vs_burn_kcal <= 0 ? "text-[#34D399]" : "text-[#F87171]"}>
-              net vs burn {summary.net_vs_burn_kcal > 0 ? "+" : ""}{Math.round(summary.net_vs_burn_kcal)}
-            </span>
-          )}
+          <span className="text-[#A1A1AA]">Carbs {Math.round(summary?.consumed_carbs_g ?? 0)}g</span>
+          <span className="text-[#A1A1AA]">Fat {Math.round(summary?.consumed_fat_g ?? 0)}g</span>
           {summary?.remaining_kcal != null && (
             <span className="text-[#71717A] ml-auto">{Math.round(summary.remaining_kcal)} kcal left</span>
           )}
         </div>
+
+        {/* Energy balance: eaten (in) vs Garmin burned (out) */}
+        <EnergyBalance
+          eaten={consumed}
+          burned={summary?.burned_total_kcal ?? null}
+          active={summary?.burned_active_kcal ?? null}
+          net={summary?.net_vs_burn_kcal ?? null}
+        />
       </div>
 
       {/* 7-day energy balance */}
@@ -184,6 +230,9 @@ export function FoodDashboard() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Weight — the fat-loss metric lives here now */}
+      <WeightSection />
 
       {/* Targets editor */}
       <TargetsEditor date={date} targets={targets} onSaved={() => qc.invalidateQueries({ queryKey: ["food-targets", date] })} />
