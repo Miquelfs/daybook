@@ -46,6 +46,7 @@ def _row_to_entry(row: sqlite3.Row) -> FoodEntryOut:
         protein_g=row["protein_g"],
         carbs_g=row["carbs_g"],
         fat_g=row["fat_g"],
+        sugar_g=row["sugar_g"],
         ai_confidence=row["ai_confidence"],
         logged_at=row["logged_at"],
         created_at=row["created_at"],
@@ -142,11 +143,11 @@ def create_entry(body: FoodEntryIn, conn: DB):
     cur = conn.execute(
         """INSERT INTO food_entries
            (date, meal_type, description, source, kcal, protein_g, carbs_g, fat_g,
-            ai_confidence, ai_raw_json)
-           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            sugar_g, ai_confidence, ai_raw_json)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
         (body.date, body.meal_type, body.description.strip(), body.source,
          body.kcal, body.protein_g, body.carbs_g, body.fat_g,
-         body.ai_confidence, body.ai_raw_json),
+         body.sugar_g, body.ai_confidence, body.ai_raw_json),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM food_entries WHERE id=?", (cur.lastrowid,)).fetchone()
@@ -213,7 +214,9 @@ def daily_summary(date: str = Query(...), conn: DB = None):
                   COALESCE(SUM(kcal),0)       AS kcal,
                   COALESCE(SUM(protein_g),0)  AS protein,
                   COALESCE(SUM(carbs_g),0)    AS carbs,
-                  COALESCE(SUM(fat_g),0)      AS fat
+                  COALESCE(SUM(fat_g),0)      AS fat,
+                  COALESCE(SUM(sugar_g),0)    AS sugar,
+                  COALESCE(MAX(kcal),0)       AS biggest_meal
            FROM food_entries WHERE date=?""",
         (date,),
     ).fetchone()
@@ -239,6 +242,8 @@ def daily_summary(date: str = Query(...), conn: DB = None):
         "consumed_protein_g": consumed_protein,
         "consumed_carbs_g": round(agg["carbs"], 1),
         "consumed_fat_g": round(agg["fat"], 1),
+        "consumed_sugar_g": round(agg["sugar"], 1),
+        "biggest_meal_kcal": round(agg["biggest_meal"], 1),
         "target_kcal": target_kcal,
         "protein_target_g": protein_target,
         "remaining_kcal": (round(target_kcal - consumed_kcal, 1) if target_kcal is not None else None),

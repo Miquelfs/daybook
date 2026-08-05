@@ -13,7 +13,7 @@ const inputCls =
   "bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]";
 
 function blankItem(): EditItem {
-  return { _key: Math.random().toString(36).slice(2), name: "", kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 };
+  return { _key: Math.random().toString(36).slice(2), name: "", kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, sugar_g: 0 };
 }
 
 // Shared add-food form. Type what you ate (photo optional) → AI proposes macros
@@ -80,6 +80,7 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
           protein_g: it.protein_g,
           carbs_g: it.carbs_g,
           fat_g: it.fat_g,
+          sugar_g: it.sugar_g ?? 0,
           ai_confidence: confidence,
         });
       }
@@ -106,8 +107,9 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
       p: acc.p + (it.protein_g || 0),
       c: acc.c + (it.carbs_g || 0),
       f: acc.f + (it.fat_g || 0),
+      s: acc.s + (it.sugar_g || 0),
     }),
-    { kcal: 0, p: 0, c: 0, f: 0 }
+    { kcal: 0, p: 0, c: 0, f: 0, s: 0 }
   );
 
   return (
@@ -188,8 +190,8 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
                   <X size={14} className="text-[#71717A]" />
                 </button>
               </div>
-              <div className="grid grid-cols-4 gap-2">
-                {([["kcal", "kcal"], ["protein_g", "P g"], ["carbs_g", "C g"], ["fat_g", "F g"]] as const).map(
+              <div className="grid grid-cols-5 gap-1.5">
+                {([["kcal", "kcal"], ["protein_g", "P g"], ["carbs_g", "C g"], ["fat_g", "F g"], ["sugar_g", "Sug g"]] as const).map(
                   ([field, label]) => (
                     <div key={field}>
                       <label className="block text-[10px] text-[#52525B] mb-0.5">{label}</label>
@@ -217,7 +219,7 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
           <div className="flex items-center justify-between pt-1 text-xs text-[#A1A1AA] tabular-nums">
             <span>Total</span>
             <span>
-              {Math.round(totals.kcal)} kcal · {Math.round(totals.p)}P / {Math.round(totals.c)}C / {Math.round(totals.f)}F
+              {Math.round(totals.kcal)} kcal · {Math.round(totals.p)}P / {Math.round(totals.c)}C / {Math.round(totals.f)}F · {Math.round(totals.s)}g sugar
             </span>
           </div>
 

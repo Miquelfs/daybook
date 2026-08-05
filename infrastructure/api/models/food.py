@@ -11,6 +11,7 @@ class FoodEntryIn(BaseModel):
     protein_g: float = 0
     carbs_g: float = 0
     fat_g: float = 0
+    sugar_g: float = 0
     ai_confidence: Optional[float] = None
     ai_raw_json: Optional[str] = None
 
@@ -24,6 +25,7 @@ class FoodEntryPatch(BaseModel):
     protein_g: Optional[float] = None
     carbs_g: Optional[float] = None
     fat_g: Optional[float] = None
+    sugar_g: Optional[float] = None
     ai_confidence: Optional[float] = None
     ai_raw_json: Optional[str] = None
 
@@ -40,6 +42,7 @@ class FoodEntryOut(BaseModel):
     protein_g: float
     carbs_g: float
     fat_g: float
+    sugar_g: float
     ai_confidence: Optional[float]
     logged_at: str
     created_at: str

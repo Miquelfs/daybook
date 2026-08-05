@@ -67,14 +67,16 @@ _SCHEMA_HINT = (
     '{\n'
     '  "items": [\n'
     '    {"name": str, "grams": number|null, "kcal": number, '
-    '"protein_g": number, "carbs_g": number, "fat_g": number}\n'
+    '"protein_g": number, "carbs_g": number, "fat_g": number, "sugar_g": number}\n'
     '  ],\n'
     '  "total_kcal": number,\n'
     '  "total_protein_g": number,\n'
     '  "total_carbs_g": number,\n'
     '  "total_fat_g": number,\n'
+    '  "total_sugar_g": number,\n'
     '  "confidence": number   // 0..1, your confidence in the estimate\n'
     '}\n'
+    '"sugar_g" is the sugar subset of carbs (<= carbs_g). '
     'Split a meal into one item per distinct food. Totals must equal the sum of '
     'the items. No markdown, no code fences, no commentary.'
 )
@@ -148,6 +150,7 @@ def analyze(
         ("total_protein_g", "protein_g"),
         ("total_carbs_g", "carbs_g"),
         ("total_fat_g", "fat_g"),
+        ("total_sugar_g", "sugar_g"),
     ):
         if data.get(key) is None:
             data[key] = round(sum((it.get(field) or 0) for it in items), 1)

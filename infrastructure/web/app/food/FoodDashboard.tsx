@@ -190,6 +190,7 @@ export function FoodDashboard() {
         <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs tabular-nums pt-1 border-t border-[#18181B]">
           <span className="text-[#A1A1AA]">Carbs {Math.round(summary?.consumed_carbs_g ?? 0)}g</span>
           <span className="text-[#A1A1AA]">Fat {Math.round(summary?.consumed_fat_g ?? 0)}g</span>
+          <span className="text-[#A1A1AA]">Sugar {Math.round(summary?.consumed_sugar_g ?? 0)}g</span>
           {summary?.remaining_kcal != null && (
             <span className="text-[#71717A] ml-auto">{Math.round(summary.remaining_kcal)} kcal left</span>
           )}

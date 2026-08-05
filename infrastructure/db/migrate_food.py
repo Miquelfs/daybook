@@ -90,6 +90,7 @@ def migrate(conn):
             protein_g     REAL NOT NULL DEFAULT 0,
             carbs_g       REAL NOT NULL DEFAULT 0,
             fat_g         REAL NOT NULL DEFAULT 0,
+            sugar_g       REAL NOT NULL DEFAULT 0,
             ai_confidence REAL,                 -- 0..1 when AI-estimated
             ai_raw_json   TEXT,                 -- raw analyzer output, for audit
             logged_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
@@ -137,6 +138,11 @@ def migrate(conn):
         );
         CREATE INDEX IF NOT EXISTS idx_food_meal_plans_date ON food_meal_plans(date);
     """)
+
+    # Idempotent column adds for DBs created before a column existed.
+    _food_cols = [r[1] for r in conn.execute("PRAGMA table_info(food_entries)")]
+    if "sugar_g" not in _food_cols:
+        conn.execute("ALTER TABLE food_entries ADD COLUMN sugar_g REAL NOT NULL DEFAULT 0")
 
     # Seed crew presets only if the table is empty (never re-seed / duplicate).
     existing = conn.execute("SELECT COUNT(*) AS c FROM crew_meal_presets").fetchone()

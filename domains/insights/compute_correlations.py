@@ -46,6 +46,9 @@ _STATIC_METRICS = [
     "distance_km", "unique_places",
     # Money
     "daily_spend",
+    # Food (dietary intake)
+    "food_kcal", "food_protein", "food_carbs", "food_fat", "food_sugar",
+    "meal_count", "biggest_meal_kcal",
     # Environment
     "temp_mean", "precipitation", "wind_speed_max",
     # Health extras
@@ -176,6 +179,28 @@ def _fetch(conn, key: str, start: str, end: str) -> dict[str, float]:
             (start, end),
         ).fetchall()
         return {r["date"]: float(r["val"]) for r in rows}
+
+    # Food (dietary intake, aggregated from food_entries)
+    _FOOD_AGG = {
+        "food_kcal":         ("SUM",   "kcal"),
+        "food_protein":      ("SUM",   "protein_g"),
+        "food_carbs":        ("SUM",   "carbs_g"),
+        "food_fat":          ("SUM",   "fat_g"),
+        "food_sugar":        ("SUM",   "sugar_g"),
+        "meal_count":        ("COUNT", "*"),
+        "biggest_meal_kcal": ("MAX",   "kcal"),
+    }
+    if key in _FOOD_AGG:
+        agg, col = _FOOD_AGG[key]
+        try:
+            rows = conn.execute(
+                f"SELECT date, {agg}({col}) AS val FROM food_entries "
+                f"WHERE date BETWEEN ? AND ? GROUP BY date",
+                (start, end),
+            ).fetchall()
+            return {r["date"]: float(r["val"]) for r in rows if r["val"] is not None}
+        except Exception:
+            return {}
 
     if key == "sleep_duration":
         rows = conn.execute(

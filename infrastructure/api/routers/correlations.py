@@ -62,6 +62,14 @@ _STATIC_CATALOG: dict[str, dict] = {
     "steps":         {"label": "Steps",             "unit": "steps",  "category": "health",     "_type": "simple", "table": "daily_stats", "col": "steps"},
     "weight":        {"label": "Weight",            "unit": "kg",     "category": "health",     "_type": "simple", "table": "weight_log",  "col": "weight_kg"},
     "active_cal":    {"label": "Active calories",   "unit": "kcal",   "category": "health",     "_type": "simple", "table": "daily_stats", "col": "active_calories"},
+    # Food (dietary intake, aggregated from food_entries)
+    "food_kcal":         {"label": "Calories eaten",     "unit": "kcal",  "category": "food", "_type": "food_agg", "agg": "SUM", "col": "kcal"},
+    "food_protein":      {"label": "Protein eaten",      "unit": "g",     "category": "food", "_type": "food_agg", "agg": "SUM", "col": "protein_g"},
+    "food_carbs":        {"label": "Carbs eaten",        "unit": "g",     "category": "food", "_type": "food_agg", "agg": "SUM", "col": "carbs_g"},
+    "food_fat":          {"label": "Fat eaten",          "unit": "g",     "category": "food", "_type": "food_agg", "agg": "SUM", "col": "fat_g"},
+    "food_sugar":        {"label": "Sugar eaten",        "unit": "g",     "category": "food", "_type": "food_agg", "agg": "SUM", "col": "sugar_g"},
+    "meal_count":        {"label": "Meals logged",       "unit": "count", "category": "food", "_type": "food_agg", "agg": "COUNT", "col": "*"},
+    "biggest_meal_kcal": {"label": "Biggest meal",       "unit": "kcal",  "category": "food", "_type": "food_agg", "agg": "MAX", "col": "kcal"},
     # Activity
     "activity_count":    {"label": "Activity count",    "unit": "count",   "category": "activity", "_type": "activity_agg", "agg": "COUNT", "col": "*",                    "scale": 1.0},
     "total_dist_km":     {"label": "Total distance",    "unit": "km",      "category": "activity", "_type": "activity_agg", "agg": "SUM",   "col": "distance_meters",      "scale": 0.001},
@@ -108,6 +116,7 @@ _TOP_CANDIDATES = [
     "fatigue_score",
     "temp_mean", "precipitation",
     "hr_daytime_avg", "hr_daytime_peak", "hr_duty_avg",
+    "food_kcal", "food_protein", "food_carbs", "food_sugar", "meal_count", "biggest_meal_kcal",
 ]
 
 _WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -214,6 +223,18 @@ def _fetch_metric(conn: sqlite3.Connection, key: str, start: str, end: str) -> d
             (start, end),
         ).fetchall()
         return {r["date"]: float(r["val"]) for r in rows}
+
+    if t == "food_agg":
+        agg, col = meta["agg"], meta["col"]
+        try:
+            rows = conn.execute(
+                f"SELECT date, {agg}({col}) AS val FROM food_entries "
+                f"WHERE date BETWEEN ? AND ? GROUP BY date",
+                (start, end),
+            ).fetchall()
+            return {r["date"]: float(r["val"]) for r in rows if r["val"] is not None}
+        except Exception:
+            return {}
 
     if t == "sleep_duration":
         rows = conn.execute(

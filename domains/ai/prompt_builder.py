@@ -244,7 +244,7 @@ def insights_narrative(data: dict) -> str:
         for c in corrs
     ) or "  (no correlations computed yet)"
 
-    return f"""You are a sharp personal-data analyst talking directly to the person whose data this is — years of daily self-tracking (sleep, HRV, mood, energy, training, spending, screen time, aviation duty). Below are your strongest correlations. Write an analysis that:
+    return f"""You are a sharp personal-data analyst talking directly to the person whose data this is — years of daily self-tracking (sleep, HRV, mood, energy, training, diet/food intake incl. calories, protein and sugar, spending, screen time, aviation duty). Below are your strongest correlations. Write an analysis that:
 1. Leads with the 2-3 most ROBUST, actionable patterns. Weight by sample size (n): an |r| near 1 with small n is almost certainly noise — deprioritise those and say so plainly. Prefer larger-n findings.
 2. For the single best pattern, proposes ONE concrete experiment: what to change, for how long, and what to watch.
 3. Names the correlations most likely to be confounds or mechanically linked (e.g. two measures of the same thing, like activity calories and moving time).

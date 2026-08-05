@@ -67,6 +67,7 @@ export interface FoodEntry {
   protein_g: number;
   carbs_g: number;
   fat_g: number;
+  sugar_g: number;
   ai_confidence: number | null;
   logged_at: string;
   created_at: string;
@@ -82,6 +83,7 @@ export interface FoodEntryIn {
   protein_g: number;
   carbs_g: number;
   fat_g: number;
+  sugar_g: number;
   ai_confidence?: number | null;
   ai_raw_json?: string;
 }
@@ -93,6 +95,7 @@ export interface AnalyzeItem {
   protein_g: number;
   carbs_g: number;
   fat_g: number;
+  sugar_g: number;
 }
 
 export interface AnalyzeResult {
@@ -101,6 +104,7 @@ export interface AnalyzeResult {
   total_protein_g: number;
   total_carbs_g: number;
   total_fat_g: number;
+  total_sugar_g: number;
   confidence: number;
 }
 
@@ -111,6 +115,8 @@ export interface FoodSummary {
   consumed_protein_g: number;
   consumed_carbs_g: number;
   consumed_fat_g: number;
+  consumed_sugar_g: number;
+  biggest_meal_kcal: number;
   target_kcal: number | null;
   protein_target_g: number | null;
   remaining_kcal: number | null;
