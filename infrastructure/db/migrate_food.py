@@ -137,6 +137,12 @@ def migrate(conn):
             generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         );
         CREATE INDEX IF NOT EXISTS idx_food_meal_plans_date ON food_meal_plans(date);
+
+        CREATE TABLE IF NOT EXISTS water_log (
+            date       TEXT PRIMARY KEY,      -- YYYY-MM-DD, one running total per day
+            ml         REAL NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        );
     """)
 
     # Idempotent column adds for DBs created before a column existed.

@@ -19,6 +19,7 @@ from infrastructure.api.models.food import (
     FoodEntryOut,
     FoodEntryPatch,
     FoodTargetIn,
+    WaterBody,
 )
 from domains.ai import ollama_client
 from domains.food import analyzer, meal_planner, targets as targets_mod
@@ -205,6 +206,35 @@ async def attach_photo(entry_id: int, file: UploadFile, conn: DB):
     return _row_to_entry(out)
 
 
+# ── Water ─────────────────────────────────────────────────────────────────────
+
+def _water_ml(conn, date: str) -> float:
+    row = conn.execute("SELECT ml FROM water_log WHERE date=?", (date,)).fetchone()
+    return float(row["ml"]) if row and row["ml"] else 0.0
+
+
+@router.get("/water")
+def get_water(date: str = Query(...), conn: DB = None):
+    return {"date": date, "ml": _water_ml(conn, date), "goal_ml": targets_mod.DEFAULT_WATER_GOAL_ML}
+
+
+@router.post("/water")
+def set_water(body: WaterBody, conn: DB):
+    current = _water_ml(conn, body.date)
+    if body.set_ml is not None:
+        new_ml = max(0.0, body.set_ml)
+    else:
+        new_ml = max(0.0, current + (body.add_ml or 0))
+    conn.execute(
+        """INSERT INTO water_log (date, ml) VALUES (?, ?)
+           ON CONFLICT(date) DO UPDATE SET ml=excluded.ml,
+             updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')""",
+        (body.date, new_ml),
+    )
+    conn.commit()
+    return {"date": body.date, "ml": new_ml, "goal_ml": targets_mod.DEFAULT_WATER_GOAL_ML}
+
+
 # ── Daily summary (intake vs target vs Garmin burn) ───────────────────────────
 
 @router.get("/summary")
@@ -251,6 +281,8 @@ def daily_summary(date: str = Query(...), conn: DB = None):
         "burned_active_kcal": burned_active,
         "burned_total_kcal": burned_total,
         "net_vs_burn_kcal": (round(consumed_kcal - burned_total, 1) if burned_total else None),
+        "water_ml": _water_ml(conn, date),
+        "water_goal_ml": targets_mod.DEFAULT_WATER_GOAL_ML,
     }
 
 

@@ -70,6 +70,7 @@ _STATIC_CATALOG: dict[str, dict] = {
     "food_sugar":        {"label": "Sugar eaten",        "unit": "g",     "category": "food", "_type": "food_agg", "agg": "SUM", "col": "sugar_g"},
     "meal_count":        {"label": "Meals logged",       "unit": "count", "category": "food", "_type": "food_agg", "agg": "COUNT", "col": "*"},
     "biggest_meal_kcal": {"label": "Biggest meal",       "unit": "kcal",  "category": "food", "_type": "food_agg", "agg": "MAX", "col": "kcal"},
+    "water_ml":          {"label": "Water drank",        "unit": "ml",    "category": "food", "_type": "simple", "table": "water_log", "col": "ml"},
     # Activity
     "activity_count":    {"label": "Activity count",    "unit": "count",   "category": "activity", "_type": "activity_agg", "agg": "COUNT", "col": "*",                    "scale": 1.0},
     "total_dist_km":     {"label": "Total distance",    "unit": "km",      "category": "activity", "_type": "activity_agg", "agg": "SUM",   "col": "distance_meters",      "scale": 0.001},
@@ -116,7 +117,7 @@ _TOP_CANDIDATES = [
     "fatigue_score",
     "temp_mean", "precipitation",
     "hr_daytime_avg", "hr_daytime_peak", "hr_duty_avg",
-    "food_kcal", "food_protein", "food_carbs", "food_sugar", "meal_count", "biggest_meal_kcal",
+    "food_kcal", "food_protein", "food_carbs", "food_sugar", "meal_count", "biggest_meal_kcal", "water_ml",
 ]
 
 _WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]

@@ -12,6 +12,7 @@ import {
 } from "@/lib/food-api";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
 import { WeightSection } from "@/components/health/WeightSection";
+import { WaterTracker } from "@/components/WaterTracker";
 
 const AMBER = "#F59E0B";
 const GREEN = "#34D399";
@@ -204,6 +205,9 @@ export function FoodDashboard() {
           net={summary?.net_vs_burn_kcal ?? null}
         />
       </div>
+
+      {/* Water */}
+      <WaterTracker date={date} />
 
       {/* 7-day energy balance */}
       <div>

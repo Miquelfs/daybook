@@ -12,6 +12,7 @@ from typing import Optional
 
 DEFAULT_DEFICIT_KCAL = 500      # you can pick anything; this is just the suggestion
 DEFAULT_PROTEIN_PER_KG = 2.0    # g per kg bodyweight
+DEFAULT_WATER_GOAL_ML = 3000    # daily hydration target (endurance training → higher)
 
 
 def _latest_weight_kg(conn) -> Optional[float]:

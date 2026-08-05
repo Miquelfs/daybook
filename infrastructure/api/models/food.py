@@ -62,6 +62,12 @@ class CrewMealPreset(BaseModel):
     location: str
 
 
+class WaterBody(BaseModel):
+    date: str
+    add_ml: Optional[float] = None   # increment (quick-add buttons)
+    set_ml: Optional[float] = None   # set absolute total (manual edit)
+
+
 class FoodTargetIn(BaseModel):
     """Manual override. effective_date defaults to today server-side if omitted."""
     effective_date: Optional[str] = None

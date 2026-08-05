@@ -124,6 +124,14 @@ export interface FoodSummary {
   burned_active_kcal: number | null;
   burned_total_kcal: number | null;
   net_vs_burn_kcal: number | null;
+  water_ml: number;
+  water_goal_ml: number;
+}
+
+export interface WaterState {
+  date: string;
+  ml: number;
+  goal_ml: number;
 }
 
 export interface CrewPreset {
@@ -194,6 +202,12 @@ export const foodApi = {
   },
 
   summary: (date: string): Promise<FoodSummary> => get(`/food/summary?date=${date}`),
+
+  water: (date: string): Promise<WaterState> => get(`/food/water?date=${date}`),
+  addWater: (date: string, add_ml: number): Promise<WaterState> =>
+    proxyPost("/api/food/water", { date, add_ml }),
+  setWater: (date: string, set_ml: number): Promise<WaterState> =>
+    proxyPost("/api/food/water", { date, set_ml }),
 
   presets: (location = "PMI"): Promise<CrewPreset[]> =>
     get(`/food/presets?location=${location}`),
