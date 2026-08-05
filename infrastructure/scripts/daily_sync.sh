@@ -151,11 +151,4 @@ else
   log "Skipping morning brief (outside 05-08h window)"
 fi
 
-# Groceries: refresh Mercadona prices for pantry items once a day (06h window).
-if [[ "$HOUR" -eq 6 ]]; then
-  log "Syncing grocery prices..."
-  python -m domains.groceries.price_tracker \
-    >> "$LOG_FILE" 2>&1 || log "WARN: Grocery price sync failed (non-fatal)"
-fi
-
 log "=== daily_sync done ==="

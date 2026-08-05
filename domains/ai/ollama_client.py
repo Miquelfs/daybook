@@ -5,7 +5,14 @@ skip the feature. Callers only ever use generate() / generate_json() /
 is_available(); the provider switch is invisible to them.
 
 Config (from .env):
-  LLM_PROVIDER          — "ollama" (local, default) or "groq" (free cloud)
+  LLM_PROVIDER          — "claude" (cloud, default), "ollama" (local) or "groq"
+
+  # Claude (Anthropic) backend — the default. Cost-tuned to Haiku:
+  ANTHROPIC_API_KEY     — key from https://console.anthropic.com
+  CLAUDE_MODEL          — structured/JSON tasks (default: claude-haiku-4-5)
+  CLAUDE_MODEL_FAST     — short narration      (default: claude-haiku-4-5)
+                          (both default to Haiku — cheapest tier; only bump a
+                           specific task to claude-sonnet-5 if accuracy needs it)
 
   # Ollama (local) backend:
   OLLAMA_HOST           — e.g. http://192.168.1.17:11434  (default: http://localhost:11434)
@@ -28,7 +35,14 @@ import urllib.error
 
 log = logging.getLogger(__name__)
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").strip().lower()
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "claude").strip().lower()
+
+# ─── Claude (Anthropic) config — the default backend ──────────────────────────
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+# Default everything to Haiku (cheapest capable tier). Override per-env only if a
+# specific task needs more — do not bump the global default.
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5")
+CLAUDE_MODEL_FAST = os.getenv("CLAUDE_MODEL_FAST", "claude-haiku-4-5")
 
 # ─── Ollama (local) config ────────────────────────────────────────────────────
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
@@ -114,8 +128,53 @@ def _groq_available() -> bool:
         return False
 
 
+def _claude_chat(prompt: str, model: Optional[str], as_json: bool) -> Optional[str]:
+    """Call the Claude Messages API via the official SDK; return the text or None."""
+    if not ANTHROPIC_API_KEY:
+        log.warning("LLM_PROVIDER=claude but ANTHROPIC_API_KEY is not set")
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        log.warning("LLM_PROVIDER=claude but the `anthropic` SDK is not installed")
+        return None
+
+    m = model or (CLAUDE_MODEL if as_json else CLAUDE_MODEL_FAST)
+    p = prompt
+    if as_json:
+        p = (
+            prompt
+            + "\n\nRespond with ONLY a single valid JSON object — no markdown, "
+            "no code fences, no commentary before or after."
+        )
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model=m,
+            max_tokens=2048,
+            messages=[{"role": "user", "content": p}],
+        )
+        parts = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
+        return "".join(parts).strip() or None
+    except Exception as e:  # anthropic errors, network, etc. — degrade gracefully
+        log.warning("Claude call failed: %s", e)
+        return None
+
+
+def _claude_available() -> bool:
+    if not ANTHROPIC_API_KEY:
+        return False
+    try:
+        import anthropic  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def is_available() -> bool:
     """Quick health check for the active provider — True if the backend is reachable."""
+    if LLM_PROVIDER == "claude":
+        return _claude_available()
     if LLM_PROVIDER == "groq":
         return _groq_available()
     try:
@@ -134,6 +193,9 @@ def generate(prompt: str, model: Optional[str] = None, as_json: bool = False) ->
     Model selection mirrors the Ollama fast/default split: short narration
     (as_json=False) uses the fast model, structured/JSON tasks use the default.
     """
+    if LLM_PROVIDER == "claude":
+        return _claude_chat(prompt, model, as_json)
+
     if LLM_PROVIDER == "groq":
         gmodel = GROQ_MODEL if as_json else GROQ_MODEL_FAST
         return _groq_chat(prompt, gmodel, as_json)
@@ -153,14 +215,32 @@ def generate(prompt: str, model: Optional[str] = None, as_json: bool = False) ->
 def generate_json(prompt: str, model: Optional[str] = None) -> Optional[dict]:
     """
     Like generate() but parses the response as JSON.
-    Returns None if Ollama is unreachable or the response is not valid JSON.
+    Returns None if the backend is unreachable or the response is not valid JSON.
     """
-    m = model or MODEL_DEFAULT
-    text = generate(prompt, model=m, as_json=True)
+    # Only Ollama needs an explicit default model; the cloud providers pick their
+    # own JSON model inside generate() when model is None (passing the Ollama
+    # default "mistral" to Claude/Groq would be an invalid model id).
+    if LLM_PROVIDER in ("claude", "groq"):
+        text = generate(prompt, model=model, as_json=True)
+    else:
+        text = generate(prompt, model=model or MODEL_DEFAULT, as_json=True)
     if text is None:
         return None
+    text = _strip_json_fences(text)
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
-        log.warning("Ollama returned invalid JSON: %s — raw: %s", e, text[:200])
+        log.warning("LLM returned invalid JSON: %s — raw: %s", e, text[:200])
         return None
+
+
+def _strip_json_fences(text: str) -> str:
+    """Drop ```json ... ``` fences a model may wrap around JSON despite instructions."""
+    t = text.strip()
+    if t.startswith("```"):
+        nl = t.find("\n")           # drop the opening fence line (``` or ```json)
+        t = t[nl + 1:] if nl != -1 else t[3:]
+        t = t.rstrip()
+        if t.endswith("```"):
+            t = t[:-3]
+    return t.strip()

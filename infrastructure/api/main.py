@@ -35,9 +35,9 @@ from infrastructure.api.routers import roster as roster_module
 from infrastructure.api.routers import experiments as experiments_module
 from infrastructure.api.routers import injuries as injuries_module
 from infrastructure.api.routers import ai as ai_module
-from infrastructure.api.routers import groceries as groceries_module
 from infrastructure.api.routers import race_plans as race_plans_module
 from infrastructure.api.routers import nutrition as nutrition_module
+from infrastructure.api.routers import food as food_module
 
 VERSION = "0.1.0"
 ROOT = Path(__file__).parents[2]
@@ -96,9 +96,9 @@ app.include_router(roster_module.router)
 app.include_router(experiments_module.router)
 app.include_router(injuries_module.router)
 app.include_router(ai_module.router)
-app.include_router(groceries_module.router)
 app.include_router(race_plans_module.router)
 app.include_router(nutrition_module.router)
+app.include_router(food_module.router)
 
 _photos_dir = ROOT / "data" / "photos"
 _photos_dir.mkdir(parents=True, exist_ok=True)
@@ -137,6 +137,10 @@ def _run_migrations() -> None:
     _migrate_adaptation_log(_conn3)
     _migrate_nutrition(_conn3)
     _conn3.close()
+    from infrastructure.db.migrate_food import migrate as _migrate_food
+    _conn4 = _get_conn()
+    _migrate_food(_conn4)
+    _conn4.close()
 
 
 @app.get("/")

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, List, Wallet, Globe, Camera, HeartPulse, TrendingUp, PlaneTakeoff } from "lucide-react";
+import { CalendarDays, List, Wallet, Globe, Camera, HeartPulse, TrendingUp, PlaneTakeoff, Apple } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const tabs = [
@@ -11,6 +11,7 @@ const tabs = [
   { href: "/moments",      label: "Moments",  icon: Camera },
   { href: "/money",        label: "Finance",  icon: Wallet },
   { href: "/health",       label: "Health",   icon: HeartPulse },
+  { href: "/food",         label: "Food",     icon: Apple },
   { href: "/aviation",     label: "Logbook",  icon: PlaneTakeoff },
   { href: "/correlations", label: "Insights", icon: TrendingUp },
   { href: "/explore",      label: "Explore",  icon: Globe },
@@ -24,6 +25,7 @@ export function BottomNav() {
     if (href === "/timeline") return pathname.startsWith("/timeline") || pathname.startsWith("/life");
     if (href === "/money") return pathname.startsWith("/money");
     if (href === "/health") return pathname.startsWith("/health");
+    if (href === "/food") return pathname.startsWith("/food");
     if (href === "/aviation") return pathname.startsWith("/aviation");
     if (href === "/correlations") return pathname.startsWith("/correlations");
     return pathname.startsWith(href);

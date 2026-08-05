@@ -1,0 +1,339 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid,
+} from "recharts";
+import { format, parseISO, subDays, addDays } from "date-fns";
+import { ChevronLeft, ChevronRight, Trash2, Sparkles } from "lucide-react";
+import {
+  foodApi, type FoodEntry, type FoodSummary, type FoodTargetsResponse, type MealPlan,
+} from "@/lib/food-api";
+import { FoodEntryComposer } from "@/components/FoodEntryComposer";
+
+const AMBER = "#F59E0B";
+const GREEN = "#34D399";
+const RED = "#F87171";
+
+function Bar2({ value, max, color }: { value: number; max: number; color: string }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div className="h-2 rounded-full bg-[#18181B] overflow-hidden">
+      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
+    </div>
+  );
+}
+
+export function FoodDashboard() {
+  const qc = useQueryClient();
+  const today = format(new Date(), "yyyy-MM-dd");
+  const [date, setDate] = useState(today);
+  const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
+  const [planning, setPlanning] = useState(false);
+
+  const { data: targets } = useQuery<FoodTargetsResponse>({
+    queryKey: ["food-targets", date],
+    queryFn: () => foodApi.targets({ date }),
+    staleTime: 30_000,
+  });
+
+  const { data: summary } = useQuery<FoodSummary>({
+    queryKey: ["food-summary", date],
+    queryFn: () => foodApi.summary(date),
+    staleTime: 0,
+  });
+
+  const { data: entries = [] } = useQuery<FoodEntry[]>({
+    queryKey: ["day-food", date],
+    queryFn: () => foodApi.listEntries({ date }),
+    staleTime: 0,
+  });
+
+  const weekDates = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => format(subDays(parseISO(date), 6 - i), "yyyy-MM-dd")),
+    [date]
+  );
+
+  const { data: week = [] } = useQuery<FoodSummary[]>({
+    queryKey: ["food-week", date],
+    queryFn: () => Promise.all(weekDates.map((d) => foodApi.summary(d))),
+    staleTime: 0,
+  });
+
+  const activeTarget = targets?.active;
+  const targetKcal = summary?.target_kcal ?? activeTarget?.target_kcal ?? null;
+  const proteinTarget = summary?.protein_target_g ?? activeTarget?.protein_g ?? null;
+
+  const chartData = week.map((s) => ({
+    label: format(parseISO(s.date), "EEE d"),
+    kcal: Math.round(s.consumed_kcal),
+    over: s.target_kcal != null && s.consumed_kcal > s.target_kcal,
+  }));
+
+  async function del(id: number) {
+    await foodApi.delete(id);
+    qc.invalidateQueries({ queryKey: ["day-food", date] });
+    qc.invalidateQueries({ queryKey: ["food-summary", date] });
+    qc.invalidateQueries({ queryKey: ["food-week"] });
+  }
+
+  async function generatePlan() {
+    setPlanning(true);
+    try {
+      const res = await foodApi.generateMealPlan(date);
+      setMealPlan(res.plan);
+    } catch {
+      setMealPlan({ meals: [], note: "AI meal planning is unavailable right now." });
+    } finally {
+      setPlanning(false);
+    }
+  }
+
+  const consumed = summary?.consumed_kcal ?? 0;
+  const consumedProtein = summary?.consumed_protein_g ?? 0;
+  const overTarget = targetKcal != null && consumed > targetKcal;
+
+  return (
+    <div className="space-y-8">
+      {/* Header + date nav */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-[#FAFAFA]">Food</h1>
+          <p className="text-xs text-[#52525B]">{format(parseISO(date), "EEEE d MMM yyyy")}</p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setDate(format(subDays(parseISO(date), 1), "yyyy-MM-dd"))} className="p-2 rounded-lg hover:bg-[#18181B]">
+            <ChevronLeft size={16} className="text-[#71717A]" />
+          </button>
+          {date !== today && (
+            <button onClick={() => setDate(today)} className="text-xs text-[#71717A] hover:text-[#A1A1AA] px-2">today</button>
+          )}
+          <button
+            onClick={() => setDate(format(addDays(parseISO(date), 1), "yyyy-MM-dd"))}
+            disabled={date >= today}
+            className="p-2 rounded-lg hover:bg-[#18181B] disabled:opacity-30"
+          >
+            <ChevronRight size={16} className="text-[#71717A]" />
+          </button>
+        </div>
+      </div>
+
+      {/* Today totals vs target + burn */}
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-4">
+        <div className="space-y-1.5">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs text-[#52525B] uppercase tracking-widest">Calories</span>
+            <span className={`text-sm tabular-nums ${overTarget ? "text-[#F87171]" : "text-[#FAFAFA]"}`}>
+              {Math.round(consumed)}{targetKcal != null && <span className="text-[#52525B]"> / {Math.round(targetKcal)}</span>}
+            </span>
+          </div>
+          <Bar2 value={consumed} max={targetKcal ?? consumed} color={overTarget ? RED : AMBER} />
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs text-[#52525B] uppercase tracking-widest">Protein</span>
+            <span className="text-sm tabular-nums text-[#FAFAFA]">
+              {Math.round(consumedProtein)}{proteinTarget != null && <span className="text-[#52525B]"> / {Math.round(proteinTarget)} g</span>}
+            </span>
+          </div>
+          <Bar2 value={consumedProtein} max={proteinTarget ?? consumedProtein} color={GREEN} />
+        </div>
+
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs tabular-nums pt-1 border-t border-[#18181B]">
+          <span className="text-[#A1A1AA]">C {Math.round(summary?.consumed_carbs_g ?? 0)}g</span>
+          <span className="text-[#A1A1AA]">F {Math.round(summary?.consumed_fat_g ?? 0)}g</span>
+          {summary?.burned_total_kcal != null && (
+            <span className="text-[#52525B]">burned {Math.round(summary.burned_total_kcal)}</span>
+          )}
+          {summary?.net_vs_burn_kcal != null && (
+            <span className={summary.net_vs_burn_kcal <= 0 ? "text-[#34D399]" : "text-[#F87171]"}>
+              net vs burn {summary.net_vs_burn_kcal > 0 ? "+" : ""}{Math.round(summary.net_vs_burn_kcal)}
+            </span>
+          )}
+          {summary?.remaining_kcal != null && (
+            <span className="text-[#71717A] ml-auto">{Math.round(summary.remaining_kcal)} kcal left</span>
+          )}
+        </div>
+      </div>
+
+      {/* 7-day energy balance */}
+      <div>
+        <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">Last 7 days · eaten vs target</p>
+        <div className="h-40">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#18181B" vertical={false} />
+              <XAxis dataKey="label" tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
+              <Tooltip
+                contentStyle={{ background: "#111113", border: "1px solid #27272A", borderRadius: 8, fontSize: 12 }}
+                labelStyle={{ color: "#A1A1AA" }}
+              />
+              {targetKcal != null && (
+                <ReferenceLine y={targetKcal} stroke="#3F3F46" strokeDasharray="4 4"
+                  label={{ value: "target", fill: "#52525B", fontSize: 10, position: "insideTopRight" }} />
+              )}
+              <Bar dataKey="kcal" radius={[4, 4, 0, 0]}>
+                {chartData.map((d, i) => (
+                  <Cell key={i} fill={d.over ? RED : GREEN} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Targets editor */}
+      <TargetsEditor date={date} targets={targets} onSaved={() => qc.invalidateQueries({ queryKey: ["food-targets", date] })} />
+
+      {/* Add food */}
+      <div>
+        <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">Log food</p>
+        <FoodEntryComposer date={date} />
+      </div>
+
+      {/* Entries */}
+      {entries.length > 0 && (
+        <div>
+          <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">{entries.length} item{entries.length !== 1 ? "s" : ""}</p>
+          <div className="flex flex-col gap-2">
+            {entries.map((e) => (
+              <div key={e.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-[#FAFAFA] truncate">{e.description}</p>
+                  <p className="text-xs text-[#52525B] tabular-nums">
+                    {Math.round(e.kcal)} kcal · {Math.round(e.protein_g)}P / {Math.round(e.carbs_g)}C / {Math.round(e.fat_g)}F
+                    {e.meal_type && <span className="text-[#3F3F46]"> · {e.meal_type}</span>}
+                  </p>
+                </div>
+                <button onClick={() => del(e.id)} className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
+                  <Trash2 size={14} className="text-[#52525B]" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* AI meal plan */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-[#52525B] uppercase tracking-widest">What to eat next</p>
+          <button onClick={generatePlan} disabled={planning}
+            className="flex items-center gap-1.5 text-xs text-[#F59E0B] hover:text-[#FBBF24] disabled:opacity-40">
+            <Sparkles size={13} /> {planning ? "Thinking…" : "Suggest"}
+          </button>
+        </div>
+        {mealPlan && (
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-2">
+            {mealPlan.meals?.map((m, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-[#FAFAFA]">{m.name}</p>
+                  {m.why && <p className="text-xs text-[#52525B]">{m.why}</p>}
+                </div>
+                <span className="text-xs text-[#71717A] tabular-nums shrink-0">{Math.round(m.kcal)} kcal · {Math.round(m.protein_g)}P</span>
+              </div>
+            ))}
+            {mealPlan.note && <p className="text-xs text-[#52525B] italic pt-1 border-t border-[#18181B]">{mealPlan.note}</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TargetsEditor({
+  date, targets, onSaved,
+}: {
+  date: string;
+  targets: FoodTargetsResponse | undefined;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const active = targets?.active;
+  const sug = targets?.suggestion;
+  const [targetKcal, setTargetKcal] = useState<string>("");
+  const [proteinG, setProteinG] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+
+  function openEditor() {
+    setTargetKcal(String(active?.target_kcal ?? sug?.target_kcal ?? ""));
+    setProteinG(String(active?.protein_g ?? sug?.protein_g ?? ""));
+    setOpen(true);
+  }
+
+  async function save() {
+    const tk = parseFloat(targetKcal);
+    const pg = parseFloat(proteinG);
+    if (!tk || !pg) return;
+    setSaving(true);
+    try {
+      await foodApi.putTargets({
+        effective_date: date,
+        target_kcal: tk,
+        protein_g: pg,
+        maintenance_kcal: sug?.maintenance_kcal ?? undefined,
+        deficit_kcal: sug?.maintenance_kcal ? sug.maintenance_kcal - tk : undefined,
+        basis_weight_kg: sug?.basis_weight_kg ?? undefined,
+      });
+      onSaved();
+      setOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCls =
+    "w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] tabular-nums focus:outline-none focus:border-[#3F3F46]";
+
+  return (
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs text-[#52525B] uppercase tracking-widest">Daily target</p>
+          <p className="text-sm text-[#FAFAFA] tabular-nums mt-0.5">
+            {active
+              ? `${Math.round(active.target_kcal)} kcal · ${Math.round(active.protein_g)}g protein`
+              : sug?.target_kcal
+              ? `suggested ${Math.round(sug.target_kcal)} kcal · ${sug.protein_g ? Math.round(sug.protein_g) : "?"}g protein`
+              : "no Garmin data yet — set manually"}
+          </p>
+          {sug?.maintenance_kcal && (
+            <p className="text-[11px] text-[#3F3F46] mt-0.5">maintenance ~{Math.round(sug.maintenance_kcal)} (Garmin 14-day avg)</p>
+          )}
+        </div>
+        <button onClick={openEditor} className="text-xs text-[#71717A] hover:text-[#A1A1AA]">edit</button>
+      </div>
+
+      {open && (
+        <div className="mt-3 pt-3 border-t border-[#18181B] space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[10px] text-[#52525B] mb-1">Target kcal</label>
+              <input type="number" value={targetKcal} onChange={(e) => setTargetKcal(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[10px] text-[#52525B] mb-1">Protein g</label>
+              <input type="number" value={proteinG} onChange={(e) => setProteinG(e.target.value)} className={inputCls} />
+            </div>
+          </div>
+          {sug?.target_kcal && (
+            <button
+              onClick={() => { setTargetKcal(String(sug.target_kcal)); setProteinG(String(sug.protein_g ?? "")); }}
+              className="text-[11px] text-[#71717A] hover:text-[#A1A1AA]"
+            >
+              use suggestion ({Math.round(sug.target_kcal)} / {sug.protein_g ? Math.round(sug.protein_g) : "?"}g)
+            </button>
+          )}
+          <button onClick={save} disabled={saving}
+            className="w-full bg-[#F59E0B] hover:bg-[#FBBF24] disabled:opacity-40 text-black font-semibold text-sm rounded-lg py-2 transition-colors">
+            {saving ? "Saving…" : "Save target"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

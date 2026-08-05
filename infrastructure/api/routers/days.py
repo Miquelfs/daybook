@@ -352,27 +352,16 @@ def upload_photo(
     except ValueError:
         raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD")
 
-    import io
-    import pillow_heif
-    import PIL.Image as Image
-    from PIL import ImageOps
+    from infrastructure.api.image_utils import process_image_to_jpeg
 
     content = file.file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    pillow_heif.register_heif_opener()
-
     try:
-        img = Image.open(io.BytesIO(content))
-        img = ImageOps.exif_transpose(img)
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        jpeg_bytes = buf.getvalue()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Image conversion failed: {e}")
+        jpeg_bytes = process_image_to_jpeg(content)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
     filename = f"{date_str}.jpg"
     dest = PHOTOS_DIR / filename

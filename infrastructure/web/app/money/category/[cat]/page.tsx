@@ -39,14 +39,6 @@ export default async function CategoryPage({ params, searchParams }: Props) {
           </Link>
           <div className="flex items-center gap-4">
             <span className="text-xs text-[#52525B] uppercase tracking-widest">{monthLabel}</span>
-            {category.toLowerCase() === "groceries" && (
-              <Link
-                href="/money/groceries"
-                className="text-xs text-[#F59E0B] hover:text-[#FCD34D] transition-colors uppercase tracking-widest"
-              >
-                Pantry & receipts →
-              </Link>
-            )}
           </div>
         </div>
         <div className="flex items-center gap-3">

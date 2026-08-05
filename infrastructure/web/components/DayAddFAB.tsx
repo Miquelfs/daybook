@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { X, Plus, UtensilsCrossed, Tv, BookOpen, Music } from "lucide-react";
+import { X, Plus, UtensilsCrossed, Tv, BookOpen, Music, Apple } from "lucide-react";
 import { api, type RestaurantIn } from "@/lib/api";
 import { showsApi, type ShowIn } from "@/lib/shows-api";
 import { booksApi, type BookIn } from "@/lib/books-api";
 import { songsApi, type SongIn } from "@/lib/songs-api";
+import { FoodEntryComposer } from "@/components/FoodEntryComposer";
 
-type Mode = "restaurant" | "show" | "book" | "song";
+type Mode = "food" | "restaurant" | "show" | "book" | "song";
 
 function RestaurantForm({ date, onDone }: { date: string; onDone: () => void }) {
   const qc = useQueryClient();
@@ -334,6 +335,7 @@ function SongForm({ date, onDone }: { date: string; onDone: () => void }) {
 }
 
 const MODE_META: Record<Mode, { label: string; icon: React.ReactNode; color: string }> = {
+  food:       { label: "Food", icon: <Apple size={15} />, color: "text-amber-400" },
   restaurant: { label: "Restaurant", icon: <UtensilsCrossed size={15} />, color: "text-orange-400" },
   show:       { label: "Show / Movie", icon: <Tv size={15} />, color: "text-blue-400" },
   book:       { label: "Book", icon: <BookOpen size={15} />, color: "text-emerald-400" },
@@ -342,7 +344,7 @@ const MODE_META: Record<Mode, { label: string; icon: React.ReactNode; color: str
 
 export function DayAddFAB({ date }: { date: string }) {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<Mode>("restaurant");
+  const [mode, setMode] = useState<Mode>("food");
 
   function close() { setOpen(false); }
 
@@ -389,6 +391,7 @@ export function DayAddFAB({ date }: { date: string }) {
               </div>
 
               {/* Form */}
+              {mode === "food"       && <FoodEntryComposer date={date} onDone={close} />}
               {mode === "restaurant" && <RestaurantForm date={date} onDone={close} />}
               {mode === "show"       && <ShowForm date={date} onDone={close} />}
               {mode === "book"       && <BookForm date={date} onDone={close} />}

@@ -15,6 +15,7 @@ import { DayRestaurants } from "@/components/DayRestaurants";
 import { DayShows } from "@/components/DayShows";
 import { DayBooks } from "@/components/DayBooks";
 import { DaySongs } from "@/components/DaySongs";
+import { DayFood } from "@/components/DayFood";
 import { PhotoOfDay } from "@/components/PhotoOfDay";
 import { ScreenTimeBlock } from "@/components/ScreenTimeBlock";
 import { ApiOffline } from "@/components/ApiOffline";
@@ -98,6 +99,8 @@ export async function DayView({ date }: { date: string }) {
         <DayFlights date={date} />
 
         <DaySpendSummary date={date} />
+
+        <DayFood date={date} />
 
         <DayRestaurants date={date} />
         <DayShows date={date} />

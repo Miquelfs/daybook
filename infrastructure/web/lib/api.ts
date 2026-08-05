@@ -946,50 +946,6 @@ export type MovementStats = {
   summary: { total_km: number; avg_km_per_day: number; max_km: number; days_tracked: number } | Record<string, never>;
 };
 
-export type PantryItem = {
-  id: string;
-  mercadona_id: string | null;
-  name: string;
-  unit: string | null;
-  category: string | null;
-  is_active: number;
-  created_at: string;
-  latest_price: number | null;
-  price_date: string | null;
-};
-
-export type PricePoint = {
-  date: string;
-  price_eur: number;
-  unit_price: number | null;
-  store: string;
-};
-
-export type GroceryPurchase = {
-  id: string;
-  date: string;
-  total_eur: number | null;
-  store: string;
-  source: string;
-  item_count: number;
-};
-
-export type MealPlanMeal = {
-  day: string;
-  name: string;
-  ingredients: { name: string; qty: string; estimated_eur: number }[];
-  meal_cost_eur: number;
-  notes?: string;
-};
-
-export type MealPlan = {
-  plan_id: string;
-  week_start: string;
-  meals: MealPlanMeal[];
-  total_estimated_eur: number;
-  shopping_list: { name: string; qty: string; estimated_eur: number }[];
-};
-
 export const api = {
   day: (date: string) => get<DayDetail>(`/days/${date}`),
   today: () => get<DayDetail>("/days/today"),
@@ -1386,51 +1342,6 @@ export const api = {
   deleteDecision: async (id: string): Promise<void> => {
     const res = await fetch(`${PROXY_BASE}/api/decisions/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`deleteDecision failed ${res.status}`);
-  },
-
-  // ─── Groceries ────────────────────────────────────────────────────────────
-
-  pantryItems: (activeOnly = true) =>
-    get<PantryItem[]>(`/groceries/pantry?active_only=${activeOnly}`),
-
-  addPantryItem: async (body: { name: string; mercadona_id?: string; unit?: string; category?: string }): Promise<PantryItem> => {
-    const res = await fetch(`${PROXY_BASE}/api/groceries/pantry`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`addPantryItem failed ${res.status}`);
-    return res.json();
-  },
-
-  deletePantryItem: async (itemId: string): Promise<void> => {
-    const res = await fetch(`${PROXY_BASE}/api/groceries/pantry/${itemId}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`deletePantryItem failed ${res.status}`);
-  },
-
-  priceHistory: (itemId: string, days = 90) =>
-    get<{ item: PantryItem; history: PricePoint[] }>(`/groceries/prices/${itemId}/history?days=${days}`),
-
-  syncPrices: async (): Promise<{ synced: number; skipped: number; errors: number }> => {
-    const res = await fetch(`${PROXY_BASE}/api/groceries/prices/sync`, { method: "POST" });
-    if (!res.ok) throw new Error(`syncPrices failed ${res.status}`);
-    return res.json();
-  },
-
-  groceryPurchases: (month?: string) =>
-    get<GroceryPurchase[]>(`/groceries/purchases${month ? `?month=${month}` : ""}`),
-
-  latestMealPlan: () =>
-    get<{ plan: MealPlan | null }>("/groceries/meal-plan/latest"),
-
-  generateMealPlan: async (body: { meals: number; budget_eur: number; constraints?: string }): Promise<MealPlan> => {
-    const res = await fetch(`${PROXY_BASE}/api/groceries/meal-plan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`generateMealPlan failed ${res.status}`);
-    return res.json();
   },
 };
 
