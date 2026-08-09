@@ -1,15 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid,
 } from "recharts";
 import { format, parseISO, subDays, addDays } from "date-fns";
-import { ChevronLeft, ChevronRight, Trash2, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Trash2, Sparkles, AlertTriangle, UtensilsCrossed } from "lucide-react";
 import {
-  foodApi, type FoodEntry, type FoodSummary, type FoodTargetsResponse, type MealPlan,
+  foodApi, type FoodEntry, type FoodSummary, type FoodTargetsResponse, type FoodCoach,
 } from "@/lib/food-api";
+import { groupByMeal } from "@/lib/food-meals";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
 import { WeightSection } from "@/components/health/WeightSection";
 import { WaterTracker } from "@/components/WaterTracker";
@@ -76,8 +78,16 @@ export function FoodDashboard() {
   const qc = useQueryClient();
   const today = format(new Date(), "yyyy-MM-dd");
   const [date, setDate] = useState(today);
-  const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
-  const [planning, setPlanning] = useState(false);
+  const [coaching, setCoaching] = useState(false);
+
+  const { data: coachResp } = useQuery<{ coach: FoodCoach } | null>({
+    queryKey: ["food-coach", date],
+    queryFn: async () => {
+      try { return await foodApi.coach(date); } catch { return null; }
+    },
+    staleTime: 0,
+  });
+  const coach = coachResp?.coach ?? null;
 
   const { data: targets } = useQuery<FoodTargetsResponse>({
     queryKey: ["food-targets", date],
@@ -125,15 +135,15 @@ export function FoodDashboard() {
     qc.invalidateQueries({ queryKey: ["food-week"] });
   }
 
-  async function generatePlan() {
-    setPlanning(true);
+  async function generateCoach() {
+    setCoaching(true);
     try {
-      const res = await foodApi.generateMealPlan(date);
-      setMealPlan(res.plan);
+      await foodApi.generateCoach(date);
+      qc.invalidateQueries({ queryKey: ["food-coach", date] });
     } catch {
-      setMealPlan({ meals: [], note: "AI meal planning is unavailable right now." });
+      // leave prior coach output in place
     } finally {
-      setPlanning(false);
+      setCoaching(false);
     }
   }
 
@@ -143,26 +153,31 @@ export function FoodDashboard() {
 
   return (
     <div className="space-y-8">
-      {/* Header + date nav */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-[#FAFAFA]">Food</h1>
-          <p className="text-xs text-[#52525B]">{format(parseISO(date), "EEEE d MMM yyyy")}</p>
-        </div>
-        <div className="flex items-center gap-1">
-          <button onClick={() => setDate(format(subDays(parseISO(date), 1), "yyyy-MM-dd"))} className="p-2 rounded-lg hover:bg-[#18181B]">
-            <ChevronLeft size={16} className="text-[#71717A]" />
-          </button>
-          {date !== today && (
-            <button onClick={() => setDate(today)} className="text-xs text-[#71717A] hover:text-[#A1A1AA] px-2">today</button>
-          )}
-          <button
-            onClick={() => setDate(format(addDays(parseISO(date), 1), "yyyy-MM-dd"))}
-            disabled={date >= today}
-            className="p-2 rounded-lg hover:bg-[#18181B] disabled:opacity-30"
-          >
-            <ChevronRight size={16} className="text-[#71717A]" />
-          </button>
+      {/* Header + date nav — matches the other top-level screens */}
+      <div>
+        <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
+          ← Today
+        </Link>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Food</h1>
+            <p className="text-xs text-[#52525B] mt-0.5">{format(parseISO(date), "EEEE d MMM yyyy")}</p>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setDate(format(subDays(parseISO(date), 1), "yyyy-MM-dd"))} className="p-2 rounded-lg hover:bg-[#18181B]">
+              <ChevronLeft size={16} className="text-[#71717A]" />
+            </button>
+            {date !== today && (
+              <button onClick={() => setDate(today)} className="text-xs text-[#71717A] hover:text-[#A1A1AA] px-2">today</button>
+            )}
+            <button
+              onClick={() => setDate(format(addDays(parseISO(date), 1), "yyyy-MM-dd"))}
+              disabled={date >= today}
+              className="p-2 rounded-lg hover:bg-[#18181B] disabled:opacity-30"
+            >
+              <ChevronRight size={16} className="text-[#71717A]" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -248,50 +263,94 @@ export function FoodDashboard() {
         <FoodEntryComposer date={date} />
       </div>
 
-      {/* Entries */}
+      {/* Entries grouped by meal */}
       {entries.length > 0 && (
-        <div>
-          <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">{entries.length} item{entries.length !== 1 ? "s" : ""}</p>
-          <div className="flex flex-col gap-2">
-            {entries.map((e) => (
-              <div key={e.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[#FAFAFA] truncate">{e.description}</p>
-                  <p className="text-xs text-[#52525B] tabular-nums">
-                    {Math.round(e.kcal)} kcal · {Math.round(e.protein_g)}P / {Math.round(e.carbs_g)}C / {Math.round(e.fat_g)}F
-                    {e.meal_type && <span className="text-[#3F3F46]"> · {e.meal_type}</span>}
-                  </p>
+        <div className="space-y-4">
+          {groupByMeal(entries).map((g) => {
+            const gk = g.items.reduce((a, e) => a + e.kcal, 0);
+            const gp = g.items.reduce((a, e) => a + e.protein_g, 0);
+            return (
+              <div key={g.key}>
+                <div className="flex items-baseline justify-between mb-2">
+                  <span className="text-xs text-[#52525B] uppercase tracking-widest">{g.emoji} {g.label}</span>
+                  <span className="text-xs text-[#52525B] tabular-nums">{Math.round(gk)} kcal · {Math.round(gp)}g P</span>
                 </div>
-                <button onClick={() => del(e.id)} className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
-                  <Trash2 size={14} className="text-[#52525B]" />
-                </button>
+                <div className="flex flex-col gap-2">
+                  {g.items.map((e) => (
+                    <div key={e.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[#FAFAFA] truncate">{e.description}</p>
+                        <p className="text-xs text-[#52525B] tabular-nums">
+                          {Math.round(e.kcal)} kcal · {Math.round(e.protein_g)}P / {Math.round(e.carbs_g)}C / {Math.round(e.fat_g)}F
+                          {e.sugar_g > 0 && ` · ${Math.round(e.sugar_g)}g sugar`}
+                        </p>
+                      </div>
+                      <button onClick={() => del(e.id)} className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
+                        <Trash2 size={14} className="text-[#52525B]" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
       )}
 
-      {/* AI meal plan */}
+      {/* AI coach: what to eat next + foods to watch */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-xs text-[#52525B] uppercase tracking-widest">What to eat next</p>
-          <button onClick={generatePlan} disabled={planning}
+          <p className="text-xs text-[#52525B] uppercase tracking-widest">Coach · what to eat next</p>
+          <button onClick={generateCoach} disabled={coaching}
             className="flex items-center gap-1.5 text-xs text-[#F59E0B] hover:text-[#FBBF24] disabled:opacity-40">
-            <Sparkles size={13} /> {planning ? "Thinking…" : "Suggest"}
+            <Sparkles size={13} /> {coaching ? "Thinking…" : coach ? "Refresh" : "Suggest"}
           </button>
         </div>
-        {mealPlan && (
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-2">
-            {mealPlan.meals?.map((m, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-[#FAFAFA]">{m.name}</p>
-                  {m.why && <p className="text-xs text-[#52525B]">{m.why}</p>}
+
+        {!coach && !coaching && (
+          <p className="text-xs text-[#3F3F46]">Tap Suggest for an AI meal recommendation and foods to watch, based on your target and recent eating.</p>
+        )}
+
+        {coach && (
+          <div className="space-y-3">
+            {coach.next_meal && (
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <UtensilsCrossed size={16} className="text-[#F59E0B] mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-[#FAFAFA]">{coach.next_meal.name}</p>
+                    {coach.next_meal.why && <p className="text-xs text-[#71717A] mt-0.5">{coach.next_meal.why}</p>}
+                    {coach.alternatives && coach.alternatives.length > 0 && (
+                      <p className="text-xs text-[#52525B] mt-1.5">
+                        or: {coach.alternatives.map((a) => a.name).join(" · ")}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-xs text-[#A1A1AA] tabular-nums shrink-0">
+                    {Math.round(coach.next_meal.kcal)} kcal · {Math.round(coach.next_meal.protein_g)}P
+                  </span>
                 </div>
-                <span className="text-xs text-[#71717A] tabular-nums shrink-0">{Math.round(m.kcal)} kcal · {Math.round(m.protein_g)}P</span>
               </div>
-            ))}
-            {mealPlan.note && <p className="text-xs text-[#52525B] italic pt-1 border-t border-[#18181B]">{mealPlan.note}</p>}
+            )}
+
+            {coach.avoid && coach.avoid.length > 0 && (
+              <div className="bg-[#F87171]/5 border border-[#F87171]/20 rounded-xl p-4 space-y-2">
+                <p className="text-xs text-[#F87171] uppercase tracking-widest flex items-center gap-1.5">
+                  <AlertTriangle size={12} /> Watch out
+                </p>
+                {coach.avoid.map((a, i) => (
+                  <div key={i} className="text-sm">
+                    <span className="text-[#FAFAFA] font-medium">{a.item}</span>
+                    <span className="text-[#71717A]"> — {a.reason}</span>
+                    {a.swap && <span className="text-[#34D399]"> → try {a.swap}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {coach.tip && (
+              <p className="text-xs text-[#71717A] italic">{coach.tip}</p>
+            )}
           </div>
         )}
       </div>

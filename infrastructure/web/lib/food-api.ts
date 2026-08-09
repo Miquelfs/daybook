@@ -189,6 +189,23 @@ export interface MealPlan {
   note?: string;
 }
 
+export interface RecentFood {
+  description: string;
+  meal_type: string | null;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  sugar_g: number;
+}
+
+export interface FoodCoach {
+  next_meal?: { name: string; kcal: number; protein_g: number; why: string };
+  alternatives?: { name: string; kcal: number; protein_g: number }[];
+  avoid?: { item: string; reason: string; swap: string }[];
+  tip?: string;
+}
+
 // ── API ───────────────────────────────────────────────────────────────────────
 
 export const foodApi = {
@@ -246,5 +263,16 @@ export const foodApi = {
     const qs = new URLSearchParams({ date });
     if (preferences) qs.set("preferences", preferences);
     return proxyPost(`/api/food/meal-plan/generate?${qs.toString()}`);
+  },
+
+  recent: (limit = 8): Promise<RecentFood[]> => get(`/food/recent?limit=${limit}`),
+
+  coach: (date: string): Promise<{ date: string; coach: FoodCoach; model: string; generated_at: string }> =>
+    get(`/food/coach?date=${date}`),
+
+  generateCoach: (date: string, preferences?: string): Promise<{ date: string; coach: FoodCoach }> => {
+    const qs = new URLSearchParams({ date });
+    if (preferences) qs.set("preferences", preferences);
+    return proxyPost(`/api/food/coach/generate?${qs.toString()}`);
   },
 };

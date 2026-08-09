@@ -143,6 +143,15 @@ def migrate(conn):
             ml         REAL NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         );
+
+        CREATE TABLE IF NOT EXISTS food_coach (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            date         TEXT NOT NULL,
+            coach_json   TEXT NOT NULL,        -- {next_meal, alternatives, avoid, tip}
+            model        TEXT,
+            generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_food_coach_date ON food_coach(date);
     """)
 
     # Idempotent column adds for DBs created before a column existed.

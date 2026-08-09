@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2, ChevronDown, Utensils } from "lucide-react";
+import { Trash2, ChevronDown, Utensils, ArrowUpRight } from "lucide-react";
 import { foodApi, type FoodEntry, type FoodSummary } from "@/lib/food-api";
+import { groupByMeal } from "@/lib/food-meals";
 import { SectionLabel } from "@/components/MorningBrief";
 import { WaterTracker } from "@/components/WaterTracker";
 
@@ -50,6 +52,9 @@ export function DayFood({ date }: { date: string }) {
     <section>
       <div className="flex items-center justify-between mb-2">
         <SectionLabel>Food &amp; water</SectionLabel>
+        <Link href="/food" className="flex items-center gap-0.5 text-xs text-[#71717A] hover:text-[#F59E0B] uppercase tracking-widest transition-colors">
+          Open <ArrowUpRight size={12} />
+        </Link>
       </div>
 
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
@@ -87,22 +92,26 @@ export function DayFood({ date }: { date: string }) {
           <WaterTracker date={date} compact />
         </div>
 
-        {/* Expanded: entries + burn/net */}
+        {/* Expanded: entries grouped by meal + burn/net */}
         {open && entries.length > 0 && (
-          <div className="px-4 pb-3 pt-1 border-t border-[#18181B] space-y-2">
-            {entries.map((e) => (
-              <div key={e.id} className="flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-[#FAFAFA] truncate">{e.description}</p>
-                  <p className="text-xs text-[#52525B] tabular-nums">
-                    {Math.round(e.kcal)} kcal · {Math.round(e.protein_g)}P / {Math.round(e.carbs_g)}C / {Math.round(e.fat_g)}F
-                    {e.sugar_g > 0 && ` · ${Math.round(e.sugar_g)}g sugar`}
-                    {e.meal_type && <span className="text-[#3F3F46]"> · {e.meal_type}</span>}
-                  </p>
-                </div>
-                <button onClick={() => del(e.id)} className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
-                  <Trash2 size={14} className="text-[#52525B]" />
-                </button>
+          <div className="px-4 pb-3 pt-1 border-t border-[#18181B] space-y-3">
+            {groupByMeal(entries).map((g) => (
+              <div key={g.key} className="space-y-1.5">
+                <p className="text-[10px] text-[#52525B] uppercase tracking-widest">{g.emoji} {g.label}</p>
+                {g.items.map((e) => (
+                  <div key={e.id} className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-[#FAFAFA] truncate">{e.description}</p>
+                      <p className="text-xs text-[#52525B] tabular-nums">
+                        {Math.round(e.kcal)} kcal · {Math.round(e.protein_g)}P / {Math.round(e.carbs_g)}C / {Math.round(e.fat_g)}F
+                        {e.sugar_g > 0 && ` · ${Math.round(e.sugar_g)}g sugar`}
+                      </p>
+                    </div>
+                    <button onClick={() => del(e.id)} className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
+                      <Trash2 size={14} className="text-[#52525B]" />
+                    </button>
+                  </div>
+                ))}
               </div>
             ))}
             {summary?.net_vs_burn_kcal != null && (

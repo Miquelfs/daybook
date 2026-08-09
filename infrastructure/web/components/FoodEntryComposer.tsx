@@ -1,9 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Sparkles, X } from "lucide-react";
-import { foodApi, type AnalyzeItem } from "@/lib/food-api";
+import { foodApi, type AnalyzeItem, type RecentFood } from "@/lib/food-api";
 
 const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack", "extra"];
 
@@ -30,6 +30,30 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
   const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { data: recent = [] } = useQuery<RecentFood[]>({
+    queryKey: ["food-recent"],
+    queryFn: () => foodApi.recent(8),
+    staleTime: 60_000,
+  });
+
+  function invalidate() {
+    qc.invalidateQueries({ queryKey: ["day-food", date] });
+    qc.invalidateQueries({ queryKey: ["food-summary", date] });
+    qc.invalidateQueries({ queryKey: ["food-week"] });
+    qc.invalidateQueries({ queryKey: ["food-recent"] });
+  }
+
+  async function quickLog(r: RecentFood) {
+    await foodApi.create({
+      date,
+      description: r.description,
+      meal_type: (mealType || r.meal_type) || undefined,
+      source: "text",
+      kcal: r.kcal, protein_g: r.protein_g, carbs_g: r.carbs_g, fat_g: r.fat_g, sugar_g: r.sugar_g,
+    });
+    invalidate();
+  }
 
   async function analyze() {
     if (!text.trim() && !file) return;
@@ -114,6 +138,26 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
 
   return (
     <div className="space-y-3">
+      {!items && recent.length > 0 && (
+        <div>
+          <p className="text-[11px] text-[#52525B] mb-1.5">Quick add (recent)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {recent.map((r, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => quickLog(r)}
+                title={`${Math.round(r.kcal)} kcal · ${Math.round(r.protein_g)}g protein`}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-[#18181B] border border-[#27272A] text-[#D4D4D8] hover:border-[#3F3F46] hover:bg-[#1F1F23] transition-colors"
+              >
+                <span className="truncate max-w-[140px]">{r.description}</span>
+                <span className="text-[#52525B] tabular-nums">{Math.round(r.kcal)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}

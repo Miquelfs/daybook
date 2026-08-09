@@ -22,7 +22,7 @@ from infrastructure.api.models.food import (
     WaterBody,
 )
 from domains.ai import ollama_client
-from domains.food import analyzer, meal_planner, targets as targets_mod
+from domains.food import analyzer, coach as coach_mod, meal_planner, targets as targets_mod
 
 router = APIRouter(prefix="/food", tags=["food"])
 
@@ -109,6 +109,23 @@ async def analyze_food(
 
 
 # ── Entries CRUD ──────────────────────────────────────────────────────────────
+
+@router.get("/recent")
+def recent_foods(limit: int = Query(8, ge=1, le=30), conn: DB = None):
+    """Distinct recently/frequently logged foods for one-tap re-logging (MFP-style)."""
+    rows = conn.execute(
+        """SELECT description, meal_type, kcal, protein_g, carbs_g, fat_g, sugar_g
+           FROM food_entries
+           WHERE id IN (SELECT MAX(id) FROM food_entries GROUP BY LOWER(TRIM(description)))
+           ORDER BY (
+               SELECT COUNT(*) FROM food_entries f2
+               WHERE LOWER(TRIM(f2.description)) = LOWER(TRIM(food_entries.description))
+           ) DESC, logged_at DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
 
 @router.get("/entries", response_model=list[FoodEntryOut])
 def list_entries(
@@ -328,26 +345,51 @@ def get_meal_plan(date: str = Query(...), conn: DB = None):
     return plan
 
 
+def _remaining_budget(conn, date: str):
+    """Remaining (kcal, protein_g) for the day, falling back to the suggestion."""
+    summary = daily_summary(date=date, conn=conn)
+    remaining_kcal = summary["remaining_kcal"]
+    remaining_protein = summary["remaining_protein_g"]
+    if remaining_kcal is None:
+        sug = targets_mod.suggest_target(conn)
+        if sug["target_kcal"] is None:
+            raise HTTPException(status_code=422, detail="Set a target first (no Garmin data to suggest one)")
+        remaining_kcal = sug["target_kcal"] - summary["consumed_kcal"]
+        remaining_protein = (sug["protein_g"] or 0) - summary["consumed_protein_g"]
+    return remaining_kcal, remaining_protein
+
+
 @router.post("/meal-plan/generate")
 def generate_meal_plan(
     date: str = Query(...),
     preferences: Optional[str] = Query(None),
     conn: DB = None,
 ):
-    summary = daily_summary(date=date, conn=conn)
-    remaining_kcal = summary["remaining_kcal"]
-    remaining_protein = summary["remaining_protein_g"]
-    if remaining_kcal is None:
-        # No target set — fall back to the suggestion so we still have a budget.
-        sug = targets_mod.suggest_target(conn)
-        if sug["target_kcal"] is None:
-            raise HTTPException(status_code=422, detail="Set a target first (no Garmin data to suggest one)")
-        remaining_kcal = sug["target_kcal"] - summary["consumed_kcal"]
-        remaining_protein = (sug["protein_g"] or 0) - summary["consumed_protein_g"]
-
-    plan = meal_planner.generate(
-        conn, date, max(remaining_kcal, 0), max(remaining_protein or 0, 0), preferences
-    )
+    rk, rp = _remaining_budget(conn, date)
+    plan = meal_planner.generate(conn, date, max(rk, 0), max(rp or 0, 0), preferences)
     if plan is None:
         raise HTTPException(status_code=503, detail="AI meal planning unavailable")
     return {"date": date, "plan": plan}
+
+
+# ── AI coach (next meal + foods to flag) ──────────────────────────────────────
+
+@router.get("/coach")
+def get_coach(date: str = Query(...), conn: DB = None):
+    result = coach_mod.latest(conn, date)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No coach output for this date")
+    return result
+
+
+@router.post("/coach/generate")
+def generate_coach(
+    date: str = Query(...),
+    preferences: Optional[str] = Query(None),
+    conn: DB = None,
+):
+    rk, rp = _remaining_budget(conn, date)
+    coach = coach_mod.generate(conn, date, max(rk, 0), max(rp or 0, 0), preferences)
+    if coach is None:
+        raise HTTPException(status_code=503, detail="AI coach unavailable")
+    return {"date": date, "coach": coach}
