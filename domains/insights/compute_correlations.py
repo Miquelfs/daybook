@@ -49,6 +49,9 @@ _STATIC_METRICS = [
     # Food (dietary intake)
     "food_kcal", "food_protein", "food_carbs", "food_fat", "food_sugar",
     "meal_count", "biggest_meal_kcal", "water_ml",
+    # All-day wellness (CIRQA)
+    "stress_peak", "stress_high_min", "energy_drained", "body_battery_low",
+    "respiration_avg", "spo2_avg",
     # Environment
     "temp_mean", "precipitation", "wind_speed_max",
     # Health extras
@@ -171,6 +174,12 @@ def _fetch(conn, key: str, start: str, end: str) -> dict[str, float]:
         "screen_unlocks":("screen_time",  "unlocks"),
         "weight":        ("weight_log",   "weight_kg"),
         "water_ml":      ("water_log",    "ml"),
+        "stress_peak":       ("wellness_daily", "stress_max"),
+        "stress_high_min":   ("wellness_daily", "stress_high_min"),
+        "energy_drained":    ("wellness_daily", "bb_drained"),
+        "body_battery_low":  ("wellness_daily", "bb_min"),
+        "respiration_avg":   ("wellness_daily", "respiration_avg"),
+        "spo2_avg":          ("wellness_daily", "spo2_avg"),
     }
     if key in _SIMPLE:
         table, col = _SIMPLE[key]

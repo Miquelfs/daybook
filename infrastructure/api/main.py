@@ -141,6 +141,10 @@ def _run_migrations() -> None:
     _conn4 = _get_conn()
     _migrate_food(_conn4)
     _conn4.close()
+    from infrastructure.db.migrate_wellness import migrate as _migrate_wellness
+    _conn5 = _get_conn()
+    _migrate_wellness(_conn5)
+    _conn5.close()
 
 
 @app.get("/")

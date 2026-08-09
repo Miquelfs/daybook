@@ -97,6 +97,11 @@ log "Syncing intraday heart rate..."
 python -m domains.health.garmin.intraday_hr_sync \
   >> "$LOG_FILE" 2>&1 || log "WARN: Intraday HR sync failed (non-fatal)"
 
+# All-day wellness (CIRQA): intraday stress, Body Battery, respiration, SpO2.
+log "Syncing all-day wellness..."
+python -m domains.health.garmin.wellness_sync \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Wellness sync failed (non-fatal)"
+
 # Load Index: compute fatigue composite for yesterday (Horizon 1).
 log "Computing Load Index..."
 python -m domains.health.compute_load_index \

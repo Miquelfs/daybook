@@ -62,6 +62,13 @@ _STATIC_CATALOG: dict[str, dict] = {
     "steps":         {"label": "Steps",             "unit": "steps",  "category": "health",     "_type": "simple", "table": "daily_stats", "col": "steps"},
     "weight":        {"label": "Weight",            "unit": "kg",     "category": "health",     "_type": "simple", "table": "weight_log",  "col": "weight_kg"},
     "active_cal":    {"label": "Active calories",   "unit": "kcal",   "category": "health",     "_type": "simple", "table": "daily_stats", "col": "active_calories"},
+    # All-day wellness (CIRQA — intraday stress / Body Battery / respiration / SpO2)
+    "stress_peak":       {"label": "Stress peak",         "unit": "0-100", "category": "wellness", "_type": "simple", "table": "wellness_daily", "col": "stress_max"},
+    "stress_high_min":   {"label": "High-stress minutes", "unit": "min",   "category": "wellness", "_type": "simple", "table": "wellness_daily", "col": "stress_high_min"},
+    "energy_drained":    {"label": "Energy drained",      "unit": "pts",   "category": "wellness", "_type": "simple", "table": "wellness_daily", "col": "bb_drained"},
+    "body_battery_low":  {"label": "Body Battery low",    "unit": "0-100", "category": "wellness", "_type": "simple", "table": "wellness_daily", "col": "bb_min"},
+    "respiration_avg":   {"label": "Respiration",         "unit": "brpm",  "category": "wellness", "_type": "simple", "table": "wellness_daily", "col": "respiration_avg"},
+    "spo2_avg":          {"label": "SpO2 (all-day)",      "unit": "%",     "category": "wellness", "_type": "simple", "table": "wellness_daily", "col": "spo2_avg"},
     # Food (dietary intake, aggregated from food_entries)
     "food_kcal":         {"label": "Calories eaten",     "unit": "kcal",  "category": "food", "_type": "food_agg", "agg": "SUM", "col": "kcal"},
     "food_protein":      {"label": "Protein eaten",      "unit": "g",     "category": "food", "_type": "food_agg", "agg": "SUM", "col": "protein_g"},
@@ -118,6 +125,7 @@ _TOP_CANDIDATES = [
     "temp_mean", "precipitation",
     "hr_daytime_avg", "hr_daytime_peak", "hr_duty_avg",
     "food_kcal", "food_protein", "food_carbs", "food_sugar", "meal_count", "biggest_meal_kcal", "water_ml",
+    "stress_peak", "stress_high_min", "energy_drained", "body_battery_low", "respiration_avg", "spo2_avg",
 ]
 
 _WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
