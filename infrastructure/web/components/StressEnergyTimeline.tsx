@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid,
+  ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea, CartesianGrid,
 } from "recharts";
 import { Activity } from "lucide-react";
 import { wellnessApi, type WellnessTimeline } from "@/lib/wellness-api";
@@ -13,12 +13,18 @@ const STRESS = "#F97316";  // orange
 const ENERGY = "#22D3EE";  // cyan (Body Battery)
 const HR = "#F87171";      // red
 
-const EVENT_COLOR: Record<string, string> = {
-  activity: "#34D399",
-  meal: "#F59E0B",
-  flight: "#60A5FA",
+const SPAN_COLOR: Record<string, string> = {
+  activity: "#34D399",  // green
+  flight: "#60A5FA",    // blue
 };
-const EVENT_EMOJI: Record<string, string> = { activity: "🏃", meal: "🍽", flight: "✈️" };
+const EVENT_COLOR: Record<string, string> = {
+  meal: "#F59E0B",
+  takeoff: "#60A5FA",
+  landing: "#3B82F6",
+};
+const EVENT_EMOJI: Record<string, string> = {
+  meal: "🍽", takeoff: "🛫", landing: "🛬", flight: "✈️", activity: "🏃",
+};
 
 function toMin(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
@@ -68,6 +74,7 @@ export function StressEnergyTimeline({ date }: { date: string }) {
   }
 
   const events = data.events.map((e) => ({ ...e, m: toMin(e.t) }));
+  const spans = (data.spans ?? []).map((s) => ({ ...s, m1: toMin(s.start), m2: toMin(s.end) }));
 
   return (
     <section>
@@ -88,8 +95,12 @@ export function StressEnergyTimeline({ date }: { date: string }) {
                 contentStyle={{ background: "#111113", border: "1px solid #27272A", borderRadius: 8, fontSize: 12 }}
                 labelFormatter={(m) => fmt(Number(m)).replace(":00", `:${String(Number(m) % 60).padStart(2, "0")}`)}
               />
+              {spans.map((s, i) => (
+                <ReferenceArea key={`s${i}`} yAxisId="pct" x1={s.m1} x2={s.m2}
+                  fill={SPAN_COLOR[s.type] ?? "#3F3F46"} fillOpacity={0.1} stroke={SPAN_COLOR[s.type] ?? "#3F3F46"} strokeOpacity={0.25} />
+              ))}
               {events.map((e, i) => (
-                <ReferenceLine key={i} yAxisId="pct" x={e.m} stroke={EVENT_COLOR[e.type] ?? "#3F3F46"} strokeOpacity={0.5} strokeWidth={1} />
+                <ReferenceLine key={`e${i}`} yAxisId="pct" x={e.m} stroke={EVENT_COLOR[e.type] ?? "#3F3F46"} strokeOpacity={0.55} strokeWidth={1} strokeDasharray={e.type === "meal" ? "3 3" : undefined} />
               ))}
               <Line yAxisId="pct" dataKey="stress" name="Stress" stroke={STRESS} dot={false} strokeWidth={1.5} connectNulls />
               <Line yAxisId="pct" dataKey="bb" name="Energy" stroke={ENERGY} dot={false} strokeWidth={1.5} connectNulls />
@@ -104,11 +115,16 @@ export function StressEnergyTimeline({ date }: { date: string }) {
           <span className="flex items-center gap-1 text-[#71717A]"><span className="w-2 h-2 rounded-full" style={{ background: ENERGY }} /> Energy</span>
           <span className="flex items-center gap-1 text-[#71717A]"><span className="w-2 h-2 rounded-full" style={{ background: HR }} /> HR</span>
         </div>
-        {events.length > 0 && (
-          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 pt-2 border-t border-[#18181B] text-[11px] text-[#71717A]">
+        {(spans.length > 0 || events.length > 0) && (
+          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 pt-2 border-t border-[#18181B] text-[11px]">
+            {spans.map((s, i) => (
+              <span key={`s${i}`} className="tabular-nums" style={{ color: SPAN_COLOR[s.type] ?? "#71717A" }}>
+                {EVENT_EMOJI[s.type] ?? "•"} {s.start}–{s.end} {s.label}
+              </span>
+            ))}
             {events.map((e, i) => (
-              <span key={i} className="tabular-nums">
-                {e.t} {EVENT_EMOJI[e.type] ?? "•"} {e.label}
+              <span key={`e${i}`} title={e.detail ?? e.label} className="tabular-nums text-[#71717A]">
+                {EVENT_EMOJI[e.type] ?? "•"} {e.t} {e.label}
               </span>
             ))}
           </div>

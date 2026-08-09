@@ -12,7 +12,8 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export interface TimelinePoint { t: string; v: number }
-export interface TimelineEvent { t: string; label: string; type: string }
+export interface TimelineEvent { t: string; label: string; type: string; detail?: string }
+export interface TimelineSpan { start: string; end: string; label: string; type: string }
 
 export interface WellnessTimeline {
   date: string;
@@ -20,6 +21,7 @@ export interface WellnessTimeline {
   stress: TimelinePoint[];
   body_battery: TimelinePoint[];
   hr: TimelinePoint[];
+  spans: TimelineSpan[];
   events: TimelineEvent[];
   has_data: boolean;
 }
