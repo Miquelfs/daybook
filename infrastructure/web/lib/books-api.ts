@@ -99,11 +99,19 @@ export interface BooksStats {
   };
 }
 
+export interface BookFacets {
+  authors: string[];
+  locations: string[];
+  genres: string[];
+}
+
 // ── API ───────────────────────────────────────────────────────────────────────
 
 export const booksApi = {
   stats: (year?: number | null): Promise<BooksStats> =>
     get(`/books/stats${year ? `?year=${year}` : ""}`),
+
+  facets: (): Promise<BookFacets> => get(`/books/facets`),
 
   list: (params?: { year?: number; date?: string; genre?: string; author?: string }): Promise<Book[]> => {
     const qs = new URLSearchParams();

@@ -38,6 +38,7 @@ from infrastructure.api.routers import ai as ai_module
 from infrastructure.api.routers import race_plans as race_plans_module
 from infrastructure.api.routers import nutrition as nutrition_module
 from infrastructure.api.routers import food as food_module
+from infrastructure.api.routers import wellness as wellness_module
 
 VERSION = "0.1.0"
 ROOT = Path(__file__).parents[2]
@@ -99,6 +100,7 @@ app.include_router(ai_module.router)
 app.include_router(race_plans_module.router)
 app.include_router(nutrition_module.router)
 app.include_router(food_module.router)
+app.include_router(wellness_module.router)
 
 _photos_dir = ROOT / "data" / "photos"
 _photos_dir.mkdir(parents=True, exist_ok=True)

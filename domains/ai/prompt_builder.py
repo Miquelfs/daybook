@@ -31,6 +31,7 @@ def morning_brief(
     last_intention: Optional[str],
     todays_session: Optional[dict] = None,
     tags: Optional[list] = None,
+    recovery: Optional[dict] = None,
 ) -> str:
     """
     Builds the 6am morning brief prompt.
@@ -52,7 +53,7 @@ def morning_brief(
     )
 
     fatigue = round(load_index.get("fatigue_score") or 0) or "unknown"
-    recovery = load_index.get("recovery_status") or "unknown"
+    recovery_status = load_index.get("recovery_status") or "unknown"
 
     energy_yd = yesterday.get("energy") or "unknown"
     mood_yd = yesterday.get("mood") or "unknown"
@@ -74,6 +75,13 @@ def morning_brief(
     intention_line = f"\nLast night's intention: {last_intention}" if last_intention else ""
     tags_line = f"\nYesterday you did / logged: {', '.join(tags)}" if tags else ""
 
+    recovery_line = ""
+    if recovery and recovery.get("status") in ("watch", "flag") and recovery.get("reasons"):
+        recovery_line = (
+            f"\nRecovery flag ({recovery['status'].upper()}): {', '.join(recovery['reasons'])} "
+            "— possible illness or overreach."
+        )
+
     session_line = ""
     if todays_session:
         fuel = todays_session.get("fueling") or {}
@@ -89,6 +97,7 @@ def morning_brief(
 
     return f"""You are a concise personal daily assistant. Write a warm, grounded morning brief in 3-4 sentences using the data below.
 Mention the most notable numbers, flag anything worth attention (low HRV, poor sleep, high fatigue), and end with one actionable suggestion for the day.
+If a "Recovery flag" line is present below, lead with it and advise an easier day / monitoring for illness.
 If there's a training session today, mention it and (if fuelling is given) a one-line fuelling reminder.
 Reference what you actually did yesterday (from the "Yesterday you did / logged" list) — name one or two of the notable activities and connect them to today's state or suggestion (e.g. a hard training day → recovery focus, a late night or nap → energy, alcohol/travel → hydration).
 Address the reader directly as "you". Do not start with "Good morning". Do not repeat all numbers — pick the most meaningful ones.
@@ -100,7 +109,7 @@ Yesterday: energy {energy_yd}/10, mood {mood_yd}/10{tags_line}
 Sleep last night: {sleep_dur}, score {sleep_score}/100, deep {deep_pct}, REM {rem_pct}
 HRV: {hrv_val}ms (weekly avg {hrv_weekly}ms)
 Resting HR: {resting_hr}bpm | Steps: {steps} | Body battery: {body_battery}
-Load index: {fatigue}/100 ({recovery})
+Load index: {fatigue}/100 ({recovery_status}){recovery_line}
 
 This week: avg energy {avg_energy}/10{energy_trend}, avg mood {avg_mood}/10, {activity_count} workouts{f', spent €{round(total_spend, 2)}' if total_spend else ''}{intention_line}
 

@@ -187,6 +187,11 @@ def run(target_date: str, force: bool = False) -> None:
                 log.info("Brief already exists for %s — skipping (use --force to regenerate)", target_date)
                 return
         data = _fetch_data(conn, target_date, yesterday)
+        try:
+            from domains.health.recovery import recovery_flag
+            data["recovery"] = recovery_flag(conn, yesterday)
+        except Exception:
+            data["recovery"] = None
 
         prompt = build_brief_prompt(
             today=target_date,
@@ -200,6 +205,7 @@ def run(target_date: str, force: bool = False) -> None:
             last_intention=data["last_intention"],
             todays_session=data.get("todays_session"),
             tags=data.get("tags"),
+            recovery=data.get("recovery"),
         )
 
         log.info("Calling Ollama (model: %s)...", ollama_client.MODEL_FAST)

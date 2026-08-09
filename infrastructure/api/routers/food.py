@@ -22,7 +22,7 @@ from infrastructure.api.models.food import (
     WaterBody,
 )
 from domains.ai import ollama_client
-from domains.food import analyzer, coach as coach_mod, meal_planner, targets as targets_mod
+from domains.food import analytics, analyzer, coach as coach_mod, meal_planner, targets as targets_mod
 
 router = APIRouter(prefix="/food", tags=["food"])
 
@@ -250,6 +250,18 @@ def set_water(body: WaterBody, conn: DB):
     )
     conn.commit()
     return {"date": body.date, "ml": new_ml, "goal_ml": targets_mod.DEFAULT_WATER_GOAL_ML}
+
+
+# ── Streak + expenditure calibration (Caltrack-style) ─────────────────────────
+
+@router.get("/streak")
+def deficit_streak(date: str = Query(...), conn: DB = None):
+    return analytics.deficit_streak(conn, date, targets_mod.active_target)
+
+
+@router.get("/calibration")
+def expenditure_calibration(date: str = Query(...), days: int = Query(14, ge=7, le=60), conn: DB = None):
+    return analytics.expenditure_calibration(conn, date, days)
 
 
 # ── Daily summary (intake vs target vs Garmin burn) ───────────────────────────

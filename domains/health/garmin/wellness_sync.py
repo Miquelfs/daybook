@@ -98,12 +98,15 @@ def sync_date(client, conn: sqlite3.Connection, date_str: str, force: bool = Fal
 
     raw_bundle: dict = {}
     daily: dict = {"date": date_str}
+    day_offset_s = 0
 
     # ── Stress (intraday + aggregates) ────────────────────────────────────────
     try:
         s = client.get_stress_data(date_str) or {}
         raw_bundle["stress"] = s
         off = _tz_offset_s(s)
+        if off:
+            day_offset_s = off
         stress_series = _parse_pair_series(s.get("stressValuesArray"), off, 1)
         if stress_series:
             conn.executemany(
@@ -185,10 +188,11 @@ def sync_date(client, conn: sqlite3.Connection, date_str: str, force: bool = Fal
 
     _store_raw(date_str, raw_bundle)
 
+    daily["utc_offset_min"] = round(day_offset_s / 60) if day_offset_s else None
     cols = ["date", "stress_avg", "stress_max", "stress_rest_min", "stress_low_min",
             "stress_med_min", "stress_high_min", "bb_min", "bb_max", "bb_charged",
             "bb_drained", "respiration_avg", "respiration_low", "respiration_high",
-            "spo2_avg", "spo2_low", "skin_temp_dev"]
+            "spo2_avg", "spo2_low", "skin_temp_dev", "utc_offset_min"]
     conn.execute(
         f"INSERT OR REPLACE INTO wellness_daily ({','.join(cols)}) "
         f"VALUES ({','.join('?' for _ in cols)})",

@@ -51,9 +51,14 @@ def migrate(conn):
             spo2_avg         REAL,
             spo2_low         INTEGER,
             skin_temp_dev    REAL,      -- deviation from baseline °C (nullable; not in all libs)
+            utc_offset_min   INTEGER,   -- local offset for the day (localizes UTC events on the timeline)
             updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         );
     """)
+    # Idempotent add for pre-existing tables.
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(wellness_daily)")]
+    if "utc_offset_min" not in cols:
+        conn.execute("ALTER TABLE wellness_daily ADD COLUMN utc_offset_min INTEGER")
     conn.commit()
     print("wellness tables ready.")
 

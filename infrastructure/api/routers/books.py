@@ -90,6 +90,26 @@ def list_books(
     return [_row_to_book(r) for r in rows]
 
 
+@router.get("/facets")
+def get_facets(conn: DB):
+    """Distinct authors / locations / genres already in the log, for
+    autocomplete when adding or editing a book (so the same author isn't
+    re-typed three different ways)."""
+    def _distinct(col: str) -> list[str]:
+        rows = conn.execute(
+            f"SELECT DISTINCT {col} AS v FROM books "
+            f"WHERE {col} IS NOT NULL AND TRIM({col}) != '' "
+            f"ORDER BY {col} COLLATE NOCASE",
+        ).fetchall()
+        return [r["v"] for r in rows]
+
+    return {
+        "authors": _distinct("author"),
+        "locations": _distinct("location"),
+        "genres": _distinct("genre"),
+    }
+
+
 @router.get("/{book_id}", response_model=BookOut)
 def get_book(book_id: int, conn: DB):
     row = conn.execute("SELECT * FROM books WHERE id=?", (book_id,)).fetchone()

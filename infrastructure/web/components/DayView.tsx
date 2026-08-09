@@ -16,6 +16,8 @@ import { DayShows } from "@/components/DayShows";
 import { DayBooks } from "@/components/DayBooks";
 import { DaySongs } from "@/components/DaySongs";
 import { DayFood } from "@/components/DayFood";
+import { RecoveryCard } from "@/components/RecoveryCard";
+import { StressEnergyTimeline } from "@/components/StressEnergyTimeline";
 import { PhotoOfDay } from "@/components/PhotoOfDay";
 import { ScreenTimeBlock } from "@/components/ScreenTimeBlock";
 import { ApiOffline } from "@/components/ApiOffline";
@@ -86,6 +88,8 @@ export async function DayView({ date }: { date: string }) {
           aiAvailable={aiStatus?.ollama_available ?? false}
         />
 
+        <RecoveryCard date={date} />
+
         <DayTraining initialPrescription={trainingDay} date={date} />
 
         <MovementBlock
@@ -93,6 +97,8 @@ export async function DayView({ date }: { date: string }) {
           stats={day.daily_stats}
           screenTimeSlot={<ScreenTimeBlock date={date} />}
         />
+
+        <StressEnergyTimeline date={date} />
 
         <DayRosterBadge date={date} />
 

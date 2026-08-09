@@ -10,6 +10,7 @@ import { format, parseISO, subDays, addDays } from "date-fns";
 import { ChevronLeft, ChevronRight, Trash2, Sparkles, AlertTriangle, UtensilsCrossed } from "lucide-react";
 import {
   foodApi, type FoodEntry, type FoodSummary, type FoodTargetsResponse, type FoodCoach,
+  type DeficitStreak, type Calibration,
 } from "@/lib/food-api";
 import { groupByMeal } from "@/lib/food-meals";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
@@ -118,6 +119,18 @@ export function FoodDashboard() {
     staleTime: 0,
   });
 
+  const { data: streak } = useQuery<DeficitStreak>({
+    queryKey: ["food-streak", date],
+    queryFn: () => foodApi.streak(date),
+    staleTime: 30_000,
+  });
+
+  const { data: calib } = useQuery<Calibration>({
+    queryKey: ["food-calibration", date],
+    queryFn: () => foodApi.calibration(date, 14),
+    staleTime: 60_000,
+  });
+
   const activeTarget = targets?.active;
   const targetKcal = summary?.target_kcal ?? activeTarget?.target_kcal ?? null;
   const proteinTarget = summary?.protein_target_g ?? activeTarget?.protein_g ?? null;
@@ -160,7 +173,14 @@ export function FoodDashboard() {
         </Link>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Food</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-semibold tracking-tight">Food</h1>
+              {streak && streak.current > 0 && (
+                <span className="text-xs font-semibold text-[#F59E0B] bg-[#F59E0B]/10 rounded-full px-2 py-0.5 tabular-nums">
+                  🔥 {streak.current}-day{streak.best > streak.current ? ` · best ${streak.best}` : ""}
+                </span>
+              )}
+            </div>
             <p className="text-xs text-[#52525B] mt-0.5">{format(parseISO(date), "EEEE d MMM yyyy")}</p>
           </div>
           <div className="flex items-center gap-1">
@@ -250,6 +270,26 @@ export function FoodDashboard() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Expenditure calibration — predicted vs actual weight change */}
+      {calib?.enough && calib.actual_kg != null && (
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+          <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">Calibration · last {calib.window_days}d</p>
+          <div className="flex items-center justify-between text-sm tabular-nums">
+            <span className="text-[#71717A]">Predicted <span className="text-[#A1A1AA]">{calib.predicted_kg} kg</span></span>
+            <span className="text-[#71717A]">Actual <span className="text-[#FAFAFA] font-semibold">{calib.actual_kg} kg</span></span>
+          </div>
+          {calib.maintenance_adjust_kcal != null && Math.abs(calib.maintenance_adjust_kcal) >= 75 && (
+            <p className="text-xs text-[#52525B] mt-2 pt-2 border-t border-[#18181B]">
+              Your real maintenance looks{" "}
+              <span className={calib.maintenance_adjust_kcal > 0 ? "text-[#34D399]" : "text-[#F87171]"}>
+                ~{Math.abs(calib.maintenance_adjust_kcal)} kcal {calib.maintenance_adjust_kcal > 0 ? "higher" : "lower"}
+              </span>{" "}
+              than modeled — you can {calib.maintenance_adjust_kcal > 0 ? "eat a bit more" : "tighten the target"} and still hit your rate.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Weight — the fat-loss metric lives here now */}
       <WeightSection />

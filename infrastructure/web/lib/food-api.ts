@@ -206,6 +206,22 @@ export interface FoodCoach {
   tip?: string;
 }
 
+export interface DeficitStreak {
+  current: number;
+  best: number;
+  avg_deficit_kcal: number | null;
+}
+
+export interface Calibration {
+  enough: boolean;
+  days_counted: number;
+  window_days?: number;
+  avg_daily_net_kcal?: number;
+  predicted_kg?: number;
+  actual_kg?: number | null;
+  maintenance_adjust_kcal?: number | null;
+}
+
 // ── API ───────────────────────────────────────────────────────────────────────
 
 export const foodApi = {
@@ -264,6 +280,11 @@ export const foodApi = {
     if (preferences) qs.set("preferences", preferences);
     return proxyPost(`/api/food/meal-plan/generate?${qs.toString()}`);
   },
+
+  streak: (date: string): Promise<DeficitStreak> => get(`/food/streak?date=${date}`),
+
+  calibration: (date: string, days = 14): Promise<Calibration> =>
+    get(`/food/calibration?date=${date}&days=${days}`),
 
   recent: (limit = 8): Promise<RecentFood[]> => get(`/food/recent?limit=${limit}`),
 
