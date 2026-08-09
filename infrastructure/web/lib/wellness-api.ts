@@ -59,4 +59,6 @@ export const wellnessApi = {
   recovery: (date: string): Promise<RecoveryFlag> => get(`/wellness/recovery?date=${date}`),
   flightPhases: (date: string): Promise<FlightPhases> => get(`/wellness/flight-phases?date=${date}`),
   stressByPlace: (date: string): Promise<StressByPlace> => get(`/wellness/stress-by-place?date=${date}`),
+  flightPhase: (flightId: string): Promise<{ flight_id: string; phase: FlightPhases["flights"][number] | null }> =>
+    get(`/wellness/flight/${flightId}`),
 };

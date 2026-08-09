@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
+import { FlightPhysioCard } from "@/components/FlightPhysioCard";
 import Link from "next/link";
 import {
   ArrowLeft, PlaneTakeoff, PlaneLanding, Clock, Users,
@@ -403,6 +404,9 @@ export default function FlightDetailPage() {
         <Row label="PIC" value={hhmm(f.pic_seconds)} />
         <Row label="First Officer (SIC)" value={hhmm(f.sic_seconds)} />
       </Section>
+
+      {/* Cirqa physiological load — computed live, never part of the logbook export */}
+      <FlightPhysioCard flightId={id} />
 
       {/* Edit flight times / crew — available on all flights */}
       {editingTimes ? (

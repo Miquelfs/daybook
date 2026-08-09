@@ -25,6 +25,7 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [mealType, setMealType] = useState("");
+  const [time, setTime] = useState(() => new Date().toTimeString().slice(0, 5)); // local HH:MM, editable
   const [items, setItems] = useState<EditItem[] | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -50,6 +51,7 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
       description: r.description,
       meal_type: (mealType || r.meal_type) || undefined,
       source: "text",
+      eaten_at: `${date}T${time}`,
       kcal: r.kcal, protein_g: r.protein_g, carbs_g: r.carbs_g, fat_g: r.fat_g, sugar_g: r.sugar_g,
     });
     invalidate();
@@ -100,6 +102,7 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
           description: it.name.trim() || "Food",
           meal_type: mealType || undefined,
           source: file ? "photo" : "text",
+          eaten_at: `${date}T${time}`,
           kcal: it.kcal,
           protein_g: it.protein_g,
           carbs_g: it.carbs_g,
@@ -173,6 +176,13 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
             <option key={m} value={m}>{m}</option>
           ))}
         </select>
+        <input
+          type="time"
+          value={time}
+          onChange={(e) => setTime(e.target.value)}
+          title="When you ate it"
+          className={`w-[92px] shrink-0 ${inputCls}`}
+        />
         <button
           type="button"
           onClick={() => fileRef.current?.click()}

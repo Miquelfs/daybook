@@ -61,6 +61,7 @@ export interface FoodEntry {
   description: string;
   meal_type: string | null;
   source: string;
+  eaten_at: string | null;
   photo_path: string | null;
   photo_url: string | null;
   kcal: number;
@@ -79,6 +80,7 @@ export interface FoodEntryIn {
   description: string;
   meal_type?: string;
   source?: string;
+  eaten_at?: string;
   kcal: number;
   protein_g: number;
   carbs_g: number;

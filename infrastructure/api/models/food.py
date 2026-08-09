@@ -7,6 +7,7 @@ class FoodEntryIn(BaseModel):
     description: str
     meal_type: Optional[str] = None       # breakfast|lunch|dinner|snack|extra
     source: str = "text"                  # text|photo|preset
+    eaten_at: Optional[str] = None        # local YYYY-MM-DDTHH:MM (when you ate it)
     kcal: float = 0
     protein_g: float = 0
     carbs_g: float = 0
@@ -21,6 +22,7 @@ class FoodEntryPatch(BaseModel):
     description: Optional[str] = None
     meal_type: Optional[str] = None
     source: Optional[str] = None
+    eaten_at: Optional[str] = None
     kcal: Optional[float] = None
     protein_g: Optional[float] = None
     carbs_g: Optional[float] = None
@@ -36,6 +38,7 @@ class FoodEntryOut(BaseModel):
     description: str
     meal_type: Optional[str]
     source: str
+    eaten_at: Optional[str]
     photo_path: Optional[str]
     photo_url: Optional[str]
     kcal: float

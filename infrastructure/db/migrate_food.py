@@ -158,6 +158,10 @@ def migrate(conn):
     _food_cols = [r[1] for r in conn.execute("PRAGMA table_info(food_entries)")]
     if "sugar_g" not in _food_cols:
         conn.execute("ALTER TABLE food_entries ADD COLUMN sugar_g REAL NOT NULL DEFAULT 0")
+    if "eaten_at" not in _food_cols:
+        # Local wall-clock time the food was eaten (YYYY-MM-DDTHH:MM), user-editable.
+        # NULL = fall back to logged_at. Powers meal-time habit tracking + the timeline.
+        conn.execute("ALTER TABLE food_entries ADD COLUMN eaten_at TEXT")
 
     # Seed crew presets only if the table is empty (never re-seed / duplicate).
     existing = conn.execute("SELECT COUNT(*) AS c FROM crew_meal_presets").fetchone()

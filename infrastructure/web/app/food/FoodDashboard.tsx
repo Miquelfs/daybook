@@ -325,6 +325,7 @@ export function FoodDashboard() {
                           {e.sugar_g > 0 && ` · ${Math.round(e.sugar_g)}g sugar`}
                         </p>
                       </div>
+                      <EntryTime entry={e} date={date} />
                       <button onClick={() => del(e.id)} className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
                         <Trash2 size={14} className="text-[#52525B]" />
                       </button>
@@ -395,6 +396,36 @@ export function FoodDashboard() {
         )}
       </div>
     </div>
+  );
+}
+
+// Show + inline-edit when a food item was eaten (drives meal-time habits + the timeline).
+function EntryTime({ entry, date }: { entry: FoodEntry; date: string }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const t = entry.eaten_at && entry.eaten_at.length >= 16 ? entry.eaten_at.slice(11, 16) : null;
+
+  async function save(newT: string) {
+    setEditing(false);
+    if (!newT) return;
+    await foodApi.update(entry.id, { eaten_at: `${date}T${newT}` });
+    qc.invalidateQueries({ queryKey: ["day-food", date] });
+    qc.invalidateQueries({ queryKey: ["wellness-timeline", date] });
+  }
+
+  if (editing) {
+    return (
+      <input type="time" defaultValue={t ?? ""} autoFocus
+        onBlur={(e) => save(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") save((e.target as HTMLInputElement).value); }}
+        className="w-[84px] shrink-0 bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#FAFAFA] tabular-nums focus:outline-none focus:border-[#3F3F46]" />
+    );
+  }
+  return (
+    <button onClick={() => setEditing(true)}
+      className="shrink-0 text-xs text-[#52525B] tabular-nums hover:text-[#A1A1AA] transition-colors">
+      {t ?? "set time"}
+    </button>
   );
 }
 

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 
 from infrastructure.api.db import get_db
 from domains.health.recovery import recovery_flag
-from domains.health.stress_context import flight_phases, stress_by_place
+from domains.health.stress_context import flight_phases, flight_phase_by_id, stress_by_place
 
 router = APIRouter(prefix="/wellness", tags=["wellness"])
 
@@ -41,6 +41,12 @@ def get_recovery(date: str = Query(...), conn: DB = None):
 @router.get("/flight-phases")
 def get_flight_phases(date: str = Query(...), conn: DB = None):
     return {"date": date, "flights": flight_phases(conn, date)}
+
+
+@router.get("/flight/{flight_id}")
+def get_flight_phase(flight_id: str, conn: DB):
+    """Physiological load for one flight — for the flight detail page."""
+    return {"flight_id": flight_id, "phase": flight_phase_by_id(conn, flight_id)}
 
 
 @router.get("/stress-by-place")
@@ -100,18 +106,21 @@ def get_timeline(date: str = Query(...), conn: DB = None):
             events.append({"t": ld, "label": f"LDG {f['arr_iata'] or ''}".strip(), "type": "landing"})
 
     # Meals → one marker per meal-type (tag only, not the food list), with total kcal on hover.
-    meal_rows = conn.execute(
-        "SELECT meal_type, MIN(logged_at) AS first_logged, ROUND(SUM(kcal)) AS kcal, COUNT(*) AS n "
-        "FROM food_entries WHERE date=? GROUP BY meal_type", (date,)
-    ).fetchall()
-    for m in meal_rows:
-        t = _local_hhmm(m["first_logged"], offset_min)
+    # Prefer the user's eaten_at (already local wall-clock); else localize logged_at.
+    meals: dict = {}
+    for m in conn.execute("SELECT meal_type, eaten_at, logged_at, kcal FROM food_entries WHERE date=?", (date,)):
+        t = m["eaten_at"][11:16] if m["eaten_at"] and len(m["eaten_at"]) >= 16 else _local_hhmm(m["logged_at"], offset_min)
         if not t:
             continue
-        tag = _MEAL_LABEL.get(m["meal_type"] or "", "Meal")
+        g = meals.setdefault(m["meal_type"] or "", {"t": t, "kcal": 0.0, "n": 0})
+        if t < g["t"]:
+            g["t"] = t
+        g["kcal"] += m["kcal"] or 0
+        g["n"] += 1
+    for key, g in meals.items():
         events.append({
-            "t": t, "label": tag, "type": "meal",
-            "detail": f"{int(m['kcal'] or 0)} kcal · {m['n']} item{'s' if m['n'] != 1 else ''}",
+            "t": g["t"], "label": _MEAL_LABEL.get(key, "Meal"), "type": "meal",
+            "detail": f"{int(g['kcal'])} kcal · {g['n']} item{'s' if g['n'] != 1 else ''}",
         })
 
     events.sort(key=lambda e: e["t"])

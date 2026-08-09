@@ -59,7 +59,7 @@ def _window_avg(series: dict[int, float], lo: int, hi: int) -> Optional[float]:
     return round(sum(vals) / len(vals), 1) if vals else None
 
 
-def flight_phases(conn, date: str) -> list[dict]:
+def _phases_for_rows(conn, date: str, rows) -> list[dict]:
     off = _offset_min(conn, date)
     hr = _series_min(conn, "intraday_hr", "heart_rate", date)
     stress = _series_min(conn, "intraday_stress", "level", date)
@@ -68,9 +68,9 @@ def flight_phases(conn, date: str) -> list[dict]:
     med_hr = statistics.median(hr.values()) if hr else None
     med_stress = statistics.median(stress.values()) if stress else None
 
-    def phase(center: Optional[int], pre: int, post: int) -> Optional[dict]:
+    def phase(center: Optional[int], pre: int, post: int) -> dict:
         if center is None:
-            return None
+            return {}
         h = _window_avg(hr, center - pre, center + post)
         s = _window_avg(stress, center - pre, center + post)
         return {
@@ -80,19 +80,36 @@ def flight_phases(conn, date: str) -> list[dict]:
         }
 
     out = []
-    for f in conn.execute(
-        "SELECT dep_iata, arr_iata, takeoff_utc, landing_utc, takeoff_crew, landing_crew "
-        "FROM flights WHERE date=? AND is_sim=0 ORDER BY takeoff_utc", (date,)
-    ):
+    for f in rows:
         tk = _iso_to_local_min(f["takeoff_utc"], off)
         ld = _iso_to_local_min(f["landing_utc"], off)
         out.append({
             "leg": f"{f['dep_iata'] or '?'}→{f['arr_iata'] or '?'}",
             "dep": f["dep_iata"], "arr": f["arr_iata"],
-            "takeoff": {**(phase(tk, 5, 10) or {}), "you_flew": f["takeoff_crew"] == PILOT_CODE},
-            "landing": {**(phase(ld, 15, 2) or {}), "you_flew": f["landing_crew"] == PILOT_CODE},
+            "takeoff": {**phase(tk, 5, 10), "you_flew": f["takeoff_crew"] == PILOT_CODE},
+            "landing": {**phase(ld, 15, 2), "you_flew": f["landing_crew"] == PILOT_CODE},
         })
     return out
+
+
+_FLIGHT_COLS = "dep_iata, arr_iata, takeoff_utc, landing_utc, takeoff_crew, landing_crew"
+
+
+def flight_phases(conn, date: str) -> list[dict]:
+    rows = conn.execute(
+        f"SELECT {_FLIGHT_COLS} FROM flights WHERE date=? AND is_sim=0 ORDER BY takeoff_utc", (date,)
+    ).fetchall()
+    return _phases_for_rows(conn, date, rows)
+
+
+def flight_phase_by_id(conn, flight_id) -> Optional[dict]:
+    f = conn.execute(
+        f"SELECT date, {_FLIGHT_COLS} FROM flights WHERE id=? AND is_sim=0", (flight_id,)
+    ).fetchone()
+    if not f:
+        return None
+    res = _phases_for_rows(conn, f["date"], [f])
+    return res[0] if res else None
 
 
 def _haversine_km(a_lat, a_lng, b_lat, b_lng) -> float:

@@ -41,6 +41,7 @@ def _row_to_entry(row: sqlite3.Row) -> FoodEntryOut:
         description=row["description"],
         meal_type=row["meal_type"],
         source=row["source"],
+        eaten_at=row["eaten_at"],
         photo_path=photo_path,
         photo_url=(f"/photos/{photo_path}" if photo_path else None),
         kcal=row["kcal"],
@@ -160,10 +161,10 @@ def create_entry(body: FoodEntryIn, conn: DB):
     conn.execute("INSERT OR IGNORE INTO days (date) VALUES (?)", (body.date,))
     cur = conn.execute(
         """INSERT INTO food_entries
-           (date, meal_type, description, source, kcal, protein_g, carbs_g, fat_g,
+           (date, meal_type, description, source, eaten_at, kcal, protein_g, carbs_g, fat_g,
             sugar_g, ai_confidence, ai_raw_json)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (body.date, body.meal_type, body.description.strip(), body.source,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (body.date, body.meal_type, body.description.strip(), body.source, body.eaten_at,
          body.kcal, body.protein_g, body.carbs_g, body.fat_g,
          body.sugar_g, body.ai_confidence, body.ai_raw_json),
     )
