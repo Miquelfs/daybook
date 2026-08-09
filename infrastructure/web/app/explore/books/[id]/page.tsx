@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { booksApi } from "@/lib/books-api";
+import { BookDetailActions } from "@/components/books/BookDetailActions";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -19,12 +20,15 @@ export default async function BookDetailPage({ params }: Props) {
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
-      <Link
-        href="/explore/books"
-        className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest mb-6 inline-block"
-      >
-        ← Books
-      </Link>
+      <div className="flex items-center justify-between mb-6">
+        <Link
+          href="/explore/books"
+          className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest inline-block"
+        >
+          ← Books
+        </Link>
+        <BookDetailActions book={book} />
+      </div>
 
       <div className="flex gap-6 mb-8">
         {/* Cover */}

@@ -5,9 +5,9 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { X, Plus, UtensilsCrossed, Tv, BookOpen, Music, Apple } from "lucide-react";
 import { api, type RestaurantIn } from "@/lib/api";
 import { showsApi, type ShowIn } from "@/lib/shows-api";
-import { booksApi, type BookIn } from "@/lib/books-api";
 import { songsApi, type SongIn } from "@/lib/songs-api";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
+import { BookForm } from "@/components/books/BookForm";
 
 type Mode = "food" | "restaurant" | "show" | "book" | "song";
 
@@ -191,70 +191,6 @@ function ShowForm({ date, onDone }: { date: string; onDone: () => void }) {
   );
 }
 
-function BookForm({ date, onDone }: { date: string; onDone: () => void }) {
-  const qc = useQueryClient();
-  const [title, setTitle] = useState("");
-  const [author, setAuthor] = useState("");
-  const [genre, setGenre] = useState("");
-  const [language, setLanguage] = useState("");
-  const [rating, setRating] = useState("");
-  const [notes, setNotes] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!title.trim() || !author.trim()) return;
-    setSaving(true);
-    try {
-      const body: BookIn = {
-        title: title.trim(),
-        author: author.trim(),
-        date_finished: date,
-        genre: genre.trim() || undefined,
-        language: language.trim() || undefined,
-        rating: rating ? parseInt(rating) : undefined,
-        notes: notes.trim() || undefined,
-      };
-      await booksApi.create(body);
-      qc.invalidateQueries({ queryKey: ["day-books", date] });
-      onDone();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-3">
-      <input required value={title} onChange={e => setTitle(e.target.value)}
-        placeholder="Title *"
-        className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
-      <input required value={author} onChange={e => setAuthor(e.target.value)}
-        placeholder="Author *"
-        className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
-      <div className="grid grid-cols-2 gap-2">
-        <input value={genre} onChange={e => setGenre(e.target.value)}
-          placeholder="Genre"
-          className="bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
-        <input value={language} onChange={e => setLanguage(e.target.value)}
-          placeholder="Language"
-          className="bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]" />
-      </div>
-      <select value={rating} onChange={e => setRating(e.target.value)}
-        className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#3F3F46]">
-        <option value="">No rating</option>
-        {[1,2,3,4,5].map(n => <option key={n} value={n}>{"⭐".repeat(n)}</option>)}
-      </select>
-      <textarea value={notes} onChange={e => setNotes(e.target.value)}
-        placeholder="Notes (optional)" rows={2}
-        className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46] resize-none" />
-      <button type="submit" disabled={saving || !title.trim() || !author.trim()}
-        className="w-full bg-[#F59E0B] hover:bg-[#FBBF24] disabled:opacity-40 text-black font-semibold text-sm rounded-lg py-2.5 transition-colors">
-        {saving ? "Saving…" : "Add book"}
-      </button>
-    </form>
-  );
-}
-
 function SongForm({ date, onDone }: { date: string; onDone: () => void }) {
   const qc = useQueryClient();
   const [title, setTitle] = useState("");
@@ -394,7 +330,7 @@ export function DayAddFAB({ date }: { date: string }) {
               {mode === "food"       && <FoodEntryComposer date={date} onDone={close} />}
               {mode === "restaurant" && <RestaurantForm date={date} onDone={close} />}
               {mode === "show"       && <ShowForm date={date} onDone={close} />}
-              {mode === "book"       && <BookForm date={date} onDone={close} />}
+              {mode === "book"       && <BookForm defaultDate={date} onSaved={close} />}
               {mode === "song"       && <SongForm date={date} onDone={close} />}
             </div>
           </div>
