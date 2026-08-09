@@ -4,24 +4,37 @@
 
 Claude cannot SSH to the Pi directly. Always provide commands for the user to run in their terminal.
 
-When deployment is needed, output the exact commands for the user to execute:
+**Build the frontend on the Mac, never on the Pi.** The Pi (1 CPU, ~384 MB heap cap) cannot build Next.js — an on-Pi `npm run build` OOM-thrashes it into unresponsiveness (SSH times out, needs a physical power-cycle). The `daybook-web` systemd service just runs `next start`, which serves a prebuilt `.next/`. So we build locally and ship the built `.next/`; the Pi only restarts.
 
+When deployment is needed, output these commands for the user to run **one block at a time** (each of the last four prompts for the Pi password — pasting several at once can let a password prompt swallow the next line). Do **not** include `#` comment lines in the blocks the user pastes — their interactive zsh does not treat `#` as a comment and it throws errors.
+
+1. Build the frontend on the Mac (no password):
 ```bash
-# 1. Sync code to Pi
-rsync -av --delete \
-  --exclude='.git' --exclude='.next' --exclude='node_modules' \
-  --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' \
-  --exclude='data/' --exclude='infrastructure/db/*.db' \
-  --exclude='infrastructure/db/*.db-wal' --exclude='infrastructure/db/*.db-shm' \
-  --exclude='infrastructure/scripts/logs/' --exclude='nohup.out' --exclude='.env' \
-  . pi@daybook-pi:~/daybook/
-
-# 2. Copy env
-scp infrastructure/web/.env.local pi@daybook-pi:~/daybook/infrastructure/web/.env.local
-
-# 3. Build frontend and restart services on Pi
-ssh pi@daybook-pi "cd ~/daybook/infrastructure/web && npm install --include=dev --silent && npm run build && sudo systemctl restart daybook-api daybook-web"
+cd infrastructure/web && npm run build && cd ../..
 ```
+
+2. Sync code to the Pi (excludes `.next` — shipped in step 4):
+```bash
+rsync -av --delete --exclude='.git' --exclude='.next' --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' --exclude='data/' --exclude='infrastructure/db/*.db' --exclude='infrastructure/db/*.db-wal' --exclude='infrastructure/db/*.db-shm' --exclude='infrastructure/scripts/logs/' --exclude='nohup.out' --exclude='.env' . pi@daybook-pi:~/daybook/
+```
+
+3. Copy the web env:
+```bash
+scp infrastructure/web/.env.local pi@daybook-pi:~/daybook/infrastructure/web/.env.local
+```
+
+4. Ship the prebuilt frontend (`-z --partial` so it resumes if the link hiccups):
+```bash
+rsync -avz --partial --timeout=120 infrastructure/web/.next/ pi@daybook-pi:~/daybook/infrastructure/web/.next/
+```
+
+5. Restart services on the Pi (no build — serves the new `.next` and applies API startup migrations):
+```bash
+ssh pi@daybook-pi "sudo systemctl restart daybook-api daybook-web"
+```
+
+- **No `npm install` / no build on the Pi.** The Pi already has `node_modules` for `next start`. Only when web *dependencies* change, run a one-time `ssh pi@daybook-pi "cd ~/daybook/infrastructure/web && npm install --omit=dev"`.
+- If step 4's rsync drops with "connection unexpectedly closed", a stuck build is hogging RAM — clear it: `ssh pi@daybook-pi "pkill -f 'next build'; pkill -f 'npm run build'"`, then re-run step 4. If SSH itself times out, the Pi needs a physical power-cycle (services + Tailscale auto-start on boot).
 
 The user will paste back the output for Claude to review.
 
