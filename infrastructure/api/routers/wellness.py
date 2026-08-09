@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query
 
 from infrastructure.api.db import get_db
 from domains.health.recovery import recovery_flag
+from domains.health.stress_context import flight_phases, stress_by_place
 
 router = APIRouter(prefix="/wellness", tags=["wellness"])
 
@@ -35,6 +36,16 @@ _MEAL_LABEL = {
 @router.get("/recovery")
 def get_recovery(date: str = Query(...), conn: DB = None):
     return recovery_flag(conn, date)
+
+
+@router.get("/flight-phases")
+def get_flight_phases(date: str = Query(...), conn: DB = None):
+    return {"date": date, "flights": flight_phases(conn, date)}
+
+
+@router.get("/stress-by-place")
+def get_stress_by_place(date: str = Query(...), conn: DB = None):
+    return stress_by_place(conn, date)
 
 
 @router.get("/timeline")
