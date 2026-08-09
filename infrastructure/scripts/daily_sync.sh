@@ -92,15 +92,21 @@ YESTERDAY="$(date -d 'yesterday' +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d)"
 python -m domains.weather.weather_sync "$YESTERDAY" "$DATE" \
   >> "$LOG_FILE" 2>&1 || log "WARN: Weather sync failed (non-fatal)"
 
-# Intraday HR: fetch continuous heart rate readings for yesterday.
+# Intraday HR: fetch continuous heart rate readings for yesterday, then refresh
+# today (partial day, --force) so the current-day timeline stays live.
 log "Syncing intraday heart rate..."
 python -m domains.health.garmin.intraday_hr_sync \
   >> "$LOG_FILE" 2>&1 || log "WARN: Intraday HR sync failed (non-fatal)"
+python -m domains.health.garmin.intraday_hr_sync --date "$DATE" --force \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Intraday HR (today) failed (non-fatal)"
 
-# All-day wellness (CIRQA): intraday stress, Body Battery, respiration, SpO2.
+# All-day wellness (CIRQA): intraday stress, Body Battery, respiration, SpO2 —
+# yesterday, then today (partial, --force) so stress/energy show for the day so far.
 log "Syncing all-day wellness..."
 python -m domains.health.garmin.wellness_sync \
   >> "$LOG_FILE" 2>&1 || log "WARN: Wellness sync failed (non-fatal)"
+python -m domains.health.garmin.wellness_sync --date "$DATE" --force \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Wellness (today) failed (non-fatal)"
 
 # Load Index: compute fatigue composite for yesterday (Horizon 1).
 log "Computing Load Index..."
