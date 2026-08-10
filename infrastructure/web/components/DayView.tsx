@@ -18,7 +18,6 @@ import { DaySongs } from "@/components/DaySongs";
 import { DayFood } from "@/components/DayFood";
 import { RecoveryCard } from "@/components/RecoveryCard";
 import { StressEnergyTimeline } from "@/components/StressEnergyTimeline";
-import { FlightLoadCard } from "@/components/FlightLoadCard";
 import { StressByPlaceCard } from "@/components/StressByPlaceCard";
 import { PhotoOfDay } from "@/components/PhotoOfDay";
 import { ScreenTimeBlock } from "@/components/ScreenTimeBlock";
@@ -101,8 +100,6 @@ export async function DayView({ date }: { date: string }) {
         />
 
         <StressEnergyTimeline date={date} />
-
-        <FlightLoadCard date={date} />
 
         <StressByPlaceCard date={date} />
 

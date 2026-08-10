@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 
 from infrastructure.api.db import get_db
 from domains.health.recovery import recovery_flag
-from domains.health.stress_context import flight_phases, flight_phase_by_id, stress_by_place
+from domains.health.stress_context import flight_phases, flight_phase_by_id, stress_by_place, _phases_for_rows
 
 router = APIRouter(prefix="/wellness", tags=["wellness"])
 
@@ -80,36 +80,56 @@ def get_timeline(date: str = Query(...), conn: DB = None):
     off_row = conn.execute("SELECT utc_offset_min FROM wellness_daily WHERE date=?", (date,)).fetchone()
     offset_min = (off_row["utc_offset_min"] if off_row and off_row["utc_offset_min"] is not None else 0)
 
-    spans = []   # shaded regions on the timeline (flights, activities)
-    events = []  # point markers (takeoff, landing, meals-by-tag)
+    spans = []   # shaded regions on the timeline (flights, activities) — tappable
+    events = []  # point markers (takeoff, landing, meals-by-tag) — tappable
 
-    # Activities → shaded green block (start → start + duration) + a marker.
+    # Activities → shaded green block (start → start + duration), links to detail.
     for a in conn.execute(
-        "SELECT name, activity_type, start_time, duration_seconds FROM activities WHERE date=?", (date,)
+        "SELECT id, name, activity_type, start_time, duration_seconds FROM activities WHERE date=?", (date,)
     ):
         start = _local_hhmm(a["start_time"], offset_min)
         if not start:
             continue
         label = a["name"] or (a["activity_type"] or "Activity")
         end = _local_hhmm(a["start_time"], offset_min, plus_s=int(a["duration_seconds"] or 0))
-        spans.append({"start": start, "end": end or start, "label": label, "type": "activity"})
+        spans.append({
+            "start": start, "end": end or start, "label": label, "type": "activity",
+            "id": str(a["id"]), "href": f"/activity/{a['id']}",
+        })
 
     # Flights → shaded blue block (off-block → on-block) + takeoff/landing markers.
-    for f in conn.execute(
-        "SELECT dep_iata, arr_iata, off_block_utc, on_block_utc, takeoff_utc, landing_utc "
-        "FROM flights WHERE date=? AND is_sim=0", (date,)
-    ):
+    # Fold the Flight Load card in: attach the takeoff/landing HR·stress deltas
+    # to the span so tapping (or the chip) shows the spike; link to the flight.
+    flight_rows = conn.execute(
+        "SELECT id, dep_iata, arr_iata, off_block_utc, on_block_utc, takeoff_utc, landing_utc, "
+        "takeoff_crew, landing_crew FROM flights WHERE date=? AND is_sim=0 ORDER BY takeoff_utc",
+        (date,),
+    ).fetchall()
+    phases = _phases_for_rows(conn, date, flight_rows)  # same order; [] if no wellness
+    for i, f in enumerate(flight_rows):
+        ph = phases[i] if i < len(phases) else None
         leg = f"{f['dep_iata'] or '?'}→{f['arr_iata'] or '?'}"
         s = _local_hhmm(f["off_block_utc"], offset_min) or _local_hhmm(f["takeoff_utc"], offset_min)
         e = _local_hhmm(f["on_block_utc"], offset_min) or _local_hhmm(f["landing_utc"], offset_min)
+        ld_delta = (ph or {}).get("landing", {}).get("stress_delta") if ph else None
+        you_flew = bool((ph or {}).get("landing", {}).get("you_flew")) if ph else None
+        detail = None
+        if ld_delta is not None:
+            detail = f"landing stress {'+' if ld_delta >= 0 else ''}{round(ld_delta)}"
         if s and e:
-            spans.append({"start": s, "end": e, "label": leg, "type": "flight"})
+            spans.append({
+                "start": s, "end": e, "label": leg, "type": "flight",
+                "id": str(f["id"]), "href": f"/aviation/{f['id']}",
+                "you_flew": you_flew, "detail": detail,
+            })
         tk = _local_hhmm(f["takeoff_utc"], offset_min)
         ld = _local_hhmm(f["landing_utc"], offset_min)
         if tk:
-            events.append({"t": tk, "label": f"T/O {f['dep_iata'] or ''}".strip(), "type": "takeoff"})
+            events.append({"t": tk, "label": f"T/O {f['dep_iata'] or ''}".strip(),
+                           "type": "takeoff", "id": str(f["id"]), "href": f"/aviation/{f['id']}"})
         if ld:
-            events.append({"t": ld, "label": f"LDG {f['arr_iata'] or ''}".strip(), "type": "landing"})
+            events.append({"t": ld, "label": f"LDG {f['arr_iata'] or ''}".strip(),
+                           "type": "landing", "id": str(f["id"]), "href": f"/aviation/{f['id']}"})
 
     # Meals → one marker per meal-type (tag only, not the food list), with total kcal on hover.
     # Prefer the user's eaten_at (already local wall-clock); else localize logged_at.
@@ -126,6 +146,7 @@ def get_timeline(date: str = Query(...), conn: DB = None):
     for key, g in meals.items():
         events.append({
             "t": g["t"], "label": _MEAL_LABEL.get(key, "Meal"), "type": "meal",
+            "meal_type": key or "meal", "href": "/food",
             "detail": f"{int(g['kcal'])} kcal · {g['n']} item{'s' if g['n'] != 1 else ''}",
         })
 

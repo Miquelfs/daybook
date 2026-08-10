@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
   ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea, CartesianGrid,
@@ -19,13 +20,15 @@ const SPAN_COLOR: Record<string, string> = {
 };
 const SPAN_FILL_OPACITY: Record<string, number> = { flight: 0.22, activity: 0.14 };
 const EVENT_COLOR: Record<string, string> = {
-  meal: "#F59E0B",
+  meal: "#FBBF24",     // brighter amber so it reads over the flight shading
   takeoff: "#60A5FA",
   landing: "#3B82F6",
 };
-const EVENT_EMOJI: Record<string, string> = {
-  meal: "🍽", takeoff: "🛫", landing: "🛬", flight: "✈️", activity: "🏃",
+// Meal marker/chip emoji by meal type.
+const MEAL_EMOJI: Record<string, string> = {
+  breakfast: "☕", lunch: "🥗", dinner: "🍽", snack: "🍎", extra: "🍫", meal: "🍴",
 };
+const SPAN_EMOJI: Record<string, string> = { flight: "✈️", activity: "🏃" };
 
 function toMin(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
@@ -77,6 +80,35 @@ export function StressEnergyTimeline({ date }: { date: string }) {
   const events = data.events.map((e) => ({ ...e, m: toMin(e.t) }));
   const spans = (data.spans ?? []).map((s) => ({ ...s, m1: toMin(s.start), m2: toMin(s.end) }));
 
+  // One tappable chip per flight, activity and meal — sorted by time of day.
+  const chips = [
+    ...spans.map((s) => ({
+      key: `s-${s.type}-${s.id ?? s.start}`,
+      sortM: s.m1,
+      emoji: SPAN_EMOJI[s.type] ?? "•",
+      time: s.start,
+      label: s.label,
+      detail:
+        s.type === "flight"
+          ? [s.you_flew ? "you flew" : null, s.detail].filter(Boolean).join(" · ") || undefined
+          : `${s.start}–${s.end}`,
+      href: s.href,
+      color: SPAN_COLOR[s.type] ?? "#A1A1AA",
+    })),
+    ...events
+      .filter((e) => e.type === "meal")
+      .map((e) => ({
+        key: `m-${e.meal_type ?? e.t}`,
+        sortM: e.m,
+        emoji: MEAL_EMOJI[e.meal_type ?? "meal"] ?? "🍴",
+        time: e.t,
+        label: e.label,
+        detail: e.detail,
+        href: e.href,
+        color: EVENT_COLOR.meal,
+      })),
+  ].sort((a, b) => a.sortM - b.sortM);
+
   return (
     <section>
       <SectionLabel>Stress &amp; energy</SectionLabel>
@@ -103,12 +135,13 @@ export function StressEnergyTimeline({ date }: { date: string }) {
               ))}
               {events.map((e, i) => {
                 const isFlight = e.type === "takeoff" || e.type === "landing";
+                const isMeal = e.type === "meal";
                 return (
                   <ReferenceLine key={`e${i}`} yAxisId="pct" x={e.m}
                     stroke={EVENT_COLOR[e.type] ?? "#3F3F46"}
-                    strokeOpacity={isFlight ? 0.85 : 0.55}
-                    strokeWidth={isFlight ? 1.5 : 1}
-                    strokeDasharray={e.type === "meal" ? "3 3" : undefined} />
+                    strokeOpacity={isFlight ? 0.85 : isMeal ? 0.8 : 0.55}
+                    strokeWidth={isMeal ? 1.4 : isFlight ? 1.5 : 1}
+                    strokeDasharray={isMeal ? "2 2" : undefined} />
                 );
               })}
               <Line yAxisId="pct" dataKey="stress" name="Stress" stroke={STRESS} dot={false} strokeWidth={1.5} connectNulls />
@@ -118,24 +151,33 @@ export function StressEnergyTimeline({ date }: { date: string }) {
           </ResponsiveContainer>
         </div>
 
-        {/* Legend + event strip */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px]">
-          <span className="flex items-center gap-1 text-[#71717A]"><span className="w-2 h-2 rounded-full" style={{ background: STRESS }} /> Stress</span>
-          <span className="flex items-center gap-1 text-[#71717A]"><span className="w-2 h-2 rounded-full" style={{ background: ENERGY }} /> Energy</span>
-          <span className="flex items-center gap-1 text-[#71717A]"><span className="w-2 h-2 rounded-full" style={{ background: HR }} /> HR</span>
+        {/* Series legend */}
+        <div className="flex items-center gap-4 mt-2 text-[11px] text-[#71717A]">
+          <span className="flex items-center gap-1.5"><span className="w-3 h-[2px] rounded-full" style={{ background: STRESS }} /> Stress</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-[2px] rounded-full" style={{ background: ENERGY }} /> Energy</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-[2px] rounded-full" style={{ background: HR, opacity: 0.5 }} /> HR</span>
         </div>
-        {(spans.length > 0 || events.length > 0) && (
-          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 pt-2 border-t border-[#18181B] text-[11px]">
-            {spans.map((s, i) => (
-              <span key={`s${i}`} className="tabular-nums" style={{ color: SPAN_COLOR[s.type] ?? "#71717A" }}>
-                {EVENT_EMOJI[s.type] ?? "•"} {s.start}–{s.end} {s.label}
-              </span>
-            ))}
-            {events.map((e, i) => (
-              <span key={`e${i}`} title={e.detail ?? e.label} className="tabular-nums text-[#71717A]">
-                {EVENT_EMOJI[e.type] ?? "•"} {e.t} {e.label}
-              </span>
-            ))}
+
+        {/* Tappable event chips — flights & activities (spans) + meals (events) */}
+        {chips.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5 border-t border-[#18181B]">
+            {chips.map((c) => {
+              const body = (
+                <>
+                  <span>{c.emoji}</span>
+                  <span className="tabular-nums text-[#52525B]">{c.time}</span>
+                  <span className="truncate max-w-[160px] font-medium" style={{ color: c.color }}>{c.label}</span>
+                  {c.detail && <span className="text-[#71717A]">· {c.detail}</span>}
+                </>
+              );
+              const cls =
+                "flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] bg-[#18181B] border border-[#27272A] hover:border-[#3F3F46] transition-colors";
+              return c.href ? (
+                <Link key={c.key} href={c.href} className={cls}>{body}</Link>
+              ) : (
+                <span key={c.key} className={cls}>{body}</span>
+              );
+            })}
           </div>
         )}
       </div>
