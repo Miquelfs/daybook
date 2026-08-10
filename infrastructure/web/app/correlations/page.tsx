@@ -335,15 +335,6 @@ export default function CorrelationsPage() {
         <p className="text-sm text-[#71717A] mt-0.5">Patterns in your data.</p>
       </div>
 
-      <div className="mb-6">
-        <AINarrative
-          topic="insights"
-          label="AI Interpretation"
-          blurb="Let AI read your strongest cross-domain correlations — surfacing the interesting patterns, one experiment to try, and any likely confounds."
-          cta="Interpret my correlations"
-        />
-      </div>
-
       {/* Tabs */}
       <div className="flex gap-0 mb-6 p-1 bg-[#0D0D0F] border border-[#27272A] rounded-lg overflow-x-auto">
         {(
@@ -492,6 +483,43 @@ export default function CorrelationsPage() {
                       <div className="text-right shrink-0">
                         <p className={`text-sm font-semibold tabular-nums ${deltaColor(tag.delta)}`}>
                           {tag.delta > 0 ? "+" : ""}{tag.delta.toFixed(1)} mood
+                        </p>
+                        <p className="text-[10px] text-[#52525B]">vs without</p>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setSelectedTagSlug(tag.slug)}
+                      className="p-2.5 rounded-xl bg-[#0D0D0F] border border-[#27272A] text-[#52525B] hover:text-[#A1A1AA] hover:border-[#3F3F46] transition-colors shrink-0"
+                      title="Tag stats"
+                    >
+                      <TrendingUp size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* What makes you stressed? */}
+          {(weeklyData?.top_tags_stress ?? []).length > 0 && (
+            <div>
+              <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">What makes you stressed?</p>
+              <div className="space-y-2">
+                {(weeklyData?.top_tags_stress ?? []).map((tag) => (
+                  <div key={tag.slug} className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setMetricA(`tag:${tag.slug}`); setMetricB("stress_avg"); setTab("compare"); setTimeout(() => compareRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}
+                      className="flex-1 flex items-center gap-3 px-4 py-3 bg-[#0D0D0F] border border-[#27272A]
+                                 rounded-xl hover:border-[#3F3F46] transition-colors text-left"
+                    >
+                      <span className="text-xl shrink-0">{tag.icon ?? "🏷️"}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-[#FAFAFA] font-medium truncate">{tag.name}</p>
+                        <p className="text-xs text-[#52525B]">{tag.usage} days tracked</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className={`text-sm font-semibold tabular-nums ${tag.delta > 0 ? "text-[#F87171]" : "text-[#34D399]"}`}>
+                          {tag.delta > 0 ? "+" : ""}{tag.delta.toFixed(1)} stress
                         </p>
                         <p className="text-[10px] text-[#52525B]">vs without</p>
                       </div>
@@ -1168,6 +1196,14 @@ export default function CorrelationsPage() {
 
       {tab === "experiments" && <ExperimentsTab />}
 
+      <div className="mt-10 pt-6 border-t border-[#18181B]">
+        <AINarrative
+          topic="insights"
+          label="AI Interpretation"
+          blurb="Let AI read your strongest cross-domain correlations — surfacing the interesting patterns, one experiment to try, and any likely confounds."
+          cta="Interpret my correlations"
+        />
+      </div>
     </main>
   );
 }

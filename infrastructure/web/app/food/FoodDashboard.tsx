@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid,
@@ -78,7 +79,11 @@ function EnergyBalance({
 export function FoodDashboard() {
   const qc = useQueryClient();
   const today = format(new Date(), "yyyy-MM-dd");
-  const [date, setDate] = useState(today);
+  const params = useSearchParams();
+  const initialDate = params.get("date");
+  const [date, setDate] = useState(
+    initialDate && /^\d{4}-\d{2}-\d{2}$/.test(initialDate) ? initialDate : today
+  );
   const [coaching, setCoaching] = useState(false);
 
   const { data: coachResp } = useQuery<{ coach: FoodCoach } | null>({
@@ -140,6 +145,18 @@ export function FoodDashboard() {
     kcal: Math.round(s.consumed_kcal),
     over: s.target_kcal != null && s.consumed_kcal > s.target_kcal,
   }));
+
+  const waterGoal = week[week.length - 1]?.water_goal_ml ?? 3000;
+  const waterWeek = week.map((s) => ({
+    label: format(parseISO(s.date), "EEEEE"),
+    ml: s.water_ml,
+    pct: s.water_goal_ml ? Math.min(100, Math.round((s.water_ml / s.water_goal_ml) * 100)) : 0,
+    hit: s.water_goal_ml > 0 && s.water_ml >= s.water_goal_ml,
+  }));
+  const waterAvg = waterWeek.length
+    ? Math.round(waterWeek.reduce((a, d) => a + d.ml, 0) / waterWeek.length)
+    : 0;
+  const waterDaysHit = waterWeek.filter((d) => d.hit).length;
 
   async function del(id: number) {
     await foodApi.delete(id);
@@ -243,6 +260,38 @@ export function FoodDashboard() {
 
       {/* Water */}
       <WaterTracker date={date} />
+
+      {/* 7-day water trend */}
+      {waterWeek.length > 0 && (
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-[#52525B] uppercase tracking-widest">Last 7 days · water</p>
+            <p className="text-[11px] text-[#71717A] tabular-nums">
+              avg <span className="font-semibold text-[#E4E4E7]">{(waterAvg / 1000).toFixed(1)}L</span>
+              <span className="text-[#3F3F46]"> / {(waterGoal / 1000).toFixed(1)}L</span> · {waterDaysHit}/7 hit
+            </p>
+          </div>
+          <div className="flex items-end justify-between gap-1.5 h-20">
+            {waterWeek.map((d, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                <div className="w-full flex-1 flex items-end">
+                  <div
+                    className="w-full rounded-t"
+                    style={{ height: `${Math.max(4, d.pct)}%`, background: d.hit ? "#22D3EE" : "#0EA5B7" }}
+                    title={`${(d.ml / 1000).toFixed(2)}L`}
+                  />
+                </div>
+                <span className="text-[9px] text-[#52525B]">{d.label}</span>
+              </div>
+            ))}
+          </div>
+          {waterAvg < waterGoal && (
+            <p className="text-[11px] text-[#71717A] mt-2">
+              💧 You&apos;re averaging {((waterGoal - waterAvg) / 1000).toFixed(1)}L under goal — aim for a bit more each day.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* 7-day energy balance */}
       <div>

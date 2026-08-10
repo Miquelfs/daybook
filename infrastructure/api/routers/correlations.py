@@ -128,6 +128,54 @@ _TOP_CANDIDATES = [
     "stress_peak", "stress_high_min", "energy_drained", "body_battery_low", "respiration_avg", "spo2_avg",
 ]
 
+# Metrics that measure essentially the SAME underlying thing — a correlation
+# between two members of one family is trivially high and not an insight
+# (e.g. distance↔moving-time↔calories, or two names for Body Battery low). We
+# suppress within-family pairs so the discover lists surface real relationships.
+_REDUNDANT_FAMILIES: list[set[str]] = [
+    {"total_dist_km", "moving_time_hours", "activity_cal", "activity_count",
+     "elevation_gain_m", "training_stress"},                      # exercise volume
+    {"hr_daytime_avg", "hr_duty_avg", "hr_daytime_peak"},         # intraday-HR windows
+    {"stress_avg", "stress_high_min", "stress_peak"},             # Garmin stress
+    {"battery_low", "battery_high", "body_battery_low", "energy_drained"},  # Body Battery
+    {"food_kcal", "food_protein", "food_carbs", "food_fat", "food_sugar", "biggest_meal_kcal"},  # intake
+]
+
+
+def _redundant_pair(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    return any(a in fam and b in fam for fam in _REDUNDANT_FAMILIES)
+
+
+def _tag_impact_on(conn, value_by_date: dict[str, float], tag_rows, min_n: int = 3) -> list[dict]:
+    """Per-tag avg of `value_by_date` on days with the tag vs without.
+
+    `tag_rows` are rows with slug/name/icon/usage (already filtered to 3+ days).
+    Returns dicts shaped like TagImpact but with generic avg_with/avg_without.
+    """
+    if not value_by_date:
+        return []
+    overall = sum(value_by_date.values()) / len(value_by_date)
+    out = []
+    for tag in tag_rows:
+        slug = tag["slug"]
+        used = {r["date"] for r in conn.execute(
+            "SELECT dt.date FROM day_tags dt JOIN tags t ON t.id=dt.tag_id WHERE t.slug=?", (slug,)
+        )}
+        with_vals = [v for d, v in value_by_date.items() if d in used]
+        without_vals = [v for d, v in value_by_date.items() if d not in used]
+        if len(with_vals) < min_n:
+            continue
+        avg_with = sum(with_vals) / len(with_vals)
+        avg_without = sum(without_vals) / len(without_vals) if without_vals else overall
+        out.append({
+            "slug": slug, "name": tag["name"], "icon": tag["icon"], "usage": tag["usage"],
+            "avg_with": round(avg_with, 2), "avg_without": round(avg_without, 2),
+            "delta": round(avg_with - avg_without, 2),
+        })
+    return out
+
 _WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
 
@@ -573,6 +621,8 @@ def top_correlations(
 
     results = []
     for a, b in combinations(candidates, 2):
+        if _redundant_pair(a, b):
+            continue
         common = sorted(set(data[a].keys()) & set(data[b].keys()))
         if len(common) < 10:
             continue
@@ -720,11 +770,21 @@ def weekly_stats(conn: DB):
 
     top_tags.sort(key=lambda x: abs(x["delta"]), reverse=True)
 
+    # What makes you stressed? — same with/without logic against Garmin daily
+    # stress (0-100), sorted so the biggest stress-raisers come first.
+    stress_by_date = {
+        r["date"]: float(r["stress_avg"])
+        for r in conn.execute("SELECT date, stress_avg FROM daily_stats WHERE stress_avg IS NOT NULL")
+    }
+    top_tags_stress = _tag_impact_on(conn, stress_by_date, tag_rows)
+    top_tags_stress.sort(key=lambda x: x["delta"], reverse=True)
+
     return {
         "by_weekday": by_weekday,
         "best_weekday_mood": best_weekday_mood,
         "best_weekday_energy": best_weekday_energy,
         "top_tags": top_tags[:8],
+        "top_tags_stress": top_tags_stress[:8],
     }
 
 
@@ -830,6 +890,9 @@ def precomputed_correlations(
         if domain:
             if meta_a["category"] != domain and meta_b["category"] != domain:
                 continue
+
+        if _redundant_pair(row["metric_a"], row["metric_b"]):
+            continue
 
         # Direction relative to prior week
         r_prev = row["r_prev"]

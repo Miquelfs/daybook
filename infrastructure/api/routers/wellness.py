@@ -166,7 +166,7 @@ def get_timeline(date: str = Query(...), conn: DB = None):
     for key, g in meals.items():
         events.append({
             "t": g["t"], "label": _MEAL_LABEL.get(key, "Meal"), "type": "meal",
-            "meal_type": key or "meal", "href": "/food",
+            "meal_type": key or "meal", "href": f"/food?date={date}",
             "detail": f"{int(g['kcal'])} kcal · {g['n']} item{'s' if g['n'] != 1 else ''}",
         })
 

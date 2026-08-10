@@ -54,11 +54,22 @@ export type TagImpact = {
   delta: number;
 };
 
+export type TagStressImpact = {
+  slug: string;
+  name: string;
+  icon: string | null;
+  usage: number;
+  avg_with: number;
+  avg_without: number;
+  delta: number;
+};
+
 export type WeeklyStatsResponse = {
   by_weekday: WeekdayStat[];
   best_weekday_mood: string | null;
   best_weekday_energy: string | null;
   top_tags: TagImpact[];
+  top_tags_stress?: TagStressImpact[];
 };
 
 export type JournalEntry = {
