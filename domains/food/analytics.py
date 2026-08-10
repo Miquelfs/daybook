@@ -13,6 +13,58 @@ from typing import Callable, Optional
 KCAL_PER_KG = 7700.0  # approx kcal per kg of body mass
 
 
+def food_library(conn, q: str = "", limit: int = 60) -> list[dict]:
+    """Searchable food library: your logged foods (aggregated by name) + crew
+    presets, each with per-item macros for tap-to-add."""
+    like = f"%{q.lower()}%"
+    logged = conn.execute(
+        """SELECT TRIM(description) AS name,
+                  COUNT(*)              AS times_logged,
+                  ROUND(AVG(kcal))      AS kcal,
+                  ROUND(AVG(protein_g)) AS protein_g,
+                  ROUND(AVG(carbs_g))   AS carbs_g,
+                  ROUND(AVG(fat_g))     AS fat_g,
+                  ROUND(AVG(sugar_g))   AS sugar_g,
+                  MAX(meal_type)        AS meal_type
+           FROM food_entries
+           WHERE description IS NOT NULL AND TRIM(description) <> ''
+             AND (? = '' OR LOWER(description) LIKE ?)
+           GROUP BY LOWER(TRIM(description))
+           ORDER BY times_logged DESC, MAX(date) DESC
+           LIMIT ?""",
+        (q, like, limit),
+    ).fetchall()
+
+    items = [{
+        "name": r["name"], "kcal": r["kcal"] or 0, "protein_g": r["protein_g"] or 0,
+        "carbs_g": r["carbs_g"] or 0, "fat_g": r["fat_g"] or 0, "sugar_g": r["sugar_g"] or 0,
+        "meal_type": r["meal_type"], "times_logged": r["times_logged"], "source": "logged",
+    } for r in logged]
+
+    seen = {i["name"].lower() for i in items}
+    if len(items) < limit:
+        try:
+            presets = conn.execute(
+                """SELECT name, kcal, protein_g, carbs_g, fat_g, meal_type, category
+                   FROM crew_meal_presets
+                   WHERE (? = '' OR LOWER(name) LIKE ?)
+                   ORDER BY protein_g DESC LIMIT ?""",
+                (q, like, limit - len(items)),
+            ).fetchall()
+            for r in presets:
+                if r["name"].lower() in seen:
+                    continue
+                items.append({
+                    "name": r["name"], "kcal": round(r["kcal"] or 0), "protein_g": round(r["protein_g"] or 0),
+                    "carbs_g": round(r["carbs_g"] or 0), "fat_g": round(r["fat_g"] or 0),
+                    "sugar_g": 0, "meal_type": r["meal_type"],
+                    "times_logged": 0, "source": "preset", "category": r["category"],
+                })
+        except Exception:
+            pass
+    return items[:limit]
+
+
 def _day_totals(conn, ds: str) -> tuple[int, float]:
     row = conn.execute(
         "SELECT COUNT(*) AS n, COALESCE(SUM(kcal),0) AS k FROM food_entries WHERE date=?",
@@ -91,15 +143,26 @@ def expenditure_calibration(conn, date: str, days: int = 14) -> dict:
     cum = sum(nets)
     predicted_kg = round(cum / KCAL_PER_KG, 2)
 
-    w_start = (conn.execute("SELECT weight_kg FROM weight_log WHERE date<=? ORDER BY date DESC LIMIT 1", (start.isoformat(),)).fetchone()
-               or conn.execute("SELECT weight_kg FROM weight_log WHERE date>=? ORDER BY date ASC LIMIT 1", (start.isoformat(),)).fetchone())
-    w_end = conn.execute("SELECT weight_kg FROM weight_log WHERE date<=? ORDER BY date DESC LIMIT 1", (end.isoformat(),)).fetchone()
-    actual_kg = round(w_end["weight_kg"] - w_start["weight_kg"], 2) if (w_start and w_end) else None
+    # Actual scale change needs TWO distinct weigh-ins spanning the window — the
+    # first at/near the start, the last at/near the end. Without a real span the
+    # comparison is meaningless (a single weigh-in reads as "0 kg change" and
+    # produces a bogus maintenance adjustment), so we report it as un-calibrated.
+    w_start = (conn.execute("SELECT date, weight_kg FROM weight_log WHERE date<=? ORDER BY date DESC LIMIT 1", (start.isoformat(),)).fetchone()
+               or conn.execute("SELECT date, weight_kg FROM weight_log WHERE date>=? ORDER BY date ASC LIMIT 1", (start.isoformat(),)).fetchone())
+    w_end = conn.execute("SELECT date, weight_kg FROM weight_log WHERE date<=? ORDER BY date DESC LIMIT 1", (end.isoformat(),)).fetchone()
 
-    # If actual loss > predicted, real expenditure is higher than modeled → +adj.
+    actual_kg = None
+    span_days = None
     maintenance_adjust = None
-    if actual_kg is not None:
-        maintenance_adjust = round((predicted_kg - actual_kg) * KCAL_PER_KG / n)
+    if w_start and w_end and w_start["date"] != w_end["date"]:
+        span_days = (_date.fromisoformat(w_end["date"]) - _date.fromisoformat(w_start["date"])).days
+        if span_days >= 5:  # need a real trend, not two adjacent weigh-ins
+            actual_kg = round(w_end["weight_kg"] - w_start["weight_kg"], 2)
+            # If actual loss > predicted, real expenditure is higher than modeled → +adj.
+            # Divide by the measured span so the daily adjustment is proportionate,
+            # then clamp to a sane range (data noise shouldn't demand ±1000 kcal).
+            raw = (predicted_kg - actual_kg) * KCAL_PER_KG / span_days
+            maintenance_adjust = int(max(-500, min(500, round(raw))))
 
     return {
         "enough": True,
@@ -108,5 +171,7 @@ def expenditure_calibration(conn, date: str, days: int = 14) -> dict:
         "avg_daily_net_kcal": round(cum / n),
         "predicted_kg": predicted_kg,
         "actual_kg": actual_kg,
+        "weigh_in_span_days": span_days,
         "maintenance_adjust_kcal": maintenance_adjust,
+        "calibrated": actual_kg is not None,
     }

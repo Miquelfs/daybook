@@ -85,6 +85,7 @@ export function FoodDashboard() {
     initialDate && /^\d{4}-\d{2}-\d{2}$/.test(initialDate) ? initialDate : today
   );
   const [coaching, setCoaching] = useState(false);
+  const [coachMeal, setCoachMeal] = useState("");
 
   const { data: coachResp } = useQuery<{ coach: FoodCoach } | null>({
     queryKey: ["food-coach", date],
@@ -168,7 +169,7 @@ export function FoodDashboard() {
   async function generateCoach() {
     setCoaching(true);
     try {
-      await foodApi.generateCoach(date);
+      await foodApi.generateCoach(date, undefined, coachMeal || undefined);
       qc.invalidateQueries({ queryKey: ["food-coach", date] });
     } catch {
       // leave prior coach output in place
@@ -185,9 +186,14 @@ export function FoodDashboard() {
     <div className="space-y-8">
       {/* Header + date nav — matches the other top-level screens */}
       <div>
-        <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
-          ← Today
-        </Link>
+        <div className="flex items-center justify-between mb-2">
+          <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block">
+            ← Today
+          </Link>
+          <Link href="/food/library" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block">
+            Foods →
+          </Link>
+        </div>
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
@@ -261,35 +267,38 @@ export function FoodDashboard() {
       {/* Water */}
       <WaterTracker date={date} />
 
-      {/* 7-day water trend */}
+      {/* 7-day water trend — each day's litres, goal line, calm nudge */}
       {waterWeek.length > 0 && (
         <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-xs text-[#52525B] uppercase tracking-widest">Last 7 days · water</p>
+            <p className="text-xs text-[#52525B] uppercase tracking-widest">💧 Water · last 7 days</p>
             <p className="text-[11px] text-[#71717A] tabular-nums">
-              avg <span className="font-semibold text-[#E4E4E7]">{(waterAvg / 1000).toFixed(1)}L</span>
-              <span className="text-[#3F3F46]"> / {(waterGoal / 1000).toFixed(1)}L</span> · {waterDaysHit}/7 hit
+              avg <span className="font-semibold text-[#22D3EE]">{(waterAvg / 1000).toFixed(1)}L</span>
+              <span className="text-[#3F3F46]"> / {(waterGoal / 1000).toFixed(1)}L goal</span> · {waterDaysHit}/7 hit
             </p>
           </div>
-          <div className="flex items-end justify-between gap-1.5 h-20">
+          <div className="flex items-end justify-between gap-2 h-28">
             {waterWeek.map((d, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                <div className="w-full flex-1 flex items-end">
+              <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full">
+                <span className={`text-[10px] tabular-nums ${d.ml > 0 ? "text-[#A1A1AA]" : "text-[#3F3F46]"}`}>
+                  {d.ml > 0 ? (d.ml / 1000).toFixed(1) : "—"}
+                </span>
+                <div className="w-full flex-1 flex items-end bg-[#18181B] rounded-md overflow-hidden">
                   <div
-                    className="w-full rounded-t"
-                    style={{ height: `${Math.max(4, d.pct)}%`, background: d.hit ? "#22D3EE" : "#0EA5B7" }}
-                    title={`${(d.ml / 1000).toFixed(2)}L`}
+                    className="w-full rounded-md transition-all"
+                    style={{ height: `${Math.max(d.ml > 0 ? 6 : 0, d.pct)}%`, background: d.hit ? "#22D3EE" : "#0E7490" }}
+                    title={`${(d.ml / 1000).toFixed(2)} L`}
                   />
                 </div>
-                <span className="text-[9px] text-[#52525B]">{d.label}</span>
+                <span className="text-[10px] text-[#52525B] capitalize">{d.label}</span>
               </div>
             ))}
           </div>
-          {waterAvg < waterGoal && (
-            <p className="text-[11px] text-[#71717A] mt-2">
-              💧 You&apos;re averaging {((waterGoal - waterAvg) / 1000).toFixed(1)}L under goal — aim for a bit more each day.
-            </p>
-          )}
+          <p className="text-[11px] text-[#71717A] mt-3 pt-2.5 border-t border-[#18181B]">
+            {waterAvg >= waterGoal
+              ? "💪 You're hitting your hydration goal — keep it up."
+              : `Averaging ${((waterGoal - waterAvg) / 1000).toFixed(1)}L under goal — a glass more per day gets you there.`}
+          </p>
         </div>
       )}
 
@@ -321,21 +330,37 @@ export function FoodDashboard() {
       </div>
 
       {/* Expenditure calibration — predicted vs actual weight change */}
-      {calib?.enough && calib.actual_kg != null && (
+      {calib?.enough && (
         <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">Calibration · last {calib.window_days}d</p>
-          <div className="flex items-center justify-between text-sm tabular-nums">
-            <span className="text-[#71717A]">Predicted <span className="text-[#A1A1AA]">{calib.predicted_kg} kg</span></span>
-            <span className="text-[#71717A]">Actual <span className="text-[#FAFAFA] font-semibold">{calib.actual_kg} kg</span></span>
-          </div>
-          {calib.maintenance_adjust_kcal != null && Math.abs(calib.maintenance_adjust_kcal) >= 75 && (
-            <p className="text-xs text-[#52525B] mt-2 pt-2 border-t border-[#18181B]">
-              Your real maintenance looks{" "}
-              <span className={calib.maintenance_adjust_kcal > 0 ? "text-[#34D399]" : "text-[#F87171]"}>
-                ~{Math.abs(calib.maintenance_adjust_kcal)} kcal {calib.maintenance_adjust_kcal > 0 ? "higher" : "lower"}
-              </span>{" "}
-              than modeled — you can {calib.maintenance_adjust_kcal > 0 ? "eat a bit more" : "tighten the target"} and still hit your rate.
-            </p>
+          {calib.calibrated && calib.actual_kg != null ? (
+            <>
+              <div className="flex items-center justify-between text-sm tabular-nums">
+                <span className="text-[#71717A]">Predicted <span className="text-[#A1A1AA]">{calib.predicted_kg} kg</span></span>
+                <span className="text-[#71717A]">Actual <span className="text-[#FAFAFA] font-semibold">{calib.actual_kg} kg</span></span>
+              </div>
+              {calib.weigh_in_span_days != null && (
+                <p className="text-[10px] text-[#3F3F46] mt-1">over {calib.weigh_in_span_days} days between weigh-ins</p>
+              )}
+              {calib.maintenance_adjust_kcal != null && Math.abs(calib.maintenance_adjust_kcal) >= 75 && (
+                <p className="text-xs text-[#52525B] mt-2 pt-2 border-t border-[#18181B]">
+                  Your real maintenance looks{" "}
+                  <span className={calib.maintenance_adjust_kcal > 0 ? "text-[#34D399]" : "text-[#F87171]"}>
+                    ~{Math.abs(calib.maintenance_adjust_kcal)} kcal {calib.maintenance_adjust_kcal > 0 ? "higher" : "lower"}
+                  </span>{" "}
+                  than modeled — you can {calib.maintenance_adjust_kcal > 0 ? "eat a bit more" : "tighten the target"} and still hit your rate.
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={14} className="text-[#F59E0B] mt-0.5 shrink-0" />
+              <p className="text-xs text-[#71717A]">
+                Predicted <span className="text-[#A1A1AA]">{calib.predicted_kg} kg</span> from your intake vs Garmin burn — but
+                I can&apos;t confirm it yet. Weigh in a couple of times a week (5+ days apart) and I&apos;ll calibrate your true
+                maintenance against the scale.
+              </p>
+            </div>
           )}
         </div>
       )}
@@ -389,12 +414,24 @@ export function FoodDashboard() {
 
       {/* AI coach: what to eat next + foods to watch */}
       <div>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs text-[#52525B] uppercase tracking-widest">Coach · what to eat next</p>
-          <button onClick={generateCoach} disabled={coaching}
-            className="flex items-center gap-1.5 text-xs text-[#F59E0B] hover:text-[#FBBF24] disabled:opacity-40">
-            <Sparkles size={13} /> {coaching ? "Thinking…" : coach ? "Refresh" : "Suggest"}
-          </button>
+        <div className="flex items-center justify-between mb-2 gap-2">
+          <p className="text-xs text-[#52525B] uppercase tracking-widest shrink-0">Coach · what to eat</p>
+          <div className="flex items-center gap-2">
+            <select
+              value={coachMeal}
+              onChange={(e) => setCoachMeal(e.target.value)}
+              className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#D4D4D8] focus:outline-none focus:border-[#3F3F46]"
+            >
+              <option value="">Next meal</option>
+              {["breakfast", "lunch", "dinner", "snack"].map((m) => (
+                <option key={m} value={m}>{m[0].toUpperCase() + m.slice(1)}</option>
+              ))}
+            </select>
+            <button onClick={generateCoach} disabled={coaching}
+              className="flex items-center gap-1.5 text-xs text-[#F59E0B] hover:text-[#FBBF24] disabled:opacity-40">
+              <Sparkles size={13} /> {coaching ? "Thinking…" : coach ? "Refresh" : "Suggest"}
+            </button>
+          </div>
         </div>
 
         {!coach && !coaching && (
@@ -408,6 +445,9 @@ export function FoodDashboard() {
                 <div className="flex items-start gap-3">
                   <UtensilsCrossed size={16} className="text-[#F59E0B] mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
+                    {coach.meal_type && coach.meal_type !== "next" && (
+                      <p className="text-[10px] uppercase tracking-widest text-[#F59E0B] mb-0.5">For {coach.meal_type}</p>
+                    )}
                     <p className="text-sm font-semibold text-[#FAFAFA]">{coach.next_meal.name}</p>
                     {coach.next_meal.why && <p className="text-xs text-[#71717A] mt-0.5">{coach.next_meal.why}</p>}
                     {coach.alternatives && coach.alternatives.length > 0 && (

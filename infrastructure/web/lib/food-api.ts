@@ -202,10 +202,24 @@ export interface RecentFood {
 }
 
 export interface FoodCoach {
+  meal_type?: string;
   next_meal?: { name: string; kcal: number; protein_g: number; why: string };
   alternatives?: { name: string; kcal: number; protein_g: number }[];
   avoid?: { item: string; reason: string; swap: string }[];
   tip?: string;
+}
+
+export interface FoodLibraryItem {
+  name: string;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  sugar_g: number;
+  meal_type: string | null;
+  times_logged: number;
+  source: "logged" | "preset";
+  category?: string;
 }
 
 export interface DeficitStreak {
@@ -221,7 +235,9 @@ export interface Calibration {
   avg_daily_net_kcal?: number;
   predicted_kg?: number;
   actual_kg?: number | null;
+  weigh_in_span_days?: number | null;
   maintenance_adjust_kcal?: number | null;
+  calibrated?: boolean;
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -293,9 +309,17 @@ export const foodApi = {
   coach: (date: string): Promise<{ date: string; coach: FoodCoach; model: string; generated_at: string }> =>
     get(`/food/coach?date=${date}`),
 
-  generateCoach: (date: string, preferences?: string): Promise<{ date: string; coach: FoodCoach }> => {
+  generateCoach: (date: string, preferences?: string, mealType?: string): Promise<{ date: string; coach: FoodCoach }> => {
     const qs = new URLSearchParams({ date });
     if (preferences) qs.set("preferences", preferences);
+    if (mealType) qs.set("meal_type", mealType);
     return proxyPost(`/api/food/coach/generate?${qs.toString()}`);
+  },
+
+  library: (q = "", limit = 60): Promise<{ items: FoodLibraryItem[] }> => {
+    const qs = new URLSearchParams();
+    if (q) qs.set("q", q);
+    qs.set("limit", String(limit));
+    return get(`/food/library?${qs.toString()}`);
   },
 };

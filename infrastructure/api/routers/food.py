@@ -399,10 +399,22 @@ def get_coach(date: str = Query(...), conn: DB = None):
 def generate_coach(
     date: str = Query(...),
     preferences: Optional[str] = Query(None),
+    meal_type: Optional[str] = Query(None),
     conn: DB = None,
 ):
     rk, rp = _remaining_budget(conn, date)
-    coach = coach_mod.generate(conn, date, max(rk, 0), max(rp or 0, 0), preferences)
+    coach = coach_mod.generate(conn, date, max(rk, 0), max(rp or 0, 0), preferences, meal_type)
     if coach is None:
         raise HTTPException(status_code=503, detail="AI coach unavailable")
     return {"date": date, "coach": coach}
+
+
+@router.get("/library")
+def food_library(
+    q: str = Query("", description="substring filter on food name"),
+    limit: int = Query(60, ge=1, le=200),
+    conn: DB = None,
+):
+    """A searchable library of foods with per-item macros — your logged history
+    plus crew-meal presets — for tap-to-add (Caltrack-style)."""
+    return {"items": analytics.food_library(conn, q.strip(), limit)}

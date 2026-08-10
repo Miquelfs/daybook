@@ -41,32 +41,82 @@ def recent_profile(conn, on_date: str, days: int = 14) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def today_items(conn, date: str) -> list[dict]:
+    """What's already been eaten today — grounds the suggestion in the real day."""
+    rows = conn.execute(
+        "SELECT meal_type, description, ROUND(kcal) AS kcal, ROUND(protein_g) AS protein_g "
+        "FROM food_entries WHERE date=? ORDER BY COALESCE(eaten_at, logged_at)",
+        (date,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def crew_presets(conn, limit: int = 25) -> list[dict]:
+    """Duty-day crew meals available as realistic options."""
+    try:
+        rows = conn.execute(
+            "SELECT name, ROUND(kcal) AS kcal, ROUND(protein_g) AS protein_g "
+            "FROM crew_meal_presets ORDER BY protein_g DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+_MEAL_WORD = {
+    "breakfast": "breakfast", "lunch": "lunch", "dinner": "dinner",
+    "snack": "a snack", "extra": "an extra bite",
+}
+
+
 def _prompt(remaining_kcal: float, remaining_protein: float, profile: list[dict],
+            eaten: list[dict], presets: list[dict], meal_type: Optional[str],
             preferences: Optional[str]) -> str:
-    lines = "\n".join(
+    recent = "\n".join(
         f"- {r['description']} (eaten {r['n']}x; ~{int(r['kcal'] or 0)} kcal, "
         f"{int(r['protein_g'] or 0)}g protein, {int(r['sugar_g'] or 0)}g sugar)"
         for r in profile
     ) or "(no recent history yet)"
-    pref = f"\nPreferences: {preferences.strip()}" if preferences else ""
+    today = "\n".join(
+        f"- {r.get('meal_type') or 'meal'}: {r['description']} "
+        f"(~{int(r['kcal'] or 0)} kcal, {int(r['protein_g'] or 0)}g protein)"
+        for r in eaten
+    ) or "(nothing logged yet today)"
+    preset_lines = "\n".join(
+        f"- {p['name']} (~{int(p['kcal'] or 0)} kcal, {int(p['protein_g'] or 0)}g protein)"
+        for p in presets[:15]
+    ) or "(none)"
+    meal_line = (
+        f"Plan specifically for {_MEAL_WORD.get(meal_type, meal_type)}."
+        if meal_type else "Plan the single best next thing to eat now."
+    )
+    pref = f"\nExtra request: {preferences.strip()}" if preferences else ""
     return (
-        "I'm cutting body fat while training for a Half Ironman — I want lean, "
-        "high-protein, whole foods.\n"
-        f"For the rest of today I have about {round(remaining_kcal)} kcal and "
-        f"{round(remaining_protein)} g protein left.{pref}\n\n"
-        "Foods I've eaten recently:\n" + lines + "\n\n"
+        "You are my nutrition coach. I'm cutting body fat while training for a Half "
+        "Ironman — I want lean, high-protein, whole foods, realistic portions.\n"
+        f"{meal_line}\n"
+        f"Budget left for the rest of today: ~{round(remaining_kcal)} kcal and "
+        f"~{round(remaining_protein)} g protein.{pref}\n\n"
+        "Already eaten today:\n" + today + "\n\n"
+        "Foods I eat often (last 14 days):\n" + recent + "\n\n"
+        "Crew meals available on duty days:\n" + preset_lines + "\n\n"
         "Return ONLY JSON of this exact shape:\n"
         '{\n'
+        '  "meal_type": str,\n'
         '  "next_meal": {"name": str, "kcal": number, "protein_g": number, "why": str},\n'
         '  "alternatives": [{"name": str, "kcal": number, "protein_g": number}],\n'
         '  "avoid": [{"item": str, "reason": str, "swap": str}],\n'
         '  "tip": str\n'
         '}\n'
-        "next_meal must fit the remaining budget and prioritise protein. "
-        "For \"avoid\", pick up to 3 items FROM my recent foods above that hurt fat-loss "
-        "or my protein goal (calorie-dense, low-protein, or high-sugar) — give a short "
-        "reason and a healthier swap. 1-2 alternatives. Keep the tip to one sentence. "
-        "No markdown, no code fences."
+        "Rules: next_meal must fit the remaining budget and prioritise protein. Give me "
+        "VARIETY — do NOT suggest anything I already ate today, and avoid repeating the "
+        "foods at the TOP of my recent list (I eat those too often); introduce something "
+        "different that still fits my lean, high-protein goal. Crew meals are fair game on "
+        "duty days. Give realistic kcal/protein numbers. For \"avoid\", pick up to 3 items "
+        "FROM my recent foods that hurt fat-loss or protein (calorie-dense, low-protein, or "
+        "high-sugar) with a reason and a healthier swap. Make the 1-2 alternatives genuinely "
+        "different from next_meal. One-sentence tip. No markdown, no code fences."
     )
 
 
@@ -76,16 +126,19 @@ def generate(
     remaining_kcal: float,
     remaining_protein: float,
     preferences: Optional[str] = None,
+    meal_type: Optional[str] = None,
 ) -> Optional[dict]:
     if not ollama_client.is_available():
         log.info("food coach: LLM unavailable, skipping")
         return None
     profile = recent_profile(conn, date)
     data = ollama_client.generate_json(
-        _prompt(max(remaining_kcal, 0), max(remaining_protein or 0, 0), profile, preferences)
+        _prompt(max(remaining_kcal, 0), max(remaining_protein or 0, 0), profile,
+                today_items(conn, date), crew_presets(conn), meal_type, preferences)
     )
     if not data:
         return None
+    data.setdefault("meal_type", meal_type or "next")
     model = getattr(ollama_client, "CLAUDE_MODEL", None) if \
         ollama_client.LLM_PROVIDER == "claude" else ollama_client.LLM_PROVIDER
     conn.execute(
