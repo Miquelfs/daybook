@@ -24,10 +24,11 @@ const FlightRouteMap = dynamic(
 import type { MapStyle } from "@/components/aviation/FlightRouteMap";
 import { LicensesCard } from "@/components/aviation/LicensesCard";
 import { PunctualityTab } from "@/components/aviation/PunctualityTab";
+import { FlightLoadRollup } from "@/components/StressLifeInsights";
 
 const MAP_STYLE_KEY = "daybook_aviation_map_style";
 
-type Tab = "overview" | "logbook" | "map" | "stats" | "punctuality";
+type Tab = "overview" | "logbook" | "map" | "stats" | "punctuality" | "stress";
 type CodeMode = "icao" | "iata";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -333,6 +334,7 @@ export default function AviationPage() {
         <button className={tabCls("map")} onClick={() => setTab("map")}><MapPin size={13} />Routes</button>
         <button className={tabCls("stats")} onClick={() => setTab("stats")}><TrendingUp size={13} />Analytics</button>
         <button className={tabCls("punctuality")} onClick={() => setTab("punctuality")}><Clock size={13} />Punctuality</button>
+        <button className={tabCls("stress")} onClick={() => setTab("stress")}><Gauge size={13} />Stress</button>
         <Link href="/aviation/roster" className={tabCls("roster" as Tab)}><CalendarDays size={13} />Roster</Link>
       </div>
 
@@ -1021,6 +1023,15 @@ export default function AviationPage() {
       )}
 
       {tab === "punctuality" && <PunctualityTab />}
+
+      {tab === "stress" && (
+        <div className="space-y-4">
+          <p className="text-xs text-[#52525B]">
+            Physiological load of flying — HR &amp; stress deltas in the takeoff / approach windows vs the day baseline, from the CIRQA.
+          </p>
+          <FlightLoadRollup />
+        </div>
+      )}
 
       <AddFlightSheet date={TODAY} isOpen={addOpen} onClose={() => setAddOpen(false)} />
 

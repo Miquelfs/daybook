@@ -85,12 +85,14 @@ def night_seconds(
     arr_lon: float | None = None,
 ) -> int:
     """
-    Return seconds of the flight (takeoff→landing) that occur during night
+    Return seconds of the flight span (start→end) that occur during night
     (civil twilight dusk→dawn).
 
-    Uses departure coords for windows around takeoff, arrival coords for windows
-    around landing. Where only one set of coords is available, that set is used
-    for the full flight. Handles flights crossing midnight UTC.
+    Per EASA, flight time is BLOCK time, so callers pass off-block as the start
+    (`takeoff_utc`) and on-block as the end (`landing_utc`); the parameter names
+    are historical. Uses departure coords for windows around the start, arrival
+    coords around the end. Where only one set of coords is available, that set is
+    used for the full span. Handles spans crossing midnight UTC.
     """
     if not _ASTRAL_AVAILABLE:
         return 0

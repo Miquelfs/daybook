@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, Plane, MapPin } from "lucide-react";
 import {
-  wellnessApi, type StressContexts, type FlightPhysioRollup, type StressByCity,
+  wellnessApi, type StressContexts, type FlightPhysioRollup, type StressPlaces,
 } from "@/lib/wellness-api";
 
 const CTX_EMOJI: Record<string, string> = {
@@ -77,31 +77,31 @@ function WhatStressesYou() {
 }
 
 function StressfulPlaces() {
-  const { data } = useQuery<StressByCity>({
-    queryKey: ["stress-by-city", 180],
-    queryFn: () => wellnessApi.stressByCity(180),
+  const { data } = useQuery<StressPlaces>({
+    queryKey: ["stress-places", 180],
+    queryFn: () => wellnessApi.stressPlaces(180),
     staleTime: 300_000,
   });
-  const rows = data?.cities ?? [];
+  const rows = data?.places ?? [];
   const max = Math.max(8, ...rows.map((r) => Math.abs(r.delta)));
 
   return (
     <Card title="Stressful places" icon={<MapPin size={15} className="text-[#F97316]" />}>
       <p className="text-[11px] text-[#52525B] mb-3">
-        Stress vs your baseline{data?.baseline != null ? ` (${data.baseline})` : ""}, by city · last 180 days · home excluded
+        Stress vs your baseline{data?.baseline != null ? ` (${data.baseline})` : ""}, by place · last 180 days · home excluded
       </p>
       {rows.length === 0 ? (
         <p className="text-xs text-[#52525B]">No away-from-home place data yet — builds from your GPS visits as the CIRQA syncs.</p>
       ) : (
         <div className="space-y-2.5">
           {rows.slice(0, 12).map((r) => (
-            <div key={r.city}>
-              <div className="flex items-center justify-between text-xs mb-1">
+            <div key={r.place_id}>
+              <div className="flex items-center justify-between text-xs mb-1 gap-2">
                 <span className="text-[#D4D4D8] truncate">
-                  📍 {r.city}
-                  {r.country && r.country !== "España" && <span className="text-[#52525B]"> · {r.country}</span>}
+                  📍 {r.name}
+                  {r.city && r.city !== r.name && <span className="text-[#52525B]"> · {r.city}</span>}
                 </span>
-                <span className="tabular-nums text-[#71717A]">
+                <span className="tabular-nums text-[#71717A] shrink-0">
                   <span className="font-semibold" style={{ color: deltaColor(r.delta) }}>
                     {r.delta > 0 ? "+" : ""}{r.delta}
                   </span> · {fmtDur(r.minutes)} · {r.days}d
@@ -124,7 +124,7 @@ const BY_OPTIONS: { key: "airport" | "phase" | "captain"; label: string }[] = [
   { key: "captain", label: "Captain" },
 ];
 
-function FlightLoadRollup() {
+export function FlightLoadRollup() {
   const [by, setBy] = useState<"airport" | "phase" | "captain">("airport");
   const { data } = useQuery<FlightPhysioRollup>({
     queryKey: ["flight-physio-rollup", by],

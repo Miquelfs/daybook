@@ -230,16 +230,18 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
     return () => clearTimeout(t);
   }, [arrQ]);
 
-  // Live night-time preview (computed server-side from civil twilight)
-  const previewTakeoff = takeoffUtc || offBlock;
-  const previewLanding = landingUtc || onBlock;
+  // Live night-time preview (computed server-side from civil twilight).
+  // Night is block-based (off-block → on-block); fall back to airborne times only
+  // if block times aren't filled in yet.
+  const previewOffBlock = offBlock || takeoffUtc;
+  const previewOnBlock = onBlock || landingUtc;
   const { data: nightPreview } = useQuery({
-    queryKey: ["nightCalc", flightDate, depIcao, arrIcao, previewTakeoff, previewLanding],
+    queryKey: ["nightCalc", flightDate, depIcao, arrIcao, previewOffBlock, previewOnBlock],
     queryFn: () => api.nightCalc({
       date: flightDate, dep: depIcao, arr: arrIcao,
-      takeoff: previewTakeoff, landing: previewLanding,
+      off_block: previewOffBlock, on_block: previewOnBlock,
     }),
-    enabled: !isSim && !!flightDate && !!depIcao && !!arrIcao && !!previewTakeoff && !!previewLanding,
+    enabled: !isSim && !!flightDate && !!depIcao && !!arrIcao && !!previewOffBlock && !!previewOnBlock,
     staleTime: 60_000,
     retry: false,
   });

@@ -246,22 +246,28 @@ def _parse_row(row: dict, date_iso: str, fleet: dict[str, str], captain_index: d
         pic_seconds = 0
         sic_seconds = block_seconds or 0
 
-    # Personal takeoffs
+    # Personal takeoffs. EASA basis: darkness is checked at off-block (takeoff)
+    # and on-block (landing), not at the airborne/touchdown instant, so it stays
+    # consistent with block-based night time below. Falls back to airborne times
+    # only when block times are missing.
     farmiq_took_off = (takeoff_crew or "").upper() == PILOT_CODE.upper()
     farmiq_landed = (landing_crew or "").upper() == PILOT_CODE.upper()
-    # Takeoff darkness checked at departure airport; landing darkness at arrival airport
-    tof_night = _is_night_time(takeoff_utc, dep_lat, dep_lon) if farmiq_took_off else False
-    ldg_night = _is_night_time(landing_utc, arr_lat, arr_lon) if farmiq_landed else False
+    to_ref = off_block_utc or takeoff_utc
+    ldg_ref = on_block_utc or landing_utc
+    tof_night = _is_night_time(to_ref, dep_lat, dep_lon) if farmiq_took_off else False
+    ldg_night = _is_night_time(ldg_ref, arr_lat, arr_lon) if farmiq_landed else False
 
     takeoffs_day = 1 if farmiq_took_off and not tof_night else 0
     takeoffs_night = 1 if farmiq_took_off and tof_night else 0
     landings_day = 1 if farmiq_landed and not ldg_night else 0
     landings_night = 1 if farmiq_landed and ldg_night else 0
 
-    # Night seconds for the flight leg — use both dep and arr coords for accuracy
+    # Night time = portion of BLOCK time (off-block → on-block) in darkness.
     ngt_secs = 0
-    if takeoff_utc and landing_utc and dep_lat is not None and dep_lon is not None:
-        ngt_secs = night_seconds(dep_lat, dep_lon, takeoff_utc, landing_utc, arr_lat, arr_lon)
+    ngt_from = off_block_utc or takeoff_utc
+    ngt_to = on_block_utc or landing_utc
+    if ngt_from and ngt_to and dep_lat is not None and dep_lon is not None:
+        ngt_secs = night_seconds(dep_lat, dep_lon, ngt_from, ngt_to, arr_lat, arr_lon)
 
     # Distance
     dist_nm = None

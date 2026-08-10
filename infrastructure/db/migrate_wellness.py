@@ -67,19 +67,37 @@ def migrate(conn):
         );
         CREATE INDEX IF NOT EXISTS idx_stress_ctx_date ON stress_context_daily(date);
 
-        -- Daily stress split by the specific CITY you were in (from the Overland
+        -- Daily stress split by the specific PLACE you were in (from the Overland
         -- visits → place_names geocode), so it rolls up to "which places stress me".
         CREATE TABLE IF NOT EXISTS stress_place_daily (
             date        TEXT NOT NULL,
-            city        TEXT NOT NULL,
+            place_id    TEXT NOT NULL,
+            name        TEXT,
+            city        TEXT,
             country     TEXT,
+            lat         REAL,
+            lng         REAL,
             avg_stress  INTEGER,
             minutes     INTEGER,
             updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-            PRIMARY KEY (date, city)
+            PRIMARY KEY (date, place_id)
         );
         CREATE INDEX IF NOT EXISTS idx_stress_place_date ON stress_place_daily(date);
     """)
+    # One-time upgrade from the earlier city-granularity table (derived data — safe
+    # to drop and rebuild via the stress_context backfill / nightly sync).
+    _sp_cols = [r[1] for r in conn.execute("PRAGMA table_info(stress_place_daily)")]
+    if _sp_cols and "place_id" not in _sp_cols:
+        conn.execute("DROP TABLE stress_place_daily")
+        conn.executescript("""
+            CREATE TABLE stress_place_daily (
+                date TEXT NOT NULL, place_id TEXT NOT NULL, name TEXT, city TEXT,
+                country TEXT, lat REAL, lng REAL, avg_stress INTEGER, minutes INTEGER,
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                PRIMARY KEY (date, place_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_stress_place_date ON stress_place_daily(date);
+        """)
     # Idempotent add for pre-existing tables.
     cols = [r[1] for r in conn.execute("PRAGMA table_info(wellness_daily)")]
     if "utc_offset_min" not in cols:

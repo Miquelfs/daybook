@@ -272,32 +272,33 @@ _WAKE_START = 7 * 60    # 07:00 — exclude overnight sleep so a city where you 
 _WAKE_END = 23 * 60     # 23:00   sleep doesn't read as artificially calm.
 
 
-def stress_by_city_day(conn, date: str) -> list[dict]:
-    """The day's WAKING stress split by the specific city you were in (Overland
+def stress_by_place_day(conn, date: str) -> list[dict]:
+    """The day's WAKING stress split by the specific place you were in (Overland
     visits → place_names geocode). Both intraday stress and visits are local time."""
     stress = {mn: v for mn, v in _series_min(conn, "intraday_stress", "level", date).items()
               if _WAKE_START <= mn <= _WAKE_END}
     if not stress:
         return []
 
-    # City spans for the day, from the visits + geocode (locations.db).
-    spans: list[tuple[int, int, str, Optional[str]]] = []
+    # Place spans for the day, from the visits + geocode (locations.db).
+    spans: list[tuple] = []
     try:
         lc = sqlite3.connect(_LOCATIONS_DB)
         lc.row_factory = sqlite3.Row
         for r in lc.execute(
-            """SELECT v.start_time, v.end_time, pn.city, pn.country
+            """SELECT v.start_time, v.end_time, v.place_id,
+                      pn.name, pn.city, pn.country, pn.lat, pn.lng
                FROM visits v JOIN place_names pn ON pn.place_id = v.place_id
-               WHERE v.date = ? AND pn.city IS NOT NULL AND pn.city <> ''""",
+               WHERE v.date = ?""",
             (date,),
         ):
             s = _local_min_of(r["start_time"])
             e = _local_min_of(r["end_time"])
-            if s is None:
+            if s is None or not r["place_id"]:
                 continue
             if e is None or e < s:
                 e = 1440  # visit ran past midnight — clamp to end of this day
-            spans.append((s, e, r["city"], r["country"]))
+            spans.append((s, e, r["place_id"], r["name"], r["city"], r["country"], r["lat"], r["lng"]))
         lc.close()
     except Exception:
         return []
@@ -306,19 +307,17 @@ def stress_by_city_day(conn, date: str) -> list[dict]:
 
     buckets: dict[str, dict] = {}
     for mn, level in stress.items():
-        city = country = None
-        for s, e, c, co in spans:
+        for s, e, pid, name, city, country, lat, lng in spans:
             if s <= mn <= e:
-                city, country = c, co
+                b = buckets.setdefault(pid, {
+                    "levels": [], "name": name, "city": city, "country": country, "lat": lat, "lng": lng})
+                b["levels"].append(level)
                 break
-        if not city:
-            continue
-        b = buckets.setdefault(city, {"levels": [], "country": country})
-        b["levels"].append(level)
 
     result = [
-        {"city": k, "country": v["country"], "avg_stress": round(sum(v["levels"]) / len(v["levels"])),
-         "minutes": len(v["levels"]) * 3}
+        {"place_id": k, "name": v["name"], "city": v["city"], "country": v["country"],
+         "lat": v["lat"], "lng": v["lng"],
+         "avg_stress": round(sum(v["levels"]) / len(v["levels"])), "minutes": len(v["levels"]) * 3}
         for k, v in buckets.items()
     ]
     result.sort(key=lambda b: b["avg_stress"], reverse=True)
@@ -326,75 +325,53 @@ def stress_by_city_day(conn, date: str) -> list[dict]:
 
 
 def persist_stress_places(conn, date: str) -> int:
-    """Snapshot the day's stress-by-city into stress_place_daily."""
-    rows = stress_by_city_day(conn, date)
+    """Snapshot the day's stress-by-place into stress_place_daily."""
+    rows = stress_by_place_day(conn, date)
     conn.execute("DELETE FROM stress_place_daily WHERE date=?", (date,))
     for b in rows:
         conn.execute(
-            "INSERT INTO stress_place_daily (date, city, country, avg_stress, minutes, updated_at) "
-            "VALUES (?,?,?,?,?, strftime('%Y-%m-%dT%H:%M:%SZ','now')) "
-            "ON CONFLICT(date, city) DO UPDATE SET country=excluded.country, "
+            "INSERT INTO stress_place_daily (date, place_id, name, city, country, lat, lng, avg_stress, minutes, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?, strftime('%Y-%m-%dT%H:%M:%SZ','now')) "
+            "ON CONFLICT(date, place_id) DO UPDATE SET name=excluded.name, city=excluded.city, "
+            "country=excluded.country, lat=excluded.lat, lng=excluded.lng, "
             "avg_stress=excluded.avg_stress, minutes=excluded.minutes, updated_at=excluded.updated_at",
-            (date, b["city"], b["country"], b["avg_stress"], b["minutes"]),
+            (date, b["place_id"], b["name"], b["city"], b["country"], b["lat"], b["lng"],
+             b["avg_stress"], b["minutes"]),
         )
     conn.commit()
     return len(rows)
 
 
-def _home_cities(days: int) -> set[str]:
-    """Your home city (or cities, if you relocated in the window) — to exclude,
-    since 'home stresses me ~baseline' is just noise. We take the single city
-    CONTAINING each home centroid (nearest geocoded city), not a wide radius —
-    a 40 km home radius would otherwise swallow a whole metro area."""
+_HOME_PLACE_RADIUS_KM = 1.5  # a place this close to the home centroid IS home
+
+
+def _home_centroids(days: int) -> list[tuple[float, float]]:
+    """Home centroid(s) active in the window — to exclude your actual residence
+    (the place itself, not the whole city, so a stressful spot across town shows)."""
     try:
         from domains.locations.home_base import home_for
     except Exception:
-        return set()
+        return []
     end = datetime.utcnow().date()
-    homes = []
+    out = []
     for d in (end.isoformat(), (end - timedelta(days=days - 1)).isoformat()):
         h = home_for(d)
         if h and h.get("lat") is not None:
-            label = (h.get("label") or "").lower()
-            homes.append((h["lat"], h["lng"], "" if label in ("gps centroid", "") else label))
-    if not homes:
-        return set()
-
-    out: set[str] = set()
-    try:
-        lc = sqlite3.connect(_LOCATIONS_DB)
-        lc.row_factory = sqlite3.Row
-        cities = [(r["city"], r["la"], r["lo"]) for r in lc.execute(
-            "SELECT city, AVG(lat) la, AVG(lng) lo FROM place_names "
-            "WHERE city IS NOT NULL AND city <> '' GROUP BY city")]
-        lc.close()
-        for hlat, hlng, label in homes:
-            # nearest city to the home centroid = the home city
-            nearest, best = None, 1e9
-            for city, la, lo in cities:
-                d = _haversine_km(la, lo, hlat, hlng)
-                if d < best:
-                    best, nearest = d, city
-            if nearest and best <= 25:
-                out.add(nearest)
-            if label:  # explicit home label (life-period) — exclude by name too
-                out.update(c for c, _, _ in cities if label in c.lower())
-    except Exception:
-        pass
+            out.append((h["lat"], h["lng"]))
     return out
 
 
-def stress_by_city_rollup(conn, days: int = 180, min_minutes: int = 45) -> dict:
-    """Which places stress you ABOVE your normal — waking stress per city expressed
+def stress_by_place_rollup(conn, days: int = 180, min_minutes: int = 60, min_days: int = 2) -> dict:
+    """Which places stress you ABOVE your normal — waking stress per place expressed
     as a delta vs your personal baseline (minute-weighted avg across everywhere),
-    with your home base excluded."""
+    with your home residence excluded. Requires enough exposure to be meaningful."""
     rows = conn.execute(
-        "SELECT city, country, avg_stress, minutes, date FROM stress_place_daily "
-        "WHERE date >= date('now', ?)",
+        "SELECT place_id, name, city, country, lat, lng, avg_stress, minutes, date "
+        "FROM stress_place_daily WHERE date >= date('now', ?)",
         (f"-{days} days",),
     ).fetchall()
     if not rows:
-        return {"days": days, "cities": [], "baseline": None, "has_data": False}
+        return {"days": days, "places": [], "baseline": None, "has_data": False}
 
     # Baseline = your average waking stress across ALL located time (incl. home).
     tot_w = sum((r["avg_stress"] or 0) * (r["minutes"] or 0) for r in rows)
@@ -403,23 +380,33 @@ def stress_by_city_rollup(conn, days: int = 180, min_minutes: int = 45) -> dict:
 
     agg: dict[str, dict] = {}
     for r in rows:
-        a = agg.setdefault(r["city"], {"weighted": 0.0, "minutes": 0, "days": set(), "country": r["country"]})
+        a = agg.setdefault(r["place_id"], {
+            "weighted": 0.0, "minutes": 0, "days": set(),
+            "name": r["name"], "city": r["city"], "country": r["country"],
+            "lat": r["lat"], "lng": r["lng"]})
         a["weighted"] += (r["avg_stress"] or 0) * (r["minutes"] or 0)
         a["minutes"] += (r["minutes"] or 0)
         a["days"].add(r["date"])
 
-    home = _home_cities(days)
+    homes = _home_centroids(days)
+
+    def is_home(lat, lng) -> bool:
+        return lat is not None and any(_haversine_km(lat, lng, hl, hg) <= _HOME_PLACE_RADIUS_KM for hl, hg in homes)
+
     out = []
-    for city, v in agg.items():
-        if city in home or v["minutes"] < min_minutes:
+    for pid, v in agg.items():
+        if v["minutes"] < min_minutes or len(v["days"]) < min_days or is_home(v["lat"], v["lng"]):
             continue
         avg = round(v["weighted"] / v["minutes"])
         out.append({
-            "city": city, "country": v["country"], "avg_stress": avg,
-            "delta": avg - baseline, "minutes": v["minutes"], "days": len(v["days"]),
+            "place_id": pid,
+            "name": v["name"] or v["city"] or "Unknown place",
+            "city": v["city"], "country": v["country"],
+            "avg_stress": avg, "delta": avg - baseline,
+            "minutes": v["minutes"], "days": len(v["days"]),
         })
     out.sort(key=lambda b: b["delta"], reverse=True)
-    return {"days": days, "baseline": baseline, "cities": out, "has_data": bool(out)}
+    return {"days": days, "baseline": baseline, "places": out, "has_data": bool(out)}
 
 
 if __name__ == "__main__":

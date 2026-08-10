@@ -1183,9 +1183,11 @@ def night_calc(
     date_: str = Query(..., alias="date", description="YYYY-MM-DD"),
     dep: str = Query(..., description="Departure ICAO"),
     arr: str = Query(..., description="Arrival ICAO"),
-    takeoff: str = Query(..., description="Takeoff UTC HH:MM"),
-    landing: str = Query(..., description="Landing UTC HH:MM"),
+    off_block: str = Query(..., description="Off-block UTC HH:MM"),
+    on_block: str = Query(..., description="On-block UTC HH:MM"),
 ):
+    # EASA flight time is block time: night is the off-block→on-block portion in
+    # darkness, a night takeoff/landing is off-block/on-block in darkness.
     from domains.aviation.compute import night_seconds as compute_night, is_night_moment
 
     dep_row = conn.execute("SELECT * FROM airports WHERE icao = ?", (dep.upper(),)).fetchone()
@@ -1201,26 +1203,26 @@ def night_calc(
         except Exception:
             raise HTTPException(status_code=422, detail=f"Bad time {hhmm!r}, expected HH:MM")
 
-    tof_dt = _dt(takeoff)
-    ldg_dt = _dt(landing)
-    if ldg_dt <= tof_dt:
-        ldg_dt += timedelta(days=1)
+    off_dt = _dt(off_block)
+    on_dt = _dt(on_block)
+    if on_dt <= off_dt:
+        on_dt += timedelta(days=1)
 
     arr_lat = arr_row["latitude"] if arr_row else None
     arr_lon = arr_row["longitude"] if arr_row else None
     night_s = compute_night(
         dep_lat=dep_row["latitude"], dep_lon=dep_row["longitude"],
-        takeoff_utc=tof_dt, landing_utc=ldg_dt,
+        takeoff_utc=off_dt, landing_utc=on_dt,
         arr_lat=arr_lat, arr_lon=arr_lon,
     )
     return NightCalcResult(
         night_seconds=night_s,
-        duration_seconds=int((ldg_dt - tof_dt).total_seconds()),
-        night_takeoff=is_night_moment(dep_row["latitude"], dep_row["longitude"], tof_dt),
+        duration_seconds=int((on_dt - off_dt).total_seconds()),
+        night_takeoff=is_night_moment(dep_row["latitude"], dep_row["longitude"], off_dt),
         night_landing=is_night_moment(
             arr_lat if arr_lat is not None else dep_row["latitude"],
             arr_lon if arr_lon is not None else dep_row["longitude"],
-            ldg_dt,
+            on_dt,
         ),
     )
 
@@ -1413,9 +1415,11 @@ def create_flight(flight: FlightIn, conn: DB):
                 except Exception:
                     return None
 
-            # Prefer takeoff/landing; fall back to off/on-block
-            tof_dt = _parse_hhmm(flight.date, flight.takeoff_utc or flight.off_block_utc)
-            ldg_dt = _parse_hhmm(flight.date, flight.landing_utc or flight.on_block_utc)
+            # EASA flight time is BLOCK time, so night is the portion of
+            # off-block→on-block in darkness. Fall back to takeoff/landing only
+            # when block times weren't recorded.
+            tof_dt = _parse_hhmm(flight.date, flight.off_block_utc or flight.takeoff_utc)
+            ldg_dt = _parse_hhmm(flight.date, flight.on_block_utc or flight.landing_utc)
             if ldg_dt and tof_dt and ldg_dt <= tof_dt:
                 ldg_dt = ldg_dt + timedelta(days=1)  # midnight crossing
             if tof_dt and ldg_dt:
