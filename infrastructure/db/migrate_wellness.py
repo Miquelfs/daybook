@@ -54,6 +54,18 @@ def migrate(conn):
             utc_offset_min   INTEGER,   -- local offset for the day (localizes UTC events on the timeline)
             updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         );
+
+        -- Daily stress split by what you were doing (in-flight / exercise /
+        -- airport / home / elsewhere), so it rolls up across all of life.
+        CREATE TABLE IF NOT EXISTS stress_context_daily (
+            date        TEXT NOT NULL,
+            context     TEXT NOT NULL,   -- in-flight | exercise | airport | home | elsewhere
+            avg_stress  INTEGER,
+            minutes     INTEGER,
+            updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+            PRIMARY KEY (date, context)
+        );
+        CREATE INDEX IF NOT EXISTS idx_stress_ctx_date ON stress_context_daily(date);
     """)
     # Idempotent add for pre-existing tables.
     cols = [r[1] for r in conn.execute("PRAGMA table_info(wellness_daily)")]

@@ -60,6 +60,17 @@ export interface StressByPlace {
   buckets: { place: string; avg_stress: number; minutes: number }[];
 }
 
+export interface StressContexts {
+  days: number;
+  has_data: boolean;
+  contexts: { context: string; avg_stress: number; minutes: number; days: number }[];
+}
+
+export interface FlightPhysioRollup {
+  by: "airport" | "phase" | "captain";
+  buckets: { key: string; avg_stress_delta: number; avg_hr_delta?: number; n: number }[];
+}
+
 export const wellnessApi = {
   timeline: (date: string): Promise<WellnessTimeline> => get(`/wellness/timeline?date=${date}`),
   recovery: (date: string): Promise<RecoveryFlag> => get(`/wellness/recovery?date=${date}`),
@@ -67,4 +78,7 @@ export const wellnessApi = {
   stressByPlace: (date: string): Promise<StressByPlace> => get(`/wellness/stress-by-place?date=${date}`),
   flightPhase: (flightId: string): Promise<{ flight_id: string; phase: FlightPhases["flights"][number] | null }> =>
     get(`/wellness/flight/${flightId}`),
+  stressContexts: (days = 90): Promise<StressContexts> => get(`/wellness/stress-contexts?days=${days}`),
+  flightPhysioRollup: (by: "airport" | "phase" | "captain" = "airport", days = 3650): Promise<FlightPhysioRollup> =>
+    get(`/wellness/flight-physio/rollup?by=${by}&days=${days}`),
 };

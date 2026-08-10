@@ -12,9 +12,10 @@ import { format, parseISO } from "date-fns";
 import { correlationsApi } from "@/lib/correlations-api";
 import { AINarrative } from "@/components/AINarrative";
 import type { MetricMeta, TopCorrelation, TagImpact, PrecomputedCorrelation } from "@/lib/correlations-api";
-import { TrendingUp, Minus, ArrowUpRight, ArrowDownRight, Plus, X, CheckCircle, Trash2, Sparkles, GitCompare, CalendarDays, BarChart2, Flame, FlaskConical } from "lucide-react";
+import { TrendingUp, Minus, ArrowUpRight, ArrowDownRight, Plus, X, CheckCircle, Trash2, Sparkles, GitCompare, CalendarDays, BarChart2, Flame, FlaskConical, Activity } from "lucide-react";
 import { TagStatsDrawer } from "@/components/TagStatsDrawer";
 import { HabitCalendar } from "@/components/HabitCalendar";
+import { StressLifeInsights } from "@/components/StressLifeInsights";
 import { tagsApi, type Tag as TagType } from "@/lib/tags-api";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -125,7 +126,7 @@ const TOOLTIP_STYLE = {
   itemStyle: { color: "#FAFAFA" },
 };
 
-type Tab = "discover" | "compare" | "weekly" | "period" | "habits" | "experiments";
+type Tab = "discover" | "compare" | "weekly" | "period" | "habits" | "stress" | "experiments";
 
 function rColor(r: number | null) {
   if (r === null) return "text-[#52525B]";
@@ -352,6 +353,7 @@ export default function CorrelationsPage() {
             { id: "weekly" as Tab, label: "Weekly", icon: <CalendarDays size={13} /> },
             { id: "period" as Tab, label: "Period", icon: <BarChart2 size={13} /> },
             { id: "habits" as Tab, label: "Habits", icon: <Flame size={13} /> },
+            { id: "stress" as Tab, label: "Stress", icon: <Activity size={13} /> },
             { id: "experiments" as Tab, label: "Experiments", icon: <FlaskConical size={13} /> },
           ] as const
         ).map(({ id, label, icon }) => (
@@ -1162,6 +1164,8 @@ export default function CorrelationsPage() {
       )}
 
       {/* ── EXPERIMENTS TAB ── */}
+      {tab === "stress" && <StressLifeInsights />}
+
       {tab === "experiments" && <ExperimentsTab />}
 
     </main>

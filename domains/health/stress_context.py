@@ -144,6 +144,17 @@ def stress_by_place(conn, date: str) -> dict:
         if s is not None and e is not None:
             spans.append((s, e))
 
+    # Exercise spans (activities) — a run's high reading is effort, not life stress.
+    ex_spans = []
+    for a in conn.execute(
+        "SELECT start_time, duration_seconds FROM activities WHERE date=?", (date,)
+    ):
+        s = _iso_to_local_min(a["start_time"], off)
+        if s is None:
+            continue
+        e = s + int((a["duration_seconds"] or 0) // 60)
+        ex_spans.append((s, e))
+
     # Airports with coordinates (daybook.db) — for the "airport" bucket.
     airports = [(r["latitude"], r["longitude"]) for r in conn.execute(
         "SELECT latitude, longitude FROM airports WHERE latitude IS NOT NULL AND longitude IS NOT NULL")]
@@ -180,6 +191,9 @@ def stress_by_place(conn, date: str) -> dict:
         for s, e in spans:
             if s <= mn <= e:
                 return "in-flight"
+        for s, e in ex_spans:
+            if s <= mn <= e:
+                return "exercise"
         g = nearest_gps(mn)
         if not g:
             return "unknown"
@@ -201,3 +215,65 @@ def stress_by_place(conn, date: str) -> dict:
     ]
     result.sort(key=lambda b: b["avg_stress"], reverse=True)
     return {"date": date, "buckets": result, "has_data": True}
+
+
+def persist_stress_contexts(conn, date: str) -> int:
+    """Snapshot the day's stress-by-context into stress_context_daily. Rows written."""
+    day = stress_by_place(conn, date)
+    conn.execute("DELETE FROM stress_context_daily WHERE date=?", (date,))
+    n = 0
+    for b in day.get("buckets", []):
+        conn.execute(
+            "INSERT INTO stress_context_daily (date, context, avg_stress, minutes, updated_at) "
+            "VALUES (?,?,?,?, strftime('%Y-%m-%dT%H:%M:%SZ','now')) "
+            "ON CONFLICT(date, context) DO UPDATE SET "
+            "avg_stress=excluded.avg_stress, minutes=excluded.minutes, updated_at=excluded.updated_at",
+            (date, b["place"], b["avg_stress"], b["minutes"]),
+        )
+        n += 1
+    conn.commit()
+    return n
+
+
+def stress_contexts_rollup(conn, days: int = 90) -> dict:
+    """Life-wide 'what makes you stressed' — minute-weighted avg stress per context."""
+    rows = conn.execute(
+        "SELECT context, avg_stress, minutes, date FROM stress_context_daily "
+        "WHERE date >= date('now', ?)",
+        (f"-{days} days",),
+    ).fetchall()
+    agg: dict[str, dict] = {}
+    for r in rows:
+        a = agg.setdefault(r["context"], {"weighted": 0.0, "minutes": 0, "days": set()})
+        a["weighted"] += (r["avg_stress"] or 0) * (r["minutes"] or 0)
+        a["minutes"] += (r["minutes"] or 0)
+        a["days"].add(r["date"])
+    out = [
+        {"context": k, "avg_stress": round(v["weighted"] / v["minutes"]),
+         "minutes": v["minutes"], "days": len(v["days"])}
+        for k, v in agg.items() if v["minutes"] > 0
+    ]
+    out.sort(key=lambda b: b["avg_stress"], reverse=True)
+    return {"days": days, "contexts": out, "has_data": bool(out)}
+
+
+if __name__ == "__main__":
+    import argparse
+    from infrastructure.db.connection import get_connection
+
+    ap = argparse.ArgumentParser(description="Persist stress-by-context for correlations.")
+    ap.add_argument("--date", help="single date YYYY-MM-DD")
+    ap.add_argument("--days", type=int, default=120, help="backfill window when no --date")
+    args = ap.parse_args()
+
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    if args.date:
+        print(f"stress contexts: wrote {persist_stress_contexts(conn, args.date)} row(s) for {args.date}")
+    else:
+        dates = [r[0] for r in conn.execute(
+            "SELECT DISTINCT date FROM intraday_stress WHERE date >= date('now', ?) ORDER BY date",
+            (f"-{args.days} days",))]
+        total = sum(persist_stress_contexts(conn, d) for d in dates)
+        print(f"stress contexts: wrote {total} row(s) over {len(dates)} day(s)")
+    conn.close()

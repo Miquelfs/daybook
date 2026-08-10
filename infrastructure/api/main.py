@@ -147,6 +147,10 @@ def _run_migrations() -> None:
     _conn5 = _get_conn()
     _migrate_wellness(_conn5)
     _conn5.close()
+    from infrastructure.db.migrate_flight_physio import migrate as _migrate_flight_physio
+    _conn6 = _get_conn()
+    _migrate_flight_physio(_conn6)
+    _conn6.close()
 
 
 @app.get("/")

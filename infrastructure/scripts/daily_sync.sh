@@ -108,6 +108,16 @@ python -m domains.health.garmin.wellness_sync \
 python -m domains.health.garmin.wellness_sync --date "$DATE" --force \
   >> "$LOG_FILE" 2>&1 || log "WARN: Wellness (today) failed (non-fatal)"
 
+# Flight physio + stress-by-context: snapshot yesterday & today so the takeoff/
+# landing spikes and "what stresses you" roll up across all of life.
+log "Snapshotting flight physio + stress contexts..."
+for D in "$YESTERDAY" "$DATE"; do
+  python -m domains.health.flight_physio --date "$D" \
+    >> "$LOG_FILE" 2>&1 || log "WARN: flight_physio ($D) failed (non-fatal)"
+  python -m domains.health.stress_context --date "$D" \
+    >> "$LOG_FILE" 2>&1 || log "WARN: stress_context ($D) failed (non-fatal)"
+done
+
 # Load Index: compute fatigue composite for yesterday (Horizon 1).
 log "Computing Load Index..."
 python -m domains.health.compute_load_index \

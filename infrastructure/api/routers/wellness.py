@@ -8,7 +8,11 @@ from fastapi import APIRouter, Depends, Query
 
 from infrastructure.api.db import get_db
 from domains.health.recovery import recovery_flag
-from domains.health.stress_context import flight_phases, flight_phase_by_id, stress_by_place, _phases_for_rows
+from domains.health.stress_context import (
+    flight_phases, flight_phase_by_id, stress_by_place, _phases_for_rows,
+    stress_contexts_rollup,
+)
+from domains.health.flight_physio import rollup as flight_physio_rollup
 
 router = APIRouter(prefix="/wellness", tags=["wellness"])
 
@@ -58,6 +62,22 @@ def get_flight_phase(flight_id: str, conn: DB):
 @router.get("/stress-by-place")
 def get_stress_by_place(date: str = Query(...), conn: DB = None):
     return stress_by_place(conn, date)
+
+
+@router.get("/stress-contexts")
+def get_stress_contexts(days: int = Query(90, ge=7, le=730), conn: DB = None):
+    """Life-wide: what were you doing when stressed, across the window."""
+    return stress_contexts_rollup(conn, days)
+
+
+@router.get("/flight-physio/rollup")
+def get_flight_physio_rollup(
+    by: str = Query("airport", pattern="^(airport|phase|captain)$"),
+    days: int = Query(3650, ge=7, le=3650),
+    conn: DB = None,
+):
+    """Aggregate persisted flight physio — by arrival airport, phase, or captain."""
+    return flight_physio_rollup(conn, by=by, days=days)
 
 
 @router.get("/timeline")
