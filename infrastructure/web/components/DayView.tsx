@@ -11,6 +11,7 @@ import { LocationSection } from "@/components/LocationSection";
 import { DaySpendSummary } from "@/components/money/DaySpendSummary";
 import { DayRosterBadge } from "@/components/DayRosterBadge";
 import { DayFlights } from "@/components/DayFlights";
+import { DayPassengerFlights } from "@/components/DayPassengerFlights";
 import { DayRestaurants } from "@/components/DayRestaurants";
 import { DayShows } from "@/components/DayShows";
 import { DayBooks } from "@/components/DayBooks";
@@ -107,6 +108,8 @@ export async function DayView({ date }: { date: string }) {
         <DayRosterBadge date={date} />
 
         <DayFlights date={date} />
+
+        <DayPassengerFlights date={date} />
 
         <DaySpendSummary date={date} />
 

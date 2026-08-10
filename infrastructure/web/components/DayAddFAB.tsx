@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { X, Plus, UtensilsCrossed, Tv, BookOpen, Music, Apple } from "lucide-react";
+import { X, Plus, UtensilsCrossed, Tv, BookOpen, Music, Apple, Plane } from "lucide-react";
 import { api, type RestaurantIn } from "@/lib/api";
 import { showsApi, type ShowIn } from "@/lib/shows-api";
 import { songsApi, type SongIn } from "@/lib/songs-api";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
 import { BookForm } from "@/components/books/BookForm";
+import { PassengerFlightForm } from "@/components/PassengerFlightForm";
 
-type Mode = "food" | "restaurant" | "show" | "book" | "song";
+type Mode = "food" | "restaurant" | "show" | "book" | "song" | "flight";
 
 function RestaurantForm({ date, onDone }: { date: string; onDone: () => void }) {
   const qc = useQueryClient();
@@ -276,6 +277,7 @@ const MODE_META: Record<Mode, { label: string; icon: React.ReactNode; color: str
   show:       { label: "Show / Movie", icon: <Tv size={15} />, color: "text-blue-400" },
   book:       { label: "Book", icon: <BookOpen size={15} />, color: "text-emerald-400" },
   song:       { label: "Song", icon: <Music size={15} />, color: "text-pink-400" },
+  flight:     { label: "Flight", icon: <Plane size={15} />, color: "text-sky-400" },
 };
 
 export function DayAddFAB({ date }: { date: string }) {
@@ -332,6 +334,7 @@ export function DayAddFAB({ date }: { date: string }) {
               {mode === "show"       && <ShowForm date={date} onDone={close} />}
               {mode === "book"       && <BookForm defaultDate={date} onSaved={close} />}
               {mode === "song"       && <SongForm date={date} onDone={close} />}
+              {mode === "flight"     && <PassengerFlightForm date={date} onSaved={close} />}
             </div>
           </div>
         </>

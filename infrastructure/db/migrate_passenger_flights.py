@@ -1,0 +1,46 @@
+"""
+Passenger-flight logbook — flights taken as a *passenger*, kept entirely separate
+from the pilot flight log (roster / duty flights). One row per sector.
+
+Seeded historically from a Notion export; going forward, added via the day FAB
+and the /explore/passenger-flights database page.
+
+Run once on the Pi: python -m infrastructure.db.migrate_passenger_flights
+(also runs automatically on API startup).
+"""
+
+from infrastructure.db.connection import get_connection
+
+
+def migrate(conn):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS passenger_flights (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            date           TEXT NOT NULL,      -- YYYY-MM-DD, day of the flight
+            flight_number  TEXT,               -- e.g. FR524
+            origin         TEXT,               -- IATA, e.g. BCN
+            destination    TEXT,               -- IATA, e.g. TFN
+            airline        TEXT,               -- "company", e.g. Ryanair
+            aircraft       TEXT,               -- type, e.g. B737-8200
+            price_paid     REAL,               -- ticket price in EUR (NULL = unknown)
+            reason         TEXT,               -- free-text reason for the trip
+            commuting      INTEGER NOT NULL DEFAULT 0,  -- 1 = work commute
+            companion      TEXT,               -- who I flew with, optional
+            seat           TEXT,               -- seat, optional
+            duration_hours REAL,               -- block hours, optional
+            notes          TEXT,
+            created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_pax_flights_date    ON passenger_flights(date);
+        CREATE INDEX IF NOT EXISTS idx_pax_flights_airline ON passenger_flights(airline);
+    """)
+    conn.commit()
+    print("passenger_flights table created (or already existed).")
+
+
+if __name__ == "__main__":
+    conn = get_connection()
+    migrate(conn)
+    conn.close()

@@ -4,13 +4,15 @@ import { api } from "@/lib/api";
 import { booksApi } from "@/lib/books-api";
 import { showsApi } from "@/lib/shows-api";
 import { songsApi } from "@/lib/songs-api";
+import { passengerFlightsApi } from "@/lib/passenger-flights-api";
 
 export default async function DatabasesPage() {
-  const [restaurantStats, bookStats, showStats, songStats] = await Promise.all([
+  const [restaurantStats, bookStats, showStats, songStats, flightStats] = await Promise.all([
     api.restaurantStats().catch(() => null),
     booksApi.stats().catch(() => null),
     showsApi.stats().catch(() => null),
     songsApi.stats().catch(() => null),
+    passengerFlightsApi.stats().catch(() => null),
   ]);
 
   return (
@@ -100,6 +102,22 @@ export default async function DatabasesPage() {
               {songStats
                 ? `${songStats.current_year.songs} this year · ${songStats.total_songs} total`
                 : "Daily soundtrack + year playlists"}
+            </p>
+          </div>
+          <span className="text-[#52525B] text-sm">→</span>
+        </Link>
+
+        <Link
+          href="/explore/passenger-flights"
+          className="flex items-center gap-4 bg-[#18181B] border border-[#27272A] rounded-xl px-5 py-4 hover:border-[#3F3F46] transition-colors"
+        >
+          <span className="text-3xl">✈️</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-semibold text-[#FAFAFA]">Flights as passenger</p>
+            <p className="text-xs text-[#52525B] mt-0.5">
+              {flightStats && flightStats.total > 0
+                ? `${flightStats.total} flights · ${flightStats.distinct_airports} airports · €${flightStats.total_spent.toLocaleString()}`
+                : "Trips flown as a passenger, not the pilot"}
             </p>
           </div>
           <span className="text-[#52525B] text-sm">→</span>

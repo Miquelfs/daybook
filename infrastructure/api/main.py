@@ -26,6 +26,7 @@ from infrastructure.api.routers import weather as weather_module
 from infrastructure.api.routers import screen_time as screen_time_module
 from infrastructure.api.routers import books as books_module
 from infrastructure.api.routers import songs as songs_module
+from infrastructure.api.routers import passenger_flights as passenger_flights_module
 from infrastructure.api.routers import life as life_module
 from infrastructure.api.routers import aviation as aviation_module
 from infrastructure.api.routers import restaurants as restaurants_module
@@ -88,6 +89,7 @@ app.include_router(weather_module.router)
 app.include_router(screen_time_module.router)
 app.include_router(books_module.router)
 app.include_router(songs_module.router)
+app.include_router(passenger_flights_module.router)
 app.include_router(life_module.router)
 app.include_router(aviation_module.router)
 app.include_router(restaurants_module.router)
@@ -151,6 +153,10 @@ def _run_migrations() -> None:
     _conn6 = _get_conn()
     _migrate_flight_physio(_conn6)
     _conn6.close()
+    from infrastructure.db.migrate_passenger_flights import migrate as _migrate_pax_flights
+    _conn7 = _get_conn()
+    _migrate_pax_flights(_conn7)
+    _conn7.close()
 
 
 @app.get("/")
