@@ -6,7 +6,19 @@ Claude cannot SSH to the Pi directly. Always provide commands for the user to ru
 
 **Build the frontend on the Mac, never on the Pi.** The Pi (1 CPU, ~384 MB heap cap) cannot build Next.js — an on-Pi `npm run build` OOM-thrashes it into unresponsiveness (SSH times out, needs a physical power-cycle). The `daybook-web` systemd service just runs `next start`, which serves a prebuilt `.next/`. So we build locally and ship the built `.next/`; the Pi only restarts.
 
-When deployment is needed, output these commands for the user to run **one block at a time** (each of the last four prompts for the Pi password — pasting several at once can let a password prompt swallow the next line). Do **not** include `#` comment lines in the blocks the user pastes — their interactive zsh does not treat `#` as a comment and it throws errors.
+**Prefer passwordless SSH-key auth (set up once).** The Pi accepts an ed25519 key, so `rsync`/`scp`/`ssh` run with no password prompt. This is the fix for the intermittent deploy drops (`Connection closed by port 22`, rsync `connection unexpectedly closed`) — those happen when a password is typed too slowly and the Pi closes the auth window. One-time on the Mac:
+```bash
+ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519 -C "daybook-mac"
+```
+```bash
+ssh-copy-id pi@daybook-pi
+```
+```bash
+ssh pi@daybook-pi "echo connected — no password"
+```
+(If `ssh-copy-id` is missing: `cat ~/.ssh/id_ed25519.pub | ssh pi@daybook-pi "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"`.) Once the key is in place the deploy is prompt-free; the "one block at a time / password" caution below only applies if key auth isn't set up.
+
+When deployment is needed, output these commands for the user to run **one block at a time** (without a key, each of the last four prompts for the Pi password — pasting several at once can let a password prompt swallow the next line; with key auth there are no prompts). Do **not** include `#` comment lines in the blocks the user pastes — their interactive zsh does not treat `#` as a comment and it throws errors.
 
 1. Build the frontend on the Mac (no password):
 ```bash

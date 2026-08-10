@@ -37,7 +37,7 @@ def _iso_to_local_min(iso: Optional[str], off: int) -> Optional[int]:
     if not iso:
         return None
     try:
-        dt = datetime.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S") + timedelta(minutes=off)
+        dt = datetime.strptime(iso[:19].replace(" ", "T"), "%Y-%m-%dT%H:%M:%S") + timedelta(minutes=off)
         return dt.hour * 60 + dt.minute
     except Exception:
         return None

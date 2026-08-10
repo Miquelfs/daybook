@@ -67,7 +67,7 @@ function ActivityRow({ activity: a }: { activity: Activity }) {
         <p className="text-xs text-[#A1A1AA] mt-0.5">
           {fmtDuration(a.duration_seconds)}
           {a.distance_meters ? ` · ${fmtDistance(a.distance_meters)}` : ""}
-          {a.avg_heart_rate ? ` · ${a.avg_heart_rate} bpm avg` : ""}
+          {a.avg_heart_rate ? ` · ${Math.round(a.avg_heart_rate)} bpm avg` : ""}
         </p>
       </div>
       <div className="flex items-center gap-2 shrink-0">

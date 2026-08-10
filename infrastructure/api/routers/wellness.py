@@ -20,7 +20,7 @@ def _local_hhmm(iso_utc: Optional[str], offset_min: int, plus_s: int = 0) -> Opt
     if not iso_utc:
         return None
     try:
-        dt = (datetime.strptime(iso_utc[:19], "%Y-%m-%dT%H:%M:%S")
+        dt = (datetime.strptime(iso_utc[:19].replace(" ", "T"), "%Y-%m-%dT%H:%M:%S")
               + timedelta(minutes=offset_min) + timedelta(seconds=plus_s))
         return dt.strftime("%H:%M")
     except Exception:

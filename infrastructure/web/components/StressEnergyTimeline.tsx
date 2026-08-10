@@ -15,8 +15,9 @@ const HR = "#F87171";      // red
 
 const SPAN_COLOR: Record<string, string> = {
   activity: "#34D399",  // green
-  flight: "#60A5FA",    // blue
+  flight: "#1E40AF",    // dark blue
 };
+const SPAN_FILL_OPACITY: Record<string, number> = { flight: 0.22, activity: 0.14 };
 const EVENT_COLOR: Record<string, string> = {
   meal: "#F59E0B",
   takeoff: "#60A5FA",
@@ -97,11 +98,19 @@ export function StressEnergyTimeline({ date }: { date: string }) {
               />
               {spans.map((s, i) => (
                 <ReferenceArea key={`s${i}`} yAxisId="pct" x1={s.m1} x2={s.m2}
-                  fill={SPAN_COLOR[s.type] ?? "#3F3F46"} fillOpacity={0.1} stroke={SPAN_COLOR[s.type] ?? "#3F3F46"} strokeOpacity={0.25} />
+                  fill={SPAN_COLOR[s.type] ?? "#3F3F46"} fillOpacity={SPAN_FILL_OPACITY[s.type] ?? 0.12}
+                  stroke={SPAN_COLOR[s.type] ?? "#3F3F46"} strokeOpacity={0.35} />
               ))}
-              {events.map((e, i) => (
-                <ReferenceLine key={`e${i}`} yAxisId="pct" x={e.m} stroke={EVENT_COLOR[e.type] ?? "#3F3F46"} strokeOpacity={0.55} strokeWidth={1} strokeDasharray={e.type === "meal" ? "3 3" : undefined} />
-              ))}
+              {events.map((e, i) => {
+                const isFlight = e.type === "takeoff" || e.type === "landing";
+                return (
+                  <ReferenceLine key={`e${i}`} yAxisId="pct" x={e.m}
+                    stroke={EVENT_COLOR[e.type] ?? "#3F3F46"}
+                    strokeOpacity={isFlight ? 0.85 : 0.55}
+                    strokeWidth={isFlight ? 1.5 : 1}
+                    strokeDasharray={e.type === "meal" ? "3 3" : undefined} />
+                );
+              })}
               <Line yAxisId="pct" dataKey="stress" name="Stress" stroke={STRESS} dot={false} strokeWidth={1.5} connectNulls />
               <Line yAxisId="pct" dataKey="bb" name="Energy" stroke={ENERGY} dot={false} strokeWidth={1.5} connectNulls />
               <Line yAxisId="hr" dataKey="hr" name="HR" stroke={HR} dot={false} strokeWidth={1} strokeOpacity={0.4} connectNulls />
