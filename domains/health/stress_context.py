@@ -268,10 +268,15 @@ def _local_min_of(iso_local: Optional[str]) -> Optional[int]:
         return None
 
 
+_WAKE_START = 7 * 60    # 07:00 — exclude overnight sleep so a city where you only
+_WAKE_END = 23 * 60     # 23:00   sleep doesn't read as artificially calm.
+
+
 def stress_by_city_day(conn, date: str) -> list[dict]:
-    """The day's stress split by the specific city you were in (Overland visits
-    → place_names geocode). Both intraday stress and visits are local time."""
-    stress = _series_min(conn, "intraday_stress", "level", date)
+    """The day's WAKING stress split by the specific city you were in (Overland
+    visits → place_names geocode). Both intraday stress and visits are local time."""
+    stress = {mn: v for mn, v in _series_min(conn, "intraday_stress", "level", date).items()
+              if _WAKE_START <= mn <= _WAKE_END}
     if not stress:
         return []
 
@@ -336,26 +341,85 @@ def persist_stress_places(conn, date: str) -> int:
     return len(rows)
 
 
-def stress_by_city_rollup(conn, days: int = 180, min_minutes: int = 30) -> dict:
-    """Life-wide 'which cities stress me' — minute-weighted avg stress per city."""
+def _home_cities(days: int) -> set[str]:
+    """Your home city (or cities, if you relocated in the window) — to exclude,
+    since 'home stresses me ~baseline' is just noise. We take the single city
+    CONTAINING each home centroid (nearest geocoded city), not a wide radius —
+    a 40 km home radius would otherwise swallow a whole metro area."""
+    try:
+        from domains.locations.home_base import home_for
+    except Exception:
+        return set()
+    end = datetime.utcnow().date()
+    homes = []
+    for d in (end.isoformat(), (end - timedelta(days=days - 1)).isoformat()):
+        h = home_for(d)
+        if h and h.get("lat") is not None:
+            label = (h.get("label") or "").lower()
+            homes.append((h["lat"], h["lng"], "" if label in ("gps centroid", "") else label))
+    if not homes:
+        return set()
+
+    out: set[str] = set()
+    try:
+        lc = sqlite3.connect(_LOCATIONS_DB)
+        lc.row_factory = sqlite3.Row
+        cities = [(r["city"], r["la"], r["lo"]) for r in lc.execute(
+            "SELECT city, AVG(lat) la, AVG(lng) lo FROM place_names "
+            "WHERE city IS NOT NULL AND city <> '' GROUP BY city")]
+        lc.close()
+        for hlat, hlng, label in homes:
+            # nearest city to the home centroid = the home city
+            nearest, best = None, 1e9
+            for city, la, lo in cities:
+                d = _haversine_km(la, lo, hlat, hlng)
+                if d < best:
+                    best, nearest = d, city
+            if nearest and best <= 25:
+                out.add(nearest)
+            if label:  # explicit home label (life-period) — exclude by name too
+                out.update(c for c, _, _ in cities if label in c.lower())
+    except Exception:
+        pass
+    return out
+
+
+def stress_by_city_rollup(conn, days: int = 180, min_minutes: int = 45) -> dict:
+    """Which places stress you ABOVE your normal — waking stress per city expressed
+    as a delta vs your personal baseline (minute-weighted avg across everywhere),
+    with your home base excluded."""
     rows = conn.execute(
         "SELECT city, country, avg_stress, minutes, date FROM stress_place_daily "
         "WHERE date >= date('now', ?)",
         (f"-{days} days",),
     ).fetchall()
+    if not rows:
+        return {"days": days, "cities": [], "baseline": None, "has_data": False}
+
+    # Baseline = your average waking stress across ALL located time (incl. home).
+    tot_w = sum((r["avg_stress"] or 0) * (r["minutes"] or 0) for r in rows)
+    tot_m = sum(r["minutes"] or 0 for r in rows)
+    baseline = round(tot_w / tot_m) if tot_m else 0
+
     agg: dict[str, dict] = {}
     for r in rows:
         a = agg.setdefault(r["city"], {"weighted": 0.0, "minutes": 0, "days": set(), "country": r["country"]})
         a["weighted"] += (r["avg_stress"] or 0) * (r["minutes"] or 0)
         a["minutes"] += (r["minutes"] or 0)
         a["days"].add(r["date"])
-    out = [
-        {"city": k, "country": v["country"], "avg_stress": round(v["weighted"] / v["minutes"]),
-         "minutes": v["minutes"], "days": len(v["days"])}
-        for k, v in agg.items() if v["minutes"] >= min_minutes
-    ]
-    out.sort(key=lambda b: b["avg_stress"], reverse=True)
-    return {"days": days, "cities": out, "has_data": bool(out)}
+
+    home = _home_cities(days)
+    out = []
+    for city, v in agg.items():
+        if city in home or v["minutes"] < min_minutes:
+            continue
+        avg = round(v["weighted"] / v["minutes"])
+        out.append({
+            "city": city, "country": v["country"], "avg_stress": avg,
+            "delta": avg - baseline, "minutes": v["minutes"], "days": len(v["days"]),
+        })
+    out.sort(key=lambda b: b["delta"], reverse=True)
+    return {"days": days, "baseline": baseline, "cities": out, "has_data": bool(out)}
 
 
 if __name__ == "__main__":

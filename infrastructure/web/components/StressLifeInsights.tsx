@@ -83,13 +83,15 @@ function StressfulPlaces() {
     staleTime: 300_000,
   });
   const rows = data?.cities ?? [];
-  const max = Math.max(60, ...rows.map((r) => r.avg_stress));
+  const max = Math.max(8, ...rows.map((r) => Math.abs(r.delta)));
 
   return (
     <Card title="Stressful places" icon={<MapPin size={15} className="text-[#F97316]" />}>
-      <p className="text-[11px] text-[#52525B] mb-3">Average stress by city you were in · last 180 days</p>
+      <p className="text-[11px] text-[#52525B] mb-3">
+        Stress vs your baseline{data?.baseline != null ? ` (${data.baseline})` : ""}, by city · last 180 days · home excluded
+      </p>
       {rows.length === 0 ? (
-        <p className="text-xs text-[#52525B]">No place data yet — builds from your GPS visits as the CIRQA syncs.</p>
+        <p className="text-xs text-[#52525B]">No away-from-home place data yet — builds from your GPS visits as the CIRQA syncs.</p>
       ) : (
         <div className="space-y-2.5">
           {rows.slice(0, 12).map((r) => (
@@ -100,11 +102,13 @@ function StressfulPlaces() {
                   {r.country && r.country !== "España" && <span className="text-[#52525B]"> · {r.country}</span>}
                 </span>
                 <span className="tabular-nums text-[#71717A]">
-                  <span className="font-semibold text-[#E4E4E7]">{r.avg_stress}</span> · {fmtDur(r.minutes)} · {r.days}d
+                  <span className="font-semibold" style={{ color: deltaColor(r.delta) }}>
+                    {r.delta > 0 ? "+" : ""}{r.delta}
+                  </span> · {fmtDur(r.minutes)} · {r.days}d
                 </span>
               </div>
               <div className="h-2 rounded-full bg-[#18181B] overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${(r.avg_stress / max) * 100}%`, background: stressColor(r.avg_stress) }} />
+                <div className="h-full rounded-full" style={{ width: `${(Math.abs(r.delta) / max) * 100}%`, background: deltaColor(r.delta) }} />
               </div>
             </div>
           ))}

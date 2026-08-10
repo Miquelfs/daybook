@@ -74,7 +74,8 @@ export interface FlightPhysioRollup {
 export interface StressByCity {
   days: number;
   has_data: boolean;
-  cities: { city: string; country: string | null; avg_stress: number; minutes: number; days: number }[];
+  baseline: number | null;
+  cities: { city: string; country: string | null; avg_stress: number; delta: number; minutes: number; days: number }[];
 }
 
 export const wellnessApi = {
