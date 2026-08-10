@@ -16,11 +16,17 @@ DB = Annotated[sqlite3.Connection, Depends(get_db)]
 
 
 def _local_hhmm(iso_utc: Optional[str], offset_min: int, plus_s: int = 0) -> Optional[str]:
-    """Convert a UTC ISO timestamp (+ optional seconds) to local HH:MM."""
+    """UTC timestamp → local HH:MM. Accepts full ISO (T/space/Z) and bare
+    'HH:MM' UTC time-of-day (how some flights store off/takeoff/landing times)."""
     if not iso_utc:
         return None
+    s = iso_utc.strip()
     try:
-        dt = (datetime.strptime(iso_utc[:19].replace(" ", "T"), "%Y-%m-%dT%H:%M:%S")
+        if len(s) <= 5 and ":" in s:  # bare HH:MM UTC
+            h, m = s.split(":")[:2]
+            total = (int(h) * 60 + int(m) + offset_min + plus_s // 60) % 1440
+            return f"{total // 60:02d}:{total % 60:02d}"
+        dt = (datetime.strptime(s[:19].replace(" ", "T"), "%Y-%m-%dT%H:%M:%S")
               + timedelta(minutes=offset_min) + timedelta(seconds=plus_s))
         return dt.strftime("%H:%M")
     except Exception:

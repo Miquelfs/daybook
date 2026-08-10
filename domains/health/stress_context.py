@@ -34,11 +34,19 @@ def _offset_min(conn, date: str) -> int:
 
 
 def _iso_to_local_min(iso: Optional[str], off: int) -> Optional[int]:
+    """UTC timestamp → local minute-of-day. Accepts full ISO (T/space/Z) and
+    bare 'HH:MM' UTC time-of-day (how some flights store off/takeoff/landing)."""
     if not iso:
         return None
+    s = iso.strip()
     try:
-        dt = datetime.strptime(iso[:19].replace(" ", "T"), "%Y-%m-%dT%H:%M:%S") + timedelta(minutes=off)
-        return dt.hour * 60 + dt.minute
+        if len(s) <= 5 and ":" in s:  # bare HH:MM UTC
+            h, m = s.split(":")[:2]
+            base = int(h) * 60 + int(m)
+        else:
+            dt = datetime.strptime(s[:19].replace(" ", "T"), "%Y-%m-%dT%H:%M:%S")
+            base = dt.hour * 60 + dt.minute
+        return (base + off) % 1440
     except Exception:
         return None
 
