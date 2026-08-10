@@ -1362,13 +1362,20 @@ export function fmtDistance(meters: number | null): string {
     : `${Math.round(meters)} m`;
 }
 
+// Keep this in lockstep with MOOD_STEPS in components/EmojiLabel.tsx — the
+// daily view (questionnaire) and the timeline must show the same face per level.
 export function moodEmoji(mood: number | null): string {
   if (!mood) return "·";
-  if (mood >= 9) return "😄";
-  if (mood >= 7) return "🙂";
+  if (mood >= 10) return "🥳";
+  if (mood >= 9) return "🤩";
+  if (mood >= 8) return "😄";
+  if (mood >= 7) return "😊";
+  if (mood >= 6) return "🙂";
   if (mood >= 5) return "😐";
-  if (mood >= 3) return "😕";
-  return "😞";
+  if (mood >= 4) return "😕";
+  if (mood >= 3) return "😞";
+  if (mood >= 2) return "😢";
+  return "😭";
 }
 
 export function activityIcon(type: string | null): string {

@@ -39,6 +39,7 @@ export interface RecoveryFlag {
   rhr_delta: number | null;
   hrv_status: string | null;
   body_battery_low: number | null;
+  body_battery_high: number | null;
   skin_temp_dev: number | null;
 }
 

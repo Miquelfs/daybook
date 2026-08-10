@@ -24,7 +24,7 @@ export function DayHeader({ date }: Props) {
             {isToday(d) ? "Today" : format(d, "EEEE")}
           </p>
           <h1
-            className="font-semibold leading-none tracking-tight text-[#FAFAFA] truncate"
+            className="font-semibold leading-[1.15] tracking-tight text-[#FAFAFA] truncate"
             style={{ fontSize: "clamp(1.75rem, 5.5vw, 3.25rem)" }}
           >
             {format(d, "MMMM d, yyyy")}

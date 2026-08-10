@@ -88,9 +88,12 @@ export async function DayView({ date }: { date: string }) {
           aiAvailable={aiStatus?.ollama_available ?? false}
         />
 
-        <RecoveryCard date={date} />
-
-        <DayTraining initialPrescription={trainingDay} date={date} />
+        {/* Recovery cue sits tight above Training — it's a lead-in to it, not
+            a standalone section, so keep the gap small (gap-4, not gap-12). */}
+        <div className="flex flex-col gap-4">
+          <RecoveryCard date={date} />
+          <DayTraining initialPrescription={trainingDay} date={date} />
+        </div>
 
         <MovementBlock
           activities={day.activities}

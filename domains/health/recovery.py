@@ -31,10 +31,15 @@ def recovery_flag(conn, date: str) -> dict:
         reasons.append(f"HRV {hrv_status.lower()}")
         score += 1
 
-    w = conn.execute("SELECT bb_min, skin_temp_dev FROM wellness_daily WHERE date=?", (date,)).fetchone()
+    w = conn.execute("SELECT bb_min, bb_max, skin_temp_dev FROM wellness_daily WHERE date=?", (date,)).fetchone()
     bb_low = w["bb_min"] if w else None
-    if bb_low is not None and bb_low <= 20:
-        reasons.append(f"Body Battery bottomed at {bb_low}")
+    bb_high = w["bb_max"] if w else None
+    # A bottomed-out Body Battery (bb_min) is normal daily drain — it happens
+    # almost every day and is not a recovery signal on its own. What matters for
+    # recovery is a poor overnight *recharge*: the Battery never climbed back up,
+    # i.e. a low daily peak (bb_max).
+    if bb_high is not None and bb_high <= 50:
+        reasons.append(f"Body Battery only recharged to {bb_high}")
         score += 1
     skin_dev = w["skin_temp_dev"] if w else None
     if skin_dev is not None and skin_dev >= 1.0:
@@ -49,5 +54,6 @@ def recovery_flag(conn, date: str) -> dict:
         "rhr_delta": rhr_delta,
         "hrv_status": hrv_status,
         "body_battery_low": bb_low,
+        "body_battery_high": bb_high,
         "skin_temp_dev": skin_dev,
     }
