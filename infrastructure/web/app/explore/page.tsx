@@ -3,7 +3,7 @@ import { ChevronRight, Globe, PersonStanding, Database } from "lucide-react";
 import { api } from "@/lib/api";
 import { ExploreMap } from "@/components/ExploreMap";
 import { ManualCountries } from "@/components/ManualCountries";
-import { TripCard } from "@/components/TripCard";
+import { TripYears } from "@/components/TripYears";
 import { YearSelect } from "@/components/YearSelect";
 import type { TopPlace, CityStay, WorldCoverage, FunFactCard, Trip } from "@/lib/api";
 
@@ -55,7 +55,7 @@ export default async function ExplorePage({ searchParams }: Props) {
     api.cityTimeline(year).catch(() => [] as CityStay[]),
     api.worldCoverage(year).catch(() => null as WorldCoverage | null),
     api.funFacts(year).catch(() => null as { cards: FunFactCard[] } | null),
-    api.trips(100, year).catch(() => null as { trips: Trip[]; total: number } | null),
+    api.trips(500, year).catch(() => null as { trips: Trip[]; total: number } | null),
   ]);
 
   // Distinct days with location data — per-country counts overlap, so summing
@@ -64,13 +64,15 @@ export default async function ExplorePage({ searchParams }: Props) {
   const totalCountries = data.countries.length;
   const mostVisited    = data.countries.length > 0 ? data.countries[0] : null;
 
-  // Trips grouped by year for the gallery (newest year first)
+  // Trips grouped by year for the gallery (newest year first — the API returns
+  // them start_date DESC, so first-seen year order is already newest-first).
   const tripsByYear = new Map<string, Trip[]>();
   for (const t of tripsData?.trips ?? []) {
     const y = t.start_date.slice(0, 4);
     if (!tripsByYear.has(y)) tripsByYear.set(y, []);
     tripsByYear.get(y)!.push(t);
   }
+  const tripGroups = [...tripsByYear.entries()].map(([year, trips]) => ({ year, trips }));
 
   return (
     <main className="max-w-3xl mx-auto px-4 pb-20 pt-8">
@@ -186,22 +188,7 @@ export default async function ExplorePage({ searchParams }: Props) {
               {tripsData.total} · nights not slept at home
             </span>
           </div>
-          <div className="flex flex-col gap-4">
-            {[...tripsByYear.entries()].map(([y, trips]) => (
-              <div key={y}>
-                {!year && (
-                  <p className="text-xs text-[#71717A] tabular-nums mb-2">
-                    {y} <span className="text-[#3F3F46]">· {trips.length} trips · {trips.reduce((s, t) => s + t.n_nights, 0)} nights away</span>
-                  </p>
-                )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {trips.map((t) => (
-                    <TripCard key={t.id} trip={t} flag={FLAG[t.primary_country ?? ""] ?? "🌍"} />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+          <TripYears groups={tripGroups} flags={FLAG} filtered={!!year} />
         </section>
       )}
 

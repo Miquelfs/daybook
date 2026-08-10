@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Globe, Flame, Sun, Moon } from "lucide-react";
+import { Globe, Flame } from "lucide-react";
 import type { HeatmapData, WorldCoverage } from "@/lib/api";
 
 type Country = WorldCoverage["country_details"][number];
@@ -40,9 +40,20 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const heatRef = useRef<any>(null);
 
-  const [mode, setMode] = useState<Mode>("coverage");
+  const [mode, setMode] = useState<Mode>("heatmap");
   const [theme, setTheme] = useState<Theme>("dark");
   const [ready, setReady] = useState(false);
+
+  // Follow the app's global light/dark theme (set as data-theme on <html> by
+  // ThemeToggle) so the map always matches the view you're in.
+  useEffect(() => {
+    const read = () =>
+      setTheme(document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark");
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => obs.disconnect();
+  }, []);
 
   const hasCoverage = details.length > 0;
   const hasHeat = points.length > 0;
@@ -126,8 +137,8 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
         });
       }
 
-      // Show the initial mode + frame it.
-      const initial: Mode = hasCoverage ? "coverage" : "heatmap";
+      // Show the initial mode + frame it. Heatmap is the default view.
+      const initial: Mode = hasHeat ? "heatmap" : "coverage";
       setMode(initial);
       if (initial === "coverage") coverageRef.current.addTo(map);
       else if (heatRef.current) heatRef.current.addTo(map);
@@ -187,15 +198,6 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
             <Flame size={12} /> Heatmap
           </button>
         </div>
-
-        {/* Theme toggle */}
-        <button
-          onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-          className="absolute top-3 right-3 z-[1000] flex items-center justify-center h-7 w-7 bg-[#0D0D0F]/85 border border-[#27272A] rounded-lg text-[#A1A1AA] hover:text-[#F59E0B] backdrop-blur-sm transition-colors"
-          aria-label="Toggle map theme"
-        >
-          {theme === "dark" ? <Sun size={13} /> : <Moon size={13} />}
-        </button>
       </div>
     </>
   );

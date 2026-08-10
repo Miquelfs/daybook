@@ -183,6 +183,21 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
         relevant = [run for run in runs if run[-1] >= start]
         effective_start = relevant[0][0] if relevant else start
 
+        # Preserve user overrides (custom names + dismissed trips) across the
+        # wipe. They're keyed by (start_date, end_date) and MUST survive nightly
+        # recompute — otherwise a rename or delete of any trip in the look-back
+        # window is silently erased the next night.
+        has_hidden_col = any(
+            r["name"] == "hidden" for r in dcon.execute("PRAGMA table_info(trips)")
+        )
+        ov_cols = "start_date, end_date, user_name" + (", hidden" if has_hidden_col else "")
+        overrides = {
+            (r["start_date"], r["end_date"]): r
+            for r in dcon.execute(
+                f"SELECT {ov_cols} FROM trips WHERE end_date >= ?", (effective_start,)
+            ).fetchall()
+        }
+
         # Wipe every existing trip that OVERLAPS [effective_start, end] before
         # re-inserting, so rule/data changes, merged trips, and straddling trips
         # never leave stale or overlapping rows behind.
@@ -255,6 +270,25 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
             written += 1
             if verbose:
                 print(f"  ✓ {start_d} → {end_d}: {primary or 'Away'} ({n_nights} nights, max {max_dist:.0f} km)")
+
+        # Re-apply user overrides to any window that still exists after recompute
+        # (matched by exact start/end — a trip whose boundaries shifted is a new
+        # trip and correctly starts without an override).
+        for (s_d, e_d), r in overrides.items():
+            user_name = r["user_name"]
+            hidden = r["hidden"] if has_hidden_col else 0
+            sets, params = [], []
+            if user_name is not None:
+                sets.append("user_name = ?"); params.append(user_name)
+            if has_hidden_col and hidden:
+                sets.append("hidden = ?"); params.append(hidden)
+            if not sets:
+                continue
+            params += [s_d, e_d]
+            dcon.execute(
+                f"UPDATE trips SET {', '.join(sets)} WHERE start_date = ? AND end_date = ?",
+                params,
+            )
 
         dcon.commit()
         return written
