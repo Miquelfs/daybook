@@ -29,6 +29,7 @@ SYSTEM_TAGS = [
     ("date_night",       "Date night",        "🌙", "social"),
     ("family",           "Family",            "👨‍👩‍👧", "social"),
     ("concert",          "Concert / Event",   "🎵", "social"),
+    ("steps_10k",        "10k Steps",         "👟", "activity"),
     ("running",          "Running",           "🏃", "activity"),
     ("cycling",          "Cycling",           "🚴", "activity"),
     ("swimming",         "Swimming",          "🏊", "activity"),

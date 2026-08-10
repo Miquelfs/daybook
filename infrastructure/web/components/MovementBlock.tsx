@@ -1,18 +1,36 @@
+"use client";
+
 import Link from "next/link";
-import { fmtDuration, fmtDistance, activityIcon } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { api, fmtDuration, fmtDistance, activityIcon } from "@/lib/api";
 import type { Activity, DailyStats } from "@/lib/api";
+import { foodApi } from "@/lib/food-api";
 import { SectionLabel } from "./MorningBrief";
 import type { ReactNode } from "react";
 
 interface Props {
+  date: string;
   activities: Activity[];
   stats: DailyStats | null;
   screenTimeSlot?: ReactNode;
 }
 
-export function MovementBlock({ activities, stats, screenTimeSlot }: Props) {
+export function MovementBlock({ date, activities, stats, screenTimeSlot }: Props) {
+  const { data: goal } = useQuery({
+    queryKey: ["step-goal", date],
+    queryFn: () => api.stepGoal(date),
+    staleTime: 30_000,
+  });
+  const { data: food } = useQuery({
+    queryKey: ["food-summary", date],
+    queryFn: () => foodApi.summary(date),
+    staleTime: 30_000,
+  });
+
+  const net = food?.net_vs_burn_kcal ?? null;
+
   return (
-    <section>
+    <section id="movement" className="scroll-mt-20">
       {/* Labels row */}
       <div className="flex items-start justify-between mb-3">
         <SectionLabel>Movement</SectionLabel>
@@ -31,18 +49,26 @@ export function MovementBlock({ activities, stats, screenTimeSlot }: Props) {
             </div>
           )}
           {stats?.active_calories != null && (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-[#52525B] uppercase tracking-widest">Active cal</span>
-              <span className="text-2xl font-semibold tabular-nums text-[#A1A1AA]">
-                {stats.active_calories}
-              </span>
-            </div>
+            <Metric label="Active cal" value={stats.active_calories.toLocaleString()} />
+          )}
+          {stats?.total_calories != null && (
+            <Metric label="Total cal" value={stats.total_calories.toLocaleString()} />
+          )}
+          {net != null && (
+            <Metric
+              label="Net cal"
+              value={`${net > 0 ? "+" : ""}${Math.round(net).toLocaleString()}`}
+              color={net <= 0 ? "text-[#34D399]" : "text-[#F87171]"}
+            />
           )}
         </div>
         {screenTimeSlot && (
           <div className="shrink-0 w-[148px]">{screenTimeSlot}</div>
         )}
       </div>
+
+      {/* 10k step goal — complete badge + streak */}
+      {goal && stats?.steps != null && <StepGoalRow goal={goal} />}
 
       {/* Activities — always full width */}
       {activities.length === 0 ? (
@@ -55,6 +81,55 @@ export function MovementBlock({ activities, stats, screenTimeSlot }: Props) {
         </div>
       )}
     </section>
+  );
+}
+
+function Metric({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-[#52525B] uppercase tracking-widest">{label}</span>
+      <span className={`text-2xl font-semibold tabular-nums ${color ?? "text-[#A1A1AA]"}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function StepGoalRow({ goal }: { goal: import("@/lib/api").StepGoal }) {
+  const streakLabel =
+    goal.streak > 1 ? `${goal.streak}-day streak` : goal.streak === 1 ? "1 day" : null;
+
+  if (goal.reached) {
+    return (
+      <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#34D399]/30 bg-[#34D399]/10 px-3 py-1.5">
+        <span className="text-sm">✓</span>
+        <span className="text-xs font-medium text-[#34D399]">
+          {goal.goal.toLocaleString()} steps
+        </span>
+        {streakLabel && (
+          <span className="text-xs text-[#34D399]/80">· {streakLabel} 🔥</span>
+        )}
+      </div>
+    );
+  }
+
+  const remaining = goal.steps != null ? goal.goal - goal.steps : goal.goal;
+  const pct = goal.steps != null ? Math.min(100, (goal.steps / goal.goal) * 100) : 0;
+
+  return (
+    <div className="mb-4 max-w-xs">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs text-[#52525B]">
+          {remaining.toLocaleString()} to {goal.goal.toLocaleString()}
+        </span>
+        {goal.at_risk && streakLabel && (
+          <span className="text-xs text-[#F59E0B]">{streakLabel} on the line 🔥</span>
+        )}
+      </div>
+      <div className="h-1.5 rounded-full bg-[#27272A] overflow-hidden">
+        <div className="h-full rounded-full bg-[#F59E0B]" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
   );
 }
 

@@ -946,9 +946,20 @@ export type MovementStats = {
   summary: { total_km: number; avg_km_per_day: number; max_km: number; days_tracked: number } | Record<string, never>;
 };
 
+export interface StepGoal {
+  date: string;
+  goal: number;
+  steps: number | null;
+  reached: boolean;
+  streak: number;
+  includes_today: boolean;
+  at_risk: boolean;
+}
+
 export const api = {
   day: (date: string) => get<DayDetail>(`/days/${date}`),
   today: () => get<DayDetail>("/days/today"),
+  stepGoal: (date: string) => get<StepGoal>(`/days/step-goal/${date}`),
   range: (start: string, end: string) =>
     get<DaySummary[]>(`/days?start=${start}&end=${end}`),
   questionnaire: (date: string) =>

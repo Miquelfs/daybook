@@ -96,6 +96,7 @@ export async function DayView({ date }: { date: string }) {
         </div>
 
         <MovementBlock
+          date={date}
           activities={day.activities}
           stats={day.daily_stats}
           screenTimeSlot={<ScreenTimeBlock date={date} />}

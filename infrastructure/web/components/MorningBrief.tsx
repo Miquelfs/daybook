@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { ChevronDown } from "lucide-react";
+import { useState, useEffect, useCallback, Fragment } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import Link from "next/link";
 import { fmtDuration } from "@/lib/api";
 import type { SleepData, DailyStats, HRVData, LoadIndexData } from "@/lib/api";
 
@@ -14,21 +15,44 @@ interface Props {
   aiAvailable?: boolean;
 }
 
+// Render a light subset of markdown inline: **bold**, *italic* and `code`.
+// The AI brief comes back with markdown emphasis that we were previously
+// printing raw (literal "**"). This turns it into real emphasis.
+function renderInline(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const re = /\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) nodes.push(<Fragment key={key++}>{text.slice(last, m.index)}</Fragment>);
+    if (m[1] !== undefined) nodes.push(<strong key={key++} className="font-semibold text-[#FAFAFA]">{m[1]}</strong>);
+    else if (m[2] !== undefined) nodes.push(<em key={key++}>{m[2]}</em>);
+    else if (m[3] !== undefined) nodes.push(<code key={key++} className="text-[#F59E0B] text-[13px]">{m[3]}</code>);
+    last = re.lastIndex;
+  }
+  if (last < text.length) nodes.push(<Fragment key={key++}>{text.slice(last)}</Fragment>);
+  return nodes;
+}
+
 function Stat({
   label,
   value,
   unit,
   accent,
+  to,
 }: {
   label: string;
   value: string | number | null;
   unit?: string;
   accent?: boolean;
+  to?: string; // "#anchor" (scroll on this page) or "/route" (navigate)
 }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs text-[#52525B] uppercase tracking-widest">
+  const body = (
+    <>
+      <span className="flex items-center gap-1 text-xs text-[#52525B] uppercase tracking-widest">
         {label}
+        {to && <ChevronRight size={11} className="text-[#3F3F46] group-hover:text-[#71717A] transition-colors" />}
       </span>
       <span
         className={`text-2xl font-semibold tabular-nums ${accent ? "text-[#F59E0B]" : "text-[#FAFAFA]"}`}
@@ -38,8 +62,18 @@ function Stat({
           <span className="text-sm font-normal text-[#A1A1AA] ml-1">{unit}</span>
         ) : null}
       </span>
-    </div>
+    </>
   );
+
+  if (to && value != null) {
+    const cls = "group flex flex-col gap-1 -m-1 p-1 rounded-lg hover:bg-[#18181B] transition-colors";
+    return to.startsWith("#") ? (
+      <a href={to} className={cls}>{body}</a>
+    ) : (
+      <Link href={to} className={cls}>{body}</Link>
+    );
+  }
+  return <div className="flex flex-col gap-1">{body}</div>;
 }
 
 const RECOVERY_COLOR: Record<string, string> = {
@@ -77,11 +111,12 @@ export function MorningBrief({ sleep, stats, hrv, loadIndex, brief, aiAvailable 
       <p className="text-xs text-[#F59E0B] uppercase tracking-[0.2em] mb-4">Morning brief</p>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
-        <Stat label="Sleep" value={sleepDuration} accent />
+        <Stat label="Sleep" value={sleepDuration} accent to="/health/sleep" />
         <Stat
           label="HRV"
           value={hrv?.last_night_avg ? Math.round(hrv.last_night_avg) : null}
           unit="ms"
+          to="/health/sleep"
         />
         <Stat
           label="Body battery"
@@ -90,11 +125,13 @@ export function MorningBrief({ sleep, stats, hrv, loadIndex, brief, aiAvailable 
               ? `${stats.body_battery_low}–${stats.body_battery_high}`
               : null
           }
+          to="#stress-energy"
         />
         <Stat
           label="Resting HR"
           value={stats?.resting_hr ?? null}
           unit="bpm"
+          to="#stress-energy"
         />
       </div>
 
@@ -123,13 +160,15 @@ export function MorningBrief({ sleep, stats, hrv, loadIndex, brief, aiAvailable 
             <ChevronDown size={14} />
           </button>
         ) : (
-          <div className="mt-5">
-            <p className="text-sm text-[#A1A1AA] leading-relaxed text-justify border-l-2 border-[#F59E0B]/30 pl-3">
-              {brief}
-            </p>
+          <div className="mt-5 rounded-xl border border-[#27272A] bg-[#0D0D0F] px-4 py-3.5">
+            <div className="text-sm text-[#A1A1AA] leading-relaxed space-y-2.5">
+              {brief.split(/\n{2,}/).map((para, i) => (
+                <p key={i}>{renderInline(para.trim())}</p>
+              ))}
+            </div>
             <button
               onClick={toggle}
-              className="mt-2 ml-auto flex items-center gap-1 text-xs text-[#52525B] hover:text-[#A1A1AA] transition-colors"
+              className="mt-3 ml-auto flex items-center gap-1 text-xs text-[#52525B] hover:text-[#A1A1AA] transition-colors"
             >
               Hide insight
               <ChevronDown size={14} className="rotate-180" />

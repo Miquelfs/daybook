@@ -194,6 +194,74 @@ def _activities(conn: sqlite3.Connection, date_str: str) -> list[ActivityData]:
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
+STEP_GOAL = 10_000
+
+
+class StepGoalOut(BaseModel):
+    date: str
+    goal: int
+    steps: int | None
+    reached: bool
+    streak: int          # consecutive goal-met days ending at (or just before) date
+    includes_today: bool  # whether `date` itself is part of the streak
+    at_risk: bool        # streak alive through yesterday but today not yet reached
+
+
+@router.get("/step-goal/{date_str}", response_model=StepGoalOut)
+def get_step_goal(date_str: str, conn: Annotated[sqlite3.Connection, Depends(get_db)]):
+    """Daily 10k-step goal state + current streak.
+
+    A day counts as goal-met if its Garmin steps reached the goal OR it carries
+    the `steps_10k` tag (covers hand-tagged days the user backfilled). The streak
+    is the run of consecutive met-days ending at `date` (or the day before, if
+    today hasn't been reached yet — so the counter still shows while it's at risk).
+    """
+    stats = conn.execute("SELECT steps FROM daily_stats WHERE date=?", (date_str,)).fetchone()
+    steps = stats["steps"] if stats else None
+
+    # Union of goal-met dates: enough history to walk a long streak back.
+    met_steps = {
+        r["date"] for r in conn.execute(
+            "SELECT date FROM daily_stats WHERE steps >= ? AND date <= ?",
+            (STEP_GOAL, date_str),
+        )
+    }
+    met_tag = {
+        r["date"] for r in conn.execute(
+            "SELECT dt.date FROM day_tags dt JOIN tags t ON t.id = dt.tag_id "
+            "WHERE t.slug = 'steps_10k' AND dt.date <= ?",
+            (date_str,),
+        )
+    }
+    met = met_steps | met_tag
+
+    reached = date_str in met
+
+    def run_ending(day: date) -> int:
+        n = 0
+        cur = day
+        while cur.isoformat() in met:
+            n += 1
+            cur = date.fromordinal(cur.toordinal() - 1)
+        return n
+
+    d = date.fromisoformat(date_str)
+    if reached:
+        streak = run_ending(d)
+        includes_today = True
+        at_risk = False
+    else:
+        # Not met yet — show the run through yesterday so the streak stays visible.
+        streak = run_ending(date.fromordinal(d.toordinal() - 1))
+        includes_today = False
+        at_risk = streak > 0
+
+    return StepGoalOut(
+        date=date_str, goal=STEP_GOAL, steps=steps, reached=reached,
+        streak=streak, includes_today=includes_today, at_risk=at_risk,
+    )
+
+
 @router.get("/today", response_model=DayDetail)
 def get_today(conn: Annotated[sqlite3.Connection, Depends(get_db)]):
     return get_day(_today(), conn)

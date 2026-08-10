@@ -29,6 +29,16 @@ ALL_TYPES = ["sleep", "daily_stats", "hrv", "activities"]
 RAW_DIR = _ROOT / "data" / "raw" / "garmin"
 RATE_LIMIT_SLEEP = 1.0   # seconds between API calls
 
+# Garmin keeps finalising a day's totals after our first sync of it — the watch
+# pushes a few more steps / calories hours later. If we only ever wrote each day
+# once (when it first became "yesterday") those late steps never landed, so the
+# app under-counted vs the Garmin app (e.g. 9,874 here vs 10,008 on Garmin).
+# Re-fetch a short trailing window every run so recent days converge to Garmin.
+RECENT_REFRESH_DAYS = 3
+
+# Daily step goal — a day that reaches it earns the `steps_10k` auto-tag.
+STEP_GOAL = 10_000
+
 
 # ─── Parsers ─────────────────────────────────────────────────────────────────
 
@@ -173,6 +183,28 @@ def sync_sleep(client, conn, d: str, force: bool) -> int:
         return 0
 
 
+def _ensure_step_goal_tag(conn, d: str, steps: int | None) -> None:
+    """Auto-tag a day with `steps_10k` once it reaches the step goal.
+
+    Add-only: we never remove the tag (the user may hand-tag past days, and we
+    can't tell an auto-tag from a manual one). Idempotent — safe to re-run when
+    the trailing-window re-sync bumps a day's steps past the goal.
+    """
+    if steps is None or steps < STEP_GOAL:
+        return
+    row = conn.execute("SELECT id FROM tags WHERE slug='steps_10k'").fetchone()
+    if not row:
+        conn.execute(
+            "INSERT OR IGNORE INTO tags (slug, name, icon, category, is_system) "
+            "VALUES ('steps_10k', '10k Steps', '👟', 'activity', 1)"
+        )
+        row = conn.execute("SELECT id FROM tags WHERE slug='steps_10k'").fetchone()
+    conn.execute(
+        "INSERT OR IGNORE INTO day_tags (date, tag_id) VALUES (?, ?)",
+        (d, row["id"]),
+    )
+
+
 def sync_daily_stats(client, conn, d: str, force: bool) -> int:
     if not force:
         row = conn.execute("SELECT date FROM daily_stats WHERE date=?", (d,)).fetchone()
@@ -193,6 +225,7 @@ def sync_daily_stats(client, conn, d: str, force: bool) -> int:
                  parsed["total_calories"], parsed["resting_hr"], parsed["stress_avg"],
                  parsed["body_battery_low"], parsed["body_battery_high"], json.dumps(raw)),
             )
+            _ensure_step_goal_tag(conn, d, parsed["steps"])
         _log(conn, "garmin", "daily_stats", "ok", 1 if parsed else 0)
         return 1 if parsed else 0
     except Exception as e:
@@ -423,6 +456,7 @@ def main() -> None:
     args = parser.parse_args()
 
     today = date.today()
+    recent_cutoff = today - timedelta(days=RECENT_REFRESH_DAYS - 1)
 
     if args.full_history:
         start = date(2015, 1, 1)
@@ -435,6 +469,10 @@ def main() -> None:
         start = last + timedelta(days=1)
         if start > today:
             start = today
+        # Always reach back over the trailing window so already-synced recent
+        # days get their finalised totals re-fetched (see RECENT_REFRESH_DAYS).
+        if recent_cutoff < start:
+            start = recent_cutoff
 
     end = date.fromisoformat(args.end_date) if args.end_date else today
     types = [t.strip() for t in args.types.split(",")]
@@ -466,7 +504,9 @@ def main() -> None:
             d = start
             while d <= end:
                 ds = d.isoformat()
-                force_day = args.force or (d == today)
+                # Force-refresh the trailing window (not just today) so late
+                # Garmin corrections overwrite the stale row instead of being skipped.
+                force_day = args.force or (d >= recent_cutoff)
                 print(f"  {ds}", file=sys.stderr, end="")
                 for t in per_day:
                     if t == "sleep":

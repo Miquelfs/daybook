@@ -66,7 +66,7 @@ export function StressEnergyTimeline({ date }: { date: string }) {
 
   if (!data.has_data) {
     return (
-      <section>
+      <section id="stress-energy" className="scroll-mt-20">
         <SectionLabel>Stress &amp; energy</SectionLabel>
         <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-6 text-center">
           <Activity size={18} className="text-[#3F3F46] mx-auto mb-1.5" />
@@ -110,7 +110,7 @@ export function StressEnergyTimeline({ date }: { date: string }) {
   ].sort((a, b) => a.sortM - b.sortM);
 
   return (
-    <section>
+    <section id="stress-energy" className="scroll-mt-20">
       <SectionLabel>Stress &amp; energy</SectionLabel>
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-3">
         <div className="h-52">
