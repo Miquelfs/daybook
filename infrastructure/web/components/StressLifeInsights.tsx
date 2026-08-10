@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Plane } from "lucide-react";
+import { Activity, Plane, MapPin } from "lucide-react";
 import {
-  wellnessApi, type StressContexts, type FlightPhysioRollup,
+  wellnessApi, type StressContexts, type FlightPhysioRollup, type StressByCity,
 } from "@/lib/wellness-api";
 
 const CTX_EMOJI: Record<string, string> = {
@@ -61,6 +61,44 @@ function WhatStressesYou() {
             <div key={r.context}>
               <div className="flex items-center justify-between text-xs mb-1">
                 <span className="text-[#D4D4D8]">{CTX_EMOJI[r.context] ?? "•"} {CTX_LABEL[r.context] ?? r.context}</span>
+                <span className="tabular-nums text-[#71717A]">
+                  <span className="font-semibold text-[#E4E4E7]">{r.avg_stress}</span> · {fmtDur(r.minutes)} · {r.days}d
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-[#18181B] overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${(r.avg_stress / max) * 100}%`, background: stressColor(r.avg_stress) }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function StressfulPlaces() {
+  const { data } = useQuery<StressByCity>({
+    queryKey: ["stress-by-city", 180],
+    queryFn: () => wellnessApi.stressByCity(180),
+    staleTime: 300_000,
+  });
+  const rows = data?.cities ?? [];
+  const max = Math.max(60, ...rows.map((r) => r.avg_stress));
+
+  return (
+    <Card title="Stressful places" icon={<MapPin size={15} className="text-[#F97316]" />}>
+      <p className="text-[11px] text-[#52525B] mb-3">Average stress by city you were in · last 180 days</p>
+      {rows.length === 0 ? (
+        <p className="text-xs text-[#52525B]">No place data yet — builds from your GPS visits as the CIRQA syncs.</p>
+      ) : (
+        <div className="space-y-2.5">
+          {rows.slice(0, 12).map((r) => (
+            <div key={r.city}>
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="text-[#D4D4D8] truncate">
+                  📍 {r.city}
+                  {r.country && r.country !== "España" && <span className="text-[#52525B]"> · {r.country}</span>}
+                </span>
                 <span className="tabular-nums text-[#71717A]">
                   <span className="font-semibold text-[#E4E4E7]">{r.avg_stress}</span> · {fmtDur(r.minutes)} · {r.days}d
                 </span>
@@ -142,6 +180,7 @@ export function StressLifeInsights() {
   return (
     <div className="space-y-6">
       <WhatStressesYou />
+      <StressfulPlaces />
       <FlightLoadRollup />
     </div>
   );

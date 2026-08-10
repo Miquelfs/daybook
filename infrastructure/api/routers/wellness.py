@@ -10,7 +10,7 @@ from infrastructure.api.db import get_db
 from domains.health.recovery import recovery_flag
 from domains.health.stress_context import (
     flight_phases, flight_phase_by_id, stress_by_place, _phases_for_rows,
-    stress_contexts_rollup,
+    stress_contexts_rollup, stress_by_city_rollup,
 )
 from domains.health.flight_physio import rollup as flight_physio_rollup
 
@@ -68,6 +68,12 @@ def get_stress_by_place(date: str = Query(...), conn: DB = None):
 def get_stress_contexts(days: int = Query(90, ge=7, le=730), conn: DB = None):
     """Life-wide: what were you doing when stressed, across the window."""
     return stress_contexts_rollup(conn, days)
+
+
+@router.get("/stress-by-city")
+def get_stress_by_city(days: int = Query(180, ge=7, le=730), conn: DB = None):
+    """Life-wide: which specific cities stress you, across the window."""
+    return stress_by_city_rollup(conn, days)
 
 
 @router.get("/flight-physio/rollup")

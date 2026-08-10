@@ -257,6 +257,107 @@ def stress_contexts_rollup(conn, days: int = 90) -> dict:
     return {"days": days, "contexts": out, "has_data": bool(out)}
 
 
+def _local_min_of(iso_local: Optional[str]) -> Optional[int]:
+    """Minute-of-day from a LOCAL ISO timestamp (Overland visits are already local)."""
+    if not iso_local or len(iso_local) < 16:
+        return None
+    try:
+        h, m = int(iso_local[11:13]), int(iso_local[14:16])
+        return h * 60 + m
+    except Exception:
+        return None
+
+
+def stress_by_city_day(conn, date: str) -> list[dict]:
+    """The day's stress split by the specific city you were in (Overland visits
+    → place_names geocode). Both intraday stress and visits are local time."""
+    stress = _series_min(conn, "intraday_stress", "level", date)
+    if not stress:
+        return []
+
+    # City spans for the day, from the visits + geocode (locations.db).
+    spans: list[tuple[int, int, str, Optional[str]]] = []
+    try:
+        lc = sqlite3.connect(_LOCATIONS_DB)
+        lc.row_factory = sqlite3.Row
+        for r in lc.execute(
+            """SELECT v.start_time, v.end_time, pn.city, pn.country
+               FROM visits v JOIN place_names pn ON pn.place_id = v.place_id
+               WHERE v.date = ? AND pn.city IS NOT NULL AND pn.city <> ''""",
+            (date,),
+        ):
+            s = _local_min_of(r["start_time"])
+            e = _local_min_of(r["end_time"])
+            if s is None:
+                continue
+            if e is None or e < s:
+                e = 1440  # visit ran past midnight — clamp to end of this day
+            spans.append((s, e, r["city"], r["country"]))
+        lc.close()
+    except Exception:
+        return []
+    if not spans:
+        return []
+
+    buckets: dict[str, dict] = {}
+    for mn, level in stress.items():
+        city = country = None
+        for s, e, c, co in spans:
+            if s <= mn <= e:
+                city, country = c, co
+                break
+        if not city:
+            continue
+        b = buckets.setdefault(city, {"levels": [], "country": country})
+        b["levels"].append(level)
+
+    result = [
+        {"city": k, "country": v["country"], "avg_stress": round(sum(v["levels"]) / len(v["levels"])),
+         "minutes": len(v["levels"]) * 3}
+        for k, v in buckets.items()
+    ]
+    result.sort(key=lambda b: b["avg_stress"], reverse=True)
+    return result
+
+
+def persist_stress_places(conn, date: str) -> int:
+    """Snapshot the day's stress-by-city into stress_place_daily."""
+    rows = stress_by_city_day(conn, date)
+    conn.execute("DELETE FROM stress_place_daily WHERE date=?", (date,))
+    for b in rows:
+        conn.execute(
+            "INSERT INTO stress_place_daily (date, city, country, avg_stress, minutes, updated_at) "
+            "VALUES (?,?,?,?,?, strftime('%Y-%m-%dT%H:%M:%SZ','now')) "
+            "ON CONFLICT(date, city) DO UPDATE SET country=excluded.country, "
+            "avg_stress=excluded.avg_stress, minutes=excluded.minutes, updated_at=excluded.updated_at",
+            (date, b["city"], b["country"], b["avg_stress"], b["minutes"]),
+        )
+    conn.commit()
+    return len(rows)
+
+
+def stress_by_city_rollup(conn, days: int = 180, min_minutes: int = 30) -> dict:
+    """Life-wide 'which cities stress me' — minute-weighted avg stress per city."""
+    rows = conn.execute(
+        "SELECT city, country, avg_stress, minutes, date FROM stress_place_daily "
+        "WHERE date >= date('now', ?)",
+        (f"-{days} days",),
+    ).fetchall()
+    agg: dict[str, dict] = {}
+    for r in rows:
+        a = agg.setdefault(r["city"], {"weighted": 0.0, "minutes": 0, "days": set(), "country": r["country"]})
+        a["weighted"] += (r["avg_stress"] or 0) * (r["minutes"] or 0)
+        a["minutes"] += (r["minutes"] or 0)
+        a["days"].add(r["date"])
+    out = [
+        {"city": k, "country": v["country"], "avg_stress": round(v["weighted"] / v["minutes"]),
+         "minutes": v["minutes"], "days": len(v["days"])}
+        for k, v in agg.items() if v["minutes"] >= min_minutes
+    ]
+    out.sort(key=lambda b: b["avg_stress"], reverse=True)
+    return {"days": days, "cities": out, "has_data": bool(out)}
+
+
 if __name__ == "__main__":
     import argparse
     from infrastructure.db.connection import get_connection
@@ -269,11 +370,14 @@ if __name__ == "__main__":
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     if args.date:
-        print(f"stress contexts: wrote {persist_stress_contexts(conn, args.date)} row(s) for {args.date}")
+        c = persist_stress_contexts(conn, args.date)
+        p = persist_stress_places(conn, args.date)
+        print(f"stress: wrote {c} context + {p} city row(s) for {args.date}")
     else:
         dates = [r[0] for r in conn.execute(
             "SELECT DISTINCT date FROM intraday_stress WHERE date >= date('now', ?) ORDER BY date",
             (f"-{args.days} days",))]
-        total = sum(persist_stress_contexts(conn, d) for d in dates)
-        print(f"stress contexts: wrote {total} row(s) over {len(dates)} day(s)")
+        tc = sum(persist_stress_contexts(conn, d) for d in dates)
+        tp = sum(persist_stress_places(conn, d) for d in dates)
+        print(f"stress: wrote {tc} context + {tp} city row(s) over {len(dates)} day(s)")
     conn.close()

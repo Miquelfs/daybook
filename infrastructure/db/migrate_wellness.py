@@ -66,6 +66,19 @@ def migrate(conn):
             PRIMARY KEY (date, context)
         );
         CREATE INDEX IF NOT EXISTS idx_stress_ctx_date ON stress_context_daily(date);
+
+        -- Daily stress split by the specific CITY you were in (from the Overland
+        -- visits → place_names geocode), so it rolls up to "which places stress me".
+        CREATE TABLE IF NOT EXISTS stress_place_daily (
+            date        TEXT NOT NULL,
+            city        TEXT NOT NULL,
+            country     TEXT,
+            avg_stress  INTEGER,
+            minutes     INTEGER,
+            updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+            PRIMARY KEY (date, city)
+        );
+        CREATE INDEX IF NOT EXISTS idx_stress_place_date ON stress_place_daily(date);
     """)
     # Idempotent add for pre-existing tables.
     cols = [r[1] for r in conn.execute("PRAGMA table_info(wellness_daily)")]
