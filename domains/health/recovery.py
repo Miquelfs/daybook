@@ -1,11 +1,14 @@
 """
 Recovery / illness flag — combines the signals the CIRQA (and existing sync)
 provide into a single "you might be getting sick / overreached" cue:
-elevated resting HR vs baseline + unbalanced HRV + a bottomed-out Body Battery
-(+ skin-temperature spike when available).
+elevated resting HR vs baseline + unbalanced HRV + a poor overnight Body Battery
+recharge + a short night's sleep (+ skin-temperature spike when available).
 """
 
 from typing import Optional
+
+# Nights shorter than this leave you under-recovered regardless of the rest.
+SHORT_SLEEP_SECONDS = 5 * 3600 + 30 * 60   # 5h30m
 
 
 def recovery_flag(conn, date: str) -> dict:
@@ -44,6 +47,13 @@ def recovery_flag(conn, date: str) -> dict:
     skin_dev = w["skin_temp_dev"] if w else None
     if skin_dev is not None and skin_dev >= 1.0:
         reasons.append(f"skin temp +{skin_dev}°C")
+        score += 1
+
+    sleep_row = conn.execute("SELECT duration_seconds FROM sleep WHERE date=?", (date,)).fetchone()
+    sleep_secs = sleep_row["duration_seconds"] if sleep_row else None
+    if sleep_secs is not None and sleep_secs < SHORT_SLEEP_SECONDS:
+        h, m = divmod(round(sleep_secs / 60), 60)
+        reasons.append(f"only slept {h}h {m:02d}m")
         score += 1
 
     status = "flag" if score >= 2 else ("watch" if score == 1 else "ok")
