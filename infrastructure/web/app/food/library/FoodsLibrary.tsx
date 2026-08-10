@@ -37,15 +37,15 @@ export function FoodsLibrary() {
 
   return (
     <div>
-      <Link href="/food" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-flex items-center gap-1 mb-2">
+      <Link href="/food" className="text-xs text-[#34D399] hover:text-[#6EE7B7] uppercase tracking-widest inline-flex items-center gap-1 mb-2">
         <ChevronLeft size={13} /> Food
       </Link>
-      <h1 className="text-2xl font-semibold tracking-tight">Foods</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">🥗 Foods</h1>
       <p className="text-sm text-[#71717A] mt-0.5 mb-4">Your logged foods + crew meals — tap to add to today.</p>
 
       <div className="flex gap-2 mb-4 sticky top-0 bg-[#09090B] py-2 z-10">
-        <div className="flex-1 flex items-center gap-2 bg-[#18181B] border border-[#27272A] rounded-lg px-3">
-          <Search size={14} className="text-[#52525B]" />
+        <div className="flex-1 flex items-center gap-2 bg-[#18181B] border border-[#27272A] rounded-lg px-3 focus-within:border-[#34D399]/50 transition-colors">
+          <Search size={14} className="text-[#34D399]" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}

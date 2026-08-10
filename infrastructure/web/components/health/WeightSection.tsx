@@ -53,7 +53,8 @@ export function WeightSection() {
   const stats = data?.stats;
 
   function submit() {
-    const w = parseFloat(weightVal);
+    // Accept a comma decimal separator (es-ES phone keypads type "75,5").
+    const w = parseFloat(weightVal.replace(",", "."));
     if (!w || w <= 0) return;
     add.mutate({ date: dateVal, weight_kg: Math.round(w * 10) / 10 });
   }
@@ -70,12 +71,12 @@ export function WeightSection() {
           className="bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] outline-none focus:border-[#F59E0B] transition-colors"
         />
         <input
-          type="number"
+          type="text"
           inputMode="decimal"
-          step="0.1"
+          pattern="[0-9]*[.,]?[0-9]*"
           placeholder="kg"
           value={weightVal}
-          onChange={(e) => setWeightVal(e.target.value)}
+          onChange={(e) => setWeightVal(e.target.value.replace(/[^0-9.,]/g, ""))}
           onKeyDown={(e) => e.key === "Enter" && submit()}
           className="w-24 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#F59E0B] transition-colors"
         />

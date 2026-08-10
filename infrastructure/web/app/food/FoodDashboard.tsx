@@ -190,8 +190,13 @@ export function FoodDashboard() {
           <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block">
             ← Today
           </Link>
-          <Link href="/food/library" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block">
-            Foods →
+          <Link
+            href="/food/library"
+            className="inline-flex items-center gap-1 text-xs font-medium uppercase tracking-widest
+                       text-[#34D399] hover:text-[#6EE7B7] bg-[#34D399]/10 hover:bg-[#34D399]/15
+                       rounded-full px-2.5 py-1 transition-colors"
+          >
+            🥗 Foods →
           </Link>
         </div>
         <div className="flex items-center justify-between">
@@ -304,7 +309,14 @@ export function FoodDashboard() {
 
       {/* 7-day energy balance */}
       <div>
-        <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">Last 7 days · eaten vs target</p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-[#52525B] uppercase tracking-widest">Last 7 days · eaten vs target</p>
+          {targetKcal != null && (
+            <p className="text-[11px] text-[#71717A] tabular-nums">
+              target <span className="font-semibold text-[#E4E4E7]">{Math.round(targetKcal)}</span> kcal
+            </p>
+          )}
+        </div>
         <div className="h-40">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
@@ -316,8 +328,8 @@ export function FoodDashboard() {
                 labelStyle={{ color: "#A1A1AA" }}
               />
               {targetKcal != null && (
-                <ReferenceLine y={targetKcal} stroke="#3F3F46" strokeDasharray="4 4"
-                  label={{ value: "target", fill: "#52525B", fontSize: 10, position: "insideTopRight" }} />
+                <ReferenceLine y={targetKcal} stroke="#71717A" strokeDasharray="4 4"
+                  label={{ value: `${Math.round(targetKcal)} kcal`, fill: "#A1A1AA", fontSize: 10, position: "insideTopRight" }} />
               )}
               <Bar dataKey="kcal" radius={[4, 4, 0, 0]}>
                 {chartData.map((d, i) => (
