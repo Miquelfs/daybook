@@ -1,12 +1,13 @@
 """
-Recompute night time and the day/night takeoff·landing split on the EASA basis:
-night is the portion of BLOCK time (off-block → on-block) in darkness, and a
-takeoff/landing counts as night when the off-block/on-block moment is in darkness.
+Recompute night time and the day/night takeoff·landing split from the flight
+times on the EASA basis: night is the portion of BLOCK time (off-block →
+on-block) in darkness, and a takeoff/landing counts as night when the actual
+airborne/touchdown moment is in darkness (falling back to off-block/on-block when
+the maneuver time isn't recorded). Darkness = civil twilight (dusk→dawn).
 
-This fixes flights whose night_seconds was corrected by an earlier pass while the
-day/night T/O·Ldg counts were left stale. It only reassigns day↔night within each
-flight's existing totals (so it never invents takeoffs/landings for sectors you
-didn't fly as PF).
+This overwrites any by-feel night entries with values dead-reckoned from the
+recorded times. It only reassigns day↔night within each flight's existing totals
+(so it never invents takeoffs/landings for sectors you didn't fly as PF).
 
 Run on Pi (recompute everything):
     python -m domains.aviation.backfill_night_seconds
@@ -94,25 +95,31 @@ def run(start: str, end: str, dry_run: bool = False, db_path: Path = DB_PATH,
             arr_lat=r["arr_lat"], arr_lon=r["arr_lon"],
         )
 
-        # Manual entries carry the pilot's hand-logged (paper-logbook) day/night
-        # counts — those are authoritative, so we never machine-overwrite them.
-        # We still recompute their night TIME. Imported flights had their split
-        # computed, so we reassign day↔night within existing PF totals (never
-        # inventing counts) based on the off-block / on-block darkness.
+        # Reassign day↔night within existing PF totals (never invent counts).
+        # A night takeoff/landing is the actual airborne/touchdown moment in
+        # darkness; fall back to off-block/on-block only when the maneuver time
+        # isn't recorded.
         cur_to_day = r["takeoffs_day"] or 0
         cur_to_night = r["takeoffs_night"] or 0
         cur_ldg_day = r["landings_day"] or 0
         cur_ldg_night = r["landings_night"] or 0
-        if not recompute_counts or r["source"] == "manual":
+        if not recompute_counts:
             to_day, to_night = cur_to_day, cur_to_night
             ldg_day, ldg_night = cur_ldg_day, cur_ldg_night
         else:
+            to_ref = _parse_hhmm(r["date"], r["takeoff_utc"]) or off_dt
+            ldg_ref = _parse_hhmm(r["date"], r["landing_utc"]) or on_dt
+            while to_ref < off_dt:
+                to_ref += timedelta(days=1)
+            while ldg_ref < to_ref:
+                ldg_ref += timedelta(days=1)
+
             tot_to = cur_to_day + cur_to_night
             tot_ldg = cur_ldg_day + cur_ldg_night
-            to_is_night = is_night_moment(r["dep_lat"], r["dep_lon"], off_dt)
+            to_is_night = is_night_moment(r["dep_lat"], r["dep_lon"], to_ref)
             arr_lat = r["arr_lat"] if r["arr_lat"] is not None else r["dep_lat"]
             arr_lon = r["arr_lon"] if r["arr_lon"] is not None else r["dep_lon"]
-            ldg_is_night = is_night_moment(arr_lat, arr_lon, on_dt)
+            ldg_is_night = is_night_moment(arr_lat, arr_lon, ldg_ref)
             to_night = tot_to if to_is_night else 0
             to_day = tot_to - to_night
             ldg_night = tot_ldg if ldg_is_night else 0

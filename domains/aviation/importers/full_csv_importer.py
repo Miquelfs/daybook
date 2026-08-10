@@ -246,14 +246,13 @@ def _parse_row(row: dict, date_iso: str, fleet: dict[str, str], captain_index: d
         pic_seconds = 0
         sic_seconds = block_seconds or 0
 
-    # Personal takeoffs. EASA basis: darkness is checked at off-block (takeoff)
-    # and on-block (landing), not at the airborne/touchdown instant, so it stays
-    # consistent with block-based night time below. Falls back to airborne times
-    # only when block times are missing.
+    # Personal takeoffs. A night takeoff/landing is the actual airborne/touchdown
+    # moment in darkness; fall back to off-block/on-block only when the maneuver
+    # time isn't recorded. (Night TIME below is block-based — a separate metric.)
     farmiq_took_off = (takeoff_crew or "").upper() == PILOT_CODE.upper()
     farmiq_landed = (landing_crew or "").upper() == PILOT_CODE.upper()
-    to_ref = off_block_utc or takeoff_utc
-    ldg_ref = on_block_utc or landing_utc
+    to_ref = takeoff_utc or off_block_utc
+    ldg_ref = landing_utc or on_block_utc
     tof_night = _is_night_time(to_ref, dep_lat, dep_lon) if farmiq_took_off else False
     ldg_night = _is_night_time(ldg_ref, arr_lat, arr_lon) if farmiq_landed else False
 

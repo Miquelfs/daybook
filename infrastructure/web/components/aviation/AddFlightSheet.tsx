@@ -236,10 +236,11 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
   const previewOffBlock = offBlock || takeoffUtc;
   const previewOnBlock = onBlock || landingUtc;
   const { data: nightPreview } = useQuery({
-    queryKey: ["nightCalc", flightDate, depIcao, arrIcao, previewOffBlock, previewOnBlock],
+    queryKey: ["nightCalc", flightDate, depIcao, arrIcao, previewOffBlock, previewOnBlock, takeoffUtc, landingUtc],
     queryFn: () => api.nightCalc({
       date: flightDate, dep: depIcao, arr: arrIcao,
       off_block: previewOffBlock, on_block: previewOnBlock,
+      takeoff: takeoffUtc || undefined, landing: landingUtc || undefined,
     }),
     enabled: !isSim && !!flightDate && !!depIcao && !!arrIcao && !!previewOffBlock && !!previewOnBlock,
     staleTime: 60_000,

@@ -1066,8 +1066,9 @@ export const api = {
   flightCurrency: () => get<CurrencyStatus>("/flights/currency"),
   flightLimits: () => get<FlightTimeLimits>("/flights/limits"),
 
-  nightCalc: (params: { date: string; dep: string; arr: string; off_block: string; on_block: string }) => {
-    const q = new URLSearchParams(params);
+  nightCalc: (params: { date: string; dep: string; arr: string; off_block: string; on_block: string; takeoff?: string; landing?: string }) => {
+    const clean = Object.fromEntries(Object.entries(params).filter(([, v]) => v)) as Record<string, string>;
+    const q = new URLSearchParams(clean);
     return get<NightCalcResult>(`/flights/night-calc?${q}`);
   },
 

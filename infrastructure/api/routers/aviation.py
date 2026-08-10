@@ -1185,9 +1185,12 @@ def night_calc(
     arr: str = Query(..., description="Arrival ICAO"),
     off_block: str = Query(..., description="Off-block UTC HH:MM"),
     on_block: str = Query(..., description="On-block UTC HH:MM"),
+    takeoff: str | None = Query(None, description="Takeoff UTC HH:MM (for the night T/O flag)"),
+    landing: str | None = Query(None, description="Landing UTC HH:MM (for the night ldg flag)"),
 ):
-    # EASA flight time is block time: night is the off-block→on-block portion in
-    # darkness, a night takeoff/landing is off-block/on-block in darkness.
+    # EASA basis: night TIME is the off-block→on-block portion in darkness (block
+    # time); a night takeoff/landing is the actual airborne/touchdown moment in
+    # darkness, falling back to off-block/on-block when not given.
     from domains.aviation.compute import night_seconds as compute_night, is_night_moment
 
     dep_row = conn.execute("SELECT * FROM airports WHERE icao = ?", (dep.upper(),)).fetchone()
@@ -1208,6 +1211,14 @@ def night_calc(
     if on_dt <= off_dt:
         on_dt += timedelta(days=1)
 
+    # Maneuver moments for the T/O·ldg flags; roll into the [off, on] window.
+    to_dt = _dt(takeoff) if takeoff else off_dt
+    ldg_dt = _dt(landing) if landing else on_dt
+    while to_dt < off_dt:
+        to_dt += timedelta(days=1)
+    while ldg_dt < to_dt:
+        ldg_dt += timedelta(days=1)
+
     arr_lat = arr_row["latitude"] if arr_row else None
     arr_lon = arr_row["longitude"] if arr_row else None
     night_s = compute_night(
@@ -1218,11 +1229,11 @@ def night_calc(
     return NightCalcResult(
         night_seconds=night_s,
         duration_seconds=int((on_dt - off_dt).total_seconds()),
-        night_takeoff=is_night_moment(dep_row["latitude"], dep_row["longitude"], off_dt),
+        night_takeoff=is_night_moment(dep_row["latitude"], dep_row["longitude"], to_dt),
         night_landing=is_night_moment(
             arr_lat if arr_lat is not None else dep_row["latitude"],
             arr_lon if arr_lon is not None else dep_row["longitude"],
-            on_dt,
+            ldg_dt,
         ),
     )
 
