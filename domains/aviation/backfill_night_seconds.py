@@ -38,7 +38,8 @@ def _parse_hhmm(date_str: str, value: str | None) -> datetime | None:
         return None
 
 
-def run(start: str, end: str, dry_run: bool = False, db_path: Path = DB_PATH) -> None:
+def run(start: str, end: str, dry_run: bool = False, db_path: Path = DB_PATH,
+        recompute_counts: bool = True) -> None:
     import sqlite3
     from domains.aviation import compute
     from domains.aviation.compute import night_seconds as compute_night, is_night_moment
@@ -54,7 +55,7 @@ def run(start: str, end: str, dry_run: bool = False, db_path: Path = DB_PATH) ->
 
     rows = conn.execute(
         """
-        SELECT f.id, f.date, f.off_block_utc, f.on_block_utc,
+        SELECT f.id, f.date, f.source, f.off_block_utc, f.on_block_utc,
                f.takeoff_utc, f.landing_utc, f.night_seconds,
                f.takeoffs_day, f.takeoffs_night, f.landings_day, f.landings_night,
                a1.latitude AS dep_lat, a1.longitude AS dep_lon,
@@ -93,18 +94,29 @@ def run(start: str, end: str, dry_run: bool = False, db_path: Path = DB_PATH) ->
             arr_lat=r["arr_lat"], arr_lon=r["arr_lon"],
         )
 
-        # Reassign day↔night within existing PF totals (never invent counts).
-        tot_to = (r["takeoffs_day"] or 0) + (r["takeoffs_night"] or 0)
-        tot_ldg = (r["landings_day"] or 0) + (r["landings_night"] or 0)
-        to_is_night = is_night_moment(r["dep_lat"], r["dep_lon"], off_dt)
-        arr_lat = r["arr_lat"] if r["arr_lat"] is not None else r["dep_lat"]
-        arr_lon = r["arr_lon"] if r["arr_lon"] is not None else r["dep_lon"]
-        ldg_is_night = is_night_moment(arr_lat, arr_lon, on_dt)
-
-        to_night = tot_to if to_is_night else 0
-        to_day = tot_to - to_night
-        ldg_night = tot_ldg if ldg_is_night else 0
-        ldg_day = tot_ldg - ldg_night
+        # Manual entries carry the pilot's hand-logged (paper-logbook) day/night
+        # counts — those are authoritative, so we never machine-overwrite them.
+        # We still recompute their night TIME. Imported flights had their split
+        # computed, so we reassign day↔night within existing PF totals (never
+        # inventing counts) based on the off-block / on-block darkness.
+        cur_to_day = r["takeoffs_day"] or 0
+        cur_to_night = r["takeoffs_night"] or 0
+        cur_ldg_day = r["landings_day"] or 0
+        cur_ldg_night = r["landings_night"] or 0
+        if not recompute_counts or r["source"] == "manual":
+            to_day, to_night = cur_to_day, cur_to_night
+            ldg_day, ldg_night = cur_ldg_day, cur_ldg_night
+        else:
+            tot_to = cur_to_day + cur_to_night
+            tot_ldg = cur_ldg_day + cur_ldg_night
+            to_is_night = is_night_moment(r["dep_lat"], r["dep_lon"], off_dt)
+            arr_lat = r["arr_lat"] if r["arr_lat"] is not None else r["dep_lat"]
+            arr_lon = r["arr_lon"] if r["arr_lon"] is not None else r["dep_lon"]
+            ldg_is_night = is_night_moment(arr_lat, arr_lon, on_dt)
+            to_night = tot_to if to_is_night else 0
+            to_day = tot_to - to_night
+            ldg_night = tot_ldg if ldg_is_night else 0
+            ldg_day = tot_ldg - ldg_night
 
         changed = (
             night_s != (r["night_seconds"] or 0)
@@ -151,7 +163,10 @@ if __name__ == "__main__":
     parser.add_argument("--start", default="2000-01-01")
     parser.add_argument("--end", default="2100-01-01")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--no-counts", action="store_true",
+                        help="Only recompute night_seconds; leave all day/night T/O·Ldg counts untouched.")
     parser.add_argument("--db", default=str(DB_PATH))
     args = parser.parse_args()
 
-    run(args.start, args.end, dry_run=args.dry_run, db_path=Path(args.db))
+    run(args.start, args.end, dry_run=args.dry_run, db_path=Path(args.db),
+        recompute_counts=not args.no_counts)
