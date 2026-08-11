@@ -11,6 +11,7 @@ import {
 } from "@/lib/passenger-flights-api";
 import { PassengerFlightForm } from "@/components/PassengerFlightForm";
 import { FlightStats } from "@/components/FlightStats";
+import { airlineColor } from "@/lib/airline-colors";
 
 export function PassengerFlightsClient({
   initialFlights,
@@ -45,9 +46,9 @@ export function PassengerFlightsClient({
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Plane size={20} className="text-[#F59E0B]" /> Flights as passenger
+            <Plane size={20} className="text-[#F59E0B]" /> Where I&apos;ve Flown
           </h1>
-          <p className="text-sm text-[#71717A] mt-0.5">Trips I flew on — not as the pilot</p>
+          <p className="text-sm text-[#71717A] mt-0.5">Every flight I&apos;ve taken as a passenger</p>
         </div>
         <button
           onClick={() => setSheet({})}
@@ -129,39 +130,64 @@ export function PassengerFlightsClient({
 }
 
 function FlightRow({ f, onEdit, onDelete }: { f: PassengerFlight; onEdit: () => void; onDelete: () => void }) {
-  const route = [f.origin, f.destination].filter(Boolean).join(" → ") || "—";
-  const meta = [
-    f.airline,
-    f.aircraft,
-    f.companion && `with ${f.companion}`,
-    f.seat && `seat ${f.seat}`,
-  ].filter(Boolean).join(" · ");
+  const color = airlineColor(f.airline);
+  const meta = [f.airline, f.aircraft_code ?? f.aircraft, f.companion && `with ${f.companion}`]
+    .filter(Boolean).join(" · ");
+  const dist = f.distance_km != null ? `${Math.round(f.distance_km * 0.621371).toLocaleString()} mi` : null;
 
   return (
-    <div className="group bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors">
-      <div className="w-16 shrink-0">
-        <p className="text-sm font-semibold text-[#FAFAFA]">{format(parseISO(f.date), "d MMM")}</p>
-        <p className="text-[11px] text-[#52525B]">{f.flight_number ?? ""}</p>
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-[#FAFAFA] truncate">
-          {route}
-          {f.commuting && <span className="ml-2 text-[10px] text-[#F59E0B] uppercase tracking-wide">commute</span>}
-        </p>
-        {meta && <p className="text-xs text-[#52525B] truncate">{meta}</p>}
-        {f.reason && !f.commuting && <p className="text-xs text-[#71717A] truncate">{f.reason}</p>}
-      </div>
-      {f.price_paid != null && f.price_paid > 0 && (
-        <span className="text-xs text-[#A1A1AA] tabular-nums shrink-0">€{f.price_paid}</span>
-      )}
-      <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={onEdit} className="p-1.5 rounded-lg hover:bg-[#27272A] text-[#71717A]" title="Edit">
-          <Pencil size={14} />
-        </button>
-        <button onClick={onDelete} className="p-1.5 rounded-lg hover:bg-[#27272A] text-[#71717A] hover:text-[#F87171]" title="Delete">
-          <Trash2 size={14} />
-        </button>
+    <div className="group relative bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden hover:border-[#3F3F46] transition-colors">
+      {/* airline colour spine */}
+      <div className="absolute inset-y-0 left-0 w-1" style={{ background: color }} />
+      <div className="pl-4 pr-3 py-3 flex items-center gap-3">
+        {/* Date */}
+        <div className="w-14 shrink-0">
+          <p className="text-sm font-semibold text-[#FAFAFA]">{format(parseISO(f.date), "d MMM")}</p>
+          <p className="text-[11px] text-[#52525B]">{format(parseISO(f.date), "yyyy")}</p>
+        </div>
+
+        {/* Route + meta */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-[#FAFAFA] truncate flex items-center gap-1.5">
+            <span className="font-mono tracking-tight">{f.origin ?? "—"}</span>
+            <Plane size={12} className="text-[#52525B] shrink-0" />
+            <span className="font-mono tracking-tight">{f.destination ?? "—"}</span>
+            {f.flight_number && <span className="text-[11px] text-[#52525B] font-normal ml-1">{f.flight_number}</span>}
+          </p>
+          {meta && <p className="text-xs text-[#52525B] truncate mt-0.5">{meta}</p>}
+        </div>
+
+        {/* Badges */}
+        <div className="hidden sm:flex flex-col items-end gap-1 shrink-0 text-right">
+          <div className="flex items-center gap-1.5">
+            {f.commuting && <Badge text="Commute" tone="#F59E0B" />}
+            {f.reason && !f.commuting && <Badge text={f.reason} tone="#71717A" />}
+            {f.flight_class && <Badge text={f.flight_class} tone="#34D399" />}
+          </div>
+          <span className="text-[11px] text-[#52525B] tabular-nums">
+            {[dist, f.seat && `${f.seat}`, f.price_paid ? `€${f.price_paid}` : null].filter(Boolean).join(" · ")}
+          </span>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={onEdit} className="p-1.5 rounded-lg hover:bg-[#27272A] text-[#71717A]" title="Edit">
+            <Pencil size={14} />
+          </button>
+          <button onClick={onDelete} className="p-1.5 rounded-lg hover:bg-[#27272A] text-[#71717A] hover:text-[#F87171]" title="Delete">
+            <Trash2 size={14} />
+          </button>
+        </div>
       </div>
     </div>
+  );
+}
+
+function Badge({ text, tone }: { text: string; tone: string }) {
+  return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide font-medium"
+      style={{ color: tone, background: `${tone}1A` }}>
+      {text}
+    </span>
   );
 }

@@ -119,6 +119,57 @@ def get_stats(conn: DB):
     )
 
 
+def _geo(conn: sqlite3.Connection, year: Optional[str] = None):
+    """Routes + airport visits shaped for the map (optionally one year)."""
+    # `year` is interpolated below (UNION subqueries make binding awkward), so
+    # accept a 4-digit year only — never raw user text.
+    if year and not (len(year) == 4 and year.isdigit()):
+        year = None
+    yc, yp = ("AND substr(f.date,1,4)=?", [year]) if year else ("", [])
+
+    airports_geo = [dict(r) for r in conn.execute(
+        f"""SELECT a.icao, a.iata, a.name, a.city, a.country, a.latitude, a.longitude,
+                   COUNT(*) AS visit_count, MIN(f.date) AS first_visit, MAX(f.date) AS last_visit
+            FROM (
+              SELECT dep_icao AS icao, date FROM passenger_flights WHERE dep_icao IS NOT NULL
+                {("AND substr(date,1,4)='" + year + "'") if year else ""}
+              UNION ALL
+              SELECT arr_icao, date FROM passenger_flights WHERE arr_icao IS NOT NULL
+                {("AND substr(date,1,4)='" + year + "'") if year else ""}
+            ) f
+            JOIN airports a ON a.icao = f.icao
+            GROUP BY a.icao ORDER BY visit_count DESC""").fetchall()]
+
+    routes_geo = [
+        {
+            "dep_icao": r["dep_icao"], "arr_icao": r["arr_icao"],
+            "dep_iata": r["dep_iata"], "arr_iata": r["arr_iata"],
+            "dep_lat": r["dep_lat"], "dep_lon": r["dep_lon"],
+            "arr_lat": r["arr_lat"], "arr_lon": r["arr_lon"],
+            "count": r["count"], "total_block_hours": round(r["hours"] or 0, 1),
+            "operator": r["operator"], "source": "passenger",
+        }
+        for r in conn.execute(
+            f"""SELECT f.dep_icao, f.arr_icao, d.iata AS dep_iata, a.iata AS arr_iata,
+                       d.latitude AS dep_lat, d.longitude AS dep_lon,
+                       a.latitude AS arr_lat, a.longitude AS arr_lon,
+                       COUNT(*) AS count, SUM(f.duration_hours) AS hours,
+                       MAX(f.airline) AS operator
+                FROM passenger_flights f
+                JOIN airports d ON d.icao = f.dep_icao
+                JOIN airports a ON a.icao = f.arr_icao
+                WHERE 1=1 {yc}
+                GROUP BY f.dep_icao, f.arr_icao ORDER BY count DESC""", yp)
+    ]
+    return routes_geo, airports_geo
+
+
+@router.get("/map")
+def get_map(conn: DB, year: Optional[str] = Query(None)):
+    routes_geo, airports_geo = _geo(conn, year)
+    return {"routes_geo": routes_geo, "airports_geo": airports_geo}
+
+
 @router.get("/analytics")
 def get_analytics(conn: DB):
     """MyFlightRadar-style rollup: totals, top lists, per-year, breakdowns, and
@@ -147,41 +198,7 @@ def get_analytics(conn: DB):
            JOIN airports a ON a.icao = f.arr_icao"""
     ).fetchone()
 
-    def _visits():
-        return conn.execute(
-            """SELECT a.icao, a.iata, a.name, a.city, a.country, a.latitude, a.longitude,
-                      COUNT(*) AS visit_count, MIN(f.date) AS first_visit, MAX(f.date) AS last_visit
-               FROM (
-                 SELECT dep_icao AS icao, date FROM passenger_flights WHERE dep_icao IS NOT NULL
-                 UNION ALL
-                 SELECT arr_icao, date FROM passenger_flights WHERE arr_icao IS NOT NULL
-               ) f
-               JOIN airports a ON a.icao = f.icao
-               GROUP BY a.icao ORDER BY visit_count DESC""").fetchall()
-
-    airports_geo = [dict(r) for r in _visits()]
-
-    routes_geo = [
-        {
-            "dep_icao": r["dep_icao"], "arr_icao": r["arr_icao"],
-            "dep_iata": r["dep_iata"], "arr_iata": r["arr_iata"],
-            "dep_lat": r["dep_lat"], "dep_lon": r["dep_lon"],
-            "arr_lat": r["arr_lat"], "arr_lon": r["arr_lon"],
-            "count": r["count"], "total_block_hours": round(r["hours"] or 0, 1),
-            "operator": r["operator"], "source": "passenger",
-        }
-        for r in conn.execute(
-            """SELECT f.dep_icao, f.arr_icao, d.iata AS dep_iata, a.iata AS arr_iata,
-                      d.latitude AS dep_lat, d.longitude AS dep_lon,
-                      a.latitude AS arr_lat, a.longitude AS arr_lon,
-                      COUNT(*) AS count, SUM(f.duration_hours) AS hours,
-                      MAX(f.airline) AS operator
-               FROM passenger_flights f
-               JOIN airports d ON d.icao = f.dep_icao
-               JOIN airports a ON a.icao = f.arr_icao
-               GROUP BY f.dep_icao, f.arr_icao ORDER BY count DESC"""
-        )
-    ]
+    routes_geo, airports_geo = _geo(conn)
 
     def _top(sql, params=()):
         return [dict(r) for r in conn.execute(sql, params)]

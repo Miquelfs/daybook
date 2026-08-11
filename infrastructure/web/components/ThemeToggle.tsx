@@ -19,9 +19,14 @@ export function ThemeToggle() {
     } else {
       document.documentElement.removeAttribute("data-theme");
     }
+    // Persist to both localStorage and a cookie — localStorage gets evicted on
+    // iOS Safari, so the cookie is a second line of defence for the preference.
     try {
       localStorage.setItem("db-theme", next);
     } catch { /* private mode */ }
+    try {
+      document.cookie = `db-theme=${next}; path=/; max-age=31536000; SameSite=Lax`;
+    } catch { /* ignore */ }
     document
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute("content", next === "light" ? "#F3EFE6" : "#09090B");

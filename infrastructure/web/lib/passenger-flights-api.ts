@@ -145,6 +145,9 @@ export const passengerFlightsApi = {
 
   analytics: (): Promise<FlightAnalytics> => get("/passenger-flights/analytics"),
 
+  map: (year?: string): Promise<{ routes_geo: RouteFrequency[]; airports_geo: AirportVisit[] }> =>
+    get(`/passenger-flights/map${year ? `?year=${year}` : ""}`),
+
   // Airport autocomplete reuses the pilot logbook's 7k-airport search.
   searchAirports: (q: string): Promise<AirportInfo[]> =>
     get(`/flights/airports/search?q=${encodeURIComponent(q)}`),

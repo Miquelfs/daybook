@@ -111,13 +111,13 @@ export default async function DatabasesPage() {
           href="/explore/passenger-flights"
           className="flex items-center gap-4 bg-[#18181B] border border-[#27272A] rounded-xl px-5 py-4 hover:border-[#3F3F46] transition-colors"
         >
-          <span className="text-3xl">✈️</span>
+          <span className="text-3xl">🌍</span>
           <div className="flex-1 min-w-0">
-            <p className="text-base font-semibold text-[#FAFAFA]">Flights as passenger</p>
+            <p className="text-base font-semibold text-[#FAFAFA]">Where I've Flown</p>
             <p className="text-xs text-[#52525B] mt-0.5">
               {flightStats && flightStats.total > 0
                 ? `${flightStats.total} flights · ${flightStats.distinct_airports} airports · €${flightStats.total_spent.toLocaleString()}`
-                : "Trips flown as a passenger, not the pilot"}
+                : "Every flight taken as a passenger — routes, airlines, map"}
             </p>
           </div>
           <span className="text-[#52525B] text-sm">→</span>

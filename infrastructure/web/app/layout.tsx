@@ -19,11 +19,22 @@ export const metadata: Metadata = {
   description: "One day at a time. Owned, indexed, and made meaningful.",
 };
 
-// Applies the stored theme before first paint (no flash). Dark is default.
+// Applies the stored theme before first paint (no flash).
+// Resolution order: localStorage → cookie → device (prefers-color-scheme).
+// iOS Safari periodically evicts localStorage (and it's per-origin), which was
+// silently reverting the app to dark; the cookie + device fallback keep the
+// chosen appearance instead of snapping back to the hardcoded default.
 const themeScript = `
 (function () {
   try {
     var t = localStorage.getItem("db-theme");
+    if (!t) {
+      var c = document.cookie.match(/(?:^|; )db-theme=([^;]+)/);
+      if (c) t = decodeURIComponent(c[1]);
+    }
+    if (!t && window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+      t = "light";
+    }
     if (t === "light") {
       document.documentElement.setAttribute("data-theme", "light");
       var m = document.querySelector('meta[name="theme-color"]');

@@ -1,8 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
-import { FlightRouteMap } from "@/components/aviation/FlightRouteMap";
-import type { FlightAnalytics } from "@/lib/passenger-flights-api";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { FlightRouteMap, type MapStyle } from "@/components/aviation/FlightRouteMap";
+import { passengerFlightsApi, type FlightAnalytics } from "@/lib/passenger-flights-api";
+import { AIRLINE_COLORS, DEFAULT_AIRLINE_COLOR } from "@/lib/airline-colors";
+
+type CodeMode = "icao" | "iata";
 
 // Accent palette per card — echoes MyFlightRadar's colour-coded panels, tuned
 // for the dark theme (one hue per card, bars a translucent tint of it).
@@ -15,28 +19,28 @@ const ACCENTS = {
   sky: "#38BDF8",
 };
 
-// Route colours by airline (canonical name). Vueling yellow, Ryanair blue,
-// Norwegian red — the rest fill in as more airlines are flown.
-const AIRLINE_COLORS: Record<string, string> = {
-  Vueling: "#FACC15",             // yellow
-  Ryanair: "#3B82F6",             // blue
-  Norwegian: "#EF4444",           // red
-  Iberia: "#EAB308",              // gold
-  "American Airlines": "#60A5FA", // light blue
-  Lufthansa: "#F5C518",           // Lufthansa yellow
-  "TAP Air Portugal": "#22C55E",  // green
-  "Air Europa": "#38BDF8",        // sky
-  "Wizz Air": "#D946EF",          // magenta
-  LEVEL: "#14B8A6",               // teal
-  Transavia: "#22D3EE",           // cyan
-  Joon: "#FB923C",                // orange
-  "Air China": "#F43F5E",         // rose
-  "Air Berlin": "#F97316",        // orange
-};
-const DEFAULT_AIRLINE_COLOR = "#71717A";
 
 export function FlightStats({ a }: { a: FlightAnalytics }) {
   const t = a.totals;
+
+  const [codeMode, setCodeMode] = useState<CodeMode>("iata");
+  const [mapStyle, setMapStyle] = useState<MapStyle>("dark");
+  const [mapYear, setMapYear] = useState<string>("");
+
+  const years = useMemo(
+    () => Object.keys(a.flights_per_year).sort((x, y) => y.localeCompare(x)),
+    [a.flights_per_year],
+  );
+
+  // Map data follows the year selector; all-time comes straight from analytics.
+  const { data: mapData } = useQuery({
+    queryKey: ["passenger-map", mapYear],
+    queryFn: () => passengerFlightsApi.map(mapYear || undefined),
+    initialData: { routes_geo: a.routes_geo, airports_geo: a.airports_geo },
+    enabled: mapYear !== "",
+  });
+  const routes = mapYear ? (mapData?.routes_geo ?? []) : a.routes_geo;
+  const airports = mapYear ? (mapData?.airports_geo ?? []) : a.airports_geo;
 
   const yearBars = useMemo(() => {
     const entries = Object.entries(a.flights_per_year).sort(([x], [y]) => x.localeCompare(y));
@@ -67,20 +71,37 @@ export function FlightStats({ a }: { a: FlightAnalytics }) {
         <Chip label="Years flying" value={t.years_flying} />
       </div>
 
-      {/* World map — routes coloured by airline */}
+      {/* World map — routes coloured by airline, with view controls */}
       {a.routes_geo.length > 0 && (
         <div>
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <Segmented options={[["icao", "ICAO"], ["iata", "IATA"]]}
+              value={codeMode} onChange={(v) => setCodeMode(v as CodeMode)} />
+            <Segmented options={[["dark", "Dark"], ["light", "Light"], ["satellite", "Sat"]]}
+              value={mapStyle} onChange={(v) => setMapStyle(v as MapStyle)} />
+            <select value={mapYear} onChange={(e) => setMapYear(e.target.value)}
+              className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]">
+              <option value="">All years</option>
+              {years.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
           <div className="rounded-xl overflow-hidden border border-[#27272A]">
-            <FlightRouteMap
-              routes={a.routes_geo}
-              airports={a.airports_geo}
-              height="420px"
-              basesIcao={["LEBL"]}
-              baseColors={{ LEBL: ACCENTS.amber }}
-              codeMode="iata"
-              mapStyle="dark"
-              airlineColors={AIRLINE_COLORS}
-            />
+            {routes.length > 0 ? (
+              <FlightRouteMap
+                routes={routes}
+                airports={airports}
+                height="420px"
+                basesIcao={["LEBL"]}
+                baseColors={{ LEBL: ACCENTS.amber }}
+                codeMode={codeMode}
+                mapStyle={mapStyle}
+                airlineColors={AIRLINE_COLORS}
+              />
+            ) : (
+              <div className="h-40 flex items-center justify-center text-[#52525B] text-sm">
+                No flights in {mapYear}.
+              </div>
+            )}
           </div>
           {/* Airline colour legend — only the airlines actually flown */}
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
@@ -134,6 +155,25 @@ export function FlightStats({ a }: { a: FlightAnalytics }) {
         <SplitCard title="Seat" data={a.seat_breakdown} accent={ACCENTS.sky} />
         <SplitCard title="Reason" data={a.reason_breakdown} accent={ACCENTS.violet} />
       </div>
+    </div>
+  );
+}
+
+function Segmented({ options, value, onChange }: {
+  options: [string, string][];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center bg-[#18181B] border border-[#27272A] rounded-lg p-0.5">
+      {options.map(([val, label]) => (
+        <button key={val} onClick={() => onChange(val)}
+          className={`px-2.5 py-0.5 text-xs rounded-md transition-colors ${
+            value === val ? "bg-sky-600 text-white" : "text-[#71717A] hover:text-[#A1A1AA]"
+          }`}>
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
