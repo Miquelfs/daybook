@@ -24,7 +24,7 @@ import sys
 
 from infrastructure.db.connection import get_connection
 from infrastructure.api.routers.passenger_flights import ensure_traveling_tag
-from domains.travel.flight_geo import geo_for, normalize_aircraft, parse_airport_token
+from domains.travel.flight_geo import geo_for, normalize_aircraft, normalize_airline, parse_airport_token
 
 SEAT_TYPE = {"1": "Window", "2": "Middle", "3": "Aisle"}
 FLIGHT_CLASS = {"1": "Economy", "2": "Economy+", "3": "Business", "4": "First"}
@@ -87,6 +87,7 @@ def import_csv(conn, path: str) -> tuple[int, int]:
                 continue
 
             airline_name, airline_code = _airline(r.get("Airline"))
+            airline_name, airline_code = normalize_airline(airline_name, airline_code)
             aircraft_name = _clean(r.get("Aircraft"))
             aircraft_code = normalize_aircraft(aircraft_name)
             geo = geo_for(conn, r.get("From"), r.get("To"))

@@ -23,7 +23,7 @@ import sys
 
 from infrastructure.db.connection import get_connection
 from infrastructure.api.routers.passenger_flights import ensure_traveling_tag
-from domains.travel.flight_geo import geo_for, normalize_aircraft
+from domains.travel.flight_geo import geo_for, normalize_aircraft, normalize_airline
 
 
 def _parse_date(raw: str) -> str | None:
@@ -91,16 +91,17 @@ def import_csv(conn, path: str) -> tuple[int, int]:
 
             commuting = 1 if (r.get("Commuting", "").strip().lower() == "yes") else 0
             aircraft = _clean(r.get("Aircraft"))
+            airline_name, airline_code = normalize_airline(_clean(r.get("Airline")))
             geo = geo_for(conn, origin, destination)
             conn.execute(
                 """INSERT INTO passenger_flights
                    (date, flight_number, origin, destination, dep_icao, arr_icao,
-                    airline, aircraft, aircraft_code, price_paid, reason, commuting,
-                    companion, seat, duration_hours, distance_km)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    airline, airline_code, aircraft, aircraft_code, price_paid, reason,
+                    commuting, companion, seat, duration_hours, distance_km)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     date, flight_number, origin, destination, geo["dep_icao"], geo["arr_icao"],
-                    _clean(r.get("Airline")), aircraft, normalize_aircraft(aircraft),
+                    airline_name, airline_code, aircraft, normalize_aircraft(aircraft),
                     _parse_price(r.get("Paid", "")),
                     "Commuting" if commuting else None,
                     commuting,

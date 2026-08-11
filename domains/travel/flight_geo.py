@@ -65,6 +65,38 @@ def resolve_airport(conn: sqlite3.Connection, iata: Optional[str], icao: Optiona
     return None
 
 
+# Canonical airline names keyed by IATA code — so Notion ("Vueling", no code)
+# and FR24 ("Vueling Airlines (VY/VLG)") collapse to one entry in the stats.
+_AIRLINE_BY_CODE = {
+    "FR": "Ryanair", "VY": "Vueling", "AA": "American Airlines", "JN": "Joon",
+    "VK": "LEVEL", "IB": "Iberia", "D8": "Norwegian", "AB": "Air Berlin",
+    "CA": "Air China", "TP": "TAP Air Portugal", "TO": "Transavia",
+    "LH": "Lufthansa", "W6": "Wizz Air", "UX": "Air Europa",
+}
+# Lowercased name fragment → IATA code, for sources that give only a name.
+_AIRLINE_BY_NAME = {
+    "ryanair": "FR", "vueling": "VY", "american": "AA", "joon": "JN",
+    "level": "VK", "iberia": "IB", "norwegian": "D8", "air berlin": "AB",
+    "air china": "CA", "tap": "TP", "transavia": "TO", "lufthansa": "LH",
+    "wizz": "W6", "air europa": "UX",
+}
+
+
+def normalize_airline(name: Optional[str], code: Optional[str] = None) -> tuple[Optional[str], Optional[str]]:
+    """Return (canonical_name, iata_code). Resolves by code first, then by a
+    name fragment, so both import sources land on the same airline."""
+    if not name and not code:
+        return None, None
+    c = (code or "").strip().upper() or None
+    if c and c in _AIRLINE_BY_CODE:
+        return _AIRLINE_BY_CODE[c], c
+    low = (name or "").strip().lower()
+    for frag, fc in _AIRLINE_BY_NAME.items():
+        if frag in low:
+            return _AIRLINE_BY_CODE[fc], fc
+    return (name.strip() if name else None), c
+
+
 def normalize_aircraft(raw: Optional[str]) -> Optional[str]:
     """Return an ICAO-ish type code. FR24 already parenthesises it; Notion uses
     long names we map, and anything unknown passes through unchanged."""
