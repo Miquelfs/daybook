@@ -7,19 +7,21 @@ import { format, parseISO } from "date-fns";
 import {
   passengerFlightsApi,
   type PassengerFlight,
-  type PassengerFlightStats,
+  type FlightAnalytics,
 } from "@/lib/passenger-flights-api";
 import { PassengerFlightForm } from "@/components/PassengerFlightForm";
+import { FlightStats } from "@/components/FlightStats";
 
 export function PassengerFlightsClient({
   initialFlights,
-  initialStats,
+  initialAnalytics,
 }: {
   initialFlights: PassengerFlight[];
-  initialStats: PassengerFlightStats | null;
+  initialAnalytics: FlightAnalytics | null;
 }) {
   const router = useRouter();
   const [sheet, setSheet] = useState<null | { edit?: PassengerFlight }>(null);
+  const [tab, setTab] = useState<"stats" | "log">("stats");
 
   const byYear = useMemo(() => {
     const map = new Map<string, PassengerFlight[]>();
@@ -55,38 +57,47 @@ export function PassengerFlightsClient({
         </button>
       </div>
 
-      {/* Stat tiles */}
-      {initialStats && initialStats.total > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-7">
-          <StatTile label="Flights" value={initialStats.total.toLocaleString()} />
-          <StatTile label="Airports" value={initialStats.distinct_airports.toLocaleString()} />
-          <StatTile label="In the air" value={`${initialStats.total_hours.toLocaleString()} h`} />
-          <StatTile label="Spent" value={`€${initialStats.total_spent.toLocaleString()}`} />
-        </div>
-      )}
-
-      {/* List grouped by year */}
       {initialFlights.length === 0 ? (
         <div className="border border-dashed border-[#27272A] rounded-xl px-6 py-12 text-center">
           <Plane size={22} className="text-[#3F3F46] mx-auto mb-2" />
           <p className="text-sm text-[#71717A]">No passenger flights logged yet.</p>
-          <p className="text-xs text-[#52525B] mt-0.5">Add one, or import your Notion export.</p>
+          <p className="text-xs text-[#52525B] mt-0.5">Add one, or import your flight history.</p>
         </div>
       ) : (
-        <div className="flex flex-col gap-6">
-          {byYear.map(([year, flights]) => (
-            <div key={year}>
-              <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">
-                {year} · {flights.length} flight{flights.length > 1 ? "s" : ""}
-              </p>
-              <div className="flex flex-col gap-2">
-                {flights.map((f) => (
-                  <FlightRow key={f.id} f={f} onEdit={() => setSheet({ edit: f })} onDelete={() => del(f.id)} />
-                ))}
-              </div>
+        <>
+          {/* Stats / Log switch */}
+          <div className="flex justify-center mb-6">
+            <div className="inline-flex rounded-lg border border-[#27272A] p-0.5 bg-[#09090B]">
+              {(["stats", "log"] as const).map((t) => (
+                <button key={t} onClick={() => setTab(t)}
+                  className={`px-5 py-1.5 text-xs rounded-md transition-colors capitalize ${
+                    tab === t ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"
+                  }`}>
+                  {t === "stats" ? "Statistics" : "Logbook"}
+                </button>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+
+          {tab === "stats" && initialAnalytics ? (
+            <FlightStats a={initialAnalytics} />
+          ) : (
+            <div className="flex flex-col gap-6">
+              {byYear.map(([year, flights]) => (
+                <div key={year}>
+                  <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">
+                    {year} · {flights.length} flight{flights.length > 1 ? "s" : ""}
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {flights.map((f) => (
+                      <FlightRow key={f.id} f={f} onEdit={() => setSheet({ edit: f })} onDelete={() => del(f.id)} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Add / edit sheet */}
@@ -114,15 +125,6 @@ export function PassengerFlightsClient({
         </div>
       )}
     </>
-  );
-}
-
-function StatTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-3">
-      <p className="text-xs text-[#52525B] uppercase tracking-widest">{label}</p>
-      <p className="text-xl font-semibold tabular-nums mt-0.5">{value}</p>
-    </div>
   );
 }
 

@@ -23,6 +23,7 @@ import sys
 
 from infrastructure.db.connection import get_connection
 from infrastructure.api.routers.passenger_flights import ensure_traveling_tag
+from domains.travel.flight_geo import geo_for, normalize_aircraft
 
 
 def _parse_date(raw: str) -> str | None:
@@ -89,19 +90,22 @@ def import_csv(conn, path: str) -> tuple[int, int]:
                 continue
 
             commuting = 1 if (r.get("Commuting", "").strip().lower() == "yes") else 0
+            aircraft = _clean(r.get("Aircraft"))
+            geo = geo_for(conn, origin, destination)
             conn.execute(
                 """INSERT INTO passenger_flights
-                   (date, flight_number, origin, destination, airline, aircraft,
-                    price_paid, reason, commuting, companion, seat, duration_hours)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   (date, flight_number, origin, destination, dep_icao, arr_icao,
+                    airline, aircraft, aircraft_code, price_paid, reason, commuting,
+                    companion, seat, duration_hours, distance_km)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    date, flight_number, origin, destination,
-                    _clean(r.get("Airline")), _clean(r.get("Aircraft")),
+                    date, flight_number, origin, destination, geo["dep_icao"], geo["arr_icao"],
+                    _clean(r.get("Airline")), aircraft, normalize_aircraft(aircraft),
                     _parse_price(r.get("Paid", "")),
                     "Commuting" if commuting else None,
                     commuting,
                     _clean(r.get("Acompanyant")), _clean(r.get("Seat")),
-                    _parse_float(r.get("Duration", "")),
+                    _parse_float(r.get("Duration", "")), geo["distance_km"],
                 ),
             )
             ensure_traveling_tag(conn, date)
