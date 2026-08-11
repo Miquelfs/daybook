@@ -15,6 +15,26 @@ const ACCENTS = {
   sky: "#38BDF8",
 };
 
+// Route colours by airline (canonical name). Vueling yellow, Ryanair blue,
+// Norwegian red — the rest fill in as more airlines are flown.
+const AIRLINE_COLORS: Record<string, string> = {
+  Vueling: "#FACC15",             // yellow
+  Ryanair: "#3B82F6",             // blue
+  Norwegian: "#EF4444",           // red
+  Iberia: "#EAB308",              // gold
+  "American Airlines": "#60A5FA", // light blue
+  Lufthansa: "#F5C518",           // Lufthansa yellow
+  "TAP Air Portugal": "#22C55E",  // green
+  "Air Europa": "#38BDF8",        // sky
+  "Wizz Air": "#D946EF",          // magenta
+  LEVEL: "#14B8A6",               // teal
+  Transavia: "#22D3EE",           // cyan
+  Joon: "#FB923C",                // orange
+  "Air China": "#F43F5E",         // rose
+  "Air Berlin": "#F97316",        // orange
+};
+const DEFAULT_AIRLINE_COLOR = "#71717A";
+
 export function FlightStats({ a }: { a: FlightAnalytics }) {
   const t = a.totals;
 
@@ -47,18 +67,31 @@ export function FlightStats({ a }: { a: FlightAnalytics }) {
         <Chip label="Years flying" value={t.years_flying} />
       </div>
 
-      {/* World map */}
+      {/* World map — routes coloured by airline */}
       {a.routes_geo.length > 0 && (
-        <div className="rounded-xl overflow-hidden border border-[#27272A]">
-          <FlightRouteMap
-            routes={a.routes_geo}
-            airports={a.airports_geo}
-            height="420px"
-            basesIcao={["LEBL"]}
-            baseColors={{ LEBL: ACCENTS.amber }}
-            codeMode="iata"
-            mapStyle="dark"
-          />
+        <div>
+          <div className="rounded-xl overflow-hidden border border-[#27272A]">
+            <FlightRouteMap
+              routes={a.routes_geo}
+              airports={a.airports_geo}
+              height="420px"
+              basesIcao={["LEBL"]}
+              baseColors={{ LEBL: ACCENTS.amber }}
+              codeMode="iata"
+              mapStyle="dark"
+              airlineColors={AIRLINE_COLORS}
+            />
+          </div>
+          {/* Airline colour legend — only the airlines actually flown */}
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+            {a.top_airlines.map((al) => (
+              <span key={al.airline} className="inline-flex items-center gap-1.5 text-[11px] text-[#A1A1AA]">
+                <span className="w-3 h-[3px] rounded-full"
+                  style={{ background: AIRLINE_COLORS[al.airline] ?? DEFAULT_AIRLINE_COLOR }} />
+                {al.airline}
+              </span>
+            ))}
+          </div>
         </div>
       )}
 
@@ -67,7 +100,10 @@ export function FlightStats({ a }: { a: FlightAnalytics }) {
         <BarCard title="Top airports" accent={ACCENTS.emerald}
           items={a.top_airports.map((x) => ({ label: x.code, sub: x.city ?? undefined, count: x.count }))} />
         <BarCard title="Top airlines" accent={ACCENTS.amber}
-          items={a.top_airlines.map((x) => ({ label: x.airline, count: x.count }))} />
+          items={a.top_airlines.map((x) => ({
+            label: x.airline, count: x.count,
+            color: AIRLINE_COLORS[x.airline] ?? DEFAULT_AIRLINE_COLOR,
+          }))} />
         <BarCard title="Top aircraft" accent={ACCENTS.rose}
           items={a.top_aircraft.map((x) => ({ label: x.code, count: x.count }))} />
         <BarCard title="Top routes" accent={ACCENTS.violet}
@@ -124,7 +160,7 @@ function Chip({ label, value }: { label: string; value: number }) {
 function BarCard({ title, accent, items }: {
   title: string;
   accent: string;
-  items: { label: string; sub?: string; count: number }[];
+  items: { label: string; sub?: string; count: number; color?: string }[];
 }) {
   const max = Math.max(1, ...items.map((i) => i.count));
   return (
@@ -134,18 +170,21 @@ function BarCard({ title, accent, items }: {
       </div>
       <div className="px-4 pb-3 flex flex-col gap-1.5">
         {items.length === 0 && <p className="text-xs text-[#52525B] pb-1">No data yet</p>}
-        {items.map((it, i) => (
-          <div key={i} className="relative flex items-center h-6 rounded overflow-hidden bg-[#18181B]">
-            <div className="absolute inset-y-0 left-0 rounded"
-              style={{ width: `${(it.count / max) * 100}%`, background: `${accent}26` }} />
-            <span className="relative z-10 px-2 text-xs text-[#FAFAFA] truncate">
-              {it.label}{it.sub && <span className="text-[#52525B]"> · {it.sub}</span>}
-            </span>
-            <span className="relative z-10 ml-auto px-2 text-xs tabular-nums" style={{ color: accent }}>
-              {it.count}
-            </span>
-          </div>
-        ))}
+        {items.map((it, i) => {
+          const c = it.color ?? accent;
+          return (
+            <div key={i} className="relative flex items-center h-6 rounded overflow-hidden bg-[#18181B]">
+              <div className="absolute inset-y-0 left-0 rounded"
+                style={{ width: `${(it.count / max) * 100}%`, background: `${c}26` }} />
+              <span className="relative z-10 px-2 text-xs text-[#FAFAFA] truncate">
+                {it.label}{it.sub && <span className="text-[#52525B]"> · {it.sub}</span>}
+              </span>
+              <span className="relative z-10 ml-auto px-2 text-xs tabular-nums" style={{ color: c }}>
+                {it.count}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

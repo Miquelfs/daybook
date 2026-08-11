@@ -64,7 +64,16 @@ def _airline(raw: str):
 def import_csv(conn, path: str) -> tuple[int, int]:
     inserted = skipped = 0
     with open(path, encoding="utf-8-sig", newline="") as f:
-        for r in csv.DictReader(f):
+        # FR24 exports can carry a leading blank line — skip any so the real
+        # header row is used (otherwise every row looks "dateless" & is skipped).
+        pos = f.tell()
+        while f.readline().strip() == "":
+            pos = f.tell()
+        f.seek(pos)
+        reader = csv.DictReader(f)
+        if reader.fieldnames:
+            reader.fieldnames = [(fn or "").strip() for fn in reader.fieldnames]
+        for r in reader:
             date = _clean(r.get("Date"))
             if not date or not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
                 skipped += 1

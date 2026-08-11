@@ -17,6 +17,10 @@ interface Props {
   baseColors?: BaseColorMap;
   codeMode?: CodeMode;
   mapStyle?: MapStyle;
+  // When set, routes are coloured by matching `route.operator` (airline name)
+  // against these keys (exact, then case-insensitive substring). Leaves the
+  // pilot-logbook colour logic untouched when omitted.
+  airlineColors?: BaseColorMap;
 }
 
 const TILE_LAYERS: Record<MapStyle, { url: string; attribution: string }> = {
@@ -35,13 +39,26 @@ const TILE_LAYERS: Record<MapStyle, { url: string; attribution: string }> = {
 };
 
 const AIRPORT_COLOR = "#F59E0B";   // amber-500 (regular visited airports)
+const DEFAULT_ROUTE_COLOR = "#71717A"; // zinc-500
 
 function routeColor(route: RouteFrequency): string {
   const op = (route.operator || "").toLowerCase();
   if (op.includes("norwegian") || route.source === "norwegian") return "#EF4444"; // red-500
   if (op.includes("ryanair") || route.source === "full_csv")    return "#3B82F6"; // blue-500
   if (route.source === "aerolink")                               return "#A78BFA"; // violet-400
-  return "#71717A"; // zinc-500 for manual
+  return DEFAULT_ROUTE_COLOR;
+}
+
+// Colour a route by airline name against a supplied map (exact key, then
+// case-insensitive substring). Used by the passenger logbook.
+function airlineRouteColor(route: RouteFrequency, colors: BaseColorMap): string {
+  const op = (route.operator || "").trim();
+  if (op in colors) return colors[op];
+  const low = op.toLowerCase();
+  for (const [name, color] of Object.entries(colors)) {
+    if (low.includes(name.toLowerCase())) return color;
+  }
+  return DEFAULT_ROUTE_COLOR;
 }
 
 export function FlightRouteMap({
@@ -57,6 +74,7 @@ export function FlightRouteMap({
   },
   codeMode = "icao",
   mapStyle = "dark",
+  airlineColors,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -93,7 +111,7 @@ export function FlightRouteMap({
         if (!route.dep_lat || !route.arr_lat) continue;
         const opacity = 0.25 + 0.55 * (Math.log(route.count + 1) / Math.log(maxCount + 1));
         const weight = 1 + Math.floor(route.count / 10);
-        const color = routeColor(route);
+        const color = airlineColors ? airlineRouteColor(route, airlineColors) : routeColor(route);
 
         const depLabel = codeMode === "iata"
           ? (route.dep_iata || route.dep_icao)
@@ -158,7 +176,7 @@ export function FlightRouteMap({
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routes, airports, codeMode, basesIcao, baseColors, mapStyle]);
+  }, [routes, airports, codeMode, basesIcao, baseColors, mapStyle, airlineColors]);
 
   return (
     <div
