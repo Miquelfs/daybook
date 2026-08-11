@@ -17,6 +17,8 @@ import { groupByMeal } from "@/lib/food-meals";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
 import { WeightSection } from "@/components/health/WeightSection";
 import { WaterTracker } from "@/components/WaterTracker";
+import { HeartDot, HEART_META } from "@/components/HeartRatingBadge";
+import { HeartHealthyPick } from "@/components/HeartHealthyPick";
 
 const AMBER = "#F59E0B";
 const GREEN = "#34D399";
@@ -408,6 +410,9 @@ export function FoodDashboard() {
       {/* Targets editor */}
       <TargetsEditor date={date} targets={targets} onSaved={() => qc.invalidateQueries({ queryKey: ["food-targets", date] })} />
 
+      {/* Heart-healthy pick (today only) */}
+      {date === today && <HeartHealthyPick date={date} />}
+
       {/* Add food */}
       <div>
         <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">Log food</p>
@@ -417,6 +422,7 @@ export function FoodDashboard() {
       {/* Entries grouped by meal */}
       {entries.length > 0 && (
         <div className="space-y-4">
+          <HeartBalance entries={entries} />
           {groupByMeal(entries).map((g) => {
             const gk = g.items.reduce((a, e) => a + e.kcal, 0);
             const gp = g.items.reduce((a, e) => a + e.protein_g, 0);
@@ -430,11 +436,18 @@ export function FoodDashboard() {
                   {g.items.map((e) => (
                     <div key={e.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-[#FAFAFA] truncate">{e.description}</p>
+                        <p className="text-sm font-medium text-[#FAFAFA] truncate flex items-center gap-1.5">
+                          {e.heart_rating && <HeartDot rating={e.heart_rating} title={e.heart_note ?? undefined} />}
+                          {e.description}
+                        </p>
                         <p className="text-xs text-[#52525B] tabular-nums">
                           {Math.round(e.kcal)} kcal · {Math.round(e.protein_g)}P / {Math.round(e.carbs_g)}C / {Math.round(e.fat_g)}F
-                          {e.sugar_g > 0 && ` · ${Math.round(e.sugar_g)}g sugar`}
+                          {e.fiber_g != null && e.fiber_g > 0 && ` · ${Math.round(e.fiber_g)}g fibre`}
+                          {e.saturated_fat_g != null && e.saturated_fat_g > 0 && ` · ${Math.round(e.saturated_fat_g)}g sat fat`}
                         </p>
+                        {e.heart_rating && (e.heart_rating === "limit" || e.heart_rating === "avoid") && e.heart_note && (
+                          <p className="text-[11px] text-[#71717A] mt-0.5">{e.heart_note}</p>
+                        )}
                       </div>
                       <EntryTime entry={e} date={date} />
                       <button onClick={() => del(e.id)} className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
@@ -521,6 +534,57 @@ export function FoodDashboard() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Day cholesterol balance: how many logged foods are heart-healthy vs to limit/avoid,
+// plus the day's saturated-fat load and fibre — the "how am I doing for my LDL?" glance.
+function HeartBalance({ entries }: { entries: FoodEntry[] }) {
+  const counts = { good: 0, ok: 0, limit: 0, avoid: 0 };
+  let sat = 0, fibre = 0, satKnown = false, fibreKnown = false;
+  for (const e of entries) {
+    if (e.heart_rating) counts[e.heart_rating] += 1;
+    if (e.saturated_fat_g != null) { sat += e.saturated_fat_g; satKnown = true; }
+    if (e.fiber_g != null) { fibre += e.fiber_g; fibreKnown = true; }
+  }
+  const total = entries.length;
+  const flagged = counts.limit + counts.avoid;
+  const segs: { rating: "good" | "ok" | "limit" | "avoid"; n: number }[] = [
+    { rating: "good", n: counts.good }, { rating: "ok", n: counts.ok },
+    { rating: "limit", n: counts.limit }, { rating: "avoid", n: counts.avoid },
+  ].filter((s) => s.n > 0);
+
+  const msg = flagged === 0
+    ? "Great cholesterol day — nothing flagged."
+    : `${flagged} food${flagged > 1 ? "s" : ""} to watch for your cholesterol today.`;
+
+  return (
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs text-[#52525B] uppercase tracking-widest">Heart balance</span>
+        <span className="text-xs text-[#71717A] tabular-nums">
+          {satKnown && `${Math.round(sat)}g sat fat`}{satKnown && fibreKnown && " · "}
+          {fibreKnown && `${Math.round(fibre)}g fibre`}
+        </span>
+      </div>
+      <div className="flex h-2 rounded-full overflow-hidden bg-[#18181B]">
+        {segs.map((s) => (
+          <div key={s.rating} title={`${HEART_META[s.rating].label}: ${s.n}`}
+            style={{ flex: s.n, background: HEART_META[s.rating].color }} />
+        ))}
+      </div>
+      <div className="flex items-center justify-between mt-2">
+        <div className="flex items-center gap-3">
+          {segs.map((s) => (
+            <span key={s.rating} className="inline-flex items-center gap-1 text-[11px] text-[#A1A1AA]">
+              <HeartDot rating={s.rating} /> {s.n}
+            </span>
+          ))}
+        </div>
+        <span className={`text-[11px] ${flagged === 0 ? "text-[#34D399]" : "text-[#FBBF24]"}`}>{msg}</span>
+      </div>
+      {total === 0 && <p className="text-[11px] text-[#52525B]">No foods logged yet.</p>}
     </div>
   );
 }

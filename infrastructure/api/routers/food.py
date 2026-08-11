@@ -131,7 +131,15 @@ def recent_foods(limit: int = Query(8, ge=1, le=30), conn: DB = None):
            LIMIT ?""",
         (limit,),
     ).fetchall()
-    return [dict(r) for r in rows]
+    from domains.food import heart_healthy
+    out = []
+    for r in rows:
+        d = dict(r)
+        a = heart_healthy.assess(d["description"], d.get("kcal") or 0, d.get("fat_g"),
+                                 None, None, d.get("sugar_g"))
+        d["heart_rating"] = a["rating"]
+        out.append(d)
+    return out
 
 
 @router.get("/entries", response_model=list[FoodEntryOut])

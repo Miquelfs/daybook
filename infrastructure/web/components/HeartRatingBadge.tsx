@@ -1,10 +1,10 @@
 import type { HeartRating } from "@/lib/food-api";
 
 export const HEART_META: Record<HeartRating, { label: string; color: string; dot: string }> = {
-  good:  { label: "Heart-healthy", color: "#34D399", dot: "🟢" },
-  ok:    { label: "OK",            color: "#A3A3A3", dot: "⚪️" },
-  limit: { label: "Limit",         color: "#FBBF24", dot: "🟡" },
-  avoid: { label: "Avoid",         color: "#F87171", dot: "🔴" },
+  good:  { label: "Healthy", color: "#34D399", dot: "🟢" },
+  ok:    { label: "OK",      color: "#A3A3A3", dot: "⚪️" },
+  limit: { label: "Limit",   color: "#FBBF24", dot: "🟡" },
+  avoid: { label: "Avoid",   color: "#F87171", dot: "🔴" },
 };
 
 // Compact pill for a food's cholesterol rating.

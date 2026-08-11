@@ -216,6 +216,7 @@ export interface RecentFood {
   carbs_g: number;
   fat_g: number;
   sugar_g: number;
+  heart_rating?: HeartRating | null;
 }
 
 export interface FoodCoach {
@@ -237,6 +238,7 @@ export interface FoodLibraryItem {
   times_logged: number;
   source: "logged" | "preset";
   category?: string;
+  heart_rating?: HeartRating | null;
 }
 
 export interface DeficitStreak {

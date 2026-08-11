@@ -62,6 +62,13 @@ def food_library(conn, q: str = "", limit: int = 60) -> list[dict]:
                 })
         except Exception:
             pass
+
+    # Tag each with a heart/cholesterol rating from name + macros.
+    from domains.food import heart_healthy
+    for it in items:
+        it["heart_rating"] = heart_healthy.assess(
+            it["name"], it.get("kcal") or 0, it.get("fat_g"), None, None, it.get("sugar_g")
+        )["rating"]
     return items[:limit]
 
 

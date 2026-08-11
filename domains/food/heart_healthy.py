@@ -90,6 +90,13 @@ _LIMIT_WORDS = [
     "cheese", "queso", "beef", "ternera", "pork", "cerdo", "lamb", "cordero",
     "whole milk", "leche entera", "red meat", "carne roja", "mayonnaise", "mayonesa",
 ]
+# Refined / sugary — worse for overall healthiness even when saturated fat is low.
+_REFINED_WORDS = [
+    "white bread", "pan blanco", "white rice", "arroz blanco", "sugary", "soda",
+    "cola", "candy", "sweets", "chuches", "chocolate", "cake", "tarta", "bizcocho",
+    "cookie", "biscuit", "galleta", "muffin", "cereal bar", "energy drink",
+    "juice", "zumo", "syrup", "sirope", "mochi", "sugar",
+]
 _GOOD_WORDS = [
     "oat", "avena", "lentil", "lenteja", "chickpea", "garbanzo", "bean", "judía",
     "judia", "alubia", "salmon", "salmón", "sardine", "sardina", "mackerel",
@@ -97,24 +104,29 @@ _GOOD_WORDS = [
     "nut", "nuez", "nueces", "almond", "almendra", "walnut", "vegetable", "verdura",
     "salad", "ensalada", "fruit", "fruta", "whole grain", "wholegrain", "integral",
     "quinoa", "tofu", "hummus", "broccoli", "brócoli", "spinach", "espinaca", "berry",
+    "apple", "manzana", "banana", "plátano", "platano", "pear", "pera", "orange",
+    "naranja", "grape", "uva", "kiwi", "melon", "melón", "peach", "melocotón",
 ]
 
 
 def assess(name: str, kcal: float = 0, fat_g: Optional[float] = None,
            saturated_fat_g: Optional[float] = None, fiber_g: Optional[float] = None,
            sugar_g: Optional[float] = None) -> dict:
-    """Heuristic cholesterol rating for a logged food when the LLM didn't give one.
+    """Heuristic overall-healthiness rating (cholesterol-weighted) for a logged
+    food when the LLM didn't give one.
 
-    Returns {"rating": good|ok|limit|avoid, "note": str}. Uses saturated fat &
-    fibre when known, else keyword cues on the name."""
+    Returns {"rating": good|ok|limit|avoid, "note": str}. Considers saturated fat,
+    fibre, sugar, and how processed/refined the food is — not fibre alone."""
     low = (name or "").lower()
-    score = 0  # + = heart-healthy, − = worse for LDL
+    score = 0  # + = healthier, − = less healthy (saturated fat / sugar / refined)
     reasons: list[str] = []
 
     if any(w in low for w in _GOOD_WORDS):
         score += 2
     if any(w in low for w in _LIMIT_WORDS):
         score -= 1
+    if any(w in low for w in _REFINED_WORDS):
+        score -= 1; reasons.append("refined / sugary")
     if any(w in low for w in _BAD_WORDS):
         score -= 2
         reasons.append("high in saturated fat / processed")
@@ -131,17 +143,20 @@ def assess(name: str, kcal: float = 0, fat_g: Optional[float] = None,
             score += 2; reasons.append(f"{round(fiber_g)}g fibre")
         elif fiber_g >= 3:
             score += 1
-    if sugar_g is not None and sugar_g >= 25:
-        score -= 1; reasons.append(f"{round(sugar_g)}g sugar")
+    if sugar_g is not None:
+        if sugar_g >= 35:
+            score -= 2; reasons.append(f"{round(sugar_g)}g sugar")
+        elif sugar_g >= 20:
+            score -= 1; reasons.append(f"{round(sugar_g)}g sugar")
 
     if score >= 2:
-        rating, base = "good", "Heart-healthy — low saturated fat, good fibre/unsaturated fats."
+        rating, base = "good", "Healthy — whole, low in saturated fat & sugar, good fibre."
     elif score >= 0:
-        rating, base = "ok", "Fine in moderation for your cholesterol."
+        rating, base = "ok", "Fine in moderation."
     elif score >= -2:
-        rating, base = "limit", "Go easy — better swapped for a leaner, higher-fibre option."
+        rating, base = "limit", "Go easy — swap for something leaner, higher-fibre and less processed."
     else:
-        rating, base = "avoid", "Best avoided — swap for legumes, veg, fish or wholegrains."
+        rating, base = "avoid", "Best avoided — swap for veg, legumes, fruit, fish or wholegrains."
 
     note = base
     if reasons:

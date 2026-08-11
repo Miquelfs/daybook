@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ChevronLeft, Search, Check, Plus } from "lucide-react";
 import { foodApi, type FoodLibraryItem } from "@/lib/food-api";
+import { HeartDot } from "@/components/HeartRatingBadge";
 
 const MEALS = ["breakfast", "lunch", "dinner", "snack"];
 
@@ -73,6 +74,7 @@ export function FoodsLibrary() {
             <div key={`${it.source}-${it.name}`} className="flex items-center gap-3 bg-[#0D0D0F] border border-[#27272A] rounded-lg px-3 py-2.5">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
+                  {it.heart_rating && <HeartDot rating={it.heart_rating} />}
                   <p className="text-sm text-[#FAFAFA] font-medium truncate">{it.name}</p>
                   {it.source === "preset" ? (
                     <span className="text-[9px] uppercase tracking-wider text-[#60A5FA] bg-[#60A5FA]/10 rounded px-1 py-0.5 shrink-0">crew</span>

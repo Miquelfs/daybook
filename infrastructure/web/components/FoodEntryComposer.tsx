@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Sparkles, X } from "lucide-react";
 import { foodApi, type AnalyzeItem, type RecentFood, type HeartRating } from "@/lib/food-api";
-import { HeartRatingBadge } from "@/components/HeartRatingBadge";
+import { HeartRatingBadge, HeartDot } from "@/components/HeartRatingBadge";
 
 const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack", "extra"];
 
@@ -157,8 +157,9 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
                 type="button"
                 onClick={() => quickLog(r)}
                 title={`${Math.round(r.kcal)} kcal · ${Math.round(r.protein_g)}g protein`}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-[#18181B] border border-[#27272A] text-[#D4D4D8] hover:border-[#3F3F46] hover:bg-[#1F1F23] transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-[#18181B] border border-[#27272A] text-[#D4D4D8] hover:border-[#3F3F46] hover:bg-[#1F1F23] transition-colors"
               >
+                {r.heart_rating && <HeartDot rating={r.heart_rating} />}
                 <span className="truncate max-w-[140px]">{r.description}</span>
                 <span className="text-[#52525B] tabular-nums">{Math.round(r.kcal)}</span>
               </button>
