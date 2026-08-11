@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Sparkles, X } from "lucide-react";
-import { foodApi, type AnalyzeItem, type RecentFood } from "@/lib/food-api";
+import { foodApi, type AnalyzeItem, type RecentFood, type HeartRating } from "@/lib/food-api";
+import { HeartRatingBadge } from "@/components/HeartRatingBadge";
 
 const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack", "extra"];
 
@@ -28,6 +29,7 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
   const [time, setTime] = useState(() => new Date().toTimeString().slice(0, 5)); // local HH:MM, editable
   const [items, setItems] = useState<EditItem[] | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
+  const [heart, setHeart] = useState<{ rating: HeartRating; note: string | null } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,11 +70,13 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
       const res = await foodApi.analyze(fd);
       setItems(res.items.map((it) => ({ ...it, _key: Math.random().toString(36).slice(2) })));
       setConfidence(res.confidence ?? null);
+      setHeart(res.heart_rating ? { rating: res.heart_rating, note: res.heart_note ?? null } : null);
     } catch {
       // AI unavailable (or failed) → let the user enter one item manually.
       setError("AI unavailable — enter macros manually.");
       setItems([{ ...blankItem(), name: text.trim() || "Food" }]);
       setConfidence(null);
+      setHeart(null);
     } finally {
       setAnalyzing(false);
     }
@@ -108,6 +112,8 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
           carbs_g: it.carbs_g,
           fat_g: it.fat_g,
           sugar_g: it.sugar_g ?? 0,
+          saturated_fat_g: it.saturated_fat_g ?? null,
+          fiber_g: it.fiber_g ?? null,
           ai_confidence: confidence,
         });
       }
@@ -225,12 +231,20 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
             </p>
             <button
               type="button"
-              onClick={() => { setItems(null); setConfidence(null); }}
+              onClick={() => { setItems(null); setConfidence(null); setHeart(null); }}
               className="text-[11px] text-[#71717A] hover:text-[#A1A1AA]"
             >
               ↺ start over
             </button>
           </div>
+
+          {/* Cholesterol verdict for what you're logging */}
+          {heart && (
+            <div className="flex items-start gap-2 rounded-lg border border-[#27272A] bg-[#0D0D0F] px-3 py-2">
+              <HeartRatingBadge rating={heart.rating} />
+              {heart.note && <p className="text-xs text-[#A1A1AA] leading-snug flex-1 min-w-0">{heart.note}</p>}
+            </div>
+          )}
           {items.map((it) => (
             <div key={it._key} className="bg-[#0D0D0F] border border-[#27272A] rounded-lg p-2.5 space-y-2">
               <div className="flex gap-2 items-center">

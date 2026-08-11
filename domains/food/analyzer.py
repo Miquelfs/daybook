@@ -21,8 +21,9 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
-# Haiku is vision-capable and the cheapest tier; only override for a hard case.
-FOOD_VISION_MODEL = os.getenv("FOOD_VISION_MODEL", "claude-haiku-4-5")
+# Sonnet: sharper macro estimates + heart-health judgement (saturated fat, fibre,
+# processed-ness) than Haiku, still vision-capable. Override per-env if needed.
+FOOD_VISION_MODEL = os.getenv("FOOD_VISION_MODEL", "claude-sonnet-5")
 
 
 def is_available() -> bool:
@@ -67,18 +68,29 @@ _SCHEMA_HINT = (
     '{\n'
     '  "items": [\n'
     '    {"name": str, "grams": number|null, "kcal": number, '
-    '"protein_g": number, "carbs_g": number, "fat_g": number, "sugar_g": number}\n'
+    '"protein_g": number, "carbs_g": number, "fat_g": number, '
+    '"saturated_fat_g": number, "fiber_g": number, "sugar_g": number}\n'
     '  ],\n'
     '  "total_kcal": number,\n'
     '  "total_protein_g": number,\n'
     '  "total_carbs_g": number,\n'
     '  "total_fat_g": number,\n'
+    '  "total_saturated_fat_g": number,\n'
+    '  "total_fiber_g": number,\n'
     '  "total_sugar_g": number,\n'
+    '  "heart_rating": "good" | "ok" | "limit" | "avoid",\n'
+    '  "heart_note": str,   // one sentence: why, re: cholesterol/LDL, + a swap if bad\n'
     '  "confidence": number   // 0..1, your confidence in the estimate\n'
     '}\n'
-    '"sugar_g" is the sugar subset of carbs (<= carbs_g). '
-    'Split a meal into one item per distinct food. Totals must equal the sum of '
-    'the items. No markdown, no code fences, no commentary.'
+    'The user has elevated LDL cholesterol. Judge "heart_rating" for cholesterol: '
+    '"good" = low saturated fat & high soluble fibre / unsaturated fats (oats, '
+    'legumes, veg, fruit, oily fish, olive oil, nuts); "avoid"/"limit" = high '
+    'saturated fat, fried, or processed (fatty/processed meat, butter, cream, '
+    'cheese, pastries, fried food). "heart_note" must be specific and, when '
+    'limit/avoid, name a concrete healthier swap. '
+    '"saturated_fat_g" is the saturated subset of fat_g; "sugar_g" the sugar '
+    'subset of carbs. Split a meal into one item per distinct food. Totals must '
+    'equal the sum of the items. No markdown, no code fences, no commentary.'
 )
 
 
@@ -150,6 +162,8 @@ def analyze(
         ("total_protein_g", "protein_g"),
         ("total_carbs_g", "carbs_g"),
         ("total_fat_g", "fat_g"),
+        ("total_saturated_fat_g", "saturated_fat_g"),
+        ("total_fiber_g", "fiber_g"),
         ("total_sugar_g", "sugar_g"),
     ):
         if data.get(key) is None:

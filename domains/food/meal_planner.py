@@ -44,7 +44,8 @@ def generate(
         return None
 
     data = ollama_client.generate_json(
-        _build_prompt(remaining_kcal, remaining_protein_g, preferences)
+        _build_prompt(remaining_kcal, remaining_protein_g, preferences),
+        model=ollama_client.CLAUDE_MODEL_SMART,
     )
     if not data:
         return None

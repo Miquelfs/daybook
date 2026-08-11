@@ -69,11 +69,17 @@ export interface FoodEntry {
   carbs_g: number;
   fat_g: number;
   sugar_g: number;
+  saturated_fat_g: number | null;
+  fiber_g: number | null;
+  heart_rating: HeartRating | null;
+  heart_note: string | null;
   ai_confidence: number | null;
   logged_at: string;
   created_at: string;
   updated_at: string;
 }
+
+export type HeartRating = "good" | "ok" | "limit" | "avoid";
 
 export interface FoodEntryIn {
   date: string;
@@ -86,6 +92,10 @@ export interface FoodEntryIn {
   carbs_g: number;
   fat_g: number;
   sugar_g: number;
+  saturated_fat_g?: number | null;
+  fiber_g?: number | null;
+  heart_rating?: HeartRating | null;
+  heart_note?: string | null;
   ai_confidence?: number | null;
   ai_raw_json?: string;
 }
@@ -97,6 +107,8 @@ export interface AnalyzeItem {
   protein_g: number;
   carbs_g: number;
   fat_g: number;
+  saturated_fat_g?: number;
+  fiber_g?: number;
   sugar_g: number;
 }
 
@@ -106,7 +118,11 @@ export interface AnalyzeResult {
   total_protein_g: number;
   total_carbs_g: number;
   total_fat_g: number;
+  total_saturated_fat_g?: number;
+  total_fiber_g?: number;
   total_sugar_g: number;
+  heart_rating?: HeartRating;
+  heart_note?: string;
   confidence: number;
 }
 

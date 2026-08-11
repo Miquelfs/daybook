@@ -35,6 +35,8 @@ FOOD_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
 
 def _row_to_entry(row: sqlite3.Row) -> FoodEntryOut:
     photo_path = row["photo_path"]
+    cols = row.keys()
+    g = lambda k: (row[k] if k in cols else None)
     return FoodEntryOut(
         id=row["id"],
         date=row["date"],
@@ -49,6 +51,10 @@ def _row_to_entry(row: sqlite3.Row) -> FoodEntryOut:
         carbs_g=row["carbs_g"],
         fat_g=row["fat_g"],
         sugar_g=row["sugar_g"],
+        saturated_fat_g=g("saturated_fat_g"),
+        fiber_g=g("fiber_g"),
+        heart_rating=g("heart_rating"),
+        heart_note=g("heart_note"),
         ai_confidence=row["ai_confidence"],
         logged_at=row["logged_at"],
         created_at=row["created_at"],
@@ -159,14 +165,27 @@ def create_entry(body: FoodEntryIn, conn: DB):
     if not body.description.strip():
         raise HTTPException(status_code=422, detail="Description is required")
     conn.execute("INSERT OR IGNORE INTO days (date) VALUES (?)", (body.date,))
+
+    # Every logged food gets a cholesterol rating. Prefer the analyzer's call;
+    # otherwise judge it heuristically from the name + macros.
+    heart_rating, heart_note = body.heart_rating, body.heart_note
+    if not heart_rating:
+        from domains.food import heart_healthy
+        a = heart_healthy.assess(
+            body.description, body.kcal, body.fat_g,
+            body.saturated_fat_g, body.fiber_g, body.sugar_g,
+        )
+        heart_rating, heart_note = a["rating"], a["note"]
+
     cur = conn.execute(
         """INSERT INTO food_entries
            (date, meal_type, description, source, eaten_at, kcal, protein_g, carbs_g, fat_g,
-            sugar_g, ai_confidence, ai_raw_json)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            sugar_g, saturated_fat_g, fiber_g, heart_rating, heart_note, ai_confidence, ai_raw_json)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (body.date, body.meal_type, body.description.strip(), body.source, body.eaten_at,
          body.kcal, body.protein_g, body.carbs_g, body.fat_g,
-         body.sugar_g, body.ai_confidence, body.ai_raw_json),
+         body.sugar_g, body.saturated_fat_g, body.fiber_g, heart_rating, heart_note,
+         body.ai_confidence, body.ai_raw_json),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM food_entries WHERE id=?", (cur.lastrowid,)).fetchone()

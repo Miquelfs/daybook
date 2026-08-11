@@ -108,17 +108,21 @@ def _prompt(remaining_kcal: float, remaining_protein: float, profile: list[dict]
         '  "meal_type": str,\n'
         '  "next_meal": {"name": str, "kcal": number, "protein_g": number, "why": str},\n'
         '  "alternatives": [{"name": str, "kcal": number, "protein_g": number}],\n'
-        '  "avoid": [{"item": str, "reason": str, "swap": str}],\n'
+        '  "avoid": [{"item": str, "reason": str, "swap": str, '
+        '"heart_flag": "saturated_fat" | "processed" | "fried" | "low_fibre" | "sugar" | "other"}],\n'
         '  "tip": str\n'
         '}\n'
         "Rules: next_meal must fit the remaining budget and prioritise protein. Give me "
         "VARIETY — do NOT suggest anything I already ate today, and avoid repeating the "
         "foods at the TOP of my recent list (I eat those too often); introduce something "
         "different that still fits my lean, high-protein goal. Crew meals are fair game on "
-        "duty days. Give realistic kcal/protein numbers. For \"avoid\", pick up to 3 items "
-        "FROM my recent foods that hurt fat-loss or protein (calorie-dense, low-protein, or "
-        "high-sugar) with a reason and a healthier swap. Make the 1-2 alternatives genuinely "
-        "different from next_meal. One-sentence tip. No markdown, no code fences."
+        "duty days. Give realistic kcal/protein numbers. For \"avoid\", pick up to 4 items "
+        "FROM my recent foods that work against EITHER fat-loss OR my cholesterol — "
+        "especially anything high in saturated fat, fried, processed/cured meat, pastries, "
+        "cheese, or low in fibre. For each, the \"reason\" must be specific (say why it "
+        "raises LDL or stalls fat-loss), give a concrete lower-saturated-fat / higher-fibre "
+        "\"swap\", and set \"heart_flag\". Make the 1-2 alternatives genuinely different from "
+        "next_meal. One-sentence tip. No markdown, no code fences."
     )
 
 
@@ -136,12 +140,13 @@ def generate(
     profile = recent_profile(conn, date)
     data = ollama_client.generate_json(
         _prompt(max(remaining_kcal, 0), max(remaining_protein or 0, 0), profile,
-                today_items(conn, date), crew_presets(conn), meal_type, preferences)
+                today_items(conn, date), crew_presets(conn), meal_type, preferences),
+        model=ollama_client.CLAUDE_MODEL_SMART,
     )
     if not data:
         return None
     data.setdefault("meal_type", meal_type or "next")
-    model = getattr(ollama_client, "CLAUDE_MODEL", None) if \
+    model = ollama_client.CLAUDE_MODEL_SMART if \
         ollama_client.LLM_PROVIDER == "claude" else ollama_client.LLM_PROVIDER
     conn.execute(
         "INSERT INTO food_coach (date, coach_json, model) VALUES (?,?,?)",

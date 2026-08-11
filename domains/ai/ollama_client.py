@@ -43,6 +43,10 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 # specific task needs more — do not bump the global default.
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5")
 CLAUDE_MODEL_FAST = os.getenv("CLAUDE_MODEL_FAST", "claude-haiku-4-5")
+# A smarter tier for tasks that reward better reasoning — nutrition analysis and
+# coaching (heart-health judgement, foods-to-avoid). Costs more than Haiku but
+# noticeably sharper. Falls back to Haiku for non-Claude providers.
+CLAUDE_MODEL_SMART = os.getenv("CLAUDE_MODEL_SMART", "claude-sonnet-5")
 
 # ─── Ollama (local) config ────────────────────────────────────────────────────
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")

@@ -9,6 +9,7 @@ import { groupByMeal } from "@/lib/food-meals";
 import { SectionLabel } from "@/components/MorningBrief";
 import { WaterTracker } from "@/components/WaterTracker";
 import { HeartHealthyPick } from "@/components/HeartHealthyPick";
+import { HeartDot } from "@/components/HeartRatingBadge";
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -109,11 +110,18 @@ export function DayFood({ date }: { date: string }) {
                 {g.items.map((e) => (
                   <div key={e.id} className="flex items-center gap-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-[#FAFAFA] truncate">{e.description}</p>
+                      <p className="text-sm text-[#FAFAFA] truncate flex items-center gap-1.5">
+                        {e.heart_rating && <HeartDot rating={e.heart_rating} title={e.heart_note ?? undefined} />}
+                        {e.description}
+                      </p>
                       <p className="text-xs text-[#52525B] tabular-nums">
                         {Math.round(e.kcal)} kcal · {Math.round(e.protein_g)}P / {Math.round(e.carbs_g)}C / {Math.round(e.fat_g)}F
-                        {e.sugar_g > 0 && ` · ${Math.round(e.sugar_g)}g sugar`}
+                        {e.fiber_g != null && e.fiber_g > 0 && ` · ${Math.round(e.fiber_g)}g fibre`}
+                        {e.saturated_fat_g != null && e.saturated_fat_g > 0 && ` · ${Math.round(e.saturated_fat_g)}g sat fat`}
                       </p>
+                      {e.heart_rating && e.heart_rating !== "ok" && e.heart_note && (
+                        <p className="text-[11px] text-[#71717A] mt-0.5">{e.heart_note}</p>
+                      )}
                     </div>
                     <button onClick={() => del(e.id)} className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
                       <Trash2 size={14} className="text-[#52525B]" />

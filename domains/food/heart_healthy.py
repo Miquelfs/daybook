@@ -77,6 +77,78 @@ def meal_of_the_day(date: str) -> dict:
     }
 
 
+# Keyword heuristics (English + Spanish) for a fallback rating when the analyzer
+# didn't classify (manual / preset entries).
+_BAD_WORDS = [
+    "fried", "frito", "rebozado", "empanad", "pastr", "bollería", "bolleria",
+    "croissant", "donut", "dónut", "butter", "mantequilla", "bacon", "beicon",
+    "sausage", "salchich", "chorizo", "embutido", "salami", "cream", "nata",
+    "pizza", "burger", "hamburgues", "chips", "patatas fritas", "fries", "nugget",
+    "ice cream", "helado", "processed", "procesad", "lardon", "manteca",
+]
+_LIMIT_WORDS = [
+    "cheese", "queso", "beef", "ternera", "pork", "cerdo", "lamb", "cordero",
+    "whole milk", "leche entera", "red meat", "carne roja", "mayonnaise", "mayonesa",
+]
+_GOOD_WORDS = [
+    "oat", "avena", "lentil", "lenteja", "chickpea", "garbanzo", "bean", "judía",
+    "judia", "alubia", "salmon", "salmón", "sardine", "sardina", "mackerel",
+    "caballa", "trout", "trucha", "avocado", "aguacate", "olive oil", "aceite de oliva",
+    "nut", "nuez", "nueces", "almond", "almendra", "walnut", "vegetable", "verdura",
+    "salad", "ensalada", "fruit", "fruta", "whole grain", "wholegrain", "integral",
+    "quinoa", "tofu", "hummus", "broccoli", "brócoli", "spinach", "espinaca", "berry",
+]
+
+
+def assess(name: str, kcal: float = 0, fat_g: Optional[float] = None,
+           saturated_fat_g: Optional[float] = None, fiber_g: Optional[float] = None,
+           sugar_g: Optional[float] = None) -> dict:
+    """Heuristic cholesterol rating for a logged food when the LLM didn't give one.
+
+    Returns {"rating": good|ok|limit|avoid, "note": str}. Uses saturated fat &
+    fibre when known, else keyword cues on the name."""
+    low = (name or "").lower()
+    score = 0  # + = heart-healthy, − = worse for LDL
+    reasons: list[str] = []
+
+    if any(w in low for w in _GOOD_WORDS):
+        score += 2
+    if any(w in low for w in _LIMIT_WORDS):
+        score -= 1
+    if any(w in low for w in _BAD_WORDS):
+        score -= 2
+        reasons.append("high in saturated fat / processed")
+
+    if saturated_fat_g is not None:
+        if saturated_fat_g >= 12:
+            score -= 2; reasons.append(f"{round(saturated_fat_g)}g saturated fat")
+        elif saturated_fat_g >= 7:
+            score -= 1; reasons.append(f"{round(saturated_fat_g)}g saturated fat")
+        elif saturated_fat_g <= 2:
+            score += 1
+    if fiber_g is not None:
+        if fiber_g >= 6:
+            score += 2; reasons.append(f"{round(fiber_g)}g fibre")
+        elif fiber_g >= 3:
+            score += 1
+    if sugar_g is not None and sugar_g >= 25:
+        score -= 1; reasons.append(f"{round(sugar_g)}g sugar")
+
+    if score >= 2:
+        rating, base = "good", "Heart-healthy — low saturated fat, good fibre/unsaturated fats."
+    elif score >= 0:
+        rating, base = "ok", "Fine in moderation for your cholesterol."
+    elif score >= -2:
+        rating, base = "limit", "Go easy — better swapped for a leaner, higher-fibre option."
+    else:
+        rating, base = "avoid", "Best avoided — swap for legumes, veg, fish or wholegrains."
+
+    note = base
+    if reasons:
+        note = f"{base} ({', '.join(reasons)})"
+    return {"rating": rating, "note": note}
+
+
 def guidance_directive() -> str:
     """One-liner injected into the AI meal-planner / coach prompts so their
     suggestions also respect the cholesterol goal."""

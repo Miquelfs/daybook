@@ -162,6 +162,16 @@ def migrate(conn):
         # Local wall-clock time the food was eaten (YYYY-MM-DDTHH:MM), user-editable.
         # NULL = fall back to logged_at. Powers meal-time habit tracking + the timeline.
         conn.execute("ALTER TABLE food_entries ADD COLUMN eaten_at TEXT")
+    # Heart-health (cholesterol) fields — saturated fat & fibre estimates plus a
+    # rating (good/ok/limit/avoid) + note, so each logged food is flagged.
+    for col, ddl in (
+        ("saturated_fat_g", "ALTER TABLE food_entries ADD COLUMN saturated_fat_g REAL"),
+        ("fiber_g",         "ALTER TABLE food_entries ADD COLUMN fiber_g REAL"),
+        ("heart_rating",    "ALTER TABLE food_entries ADD COLUMN heart_rating TEXT"),
+        ("heart_note",      "ALTER TABLE food_entries ADD COLUMN heart_note TEXT"),
+    ):
+        if col not in _food_cols:
+            conn.execute(ddl)
 
     # Seed crew presets only if the table is empty (never re-seed / duplicate).
     existing = conn.execute("SELECT COUNT(*) AS c FROM crew_meal_presets").fetchone()

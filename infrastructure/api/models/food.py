@@ -13,6 +13,10 @@ class FoodEntryIn(BaseModel):
     carbs_g: float = 0
     fat_g: float = 0
     sugar_g: float = 0
+    saturated_fat_g: Optional[float] = None
+    fiber_g: Optional[float] = None
+    heart_rating: Optional[str] = None    # good|ok|limit|avoid — computed if omitted
+    heart_note: Optional[str] = None
     ai_confidence: Optional[float] = None
     ai_raw_json: Optional[str] = None
 
@@ -46,6 +50,10 @@ class FoodEntryOut(BaseModel):
     carbs_g: float
     fat_g: float
     sugar_g: float
+    saturated_fat_g: Optional[float] = None
+    fiber_g: Optional[float] = None
+    heart_rating: Optional[str] = None
+    heart_note: Optional[str] = None
     ai_confidence: Optional[float]
     logged_at: str
     created_at: str
