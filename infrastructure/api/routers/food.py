@@ -421,6 +421,16 @@ def generate_coach(
     return {"date": date, "coach": coach}
 
 
+@router.get("/heart-suggestion")
+def heart_suggestion(date: str = Query(...)):
+    """Cholesterol-friendly 'meal of the day' + a heart-healthy plate & tip.
+
+    Curated and deterministic per date, so it always works (no AI needed) and is
+    stable through the day."""
+    from domains.food import heart_healthy
+    return heart_healthy.meal_of_the_day(date)
+
+
 @router.get("/library")
 def food_library(
     q: str = Query("", description="substring filter on food name"),

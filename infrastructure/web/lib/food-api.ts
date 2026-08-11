@@ -243,6 +243,23 @@ export interface Calibration {
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
+export interface HeartMeal {
+  name: string;
+  kcal: number;
+  fibre_g: number;
+  why: string;
+  meal_type: string;
+}
+
+export interface HeartSuggestion {
+  date: string;
+  focus: string;
+  hero: HeartMeal;
+  plate: HeartMeal[];
+  total_fibre_g: number;
+  tip: string;
+}
+
 export const foodApi = {
   listEntries: (params?: { date?: string; from?: string; to?: string }): Promise<FoodEntry[]> => {
     const qs = new URLSearchParams();
@@ -254,6 +271,9 @@ export const foodApi = {
   },
 
   summary: (date: string): Promise<FoodSummary> => get(`/food/summary?date=${date}`),
+
+  heartSuggestion: (date: string): Promise<HeartSuggestion> =>
+    get(`/food/heart-suggestion?date=${date}`),
 
   water: (date: string): Promise<WaterState> => get(`/food/water?date=${date}`),
   addWater: (date: string, add_ml: number): Promise<WaterState> =>

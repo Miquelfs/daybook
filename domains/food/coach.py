@@ -18,6 +18,7 @@ from datetime import date as _date, timedelta
 from typing import Optional
 
 from domains.ai import ollama_client
+from domains.food import heart_healthy
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ def _prompt(remaining_kcal: float, remaining_protein: float, profile: list[dict]
     return (
         "You are my nutrition coach. I'm cutting body fat while training for a Half "
         "Ironman — I want lean, high-protein, whole foods, realistic portions.\n"
+        f"{heart_healthy.guidance_directive()}\n"
         f"{meal_line}\n"
         f"Budget left for the rest of today: ~{round(remaining_kcal)} kcal and "
         f"~{round(remaining_protein)} g protein.{pref}\n\n"

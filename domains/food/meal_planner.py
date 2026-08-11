@@ -11,6 +11,7 @@ import logging
 from typing import Optional
 
 from domains.ai import ollama_client
+from domains.food import heart_healthy
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ def _build_prompt(remaining_kcal: float, remaining_protein_g: float,
     return (
         "I'm cutting body fat while training for a Half Ironman, so I want lean, "
         "high-protein, whole foods.\n"
+        f"{heart_healthy.guidance_directive()}\n"
         f"For the rest of today I have about {round(remaining_kcal)} kcal and "
         f"{round(remaining_protein_g)} g of protein left to eat.{pref}\n\n"
         "Suggest 2-3 simple meals/snacks that together roughly fit that budget and "
