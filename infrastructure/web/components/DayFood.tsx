@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2, ChevronDown, Utensils, ArrowUpRight } from "lucide-react";
+import { Trash2, ChevronDown, Utensils, ArrowUpRight, CalendarPlus, Check } from "lucide-react";
 import { foodApi, type FoodEntry, type FoodSummary } from "@/lib/food-api";
 import { groupByMeal } from "@/lib/food-meals";
 import { SectionLabel } from "@/components/MorningBrief";
@@ -18,6 +18,7 @@ const TODAY = new Date().toISOString().slice(0, 10);
 export function DayFood({ date }: { date: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
 
   const { data: entries = [] } = useQuery<FoodEntry[]>({
     queryKey: ["day-food", date],
@@ -42,6 +43,24 @@ export function DayFood({ date }: { date: string }) {
     await foodApi.delete(id);
     qc.invalidateQueries({ queryKey: ["day-food", date] });
     qc.invalidateQueries({ queryKey: ["food-summary", date] });
+  }
+
+  // Re-log a past meal into today with one tap (macros + heart rating carry over).
+  async function copyToToday(e: FoodEntry) {
+    await foodApi.create({
+      date: TODAY,
+      description: e.description,
+      meal_type: e.meal_type ?? undefined,
+      source: e.source,
+      kcal: e.kcal, protein_g: e.protein_g, carbs_g: e.carbs_g, fat_g: e.fat_g, sugar_g: e.sugar_g,
+      saturated_fat_g: e.saturated_fat_g, fiber_g: e.fiber_g,
+      heart_rating: e.heart_rating, heart_note: e.heart_note,
+    });
+    qc.invalidateQueries({ queryKey: ["day-food", TODAY] });
+    qc.invalidateQueries({ queryKey: ["food-summary", TODAY] });
+    qc.invalidateQueries({ queryKey: ["food-recent"] });
+    setCopiedId(e.id);
+    setTimeout(() => setCopiedId((c) => (c === e.id ? null : c)), 1500);
   }
 
   const eaten = summary?.consumed_kcal ?? 0;
@@ -123,6 +142,14 @@ export function DayFood({ date }: { date: string }) {
                         <p className="text-[11px] text-[#71717A] mt-0.5">{e.heart_note}</p>
                       )}
                     </div>
+                    {date !== TODAY && (
+                      <button onClick={() => copyToToday(e)} title="Add to today"
+                        className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
+                        {copiedId === e.id
+                          ? <Check size={14} className="text-[#34D399]" />
+                          : <CalendarPlus size={14} className="text-[#52525B]" />}
+                      </button>
+                    )}
                     <button onClick={() => del(e.id)} className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
                       <Trash2 size={14} className="text-[#52525B]" />
                     </button>
