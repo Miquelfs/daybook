@@ -36,8 +36,32 @@ def migrate(conn):
         CREATE INDEX IF NOT EXISTS idx_pax_flights_date    ON passenger_flights(date);
         CREATE INDEX IF NOT EXISTS idx_pax_flights_airline ON passenger_flights(airline);
     """)
+
+    # Richer columns (added incrementally) so the logbook can drive a
+    # MyFlightRadar-style dashboard: resolved airports for the map + distances,
+    # airline/aircraft codes, and cabin/seat/times metadata.
+    _extra = {
+        "dep_icao": "TEXT",
+        "arr_icao": "TEXT",
+        "airline_code": "TEXT",       # IATA airline code, e.g. FR
+        "aircraft_code": "TEXT",      # ICAO type code, e.g. B738
+        "registration": "TEXT",
+        "seat_type": "TEXT",          # Window / Middle / Aisle
+        "flight_class": "TEXT",       # Economy / Economy+ / Business / First
+        "dep_time": "TEXT",           # HH:MM local
+        "arr_time": "TEXT",
+        "distance_km": "REAL",        # great-circle dep→arr
+    }
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(passenger_flights)")}
+    for col, typ in _extra.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE passenger_flights ADD COLUMN {col} {typ}")
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pax_flights_dep ON passenger_flights(dep_icao)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pax_flights_arr ON passenger_flights(arr_icao)")
+
     conn.commit()
-    print("passenger_flights table created (or already existed).")
+    print("passenger_flights table created / upgraded.")
 
 
 if __name__ == "__main__":

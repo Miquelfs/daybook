@@ -288,9 +288,20 @@ def daily_summary(date: str = Query(...), conn: DB = None):
     burned_active = burn["active_calories"] if burn else None
     burned_total = burn["total_calories"] if burn else None
 
+    # Prefer a manually-set target; otherwise fall back to the auto suggestion
+    # (Garmin maintenance − default deficit, protein floor from bodyweight) so the
+    # progress bars and the 7-day chart always have a real plan to measure against
+    # instead of silently treating "consumed" as the ceiling.
     tgt = targets_mod.active_target(conn, date)
-    target_kcal = tgt["target_kcal"] if tgt else None
-    protein_target = tgt["protein_g"] if tgt else None
+    if tgt:
+        target_kcal = tgt["target_kcal"]
+        protein_target = tgt["protein_g"]
+        target_is_suggested = False
+    else:
+        sug = targets_mod.suggest_target(conn)
+        target_kcal = sug["target_kcal"]
+        protein_target = sug["protein_g"]
+        target_is_suggested = True
 
     consumed_kcal = round(agg["kcal"], 1)
     consumed_protein = round(agg["protein"], 1)
@@ -306,6 +317,7 @@ def daily_summary(date: str = Query(...), conn: DB = None):
         "biggest_meal_kcal": round(agg["biggest_meal"], 1),
         "target_kcal": target_kcal,
         "protein_target_g": protein_target,
+        "target_is_suggested": target_is_suggested,
         "remaining_kcal": (round(target_kcal - consumed_kcal, 1) if target_kcal is not None else None),
         "remaining_protein_g": (round(protein_target - consumed_protein, 1) if protein_target is not None else None),
         "burned_active_kcal": burned_active,

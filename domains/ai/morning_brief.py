@@ -179,13 +179,27 @@ def run(target_date: str, force: bool = False) -> None:
 
     conn = get_connection()
     try:
+        # Did last night's sleep (keyed under today's wake date) land yet? Garmin
+        # often uploads it well after the 6am cron, so a brief written early can
+        # be missing it. We regenerate once the data arrives, then lock.
+        sleep_now = conn.execute(
+            "SELECT duration_seconds FROM sleep WHERE date = ?", (target_date,)
+        ).fetchone()
+        has_last_night_sleep = bool(sleep_now and sleep_now["duration_seconds"])
+
         if not force:
             existing = conn.execute(
-                "SELECT morning_brief_text FROM days WHERE date = ?", (target_date,)
+                "SELECT morning_brief_text, morning_brief_has_sleep FROM days WHERE date = ?",
+                (target_date,),
             ).fetchone()
             if existing and existing["morning_brief_text"]:
-                log.info("Brief already exists for %s — skipping (use --force to regenerate)", target_date)
-                return
+                if existing["morning_brief_has_sleep"]:
+                    log.info("Brief already exists (with sleep) for %s — skipping (use --force to regenerate)", target_date)
+                    return
+                if not has_last_night_sleep:
+                    log.info("Brief exists for %s but sleep still missing — leaving it until sleep lands", target_date)
+                    return
+                log.info("Sleep landed since the brief for %s was written — regenerating with last night's sleep", target_date)
         data = _fetch_data(conn, target_date, yesterday)
         try:
             from domains.health.recovery import recovery_flag
@@ -223,8 +237,9 @@ def run(target_date: str, force: bool = False) -> None:
             "INSERT OR IGNORE INTO days (date) VALUES (?)", (target_date,)
         )
         conn.execute(
-            "UPDATE days SET morning_brief_text = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE date = ?",
-            (brief, target_date),
+            "UPDATE days SET morning_brief_text = ?, morning_brief_has_sleep = ?, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE date = ?",
+            (brief, 1 if has_last_night_sleep else 0, target_date),
         )
         conn.commit()
         log.info("Morning brief written to days.morning_brief_text for %s", target_date)

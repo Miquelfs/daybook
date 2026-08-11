@@ -121,6 +121,7 @@ export interface FoodSummary {
   biggest_meal_kcal: number;
   target_kcal: number | null;
   protein_target_g: number | null;
+  target_is_suggested?: boolean;
   remaining_kcal: number | null;
   remaining_protein_g: number | null;
   burned_active_kcal: number | null;

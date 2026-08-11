@@ -151,13 +151,16 @@ export function FoodDashboard() {
   const waterWeek = week.map((s) => ({
     label: format(parseISO(s.date), "EEEEE"),
     ml: s.water_ml,
-    pct: s.water_goal_ml ? Math.min(100, Math.round((s.water_ml / s.water_goal_ml) * 100)) : 0,
     hit: s.water_goal_ml > 0 && s.water_ml >= s.water_goal_ml,
   }));
   const waterAvg = waterWeek.length
     ? Math.round(waterWeek.reduce((a, d) => a + d.ml, 0) / waterWeek.length)
     : 0;
   const waterDaysHit = waterWeek.filter((d) => d.hit).length;
+  // Scale bars against the goal (with headroom) so the goal line sits below the
+  // top and days that beat it poke above the dashed target instead of clipping.
+  const waterScale = Math.max(waterGoal, ...waterWeek.map((d) => d.ml), 1) * 1.12;
+  const waterGoalLinePct = Math.min(100, (waterGoal / waterScale) * 100);
 
   async function del(id: number) {
     await foodApi.delete(id);
@@ -181,6 +184,7 @@ export function FoodDashboard() {
   const consumed = summary?.consumed_kcal ?? 0;
   const consumedProtein = summary?.consumed_protein_g ?? 0;
   const overTarget = targetKcal != null && consumed > targetKcal;
+  const targetIsSuggested = summary?.target_is_suggested ?? false;
 
   return (
     <div className="space-y-8">
@@ -233,22 +237,33 @@ export function FoodDashboard() {
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-4">
         <div className="space-y-1.5">
           <div className="flex items-baseline justify-between">
-            <span className="text-xs text-[#52525B] uppercase tracking-widest">Calories</span>
+            <span className="text-xs text-[#52525B] uppercase tracking-widest">
+              Calories
+              {targetIsSuggested && targetKcal != null && (
+                <span className="ml-1.5 normal-case tracking-normal text-[10px] text-[#3F3F46]">· suggested plan</span>
+              )}
+            </span>
             <span className={`text-sm tabular-nums ${overTarget ? "text-[#F87171]" : "text-[#FAFAFA]"}`}>
-              {Math.round(consumed)}{targetKcal != null && <span className="text-[#52525B]"> / {Math.round(targetKcal)}</span>}
+              {Math.round(consumed)}
+              {targetKcal != null
+                ? <span className="text-[#52525B]"> / {Math.round(targetKcal)}</span>
+                : <span className="text-[#3F3F46]"> · no plan set</span>}
             </span>
           </div>
-          <Bar2 value={consumed} max={targetKcal ?? consumed} color={overTarget ? RED : AMBER} />
+          <Bar2 value={consumed} max={targetKcal ?? 0} color={overTarget ? RED : AMBER} />
         </div>
 
         <div className="space-y-1.5">
           <div className="flex items-baseline justify-between">
             <span className="text-xs text-[#52525B] uppercase tracking-widest">Protein</span>
             <span className="text-sm tabular-nums text-[#FAFAFA]">
-              {Math.round(consumedProtein)}{proteinTarget != null && <span className="text-[#52525B]"> / {Math.round(proteinTarget)} g</span>}
+              {Math.round(consumedProtein)}
+              {proteinTarget != null
+                ? <span className="text-[#52525B]"> / {Math.round(proteinTarget)} g</span>
+                : <span className="text-[#3F3F46]"> · no plan set</span>}
             </span>
           </div>
-          <Bar2 value={consumedProtein} max={proteinTarget ?? consumedProtein} color={GREEN} />
+          <Bar2 value={consumedProtein} max={proteinTarget ?? 0} color={GREEN} />
         </div>
 
         <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs tabular-nums pt-1 border-t border-[#18181B]">
@@ -288,16 +303,26 @@ export function FoodDashboard() {
                 <span className={`text-[10px] tabular-nums ${d.ml > 0 ? "text-[#A1A1AA]" : "text-[#3F3F46]"}`}>
                   {d.ml > 0 ? (d.ml / 1000).toFixed(1) : "—"}
                 </span>
-                <div className="w-full flex-1 flex items-end bg-[#18181B] rounded-md overflow-hidden">
+                {/* relative so the dashed goal line can float over the bar track */}
+                <div className="relative w-full flex-1 flex items-end bg-[#18181B] rounded-md overflow-hidden">
+                  <div
+                    className="absolute inset-x-0 border-t border-dashed border-[#3F3F46]/70 z-10"
+                    style={{ bottom: `${waterGoalLinePct}%` }}
+                    title={`goal ${(waterGoal / 1000).toFixed(1)} L`}
+                  />
                   <div
                     className="w-full rounded-md transition-all"
-                    style={{ height: `${Math.max(d.ml > 0 ? 6 : 0, d.pct)}%`, background: d.hit ? "#22D3EE" : "#0E7490" }}
+                    style={{ height: `${Math.max(d.ml > 0 ? 6 : 0, (d.ml / waterScale) * 100)}%`, background: d.hit ? "#22D3EE" : "#0E7490" }}
                     title={`${(d.ml / 1000).toFixed(2)} L`}
                   />
                 </div>
                 <span className="text-[10px] text-[#52525B] capitalize">{d.label}</span>
               </div>
             ))}
+          </div>
+          <div className="flex items-center gap-1.5 mt-2">
+            <span className="w-4 border-t border-dashed border-[#3F3F46]/70" />
+            <span className="text-[10px] text-[#52525B]">{(waterGoal / 1000).toFixed(1)}L goal</span>
           </div>
           <p className="text-[11px] text-[#71717A] mt-3 pt-2.5 border-t border-[#18181B]">
             {waterAvg >= waterGoal

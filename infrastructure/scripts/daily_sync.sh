@@ -160,16 +160,18 @@ python -m domains.money.plan_executor \
   >> "$LOG_FILE" 2>&1 || log "WARN: Plan executor failed (non-fatal)"
 
 # AI: morning brief (requires Ollama at OLLAMA_HOST; skips gracefully otherwise).
-# The cron runs hourly — only attempt in the 05–08h window so the brief lands
-# once around 6am; later hours retry only if the earlier run failed (the brief
-# itself skips when today's already exists).
+# The cron runs hourly — attempt across the 05–11h window so the brief lands
+# once around 6am and can be regenerated once Garmin uploads last night's sleep
+# (often after 6am). The brief itself is self-gating: it skips cheaply when
+# today's brief already includes sleep, and only re-calls the LLM when sleep has
+# just landed for a brief that was written without it.
 HOUR="$(date +%H)"
-if [[ "$HOUR" -ge 5 && "$HOUR" -le 8 ]]; then
+if [[ "$HOUR" -ge 5 && "$HOUR" -le 11 ]]; then
   log "Generating AI morning brief..."
   python -m domains.ai.morning_brief --date "$DATE" \
     >> "$LOG_FILE" 2>&1 || log "WARN: Morning brief generation failed (non-fatal)"
 else
-  log "Skipping morning brief (outside 05-08h window)"
+  log "Skipping morning brief (outside 05-11h window)"
 fi
 
 log "=== daily_sync done ==="

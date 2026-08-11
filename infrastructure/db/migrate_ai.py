@@ -25,6 +25,19 @@ def migrate(db_path: Path = DB_PATH) -> None:
             else:
                 raise
 
+        # Track whether the morning brief was generated with last night's sleep
+        # present, so a brief written before Garmin uploaded sleep can be
+        # regenerated once the data lands (instead of staying stale all day).
+        try:
+            con.execute("ALTER TABLE days ADD COLUMN morning_brief_has_sleep INTEGER")
+            con.commit()
+            print("✓ Added morning_brief_has_sleep column to days")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" in str(e):
+                print("Column morning_brief_has_sleep already exists — skipping")
+            else:
+                raise
+
         # Create ai_narratives table for on-demand health narratives
         con.execute("""
             CREATE TABLE IF NOT EXISTS ai_narratives (
