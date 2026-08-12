@@ -475,15 +475,16 @@ def food_wellness_impact(
     return wellness_impact.compute(conn, date, window)
 
 
-# ── Weekly meal plan + consolidated shopping list ─────────────────────────────
+# ── Short-horizon meal plan + consolidated shopping list ──────────────────────
+# `week_start` is kept as the query/param name for backward compatibility, but it
+# now carries the plan's START date (a few days, not a calendar week).
 
 @router.get("/weekly-plan")
 def get_weekly_plan(week_start: Optional[str] = Query(None), date: Optional[str] = Query(None), conn: DB = None):
-    ws = week_start or (weekly_planner.week_start_for(date) if date else _date.today().isoformat())
-    ws = weekly_planner.week_start_for(ws)
-    plan = weekly_planner.latest_for_week(conn, ws)
+    start = weekly_planner.plan_start_for(week_start or date)
+    plan = weekly_planner.latest_for_start(conn, start)
     if plan is None:
-        raise HTTPException(status_code=404, detail="No weekly plan yet")
+        raise HTTPException(status_code=404, detail="No plan yet")
     return plan
 
 
@@ -494,16 +495,15 @@ def generate_weekly_plan(
     preferences: Optional[str] = Query(None),
     conn: DB = None,
 ):
-    ws = week_start or (weekly_planner.week_start_for(date) if date else _date.today().isoformat())
-    ws = weekly_planner.week_start_for(ws)
-    tgt = targets_mod.active_target(conn, ws) or targets_mod.suggest_target(conn)
+    start = weekly_planner.plan_start_for(week_start or date)
+    tgt = targets_mod.active_target(conn, start) or targets_mod.suggest_target(conn)
     plan = weekly_planner.generate(
-        conn, ws, tgt.get("target_kcal") if tgt else None,
+        conn, start, tgt.get("target_kcal") if tgt else None,
         tgt.get("protein_g") if tgt else None, preferences,
     )
     if plan is None:
-        raise HTTPException(status_code=503, detail="AI weekly planning unavailable")
-    return {"week_start": ws, "plan": plan}
+        raise HTTPException(status_code=503, detail="AI meal planning unavailable")
+    return {"start_date": start, "plan": plan}
 
 
 @router.get("/library")

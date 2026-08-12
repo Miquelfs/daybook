@@ -292,7 +292,8 @@ export interface WeeklyPlan {
 
 export interface WeeklyPlanResponse {
   id?: number;
-  week_start: string;
+  start_date?: string;
+  week_start?: string;
   plan: WeeklyPlan;
   model?: string;
   generated_at?: string;

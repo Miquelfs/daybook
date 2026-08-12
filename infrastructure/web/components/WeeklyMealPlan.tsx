@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { format, parseISO, startOfWeek, addDays } from "date-fns";
+import { format, parseISO, addDays } from "date-fns";
 import { CalendarRange, ShoppingCart, Sparkles, Check } from "lucide-react";
 import { foodApi, type WeeklyPlanResponse, type PlannedDay, type PlannedMeal } from "@/lib/food-api";
+
+// Plan covers the next few days starting from the selected date.
+const PLAN_DAYS = 3;
 
 const MEALS: { key: keyof PlannedDay; emoji: string }[] = [
   { key: "breakfast", emoji: "🥣" },
@@ -12,10 +15,6 @@ const MEALS: { key: keyof PlannedDay; emoji: string }[] = [
   { key: "dinner", emoji: "🍽" },
   { key: "snack", emoji: "🍎" },
 ];
-
-function weekStartOf(date: string): string {
-  return format(startOfWeek(parseISO(date), { weekStartsOn: 1 }), "yyyy-MM-dd");
-}
 
 function MealLine({ meal, emoji }: { meal?: PlannedMeal; emoji: string }) {
   if (!meal) return null;
@@ -48,9 +47,9 @@ function DayBlock({ d }: { d: PlannedDay }) {
   );
 }
 
-// Consolidated shopping list with tick-off, persisted per week in localStorage.
-function ShoppingList({ weekStart, plan }: { weekStart: string; plan: WeeklyPlanResponse["plan"] }) {
-  const storageKey = `daybook.shopping.${weekStart}`;
+// Consolidated shopping list with tick-off, persisted per plan in localStorage.
+function ShoppingList({ startDate, plan }: { startDate: string; plan: WeeklyPlanResponse["plan"] }) {
+  const storageKey = `daybook.shopping.${startDate}`;
   const [checked, setChecked] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -118,15 +117,15 @@ function ShoppingList({ weekStart, plan }: { weekStart: string; plan: WeeklyPlan
 // a whole week you can plan and shop for.
 export function WeeklyMealPlan({ date }: { date: string }) {
   const qc = useQueryClient();
-  const weekStart = weekStartOf(date);
+  const startDate = date;
   const [busy, setBusy] = useState(false);
   const [prefs, setPrefs] = useState("");
   const [showPrefs, setShowPrefs] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<WeeklyPlanResponse | null>({
-    queryKey: ["food-weekly-plan", weekStart],
-    queryFn: async () => { try { return await foodApi.weeklyPlan(weekStart); } catch { return null; } },
+    queryKey: ["food-weekly-plan", startDate],
+    queryFn: async () => { try { return await foodApi.weeklyPlan(startDate); } catch { return null; } },
     staleTime: 5 * 60 * 1000,
   });
 
@@ -134,8 +133,8 @@ export function WeeklyMealPlan({ date }: { date: string }) {
     setBusy(true);
     setErr(null);
     try {
-      await foodApi.generateWeeklyPlan(weekStart, prefs || undefined);
-      qc.invalidateQueries({ queryKey: ["food-weekly-plan", weekStart] });
+      await foodApi.generateWeeklyPlan(startDate, prefs || undefined);
+      qc.invalidateQueries({ queryKey: ["food-weekly-plan", startDate] });
     } catch {
       setErr("Couldn't build the plan just now — the AI planner may be busy. Try again in a moment.");
     } finally {
@@ -143,22 +142,22 @@ export function WeeklyMealPlan({ date }: { date: string }) {
     }
   }
 
-  const weekEnd = format(addDays(parseISO(weekStart), 6), "d MMM");
-  const weekLabel = `${format(parseISO(weekStart), "d MMM")} – ${weekEnd}`;
+  const endLabel = format(addDays(parseISO(startDate), PLAN_DAYS - 1), "d MMM");
+  const rangeLabel = `${format(parseISO(startDate), "d MMM")} – ${endLabel}`;
   const plan = data?.plan ?? null;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-2 gap-2">
         <p className="text-xs text-[#52525B] uppercase tracking-widest shrink-0 flex items-center gap-1.5">
-          <CalendarRange size={13} /> Week plan · {weekLabel}
+          <CalendarRange size={13} /> Next {PLAN_DAYS} days · {rangeLabel}
         </p>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowPrefs((v) => !v)}
             className="text-[11px] text-[#52525B] hover:text-[#A1A1AA]">preferences</button>
           <button onClick={generate} disabled={busy}
             className="flex items-center gap-1.5 text-xs text-[#34D399] hover:text-[#6EE7B7] disabled:opacity-40">
-            <Sparkles size={13} /> {busy ? "Planning…" : plan ? "Regenerate" : "Plan my week"}
+            <Sparkles size={13} /> {busy ? "Planning…" : plan ? "Regenerate" : `Plan next ${PLAN_DAYS} days`}
           </button>
         </div>
       </div>
@@ -175,22 +174,22 @@ export function WeeklyMealPlan({ date }: { date: string }) {
 
       {!plan && !busy && (
         <p className="text-xs text-[#3F3F46]">
-          {isLoading ? "Loading…" : "Get a whole week of heart-healthy meals that hit your target, plus one shopping list for the supermarket."}
+          {isLoading ? "Loading…" : `Get the next ${PLAN_DAYS} days of heart-healthy meals that hit your target, plus one small shopping list for the supermarket.`}
         </p>
       )}
 
       {busy && !plan && (
-        <p className="text-xs text-[#71717A]">Building your week — this takes a few seconds…</p>
+        <p className="text-xs text-[#71717A]">Building your plan — this takes a few seconds…</p>
       )}
 
       {plan && (
         <div className="space-y-4">
           {data?.plan.note && <p className="text-xs text-[#71717A] italic">{data.plan.note}</p>}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="space-y-2">
             {(plan.days ?? []).map((d, i) => <DayBlock key={d.day ?? i} d={d} />)}
           </div>
           <div className="pt-3 border-t border-[#18181B]">
-            <ShoppingList weekStart={weekStart} plan={plan} />
+            <ShoppingList startDate={startDate} plan={plan} />
           </div>
           {data?.generated_at && (
             <p className="text-[10px] text-[#3F3F46]">
