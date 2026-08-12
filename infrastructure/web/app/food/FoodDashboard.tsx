@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid,
+  ComposedChart, Line, Legend,
 } from "recharts";
 import { format, parseISO, subDays, addDays } from "date-fns";
 import { ChevronLeft, ChevronRight, Trash2, Sparkles, AlertTriangle, UtensilsCrossed } from "lucide-react";
@@ -26,6 +27,16 @@ const AMBER = "#F59E0B";
 const GREEN = "#34D399";
 const RED = "#F87171";
 const TEAL = "#22D3EE";
+
+// Weight change is judged against the cut goal: a loss (negative) is on-track
+// (green), a gain (positive) is off-track (red), flat is neutral.
+function kgColor(kg: number | null | undefined): string {
+  if (kg == null || Math.abs(kg) < 0.1) return "#A1A1AA";
+  return kg < 0 ? GREEN : RED;
+}
+function fmtKg(kg: number): string {
+  return `${kg > 0 ? "+" : ""}${kg} kg`;
+}
 
 function Bar2({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
@@ -90,6 +101,7 @@ export function FoodDashboard() {
   );
   const [coaching, setCoaching] = useState(false);
   const [coachMeal, setCoachMeal] = useState("");
+  const [chartMode, setChartMode] = useState<"target" | "balance">("target");
 
   const { data: coachResp } = useQuery<{ coach: FoodCoach } | null>({
     queryKey: ["food-coach", date],
@@ -148,8 +160,11 @@ export function FoodDashboard() {
   const chartData = week.map((s) => ({
     label: format(parseISO(s.date), "EEE d"),
     kcal: Math.round(s.consumed_kcal),
+    burned: s.burned_total_kcal != null ? Math.round(s.burned_total_kcal) : null,
     over: s.target_kcal != null && s.consumed_kcal > s.target_kcal,
+    surplus: s.burned_total_kcal != null && s.consumed_kcal > s.burned_total_kcal,
   }));
+  const hasBurn = chartData.some((d) => d.burned != null);
 
   const waterGoal = week[week.length - 1]?.water_goal_ml ?? 3000;
   const waterWeek = week.map((s) => ({
@@ -336,38 +351,83 @@ export function FoodDashboard() {
         </div>
       )}
 
-      {/* 7-day energy balance */}
+      {/* 7-day chart — switch between eaten-vs-target and eaten-vs-burned balance */}
       <div>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs text-[#52525B] uppercase tracking-widest">Last 7 days · eaten vs target</p>
-          {targetKcal != null && (
-            <p className="text-[11px] text-[#71717A] tabular-nums">
-              target <span className="font-semibold text-[#E4E4E7]">{Math.round(targetKcal)}</span> kcal
-            </p>
-          )}
+        <div className="flex items-center justify-between mb-2 gap-2">
+          <p className="text-xs text-[#52525B] uppercase tracking-widest">
+            Last 7 days · {chartMode === "target" ? "eaten vs target" : "eaten vs burned"}
+          </p>
+          <div className="flex items-center gap-3">
+            {chartMode === "target" && targetKcal != null && (
+              <p className="text-[11px] text-[#71717A] tabular-nums hidden sm:block">
+                target <span className="font-semibold text-[#E4E4E7]">{Math.round(targetKcal)}</span> kcal
+              </p>
+            )}
+            {/* Segmented toggle */}
+            <div className="flex rounded-lg bg-[#18181B] border border-[#27272A] p-0.5 text-[11px]">
+              <button onClick={() => setChartMode("target")}
+                className={`px-2.5 py-1 rounded-md transition-colors ${chartMode === "target" ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#71717A] hover:text-[#A1A1AA]"}`}>
+                vs target
+              </button>
+              <button onClick={() => setChartMode("balance")} disabled={!hasBurn}
+                title={hasBurn ? "" : "No Garmin burn data for these days"}
+                className={`px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 ${chartMode === "balance" ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#71717A] hover:text-[#A1A1AA]"}`}>
+                vs burn
+              </button>
+            </div>
+          </div>
         </div>
         <div className="h-40">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#18181B" vertical={false} />
-              <XAxis dataKey="label" tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip
-                contentStyle={{ background: "#111113", border: "1px solid #27272A", borderRadius: 8, fontSize: 12 }}
-                labelStyle={{ color: "#A1A1AA" }}
-              />
-              {targetKcal != null && (
-                <ReferenceLine y={targetKcal} stroke="#71717A" strokeDasharray="4 4"
-                  label={{ value: `${Math.round(targetKcal)} kcal`, fill: "#A1A1AA", fontSize: 10, position: "insideTopRight" }} />
-              )}
-              <Bar dataKey="kcal" radius={[4, 4, 0, 0]}>
-                {chartData.map((d, i) => (
-                  <Cell key={i} fill={d.over ? RED : GREEN} />
-                ))}
-              </Bar>
-            </BarChart>
+            {chartMode === "target" ? (
+              <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#18181B" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background: "#111113", border: "1px solid #27272A", borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: "#A1A1AA" }}
+                />
+                {targetKcal != null && (
+                  <ReferenceLine y={targetKcal} stroke="#71717A" strokeDasharray="4 4"
+                    label={{ value: `${Math.round(targetKcal)} kcal`, fill: "#A1A1AA", fontSize: 10, position: "insideTopRight" }} />
+                )}
+                <Bar dataKey="kcal" radius={[4, 4, 0, 0]}>
+                  {chartData.map((d, i) => (
+                    <Cell key={i} fill={d.over ? RED : GREEN} />
+                  ))}
+                </Bar>
+              </BarChart>
+            ) : (
+              <ComposedChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#18181B" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background: "#111113", border: "1px solid #27272A", borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: "#A1A1AA" }}
+                />
+                <Legend wrapperStyle={{ fontSize: 10, color: "#71717A" }} iconType="plainline" />
+                {/* Eaten bar coloured by whether the day was a deficit (≤ burn) or surplus */}
+                <Bar dataKey="kcal" name="eaten" radius={[4, 4, 0, 0]}>
+                  {chartData.map((d, i) => (
+                    <Cell key={i} fill={d.surplus ? RED : GREEN} />
+                  ))}
+                </Bar>
+                {/* Garmin burn as the reference line to beat */}
+                <Line type="monotone" dataKey="burned" name="burned" stroke={TEAL}
+                  strokeWidth={2} dot={{ r: 2.5, fill: TEAL }} connectNulls />
+              </ComposedChart>
+            )}
           </ResponsiveContainer>
         </div>
+        {chartMode === "balance" && (
+          <p className="text-[11px] text-[#52525B] mt-1.5">
+            <span className="text-[#34D399]">Green</span> = ate under your Garmin burn (deficit) ·{" "}
+            <span className="text-[#F87171]">red</span> = over (surplus). The{" "}
+            <span className="text-[#22D3EE]">teal line</span> is calories burned.
+          </p>
+        )}
       </div>
 
       {/* Food × how you feel — which eating patterns move energy/mood/stress */}
@@ -380,9 +440,21 @@ export function FoodDashboard() {
           {calib.calibrated && calib.actual_kg != null ? (
             <>
               <div className="flex items-center justify-between text-sm tabular-nums">
-                <span className="text-[#71717A]">Predicted <span className="text-[#A1A1AA]">{calib.predicted_kg} kg</span></span>
-                <span className="text-[#71717A]">Actual <span className="text-[#FAFAFA] font-semibold">{calib.actual_kg} kg</span></span>
+                <span className="text-[#71717A]">Predicted{" "}
+                  <span style={{ color: kgColor(calib.predicted_kg) }}>{fmtKg(calib.predicted_kg!)}</span>
+                </span>
+                <span className="text-[#71717A]">Actual{" "}
+                  <span className="font-semibold" style={{ color: kgColor(calib.actual_kg) }}>{fmtKg(calib.actual_kg!)}</span>
+                </span>
               </div>
+              {/* On/off-track verdict: did the scale move the way the model predicted? */}
+              {calib.actual_kg != null && calib.predicted_kg != null && (
+                <p className="text-[11px] mt-1.5" style={{ color: kgColor(calib.actual_kg) }}>
+                  {calib.actual_kg <= calib.predicted_kg + 0.3
+                    ? "● On track — the scale matches or beats the plan."
+                    : "● Off track — you're losing slower than the plan (or gaining)."}
+                </p>
+              )}
               {calib.weigh_in_span_days != null && (
                 <p className="text-[10px] text-[#3F3F46] mt-1">over {calib.weigh_in_span_days} days between weigh-ins</p>
               )}
@@ -400,7 +472,7 @@ export function FoodDashboard() {
             <div className="flex items-start gap-2">
               <AlertTriangle size={14} className="text-[#F59E0B] mt-0.5 shrink-0" />
               <p className="text-xs text-[#71717A]">
-                Predicted <span className="text-[#A1A1AA]">{calib.predicted_kg} kg</span> from your intake vs Garmin burn — but
+                Predicted <span style={{ color: kgColor(calib.predicted_kg) }}>{fmtKg(calib.predicted_kg!)}</span> from your intake vs Garmin burn — but
                 I can&apos;t confirm it yet. Weigh in a couple of times a week (5+ days apart) and I&apos;ll calibrate your true
                 maintenance against the scale.
               </p>

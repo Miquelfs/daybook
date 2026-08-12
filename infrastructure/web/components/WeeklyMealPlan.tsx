@@ -122,6 +122,7 @@ export function WeeklyMealPlan({ date }: { date: string }) {
   const [busy, setBusy] = useState(false);
   const [prefs, setPrefs] = useState("");
   const [showPrefs, setShowPrefs] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<WeeklyPlanResponse | null>({
     queryKey: ["food-weekly-plan", weekStart],
@@ -131,10 +132,13 @@ export function WeeklyMealPlan({ date }: { date: string }) {
 
   async function generate() {
     setBusy(true);
+    setErr(null);
     try {
       await foodApi.generateWeeklyPlan(weekStart, prefs || undefined);
       qc.invalidateQueries({ queryKey: ["food-weekly-plan", weekStart] });
-    } catch { /* keep any prior plan */ } finally {
+    } catch {
+      setErr("Couldn't build the plan just now — the AI planner may be busy. Try again in a moment.");
+    } finally {
       setBusy(false);
     }
   }
@@ -165,10 +169,18 @@ export function WeeklyMealPlan({ date }: { date: string }) {
           className="w-full mb-3 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-xs text-[#FAFAFA] focus:outline-none focus:border-[#3F3F46]" />
       )}
 
+      {err && (
+        <p className="text-xs text-[#F87171] mb-2">{err}</p>
+      )}
+
       {!plan && !busy && (
         <p className="text-xs text-[#3F3F46]">
           {isLoading ? "Loading…" : "Get a whole week of heart-healthy meals that hit your target, plus one shopping list for the supermarket."}
         </p>
+      )}
+
+      {busy && !plan && (
+        <p className="text-xs text-[#71717A]">Building your week — this takes a few seconds…</p>
       )}
 
       {plan && (

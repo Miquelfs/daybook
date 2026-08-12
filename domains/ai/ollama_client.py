@@ -82,7 +82,7 @@ def _post(path: str, payload: dict) -> Optional[dict]:
         return None
 
 
-def _groq_chat(prompt: str, model: str, as_json: bool) -> Optional[str]:
+def _groq_chat(prompt: str, model: str, as_json: bool, max_tokens: int = 2048) -> Optional[str]:
     """Call Groq's OpenAI-compatible chat-completions API; return the text or None."""
     if not GROQ_API_KEY:
         log.warning("LLM_PROVIDER=groq but GROQ_API_KEY is not set")
@@ -92,6 +92,7 @@ def _groq_chat(prompt: str, model: str, as_json: bool) -> Optional[str]:
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "temperature": 0.4,
+        "max_tokens": max_tokens,
     }
     if as_json:
         payload["response_format"] = {"type": "json_object"}
@@ -132,7 +133,7 @@ def _groq_available() -> bool:
         return False
 
 
-def _claude_chat(prompt: str, model: Optional[str], as_json: bool) -> Optional[str]:
+def _claude_chat(prompt: str, model: Optional[str], as_json: bool, max_tokens: int = 2048) -> Optional[str]:
     """Call the Claude Messages API via the official SDK; return the text or None."""
     if not ANTHROPIC_API_KEY:
         log.warning("LLM_PROVIDER=claude but ANTHROPIC_API_KEY is not set")
@@ -155,7 +156,7 @@ def _claude_chat(prompt: str, model: Optional[str], as_json: bool) -> Optional[s
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         resp = client.messages.create(
             model=m,
-            max_tokens=2048,
+            max_tokens=max_tokens,
             messages=[{"role": "user", "content": p}],
         )
         parts = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
@@ -189,23 +190,27 @@ def is_available() -> bool:
         return False
 
 
-def generate(prompt: str, model: Optional[str] = None, as_json: bool = False) -> Optional[str]:
+def generate(prompt: str, model: Optional[str] = None, as_json: bool = False,
+             max_tokens: int = 2048) -> Optional[str]:
     """
     Send a prompt to the active LLM backend, return the response text.
     Returns None if the backend is unreachable or the call fails.
 
     Model selection mirrors the Ollama fast/default split: short narration
     (as_json=False) uses the fast model, structured/JSON tasks use the default.
+    `max_tokens` caps the response length — bump it for large structured output
+    (e.g. a whole week of meals) so the JSON isn't truncated mid-object.
     """
     if LLM_PROVIDER == "claude":
-        return _claude_chat(prompt, model, as_json)
+        return _claude_chat(prompt, model, as_json, max_tokens)
 
     if LLM_PROVIDER == "groq":
         gmodel = GROQ_MODEL if as_json else GROQ_MODEL_FAST
-        return _groq_chat(prompt, gmodel, as_json)
+        return _groq_chat(prompt, gmodel, as_json, max_tokens)
 
     m = model or MODEL_FAST
-    payload: dict = {"model": m, "prompt": prompt, "stream": False}
+    payload: dict = {"model": m, "prompt": prompt, "stream": False,
+                     "options": {"num_predict": max_tokens}}
     if as_json:
         payload["format"] = "json"
 
@@ -216,7 +221,7 @@ def generate(prompt: str, model: Optional[str] = None, as_json: bool = False) ->
     return result.get("response")
 
 
-def generate_json(prompt: str, model: Optional[str] = None) -> Optional[dict]:
+def generate_json(prompt: str, model: Optional[str] = None, max_tokens: int = 2048) -> Optional[dict]:
     """
     Like generate() but parses the response as JSON.
     Returns None if the backend is unreachable or the response is not valid JSON.
@@ -225,9 +230,9 @@ def generate_json(prompt: str, model: Optional[str] = None) -> Optional[dict]:
     # own JSON model inside generate() when model is None (passing the Ollama
     # default "mistral" to Claude/Groq would be an invalid model id).
     if LLM_PROVIDER in ("claude", "groq"):
-        text = generate(prompt, model=model, as_json=True)
+        text = generate(prompt, model=model, as_json=True, max_tokens=max_tokens)
     else:
-        text = generate(prompt, model=model or MODEL_DEFAULT, as_json=True)
+        text = generate(prompt, model=model or MODEL_DEFAULT, as_json=True, max_tokens=max_tokens)
     if text is None:
         return None
     text = _strip_json_fences(text)

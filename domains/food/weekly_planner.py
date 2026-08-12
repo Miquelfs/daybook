@@ -98,9 +98,12 @@ def generate(conn, week_start: str, target_kcal: Optional[float],
         return None
 
     recent = _recent_liked(conn, week_start)
+    # A whole week (28 meals) + a full shopping list is a big JSON payload — give it
+    # plenty of output budget so it isn't truncated mid-object into invalid JSON.
     data = ollama_client.generate_json(
         _build_prompt(target_kcal, protein_g, recent, preferences),
         model=ollama_client.CLAUDE_MODEL_SMART,
+        max_tokens=6000,
     )
     if not data or "days" not in data:
         return None
