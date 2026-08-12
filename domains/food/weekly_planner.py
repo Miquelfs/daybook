@@ -147,18 +147,34 @@ def generate(conn, start_date: str, target_kcal: Optional[float],
     return data
 
 
-def latest_for_start(conn, start_date: str) -> Optional[dict]:
-    row = conn.execute(
-        "SELECT * FROM food_weekly_plans WHERE week_start=? "
-        "ORDER BY generated_at DESC, id DESC LIMIT 1",
-        (start_date,),
-    ).fetchone()
-    if not row:
-        return None
+def _load(row) -> dict:
+    """Row → response dict, stamping each meal-day with its concrete calendar date
+    (start + index) so the client can match 'today'/'tomorrow' regardless of when
+    the plan was generated."""
+    start = row["week_start"]
+    plan = json.loads(row["plan_json"])
+    for i, d in enumerate(plan.get("days") or []):
+        d["date"] = (_date.fromisoformat(start) + timedelta(days=i)).isoformat()
     return {
         "id": row["id"],
-        "start_date": row["week_start"],
-        "plan": json.loads(row["plan_json"]),
+        "start_date": start,
+        "plan": plan,
         "model": row["model"],
         "generated_at": row["generated_at"],
     }
+
+
+def latest_covering(conn, on_date: str) -> Optional[dict]:
+    """The most recent plan whose window [start, start+PLAN_DAYS-1] includes
+    on_date — so a plan made a day or two ago keeps showing until regenerated."""
+    rows = conn.execute(
+        "SELECT * FROM food_weekly_plans WHERE week_start <= ? "
+        "ORDER BY week_start DESC, generated_at DESC, id DESC LIMIT 30",
+        (on_date,),
+    ).fetchall()
+    for row in rows:
+        start = row["week_start"]
+        end = (_date.fromisoformat(start) + timedelta(days=PLAN_DAYS - 1)).isoformat()
+        if start <= on_date <= end:
+            return _load(row)
+    return None

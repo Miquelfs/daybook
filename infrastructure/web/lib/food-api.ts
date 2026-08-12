@@ -271,6 +271,7 @@ export interface PlannedMeal {
 
 export interface PlannedDay {
   day: string;
+  date?: string;          // concrete YYYY-MM-DD (start + index), stamped server-side
   breakfast?: PlannedMeal;
   lunch?: PlannedMeal;
   dinner?: PlannedMeal;

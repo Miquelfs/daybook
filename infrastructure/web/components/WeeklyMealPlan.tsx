@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { format, parseISO, addDays } from "date-fns";
+import { format, parseISO, addDays, differenceInCalendarDays } from "date-fns";
 import { CalendarRange, ShoppingCart, Sparkles, Check } from "lucide-react";
 import { foodApi, type WeeklyPlanResponse, type PlannedDay, type PlannedMeal } from "@/lib/food-api";
 
@@ -29,11 +29,28 @@ function MealLine({ meal, emoji }: { meal?: PlannedMeal; emoji: string }) {
   );
 }
 
-function DayBlock({ d }: { d: PlannedDay }) {
+// A day's label + styling, worked out from its real date relative to the day
+// you're viewing — so "Today"/"Tomorrow" always match the calendar, and past
+// days (from a plan made earlier) dim out instead of misleading you.
+function dayMeta(d: PlannedDay, ref: string): { label: string; today: boolean; past: boolean } {
+  if (!d.date) return { label: d.day, today: false, past: false };
+  const diff = differenceInCalendarDays(parseISO(d.date), parseISO(ref));
+  if (diff === 0) return { label: "Today", today: true, past: false };
+  if (diff === 1) return { label: "Tomorrow", today: false, past: false };
+  if (diff === -1) return { label: "Yesterday", today: false, past: true };
+  return { label: format(parseISO(d.date), "EEE d"), today: false, past: diff < 0 };
+}
+
+function DayBlock({ d, viewDate }: { d: PlannedDay; viewDate: string }) {
+  const m = dayMeta(d, viewDate);
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-lg px-3 py-2.5">
+    <div className={`rounded-lg px-3 py-2.5 border ${
+      m.today ? "bg-[#34D399]/[0.06] border-[#34D399]/40" : "bg-[#0D0D0F] border-[#27272A]"
+    } ${m.past ? "opacity-45" : ""}`}>
       <div className="flex items-baseline justify-between mb-1.5">
-        <span className="text-xs font-semibold text-[#E4E4E7]">{d.day}</span>
+        <span className={`text-xs font-semibold ${m.today ? "text-[#34D399]" : "text-[#E4E4E7]"}`}>
+          {m.label}{m.today && <span className="ml-1.5 text-[9px] uppercase tracking-widest text-[#34D399]/70">eat this</span>}
+        </span>
         {d.kcal != null && (
           <span className="text-[10px] text-[#52525B] tabular-nums">
             {Math.round(d.kcal)} kcal · {Math.round(d.protein_g ?? 0)}g P
@@ -41,7 +58,7 @@ function DayBlock({ d }: { d: PlannedDay }) {
         )}
       </div>
       <div className="space-y-1">
-        {MEALS.map((m) => <MealLine key={m.key} meal={d[m.key] as PlannedMeal} emoji={m.emoji} />)}
+        {MEALS.map((mm) => <MealLine key={mm.key} meal={d[mm.key] as PlannedMeal} emoji={mm.emoji} />)}
       </div>
     </div>
   );
@@ -142,15 +159,21 @@ export function WeeklyMealPlan({ date }: { date: string }) {
     }
   }
 
-  const endLabel = format(addDays(parseISO(startDate), PLAN_DAYS - 1), "d MMM");
-  const rangeLabel = `${format(parseISO(startDate), "d MMM")} – ${endLabel}`;
   const plan = data?.plan ?? null;
+  const planDays = plan?.days ?? [];
+  // Prefer the plan's real coverage (it may have been generated a day or two ago);
+  // fall back to the prospective next-N-days when nothing is stored yet.
+  const firstDate = planDays[0]?.date;
+  const lastDate = planDays[planDays.length - 1]?.date;
+  const rangeLabel = firstDate && lastDate
+    ? `${format(parseISO(firstDate), "d MMM")} – ${format(parseISO(lastDate), "d MMM")}`
+    : `${format(parseISO(startDate), "d MMM")} – ${format(addDays(parseISO(startDate), PLAN_DAYS - 1), "d MMM")}`;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-2 gap-2">
         <p className="text-xs text-[#52525B] uppercase tracking-widest shrink-0 flex items-center gap-1.5">
-          <CalendarRange size={13} /> Next {PLAN_DAYS} days · {rangeLabel}
+          <CalendarRange size={13} /> {plan ? "Meal plan" : `Next ${PLAN_DAYS} days`} · {rangeLabel}
         </p>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowPrefs((v) => !v)}
@@ -186,10 +209,12 @@ export function WeeklyMealPlan({ date }: { date: string }) {
         <div className="space-y-4">
           {data?.plan.note && <p className="text-xs text-[#71717A] italic">{data.plan.note}</p>}
           <div className="space-y-2">
-            {(plan.days ?? []).map((d, i) => <DayBlock key={d.day ?? i} d={d} />)}
+            {planDays.map((d, i) => <DayBlock key={d.date ?? d.day ?? i} d={d} viewDate={startDate} />)}
           </div>
           <div className="pt-3 border-t border-[#18181B]">
-            <ShoppingList startDate={startDate} plan={plan} />
+            {/* Key the tick-list to the plan itself (its start date), so checks
+                persist across the days it covers, not just the day you generated it. */}
+            <ShoppingList startDate={data?.start_date ?? startDate} plan={plan} />
           </div>
           {data?.generated_at && (
             <p className="text-[10px] text-[#3F3F46]">

@@ -481,8 +481,10 @@ def food_wellness_impact(
 
 @router.get("/weekly-plan")
 def get_weekly_plan(week_start: Optional[str] = Query(None), date: Optional[str] = Query(None), conn: DB = None):
-    start = weekly_planner.plan_start_for(week_start or date)
-    plan = weekly_planner.latest_for_start(conn, start)
+    # Look up by COVERAGE of the viewed day, so a plan made earlier keeps showing
+    # (with the right day highlighted) until it's regenerated.
+    on_date = weekly_planner.plan_start_for(week_start or date)
+    plan = weekly_planner.latest_covering(conn, on_date)
     if plan is None:
         raise HTTPException(status_code=404, detail="No plan yet")
     return plan
