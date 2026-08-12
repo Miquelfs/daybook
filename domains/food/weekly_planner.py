@@ -122,12 +122,19 @@ def generate(conn, start_date: str, target_kcal: Optional[float],
 
     labels = _day_labels(start_date)
     recent = _recent_liked(conn, start_date)
+    # Structured JSON — generate_json disables extended thinking by default, so the
+    # full token budget goes to the plan (Sonnet otherwise burns it on thinking and
+    # truncates the JSON). 3000 is ample headroom for a 3-day plan + shopping list.
     data = ollama_client.generate_json(
         _build_prompt(target_kcal, protein_g, labels, recent, preferences),
         model=ollama_client.CLAUDE_MODEL_SMART,
         max_tokens=3000,
     )
-    if not data or "days" not in data:
+    if not data:
+        log.warning("meal planner: model returned no usable JSON for %s", start_date)
+        return None
+    if "days" not in data:
+        log.warning("meal planner: JSON missing 'days' key for %s (keys=%s)", start_date, list(data)[:6])
         return None
 
     model = ollama_client.CLAUDE_MODEL_SMART if \

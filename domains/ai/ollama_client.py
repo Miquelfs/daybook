@@ -133,7 +133,8 @@ def _groq_available() -> bool:
         return False
 
 
-def _claude_chat(prompt: str, model: Optional[str], as_json: bool, max_tokens: int = 2048) -> Optional[str]:
+def _claude_chat(prompt: str, model: Optional[str], as_json: bool, max_tokens: int = 2048,
+                 thinking: Optional[bool] = None) -> Optional[str]:
     """Call the Claude Messages API via the official SDK; return the text or None."""
     if not ANTHROPIC_API_KEY:
         log.warning("LLM_PROVIDER=claude but ANTHROPIC_API_KEY is not set")
@@ -152,15 +153,32 @@ def _claude_chat(prompt: str, model: Optional[str], as_json: bool, max_tokens: i
             + "\n\nRespond with ONLY a single valid JSON object — no markdown, "
             "no code fences, no commentary before or after."
         )
+    # Newer models (e.g. claude-sonnet-5) enable extended thinking by DEFAULT, and
+    # it silently consumes the max_tokens budget (2000+ tokens) BEFORE any output —
+    # truncating structured JSON, or leaving no text block at all. We don't need
+    # reasoning tokens to fill a JSON template, so disable thinking for JSON tasks
+    # unless a caller explicitly asks for it. Narration keeps the model default.
+    want_thinking = thinking if thinking is not None else (not as_json)
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        resp = client.messages.create(
-            model=m,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": p}],
-        )
+        kwargs: dict = {
+            "model": m,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": p}],
+        }
+        if not want_thinking:
+            kwargs["thinking"] = {"type": "disabled"}
+        resp = client.messages.create(**kwargs)
         parts = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
-        return "".join(parts).strip() or None
+        text = "".join(parts).strip()
+        if not text:
+            log.warning(
+                "Claude returned no text (stop_reason=%s) — extended thinking may have "
+                "consumed the token budget; raise max_tokens or disable thinking",
+                getattr(resp, "stop_reason", None),
+            )
+            return None
+        return text
     except Exception as e:  # anthropic errors, network, etc. — degrade gracefully
         log.warning("Claude call failed: %s", e)
         return None
@@ -191,7 +209,7 @@ def is_available() -> bool:
 
 
 def generate(prompt: str, model: Optional[str] = None, as_json: bool = False,
-             max_tokens: int = 2048) -> Optional[str]:
+             max_tokens: int = 2048, thinking: Optional[bool] = None) -> Optional[str]:
     """
     Send a prompt to the active LLM backend, return the response text.
     Returns None if the backend is unreachable or the call fails.
@@ -200,9 +218,11 @@ def generate(prompt: str, model: Optional[str] = None, as_json: bool = False,
     (as_json=False) uses the fast model, structured/JSON tasks use the default.
     `max_tokens` caps the response length — bump it for large structured output
     (e.g. a whole week of meals) so the JSON isn't truncated mid-object.
+    `thinking` overrides the extended-thinking default (off for JSON, on for
+    narration); only the Claude backend honours it.
     """
     if LLM_PROVIDER == "claude":
-        return _claude_chat(prompt, model, as_json, max_tokens)
+        return _claude_chat(prompt, model, as_json, max_tokens, thinking)
 
     if LLM_PROVIDER == "groq":
         gmodel = GROQ_MODEL if as_json else GROQ_MODEL_FAST
@@ -221,7 +241,8 @@ def generate(prompt: str, model: Optional[str] = None, as_json: bool = False,
     return result.get("response")
 
 
-def generate_json(prompt: str, model: Optional[str] = None, max_tokens: int = 2048) -> Optional[dict]:
+def generate_json(prompt: str, model: Optional[str] = None, max_tokens: int = 2048,
+                  thinking: Optional[bool] = None) -> Optional[dict]:
     """
     Like generate() but parses the response as JSON.
     Returns None if the backend is unreachable or the response is not valid JSON.
@@ -230,9 +251,9 @@ def generate_json(prompt: str, model: Optional[str] = None, max_tokens: int = 20
     # own JSON model inside generate() when model is None (passing the Ollama
     # default "mistral" to Claude/Groq would be an invalid model id).
     if LLM_PROVIDER in ("claude", "groq"):
-        text = generate(prompt, model=model, as_json=True, max_tokens=max_tokens)
+        text = generate(prompt, model=model, as_json=True, max_tokens=max_tokens, thinking=thinking)
     else:
-        text = generate(prompt, model=model or MODEL_DEFAULT, as_json=True, max_tokens=max_tokens)
+        text = generate(prompt, model=model or MODEL_DEFAULT, as_json=True, max_tokens=max_tokens, thinking=thinking)
     if text is None:
         return None
     text = _strip_json_fences(text)
