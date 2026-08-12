@@ -22,7 +22,10 @@ from infrastructure.api.models.food import (
     WaterBody,
 )
 from domains.ai import ollama_client
-from domains.food import analytics, analyzer, coach as coach_mod, meal_planner, targets as targets_mod
+from domains.food import (
+    analytics, analyzer, coach as coach_mod, meal_planner, targets as targets_mod,
+    weekly_planner, wellness_impact,
+)
 
 router = APIRouter(prefix="/food", tags=["food"])
 
@@ -456,6 +459,51 @@ def heart_suggestion(date: str = Query(...)):
     stable through the day."""
     from domains.food import heart_healthy
     return heart_healthy.meal_of_the_day(date)
+
+
+# ── Food → wellness impact (how eating patterns move energy/mood/stress) ──────
+
+@router.get("/wellness-impact")
+def food_wellness_impact(
+    date: str = Query(...),
+    window: int = Query(120, ge=30, le=365),
+    conn: DB = None,
+):
+    """Split your logged days by food lever (sugar, sat fat, fibre, meal size/
+    timing, less-healthy foods) and report the average effect on same-day mood/
+    stress and next-morning energy — grounded in data you already generate."""
+    return wellness_impact.compute(conn, date, window)
+
+
+# ── Weekly meal plan + consolidated shopping list ─────────────────────────────
+
+@router.get("/weekly-plan")
+def get_weekly_plan(week_start: Optional[str] = Query(None), date: Optional[str] = Query(None), conn: DB = None):
+    ws = week_start or (weekly_planner.week_start_for(date) if date else _date.today().isoformat())
+    ws = weekly_planner.week_start_for(ws)
+    plan = weekly_planner.latest_for_week(conn, ws)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="No weekly plan yet")
+    return plan
+
+
+@router.post("/weekly-plan/generate")
+def generate_weekly_plan(
+    week_start: Optional[str] = Query(None),
+    date: Optional[str] = Query(None),
+    preferences: Optional[str] = Query(None),
+    conn: DB = None,
+):
+    ws = week_start or (weekly_planner.week_start_for(date) if date else _date.today().isoformat())
+    ws = weekly_planner.week_start_for(ws)
+    tgt = targets_mod.active_target(conn, ws) or targets_mod.suggest_target(conn)
+    plan = weekly_planner.generate(
+        conn, ws, tgt.get("target_kcal") if tgt else None,
+        tgt.get("protein_g") if tgt else None, preferences,
+    )
+    if plan is None:
+        raise HTTPException(status_code=503, detail="AI weekly planning unavailable")
+    return {"week_start": ws, "plan": plan}
 
 
 @router.get("/library")

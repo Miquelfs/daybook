@@ -152,6 +152,15 @@ def migrate(conn):
             generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         );
         CREATE INDEX IF NOT EXISTS idx_food_coach_date ON food_coach(date);
+
+        CREATE TABLE IF NOT EXISTS food_weekly_plans (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_start   TEXT NOT NULL,        -- YYYY-MM-DD (Monday)
+            plan_json    TEXT NOT NULL,        -- {days:[...], shopping_list:[...], note}
+            model        TEXT,
+            generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_food_weekly_plans_week ON food_weekly_plans(week_start);
     """)
 
     # Idempotent column adds for DBs created before a column existed.

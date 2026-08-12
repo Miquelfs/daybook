@@ -227,6 +227,77 @@ export interface FoodCoach {
   tip?: string;
 }
 
+export interface WellnessEffect {
+  outcome: "energy_next" | "energy" | "mood" | "stress";
+  label: string;
+  direction: "higher" | "lower";
+  high_avg: number;
+  low_avg: number;
+  delta: number;
+  n_high: number;
+  n_low: number;
+  good: boolean;
+}
+
+export interface WellnessLever {
+  key: string;
+  label: string;
+  unit: string;
+  threshold: number;
+  days: number;
+  effects: WellnessEffect[];
+}
+
+export interface FoodWellnessImpact {
+  date: string;
+  window_days: number;
+  days_analyzed: number;
+  levers: WellnessLever[];
+  headline: {
+    lever: string;
+    outcome: string;
+    verb: "raises" | "lowers";
+    delta: number;
+    good: boolean;
+  } | null;
+  enough: boolean;
+}
+
+export interface PlannedMeal {
+  name: string;
+  kcal: number;
+  protein_g: number;
+}
+
+export interface PlannedDay {
+  day: string;
+  breakfast?: PlannedMeal;
+  lunch?: PlannedMeal;
+  dinner?: PlannedMeal;
+  snack?: PlannedMeal;
+  kcal?: number;
+  protein_g?: number;
+}
+
+export interface ShoppingCategory {
+  category: string;
+  items: { name: string; qty?: string }[];
+}
+
+export interface WeeklyPlan {
+  days: PlannedDay[];
+  shopping_list: ShoppingCategory[];
+  note?: string;
+}
+
+export interface WeeklyPlanResponse {
+  id?: number;
+  week_start: string;
+  plan: WeeklyPlan;
+  model?: string;
+  generated_at?: string;
+}
+
 export interface FoodLibraryItem {
   name: string;
   kcal: number;
@@ -353,6 +424,18 @@ export const foodApi = {
     if (preferences) qs.set("preferences", preferences);
     if (mealType) qs.set("meal_type", mealType);
     return proxyPost(`/api/food/coach/generate?${qs.toString()}`);
+  },
+
+  wellnessImpact: (date: string, window = 120): Promise<FoodWellnessImpact> =>
+    get(`/food/wellness-impact?date=${date}&window=${window}`),
+
+  weeklyPlan: (weekStart: string): Promise<WeeklyPlanResponse> =>
+    get(`/food/weekly-plan?week_start=${weekStart}`),
+
+  generateWeeklyPlan: (weekStart: string, preferences?: string): Promise<WeeklyPlanResponse> => {
+    const qs = new URLSearchParams({ week_start: weekStart });
+    if (preferences) qs.set("preferences", preferences);
+    return proxyPost(`/api/food/weekly-plan/generate?${qs.toString()}`);
   },
 
   library: (q = "", limit = 60): Promise<{ items: FoodLibraryItem[] }> => {

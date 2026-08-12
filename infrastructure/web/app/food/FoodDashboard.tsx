@@ -19,6 +19,8 @@ import { WeightSection } from "@/components/health/WeightSection";
 import { WaterTracker } from "@/components/WaterTracker";
 import { HeartDot, HEART_META } from "@/components/HeartRatingBadge";
 import { HeartHealthyPick } from "@/components/HeartHealthyPick";
+import { FoodWellnessImpact } from "@/components/FoodWellnessImpact";
+import { WeeklyMealPlan } from "@/components/WeeklyMealPlan";
 
 const AMBER = "#F59E0B";
 const GREEN = "#34D399";
@@ -368,6 +370,9 @@ export function FoodDashboard() {
         </div>
       </div>
 
+      {/* Food × how you feel — which eating patterns move energy/mood/stress */}
+      <FoodWellnessImpact date={date} />
+
       {/* Expenditure calibration — predicted vs actual weight change */}
       {calib?.enough && (
         <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
@@ -412,6 +417,9 @@ export function FoodDashboard() {
 
       {/* Heart-healthy pick (today only) */}
       {date === today && <HeartHealthyPick date={date} />}
+
+      {/* Weekly meal plan + one shopping list for the supermarket */}
+      <WeeklyMealPlan date={date} />
 
       {/* Add food */}
       <div>
