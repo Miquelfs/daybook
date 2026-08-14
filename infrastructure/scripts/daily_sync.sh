@@ -114,8 +114,10 @@ python -m domains.health.garmin.wellness_sync --date "$DATE" --force \
 # late-evening hours that were logged after the last same-day sync. The regular
 # syncs above SKIP a day whose row already exists, so without this force the tail
 # of yesterday would never be pulled and the graph would stay short. Run it in
-# the early-morning window so the finished day is completed exactly once.
-if [[ "$HOUR" -lt 6 ]]; then
+# the early-morning window. Gated to < 08:00 so it fires whether the cron runs
+# hourly (00–07) or as a single morning run around 07:00; it's idempotent
+# (INSERT OR REPLACE) so repeats within the window are harmless.
+if [[ "$HOUR" -lt 8 ]]; then
   log "Finalizing yesterday's completed day (forced re-sync)..."
   python -m domains.health.garmin.wellness_sync --date "$YESTERDAY" --force \
     >> "$LOG_FILE" 2>&1 || log "WARN: Wellness finalize (yesterday) failed (non-fatal)"
