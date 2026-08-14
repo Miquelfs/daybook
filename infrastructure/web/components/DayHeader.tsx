@@ -3,6 +3,7 @@
 import { format, parseISO, addDays, subDays, isToday } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
+import { GarminSyncButton } from "@/components/GarminSyncButton";
 
 interface Props {
   date: string; // YYYY-MM-DD
@@ -32,6 +33,7 @@ export function DayHeader({ date }: Props) {
         </div>
 
         <div className="flex items-center gap-1 shrink-0 pb-0.5">
+          <GarminSyncButton date={date} />
           <Link
             href={`/day/${prev}`}
             title={format(subDays(d, 1), "EEE, MMM d")}

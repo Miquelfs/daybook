@@ -1002,6 +1002,12 @@ export const api = {
   syncGarmin: async (): Promise<void> => {
     await fetch(`${BASE}/sync/garmin`, { method: "POST", cache: "no-store" }).catch(() => {});
   },
+  // Force-refresh a day's full Garmin picture now (activities + stress/energy/HR).
+  // Returns immediately; the sync runs in the background on the Pi. Watch the
+  // 'manual' row from syncStatus() to know when it has landed.
+  syncNow: async (date: string): Promise<void> => {
+    await fetch(`${BASE}/sync/now?date=${date}`, { method: "POST", cache: "no-store" }).catch(() => {});
+  },
   syncStrava: async (): Promise<void> => {
     await fetch(`${BASE}/sync/strava`, { method: "POST", cache: "no-store" }).catch(() => {});
   },

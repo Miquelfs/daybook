@@ -184,6 +184,61 @@ def sync_garmin(background: BackgroundTasks):
     return {"status": "started"}
 
 
+def _run_full_refresh(day: str) -> None:
+    """On-demand 'sync now': pull the day's full Garmin picture in one shot.
+
+    Runs the incremental activity/sleep/stats sync, then force-refreshes today's
+    all-day wellness (stress / Body Battery) and intraday HR so a just-finished
+    workout and the latest stress/energy show up immediately. A 'manual' row in
+    sync_status is stamped at the very end so the UI can detect completion by
+    watching its last_success_at advance.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    steps = (
+        [sys.executable, "-m", "domains.health.garmin.garmin_sync"],
+        [sys.executable, "-m", "domains.health.garmin.wellness_sync", "--date", day, "--force"],
+        [sys.executable, "-m", "domains.health.garmin.intraday_hr_sync", "--date", day, "--force"],
+    )
+    error: str | None = None
+    for cmd in steps:
+        try:
+            r = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, timeout=300)
+            if r.returncode != 0 and error is None:
+                error = (r.stderr or b"").decode(errors="replace")[-500:] or f"exit {r.returncode}"
+        except Exception as e:  # timeout / spawn failure — keep going, record first
+            if error is None:
+                error = str(e)
+    # Completion beacon (best-effort — a failed sync still stamps last_attempt).
+    try:
+        from infrastructure.db.connection import get_connection as _get_conn
+        now = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        conn = _get_conn()
+        conn.execute(
+            """
+            INSERT INTO sync_status (source, last_attempt_at, last_success_at, last_error, records_synced)
+            VALUES ('manual', ?, ?, ?, 0)
+            ON CONFLICT(source) DO UPDATE SET
+                last_attempt_at = excluded.last_attempt_at,
+                last_success_at = CASE WHEN ? THEN excluded.last_success_at ELSE last_success_at END,
+                last_error      = excluded.last_error
+            """,
+            (now, None if error else now, error, 0 if error else 1),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+@app.post("/sync/now")
+def sync_now(background: BackgroundTasks, date: str | None = None):
+    """Force-refresh the day's Garmin data now (activities + stress/energy/HR)."""
+    from datetime import date as _date
+    day = date or _date.today().isoformat()
+    background.add_task(_run_full_refresh, day)
+    return {"status": "started", "date": day}
+
+
 def _run_strava_sync() -> None:
     subprocess.run(
         [sys.executable, "-m", "domains.health.strava.strava_sync"],
