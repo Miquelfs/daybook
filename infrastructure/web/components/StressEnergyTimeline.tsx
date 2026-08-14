@@ -17,18 +17,20 @@ const HR = "#F87171";      // red
 const SPAN_COLOR: Record<string, string> = {
   activity: "#34D399",  // green
   flight: "#1E40AF",    // dark blue
+  nap: "#818CF8",       // indigo
 };
-const SPAN_FILL_OPACITY: Record<string, number> = { flight: 0.22, activity: 0.14 };
+const SPAN_FILL_OPACITY: Record<string, number> = { flight: 0.22, activity: 0.14, nap: 0.18 };
 const EVENT_COLOR: Record<string, string> = {
   meal: "#FBBF24",     // brighter amber so it reads over the flight shading
   takeoff: "#60A5FA",
   landing: "#3B82F6",
+  nap: "#818CF8",
 };
 // Meal marker/chip emoji by meal type.
 const MEAL_EMOJI: Record<string, string> = {
   breakfast: "☕", lunch: "🥗", dinner: "🍽", snack: "🍎", extra: "🍫", meal: "🍴",
 };
-const SPAN_EMOJI: Record<string, string> = { flight: "✈️", activity: "🏃" };
+const SPAN_EMOJI: Record<string, string> = { flight: "✈️", activity: "🏃", nap: "😴" };
 
 function toMin(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
@@ -91,7 +93,7 @@ export function StressEnergyTimeline({ date }: { date: string }) {
       detail:
         s.type === "flight"
           ? [s.you_flew ? "you flew" : null, s.detail].filter(Boolean).join(" · ") || undefined
-          : `${s.start}–${s.end}`,
+          : s.detail ?? `${s.start}–${s.end}`,
       href: s.href,
       color: SPAN_COLOR[s.type] ?? "#A1A1AA",
     })),

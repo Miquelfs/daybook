@@ -13,6 +13,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LOG_DIR="$SCRIPT_DIR/logs"
 DATE="$(date +%Y-%m-%d)"
+HOUR="$(date +%H)"
+YESTERDAY="$(date -d 'yesterday' +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d)"
 LOG_FILE="$LOG_DIR/daily_sync_${DATE}.log"
 ERROR_LOG="$LOG_DIR/errors.log"
 
@@ -88,7 +90,6 @@ fi
 
 # Weather: fetch last 3 days so today + yesterday are always covered.
 log "Syncing weather (last 3 days)..."
-YESTERDAY="$(date -d 'yesterday' +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d)"
 python -m domains.weather.weather_sync "$YESTERDAY" "$DATE" \
   >> "$LOG_FILE" 2>&1 || log "WARN: Weather sync failed (non-fatal)"
 
@@ -107,6 +108,20 @@ python -m domains.health.garmin.wellness_sync \
   >> "$LOG_FILE" 2>&1 || log "WARN: Wellness sync failed (non-fatal)"
 python -m domains.health.garmin.wellness_sync --date "$DATE" --force \
   >> "$LOG_FILE" 2>&1 || log "WARN: Wellness (today) failed (non-fatal)"
+
+# Finalize the completed previous day. Once past midnight, Garmin holds the full
+# 00:00–23:59 of yesterday's intraday stress / Body Battery / HR — including the
+# late-evening hours that were logged after the last same-day sync. The regular
+# syncs above SKIP a day whose row already exists, so without this force the tail
+# of yesterday would never be pulled and the graph would stay short. Run it in
+# the early-morning window so the finished day is completed exactly once.
+if [[ "$HOUR" -lt 6 ]]; then
+  log "Finalizing yesterday's completed day (forced re-sync)..."
+  python -m domains.health.garmin.wellness_sync --date "$YESTERDAY" --force \
+    >> "$LOG_FILE" 2>&1 || log "WARN: Wellness finalize (yesterday) failed (non-fatal)"
+  python -m domains.health.garmin.intraday_hr_sync --date "$YESTERDAY" --force \
+    >> "$LOG_FILE" 2>&1 || log "WARN: Intraday HR finalize (yesterday) failed (non-fatal)"
+fi
 
 # Flight physio + stress-by-context: snapshot yesterday & today so the takeoff/
 # landing spikes and "what stresses you" roll up across all of life.
@@ -165,7 +180,6 @@ python -m domains.money.plan_executor \
 # (often after 6am). The brief itself is self-gating: it skips cheaply when
 # today's brief already includes sleep, and only re-calls the LLM when sleep has
 # just landed for a brief that was written without it.
-HOUR="$(date +%H)"
 if [[ "$HOUR" -ge 5 && "$HOUR" -le 11 ]]; then
   log "Generating AI morning brief..."
   python -m domains.ai.morning_brief --date "$DATE" \

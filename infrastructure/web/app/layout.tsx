@@ -20,21 +20,19 @@ export const metadata: Metadata = {
 };
 
 // Applies the stored theme before first paint (no flash).
-// Resolution order: localStorage → cookie → device (prefers-color-scheme).
-// iOS Safari periodically evicts localStorage (and it's per-origin), which was
-// silently reverting the app to dark; the cookie + device fallback keep the
-// chosen appearance instead of snapping back to the hardcoded default.
+// Resolution order: server-set cookie → localStorage. The device's
+// prefers-color-scheme is deliberately NOT consulted: it caused the app to flip
+// to dark on its own whenever the persisted preference had been evicted (iOS
+// Safari ITP) while the device was in auto/scheduled dark mode. The cookie is
+// now written server-side (/api/theme), which ITP does not cap to 7 days, so
+// the chosen appearance sticks. If nothing is stored we keep the dark default.
 const themeScript = `
 (function () {
   try {
-    var t = localStorage.getItem("db-theme");
-    if (!t) {
-      var c = document.cookie.match(/(?:^|; )db-theme=([^;]+)/);
-      if (c) t = decodeURIComponent(c[1]);
-    }
-    if (!t && window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
-      t = "light";
-    }
+    var t;
+    var c = document.cookie.match(/(?:^|; )db-theme=([^;]+)/);
+    if (c) t = decodeURIComponent(c[1]);
+    if (!t) { try { t = localStorage.getItem("db-theme"); } catch (e) {} }
     if (t === "light") {
       document.documentElement.setAttribute("data-theme", "light");
       var m = document.querySelector('meta[name="theme-color"]');

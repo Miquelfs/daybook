@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { tagsApi, CATEGORY_LABELS, COUNTER_SLUGS, COUNTER_TYPE, COUNTER_PLACEHOLDER } from "@/lib/tags-api";
+import { tagsApi, CATEGORY_LABELS, COUNTER_SLUGS, COUNTER_TYPE, COUNTER_PLACEHOLDER, parseNapNote, formatNapNote } from "@/lib/tags-api";
 import type { Tag, DayTag } from "@/lib/tags-api";
 import type { DayTagSummary } from "@/lib/api";
 import { X, Plus, ChevronDown, ChevronUp } from "lucide-react";
@@ -131,6 +131,40 @@ export function TagPicker({ date, initialTags }: Props) {
       {/* Inputs for active tags that need them */}
       {activeCounterTags.map((tag) => {
         const existing = dayTags.find((t) => t.slug === tag.slug)?.note ?? "";
+
+        // Nap gets two fields: a free-text duration + an end time. They're packed
+        // into a single note ("45min @16:30") so the timeline can place the nap.
+        if (tag.slug === "nap") {
+          const parsed = parseNapNote(existing);
+          const durVal = noteInputs["nap"] ?? parsed.dur;
+          const endVal = noteInputs["nap__end"] ?? parsed.end;
+          const saveNap = () =>
+            addMutation.mutate({ tag_id: tag.id, note: formatNapNote(durVal, endVal) || undefined });
+          return (
+            <div key={tag.slug} className="flex items-center gap-2 ml-1 flex-wrap">
+              <span className="text-xs text-[#52525B] shrink-0">{tag.icon} Nap:</span>
+              <input
+                type="text"
+                placeholder="Duration (e.g. 45min)"
+                value={durVal}
+                onChange={(e) => setNoteInputs((p) => ({ ...p, nap: e.target.value }))}
+                onBlur={saveNap}
+                className="w-32 bg-[#18181B] border border-[#27272A] rounded px-2 py-1 text-xs
+                           text-[#FAFAFA] placeholder:text-[#3F3F46] focus:outline-none focus:border-[#F59E0B]"
+              />
+              <span className="text-[11px] text-[#3F3F46] shrink-0">ended</span>
+              <input
+                type="time"
+                value={endVal}
+                onChange={(e) => setNoteInputs((p) => ({ ...p, nap__end: e.target.value }))}
+                onBlur={saveNap}
+                className="bg-[#18181B] border border-[#27272A] rounded px-2 py-1 text-xs
+                           text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+              />
+            </div>
+          );
+        }
+
         const value = noteInputs[tag.slug] ?? existing;
         const isCounter = COUNTER_TYPE[tag.slug] === "counter";
         const numVal = isCounter ? (parseInt(value) || 0) : 0;

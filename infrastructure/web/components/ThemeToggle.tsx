@@ -19,14 +19,19 @@ export function ThemeToggle() {
     } else {
       document.documentElement.removeAttribute("data-theme");
     }
-    // Persist to both localStorage and a cookie — localStorage gets evicted on
-    // iOS Safari, so the cookie is a second line of defence for the preference.
+    // Persist server-side (durable — see /api/theme). iOS Safari's ITP caps
+    // client-written cookies to ~7 days and evicts localStorage, which used to
+    // silently revert the theme; a server-set cookie survives. localStorage is
+    // kept only as an instant, offline-friendly fallback for the pre-paint read.
     try {
       localStorage.setItem("db-theme", next);
     } catch { /* private mode */ }
-    try {
-      document.cookie = `db-theme=${next}; path=/; max-age=31536000; SameSite=Lax`;
-    } catch { /* ignore */ }
+    fetch("/api/theme", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ theme: next }),
+      keepalive: true,
+    }).catch(() => { /* offline — localStorage still carries it */ });
     document
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute("content", next === "light" ? "#F3EFE6" : "#09090B");

@@ -1,5 +1,6 @@
 """Wellness router — all-day stress/energy timeline + recovery flag (CIRQA)."""
 
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Annotated, Optional
@@ -41,6 +42,37 @@ _MEAL_LABEL = {
     "breakfast": "Breakfast", "lunch": "Lunch", "dinner": "Dinner",
     "snack": "Snack", "extra": "Extra",
 }
+
+
+def _duration_to_min(s: str) -> Optional[int]:
+    """Tolerant free-text duration → minutes. Handles '45min', '45m', '45',
+    '1h', '1h30', '1h30m', '1.5h', '90'. Bare numbers are read as minutes."""
+    if not s:
+        return None
+    s = s.lower().strip()
+    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*h(?:\s*(\d+)\s*m?)?\s*$", s)
+    if m:
+        return int(round(float(m.group(1)) * 60 + (float(m.group(2)) if m.group(2) else 0)))
+    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*(?:min|mins|m)?\s*$", s)
+    if m:
+        return int(round(float(m.group(1))))
+    num = re.search(r"(\d+(?:\.\d+)?)", s)
+    return int(round(float(num.group(1)))) if num else None
+
+
+def _parse_nap_note(note: str) -> tuple[Optional[str], Optional[int]]:
+    """Nap tag note is '<duration> @<HH:MM end>' (end optional, back-compatible
+    with plain '<duration>'). Returns (end_hhmm | None, duration_min | None)."""
+    if not note:
+        return None, None
+    end = None
+    m = re.search(r"@\s*(\d{1,2}):(\d{2})", note)
+    if m:
+        h, mm = int(m.group(1)), int(m.group(2))
+        if 0 <= h < 24 and 0 <= mm < 60:
+            end = f"{h:02d}:{mm:02d}"
+    dur_text = re.sub(r"@\s*\d{1,2}:\d{2}", "", note).strip()
+    return end, _duration_to_min(dur_text)
 
 
 @router.get("/recovery")
@@ -175,6 +207,28 @@ def get_timeline(date: str = Query(...), conn: DB = None):
             "meal_type": key or "meal", "href": f"/food?date={date}",
             "detail": f"{int(g['kcal'])} kcal · {g['n']} item{'s' if g['n'] != 1 else ''}",
         })
+
+    # Nap → shaded indigo block. The nap tag's note carries a wall-clock end time
+    # and duration ("45min @16:30"); we anchor the block at the end and back it
+    # out by the duration so the energy recharge / stress dip shows in context.
+    # Nap times are already local (user-entered), so no offset conversion.
+    nap = conn.execute(
+        "SELECT dt.note FROM day_tags dt JOIN tags t ON t.id = dt.tag_id "
+        "WHERE dt.date=? AND t.slug='nap'", (date,)
+    ).fetchone()
+    if nap and nap["note"]:
+        end_hhmm, dur_min = _parse_nap_note(nap["note"])
+        if end_hhmm:
+            end_m = int(end_hhmm[:2]) * 60 + int(end_hhmm[3:5])
+            if dur_min and dur_min > 0:
+                start_m = max(0, end_m - dur_min)
+                start_hhmm = f"{start_m // 60:02d}:{start_m % 60:02d}"
+                spans.append({
+                    "start": start_hhmm, "end": end_hhmm, "label": "Nap", "type": "nap",
+                    "detail": f"woke {end_hhmm} · {dur_min} min",
+                })
+            else:
+                events.append({"t": end_hhmm, "label": "Nap", "type": "nap"})
 
     events.sort(key=lambda e: e["t"])
     spans.sort(key=lambda s: s["start"])

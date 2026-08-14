@@ -55,6 +55,24 @@ export const COUNTER_PLACEHOLDER: Record<string, string> = {
   personal: "Times",
 };
 
+// The nap tag note packs a duration and an optional wall-clock end time as
+// "<duration> @<HH:MM>" (e.g. "45min @16:30"). The end time lets the Stress &
+// Energy timeline place the nap window. Plain "<duration>" stays valid.
+export function parseNapNote(note?: string | null): { dur: string; end: string } {
+  if (!note) return { dur: "", end: "" };
+  const m = note.match(/@\s*(\d{1,2}:\d{2})/);
+  const end = m ? m[1] : "";
+  const dur = note.replace(/@\s*\d{1,2}:\d{2}/, "").trim();
+  return { dur, end };
+}
+
+export function formatNapNote(dur: string, end: string): string {
+  const d = dur.trim();
+  const e = end.trim();
+  if (d && e) return `${d} @${e}`;
+  return d;
+}
+
 export const tagsApi = {
   list: (category?: string): Promise<Tag[]> => {
     const qs = category ? `?category=${category}` : "";
