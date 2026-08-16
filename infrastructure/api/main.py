@@ -162,6 +162,10 @@ def _run_migrations() -> None:
     _conn8 = _get_conn()
     _migrate_settings(_conn8)
     _conn8.close()
+    from infrastructure.db.migrate_trip_return_date import migrate as _migrate_trip_return
+    _conn9 = _get_conn()
+    _migrate_trip_return(_conn9)
+    _conn9.close()
 
 
 class ThemeIn(BaseModel):

@@ -72,11 +72,15 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
     const maxDays = Math.max(1, ...details.map((c) => c.total_days));
 
     (async () => {
-      const [, , geo] = await Promise.all([
-        loadScript("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"),
-        loadScript("https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"),
-        fetch("/world-countries.geo.json").then((r) => r.json()),
-      ]);
+      // Leaflet MUST load and execute before leaflet.heat — the heat plugin
+      // assigns L.heatLayer at load time and needs window.L to already exist.
+      // Loading them in parallel raced the plugin ahead of core Leaflet, so
+      // L.heatLayer was undefined and the whole build threw (no heat layer, and
+      // setReady never ran → tiles stuck on the initial dark theme).
+      const geoPromise = fetch("/world-countries.geo.json").then((r) => r.json());
+      await loadScript("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js");
+      await loadScript("https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js");
+      const geo = await geoPromise;
       if (destroyed || !containerRef.current) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const L = (window as any).L;
@@ -94,7 +98,12 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
       });
       mapRef.current = map;
 
-      tileRef.current = L.tileLayer(TILES[theme], {
+      // Read the live theme from the DOM (the `theme` state captured by this
+      // once-on-mount effect is the initial "dark" default; the app may already
+      // be in light mode) so the map builds with the correct basemap, no flash.
+      const liveTheme: Theme =
+        document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+      tileRef.current = L.tileLayer(TILES[liveTheme], {
         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com">CARTO</a>',
         maxZoom: 19,
       }).addTo(map);
@@ -130,7 +139,7 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
         },
       });
 
-      if (hasHeat) {
+      if (hasHeat && typeof L.heatLayer === "function") {
         heatRef.current = L.heatLayer(points, {
           radius: 18, blur: 22, maxZoom: 10,
           gradient: { 0.2: "#3B82F6", 0.5: "#8B5CF6", 0.75: "#F59E0B", 1.0: "#EF4444" },

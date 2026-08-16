@@ -107,7 +107,7 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
         </div>
       </div>
       <button onClick={go} className="text-xs text-[#52525B] mt-0.5 text-left block w-full">
-        {fmtRange(trip.start_date, trip.end_date)}
+        {fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}
         {trip.cities.length > 0 && <span className="text-[#3F3F46]"> · {trip.cities.slice(0, 3).join(", ")}</span>}
         {trip.home_at_start && <span className="text-[#3F3F46]"> · from {trip.home_at_start}</span>}
       </button>

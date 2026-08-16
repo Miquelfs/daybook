@@ -396,7 +396,8 @@ CREATE INDEX IF NOT EXISTS idx_life_periods_layer ON life_periods(layer);
 CREATE TABLE IF NOT EXISTS trips (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     start_date TEXT NOT NULL,
-    end_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,                   -- last night NOT slept at home
+    return_date TEXT,                        -- home-coming day (end_date + 1) when slept home again; NULL if unknown/ongoing
     primary_country TEXT,
     countries_json TEXT,                     -- JSON list of countries visited
     cities_json TEXT,                        -- JSON list of cities

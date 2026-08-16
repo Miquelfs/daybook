@@ -27,17 +27,22 @@ export default async function TripDetailPage({ params }: Props) {
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) notFound();
 
-  const [trip, tracks, days] = await Promise.all([
-    api.trip(start, end).catch(() => null),
-    api.tracksRange(start, end).catch(() => ({ type: "FeatureCollection" as const, features: [] })),
-    api.range(start, end).catch(() => []),
-  ]);
-
+  // Fetch the trip first so we know its return day, then pull tracks/days for
+  // the full span — the trip window includes the travel-home day (return_date)
+  // even though the route key is the last away night (end).
+  const trip = await api.trip(start, end).catch(() => null);
   if (!trip) notFound();
 
-  // Every date in the trip window (inclusive), for the day scrubber.
+  const rangeEnd = trip.return_date ?? end;
+
+  const [tracks, days] = await Promise.all([
+    api.tracksRange(start, rangeEnd).catch(() => ({ type: "FeatureCollection" as const, features: [] })),
+    api.range(start, rangeEnd).catch(() => []),
+  ]);
+
+  // Every date in the trip window (inclusive of the home-coming day), for the scrubber.
   const tripDates: string[] = [];
-  for (let t = new Date(start + "T12:00:00"); t <= new Date(end + "T12:00:00"); t.setDate(t.getDate() + 1)) {
+  for (let t = new Date(start + "T12:00:00"); t <= new Date(rangeEnd + "T12:00:00"); t.setDate(t.getDate() + 1)) {
     tripDates.push(t.toISOString().slice(0, 10));
   }
 
@@ -55,7 +60,7 @@ export default async function TripDetailPage({ params }: Props) {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">🌍 {trip.name}</h1>
         <p className="text-sm text-[#71717A] mt-1">
-          {fmtRange(trip.start_date, trip.end_date)} · {trip.n_nights} night{trip.n_nights === 1 ? "" : "s"}
+          {fmtRange(trip.start_date, rangeEnd)} · {trip.n_nights} night{trip.n_nights === 1 ? "" : "s"}
           {trip.max_distance_from_home_km != null && (
             <span className="text-[#3F3F46]"> · {Math.round(trip.max_distance_from_home_km)} km out</span>
           )}
@@ -73,7 +78,7 @@ export default async function TripDetailPage({ params }: Props) {
         </section>
 
         {/* Spending across the trip */}
-        <TripExpenses start={trip.start_date} end={trip.end_date} />
+        <TripExpenses start={trip.start_date} end={rangeEnd} />
 
         {/* Photos, tap to open the day (add/replace there) */}
         <section>

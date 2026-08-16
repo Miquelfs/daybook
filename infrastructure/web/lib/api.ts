@@ -835,7 +835,8 @@ export type CurveBucket = {
 export type Trip = {
   id: number;
   start_date: string;
-  end_date: string;
+  end_date: string;                     // last night away from home
+  return_date: string | null;           // home-coming/travel-back day (end_date + 1); null if unknown
   primary_country: string | null;
   countries: string[];
   cities: string[];

@@ -213,6 +213,14 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
             start_d, end_d = run[0], run[-1]
             n_nights = (date.fromisoformat(end_d) - date.fromisoformat(start_d)).days + 1
 
+            # The home-coming day: the day after the last away night, IF you
+            # slept back home that night. That's the travel-home leg — part of
+            # the trip (photos, spending, the journey) even though it's not an
+            # away night, so it doesn't change n_nights. Left NULL when there's
+            # no data for that day (trip may still be ongoing / gap in tracking).
+            next_day = (date.fromisoformat(end_d) + timedelta(days=1)).isoformat()
+            return_date = next_day if next_day in home_nights else None
+
             countries: Counter = Counter()
             cities: Counter = Counter()
             cur = date.fromisoformat(start_d)
@@ -243,11 +251,12 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
             home = home_for(start_d)
 
             dcon.execute(
-                """INSERT INTO trips (start_date, end_date, primary_country, countries_json,
+                """INSERT INTO trips (start_date, end_date, return_date, primary_country, countries_json,
                                       cities_json, total_km, max_distance_from_home_km,
                                       auto_name, cover_photo_path, home_at_start)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(start_date, end_date) DO UPDATE SET
+                     return_date=excluded.return_date,
                      primary_country=excluded.primary_country,
                      countries_json=excluded.countries_json,
                      cities_json=excluded.cities_json,
@@ -257,7 +266,7 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
                      cover_photo_path=excluded.cover_photo_path,
                      home_at_start=excluded.home_at_start""",
                 (
-                    start_d, end_d, primary,
+                    start_d, end_d, return_date, primary,
                     json.dumps([c for c, _ in countries.most_common()]),
                     json.dumps([c for c, _ in cities.most_common(12)]),
                     total_km,
