@@ -202,6 +202,13 @@ CREATE TABLE IF NOT EXISTS sync_status (
     records_synced   INTEGER DEFAULT 0
 );
 
+-- App-wide key/value preferences (single-user). Holds the UI theme so it's
+-- rendered server-side and never reverts on browser storage eviction.
+CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- ─── Indexes ─────────────────────────────────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_sleep_date         ON sleep(date);

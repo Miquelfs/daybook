@@ -1,8 +1,38 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { BottomNav } from "@/components/BottomNav";
+
+const API =
+  process.env.API_INTERNAL_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8000";
+
+// Resolve the theme SERVER-SIDE so `data-theme` is baked into the first byte of
+// HTML on every request — no client script, no dependence on browser storage
+// (which iOS Safari evicts, the root cause of the app flipping to dark on its
+// own). The DB holds the single global preference; the cookie is only a fast
+// fallback for a transient API hiccup so we still don't snap to dark.
+async function resolveTheme(): Promise<"light" | "dark"> {
+  try {
+    const res = await fetch(`${API}/settings/theme`, { cache: "no-store" });
+    if (res.ok) {
+      const j = await res.json();
+      if (j?.theme === "light" || j?.theme === "dark") return j.theme;
+    }
+  } catch {
+    /* fall through to cookie */
+  }
+  try {
+    const c = (await cookies()).get("db-theme")?.value;
+    if (c === "light" || c === "dark") return c;
+  } catch {
+    /* ignore */
+  }
+  return "dark";
+}
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -19,44 +49,23 @@ export const metadata: Metadata = {
   description: "One day at a time. Owned, indexed, and made meaningful.",
 };
 
-// Applies the stored theme before first paint (no flash).
-// Resolution order: server-set cookie → localStorage. The device's
-// prefers-color-scheme is deliberately NOT consulted: it caused the app to flip
-// to dark on its own whenever the persisted preference had been evicted (iOS
-// Safari ITP) while the device was in auto/scheduled dark mode. The cookie is
-// now written server-side (/api/theme), which ITP does not cap to 7 days, so
-// the chosen appearance sticks. If nothing is stored we keep the dark default.
-const themeScript = `
-(function () {
-  try {
-    var t;
-    var c = document.cookie.match(/(?:^|; )db-theme=([^;]+)/);
-    if (c) t = decodeURIComponent(c[1]);
-    if (!t) { try { t = localStorage.getItem("db-theme"); } catch (e) {} }
-    if (t === "light") {
-      document.documentElement.setAttribute("data-theme", "light");
-      var m = document.querySelector('meta[name="theme-color"]');
-      if (m) m.setAttribute("content", "#F3EFE6");
-    }
-  } catch (e) {}
-})();
-`;
-
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const theme = await resolveTheme();
+  const isLight = theme === "light";
   return (
     <html
       lang="en"
+      data-theme={isLight ? "light" : undefined}
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
       <head>
-        <meta name="theme-color" content="#09090B" />
+        <meta name="theme-color" content={isLight ? "#F3EFE6" : "#09090B"} />
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="min-h-full bg-[#09090B] text-[#FAFAFA] antialiased">
         <Providers>

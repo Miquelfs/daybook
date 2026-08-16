@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 
 from infrastructure.api.routers import days, insights, questionnaire
@@ -157,6 +158,49 @@ def _run_migrations() -> None:
     _conn7 = _get_conn()
     _migrate_pax_flights(_conn7)
     _conn7.close()
+    from infrastructure.db.migrate_settings import migrate as _migrate_settings
+    _conn8 = _get_conn()
+    _migrate_settings(_conn8)
+    _conn8.close()
+
+
+class ThemeIn(BaseModel):
+    theme: str
+
+
+def _read_theme() -> str:
+    """Global UI theme from the DB. Single-user app → one server-side setting,
+    so it's immune to browser storage eviction and identical on every device."""
+    from infrastructure.db.connection import get_connection as _get_conn
+    try:
+        conn = _get_conn()
+        row = conn.execute("SELECT value FROM app_settings WHERE key='theme'").fetchone()
+        conn.close()
+        if row and row["value"] in ("light", "dark"):
+            return row["value"]
+    except Exception:
+        pass
+    return "dark"
+
+
+@app.get("/settings/theme")
+def get_theme():
+    return {"theme": _read_theme()}
+
+
+@app.post("/settings/theme")
+def set_theme(body: ThemeIn):
+    from infrastructure.db.connection import get_connection as _get_conn
+    theme = body.theme if body.theme in ("light", "dark") else "dark"
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES ('theme', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (theme,),
+    )
+    conn.commit()
+    conn.close()
+    return {"theme": theme}
 
 
 @app.get("/")

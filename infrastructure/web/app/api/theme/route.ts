@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Persist the theme in a *server-set* cookie. iOS Safari's ITP caps cookies
-// written from client JS (document.cookie) to ~7 days and periodically evicts
-// localStorage, which was silently reverting a chosen light theme back to dark.
-// A first-party HTTP cookie set here is not subject to that cap, so the
-// preference survives.
+const API =
+  process.env.API_INTERNAL_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8000";
+
+// Persist the theme in the server DB (single global setting). Browser storage —
+// even a server-set cookie — is not reliable on iOS Safari (ITP evicts it, and
+// each origin/hostname has its own jar), which is why the theme kept snapping
+// back to dark. The DB is the durable source of truth; the layout reads it
+// server-side and renders the theme on every request. The cookie set below is
+// only a fast local mirror so the very next paint matches without a round-trip.
 export async function POST(req: NextRequest) {
   let theme = "dark";
   try {
@@ -13,12 +19,19 @@ export async function POST(req: NextRequest) {
   } catch {
     /* default dark */
   }
+  await fetch(`${API}/settings/theme`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ theme }),
+    cache: "no-store",
+  }).catch(() => { /* offline — cookie mirror below still carries it */ });
+
   const res = NextResponse.json({ ok: true, theme });
   res.cookies.set("db-theme", theme, {
     path: "/",
-    maxAge: 60 * 60 * 24 * 365, // 1 year
+    maxAge: 60 * 60 * 24 * 365,
     sameSite: "lax",
-    httpOnly: false, // the pre-paint inline script reads it to avoid a flash
+    httpOnly: false,
   });
   return res;
 }
