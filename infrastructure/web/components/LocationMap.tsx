@@ -135,8 +135,8 @@ export function LocationMap({ geojson, editable = false, date, onVisitAdded, sho
       mapRef.current = map;
 
       L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-        { attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com">CARTO</a>', maxZoom: 19 }
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        { attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19 }
       ).addTo(map);
 
       const allBounds: [number, number][] = [];

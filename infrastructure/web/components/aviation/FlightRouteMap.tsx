@@ -23,14 +23,19 @@ interface Props {
   airlineColors?: BaseColorMap;
 }
 
+const OSM_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+// Applied to the tile pane only (leaves routes/markers untouched) to fake a
+// dark basemap from the light OSM tiles.
+const DARK_TILE_FILTER = "invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9)";
+
 const TILE_LAYERS: Record<MapStyle, { url: string; attribution: string }> = {
   dark: {
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution: "©OpenStreetMap ©CARTO",
+    url: OSM_URL,
+    attribution: "©OpenStreetMap",
   },
   light: {
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: "©OpenStreetMap ©CARTO",
+    url: OSM_URL,
+    attribution: "©OpenStreetMap",
   },
   satellite: {
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -105,6 +110,10 @@ export function FlightRouteMap({
         attribution: tiles.attribution,
         maxZoom: 18,
       }).addTo(map);
+      if (mapStyle === "dark") {
+        const tilePane = map.getPane("tilePane");
+        if (tilePane) tilePane.style.filter = DARK_TILE_FILTER;
+      }
 
       // Draw routes — colored by operator
       for (const route of routes) {

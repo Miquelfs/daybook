@@ -24,9 +24,12 @@ export function PlacePinMap({ lat, lng, label }: { lat: number; lng: number; lab
         scrollWheelZoom: false,
         dragging: false,
       });
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
       }).addTo(map);
+      // OSM tiles are light; filter the tile pane (only) to a dark basemap look.
+      const tilePane = map.getPane("tilePane");
+      if (tilePane) tilePane.style.filter = "invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9)";
       L.circleMarker([lat, lng], {
         radius: 8,
         color: "#F59E0B",

@@ -19,9 +19,12 @@ function loadScript(src: string): Promise<void> {
   });
 }
 
-const TILES: Record<Theme, string> = {
-  dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-  light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+// Keyless OSM tiles (CARTO now stamps "API KEY REQUIRED"). Dark is faked by a
+// CSS filter on the tile pane only, so overlays/heat/markers stay untouched.
+const OSM_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const TILE_FILTER: Record<Theme, string> = {
+  dark: "invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9)",
+  light: "",
 };
 
 /**
@@ -103,10 +106,12 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
       // be in light mode) so the map builds with the correct basemap, no flash.
       const liveTheme: Theme =
         document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
-      tileRef.current = L.tileLayer(TILES[liveTheme], {
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com">CARTO</a>',
+      tileRef.current = L.tileLayer(OSM_URL, {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 19,
       }).addTo(map);
+      const tilePane = map.getPane("tilePane");
+      if (tilePane) tilePane.style.filter = TILE_FILTER[liveTheme];
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const visitedFor = (props: any): Country | undefined => {
@@ -171,10 +176,11 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Theme swap.
+  // Theme swap — recolour the tile pane (tiles stay the same OSM source).
   useEffect(() => {
-    if (!ready || !mapRef.current || !tileRef.current) return;
-    tileRef.current.setUrl(TILES[theme]);
+    if (!ready || !mapRef.current) return;
+    const tilePane = mapRef.current.getPane("tilePane");
+    if (tilePane) tilePane.style.filter = TILE_FILTER[theme];
   }, [theme, ready]);
 
   // Mode swap.
