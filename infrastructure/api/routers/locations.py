@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 
 from domains.locations.country_names import to_english
+from domains.locations.flight_filter import cleanup_flight_points, is_airborne
 from domains.locations.locations_query import tracks_for_date
 
 router = APIRouter(prefix="/locations", tags=["locations"])
@@ -631,6 +632,13 @@ def _run_processor(dates: set[str]) -> None:
             process(date_filter=date, geocode=True)
         except Exception as e:
             print(f"[overland_process] error for {date}: {e}")
+        # Scrub any en-route points/tracks for this date that slipped past the
+        # ingest guard but fall inside a logged flight window (e.g. low-altitude
+        # short hops, or a flight logged after these points were captured).
+        try:
+            cleanup_flight_points(date=date, verbose=False)
+        except Exception as e:
+            print(f"[flight_filter] error for {date}: {e}")
 
 
 @router.post("/manual-visit")
@@ -756,6 +764,14 @@ async def ingest_overland(request: Request, background: BackgroundTasks):
                 skipped += 1
                 continue
             alt = coords[2] if len(coords) > 2 else None
+
+            # Drop fixes taken in the air (high GPS altitude or impossible ground
+            # speed). Overland keeps logging in flight; those en-route points
+            # otherwise scatter bogus places across the flight path. This works
+            # even before the flight is logged in the logbook.
+            if is_airborne(alt, props.get("speed")):
+                skipped += 1
+                continue
 
             ts = props.get("timestamp", "")
             if not ts:
