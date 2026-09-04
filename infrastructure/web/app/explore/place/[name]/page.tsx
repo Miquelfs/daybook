@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -26,19 +26,33 @@ function formatDate(d: string) {
   });
 }
 
+// useSearchParams() bails a static page to client-side rendering up to the
+// nearest Suspense boundary — required in production builds or the build fails.
 export default function PlacePage() {
+  return (
+    <Suspense fallback={null}>
+      <PlacePageContent />
+    </Suspense>
+  );
+}
+
+function PlacePageContent() {
   const { name } = useParams<{ name: string }>();
   const placeName = decodeURIComponent(name);
+  // Present when this page was reached from a city-level list (Cities/Travel
+  // log) rather than a single named venue — disambiguates same-named cities
+  // in different countries.
+  const countryParam = useSearchParams().get("country") ?? undefined;
   const [pages, setPages] = useState(1);
 
   const { data: summary } = useQuery({
-    queryKey: ["place-summary", placeName],
-    queryFn: () => api.placeSummary(placeName),
+    queryKey: ["place-summary", placeName, countryParam],
+    queryFn: () => api.placeSummary(placeName, countryParam),
   });
 
   const { data: visits = [], isLoading, isFetching } = useQuery({
-    queryKey: ["place-dates", placeName, pages],
-    queryFn: () => api.placeDates(placeName, { limit: pages * PAGE_SIZE }),
+    queryKey: ["place-dates", placeName, countryParam, pages],
+    queryFn: () => api.placeDates(placeName, { limit: pages * PAGE_SIZE, country: countryParam }),
     placeholderData: (prev: PlaceDate[] | undefined) => prev,
   });
 

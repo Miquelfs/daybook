@@ -754,6 +754,7 @@ export type GeoFeature = {
     semantic_type: string | null;
     city: string | null;
     country: string | null;
+    activity_type: string | null;  // run/ride/hike/walk/swim/... when this leg overlaps a logged Garmin/Strava activity
   };
 };
 
@@ -972,14 +973,18 @@ export const api = {
     get<TopPlace[]>(`/locations/top-places?limit=30${year ? `&year=${year}` : ""}`),
   cityTimeline: (year?: number) =>
     get<CityStay[]>(`/locations/city-timeline${year ? `?year=${year}` : ""}`),
-  placeDates: (place: string, opts?: { year?: number; limit?: number; offset?: number }) =>
+  placeDates: (place: string, opts?: { year?: number; limit?: number; offset?: number; country?: string }) =>
     get<PlaceDate[]>(
       `/locations/place-dates?place=${encodeURIComponent(place)}` +
         (opts?.year ? `&year=${opts.year}` : "") +
+        (opts?.country ? `&country=${encodeURIComponent(opts.country)}` : "") +
         `&limit=${opts?.limit ?? 100}&offset=${opts?.offset ?? 0}`
     ),
-  placeSummary: (place: string) =>
-    get<PlaceSummary>(`/locations/place-summary?place=${encodeURIComponent(place)}`),
+  placeSummary: (place: string, country?: string) =>
+    get<PlaceSummary>(
+      `/locations/place-summary?place=${encodeURIComponent(place)}` +
+        (country ? `&country=${encodeURIComponent(country)}` : "")
+    ),
   movementStats: (year?: number) =>
     get<MovementStats>(`/locations/movement/stats${year ? `?year=${year}` : ""}`),
   worldCoverage: (year?: number) =>

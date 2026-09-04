@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { TracksGeoJSON } from "@/lib/api";
+import { SPORT_COLORS, sportOf } from "@/lib/sport";
 
 interface Props {
   geojson: TracksGeoJSON;
@@ -11,21 +12,78 @@ interface Props {
   showLabels?: boolean;   // permanent place-name tooltips on named stops
 }
 
+/** Imperative handle so a places list elsewhere on the page can jump the map
+ * to a stop and pop its marker open, instead of the stop just being dead text. */
+export interface LocationMapHandle {
+  focusPlace: (key: string) => void;
+}
+
 const SEMANTIC_ICON: Record<string, string> = {
   Home: "🏠", Work: "💼", home: "🏠", work: "💼",
 };
 
-const TRACK_COLOR = "#2563EB";
 const STOP_COLOR  = "#EA580C";
-const MOVE_COLOR  = "#94A3B8";
 const PIN_COLOR   = "#F59E0B";
 
-export function LocationMap({ geojson, editable = false, date, onVisitAdded, showLabels = false }: Props) {
+// Route coloring: authoritative exercise mode (from a logged Garmin/Strava
+// activity) wins when a leg overlaps one; everything else falls back to a
+// coarse, honest speed tier — we can't reliably tell car from bus from train
+// off raw GPS alone, so "vehicle" doesn't pretend to know which.
+const MODE_STYLE: Record<string, { color: string; label: string }> = {
+  run:        { color: SPORT_COLORS.run,  label: "Run" },
+  ride:       { color: SPORT_COLORS.ride, label: "Ride" },
+  swim:       { color: SPORT_COLORS.swim, label: "Swim" },
+  other_ex:   { color: SPORT_COLORS.other, label: "Exercise" },
+  foot:       { color: "#94A3B8", label: "On foot" },
+  vehicle:    { color: "#8B5CF6", label: "Vehicle" },
+  stationary: { color: "#52525B", label: "Stationary" },
+};
+const MOVE_COLOR = MODE_STYLE.foot.color;
+
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** Classify the leg between two consecutive track points. An activity_type
+ * on either endpoint (a logged Garmin/Strava session) is authoritative;
+ * otherwise fall back to a speed-derived tier. */
+function classifyLeg(
+  a: { latlng: [number, number]; time: string; activityType: string | null },
+  b: { latlng: [number, number]; time: string; activityType: string | null }
+): string {
+  const activityType = b.activityType ?? a.activityType;
+  if (activityType) {
+    const sport = sportOf(activityType);
+    return sport === "other" ? "other_ex" : sport;
+  }
+  const distM = haversineM(a.latlng[0], a.latlng[1], b.latlng[0], b.latlng[1]);
+  const durS = (new Date(b.time).getTime() - new Date(a.time).getTime()) / 1000;
+  if (durS <= 0 || distM < 15) return "stationary";
+  const speedKmh = (distM / 1000) / (durS / 3600);
+  if (speedKmh < 1.5) return "stationary";
+  if (speedKmh <= 7) return "foot";
+  return "vehicle";
+}
+
+export const LocationMap = forwardRef<LocationMapHandle, Props>(function LocationMap(
+  { geojson, editable = false, date, onVisitAdded, showLabels = false },
+  ref
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef       = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pinMarkerRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markersRef   = useRef<Map<string, any>>(new Map());
+  const [modesUsed, setModesUsed] = useState<string[]>([]);
 
   const [pinMode, setPinMode]     = useState(false);
   const [pending, setPending]     = useState<{ lat: number; lng: number } | null>(null);
@@ -34,6 +92,17 @@ export function LocationMap({ geojson, editable = false, date, onVisitAdded, sho
   const [departedAt, setDepartedAt] = useState("");
   const [geocoding, setGeocoding] = useState(false);
   const [saving, setSaving]       = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    focusPlace: (key: string) => {
+      const map = mapRef.current;
+      const marker = markersRef.current.get(key);
+      if (!map || !marker) return;
+      const targetZoom = Math.max(map.getZoom(), 16);
+      map.flyTo(marker.getLatLng(), targetZoom, { duration: 0.6 });
+      marker.openPopup();
+    },
+  }), []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -139,21 +208,41 @@ export function LocationMap({ geojson, editable = false, date, onVisitAdded, sho
         { attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19 }
       ).addTo(map);
 
-      const allBounds: [number, number][] = [];
-      const allLatlngs: [number, number][] = geojson.features.flatMap((f) => {
+      // Flatten every feature into an ordered list of points, each carrying
+      // its own timestamp + activity_type, so consecutive legs can be
+      // classified and colored individually instead of drawn as one flat line.
+      type LegPoint = { latlng: [number, number]; time: string; activityType: string | null };
+      const legPoints: LegPoint[] = geojson.features.flatMap((f) => {
+        const props = f.properties;
         if (f.geometry.type === "LineString") {
-          return (f.geometry.coordinates as [number, number][]).map(([lng, lat]): [number, number] => [lat, lng]);
+          const coords = f.geometry.coordinates as [number, number][];
+          return coords.map(([lng, lat], i): LegPoint => ({
+            latlng: [lat, lng],
+            time: i === 0 ? props.segment_start : props.segment_end,
+            activityType: props.activity_type,
+          }));
         }
         const [lng, lat] = f.geometry.coordinates as [number, number];
-        return [[lat, lng] as [number, number]];
+        return [{ latlng: [lat, lng] as [number, number], time: props.segment_start, activityType: props.activity_type }];
       });
-      allBounds.push(...allLatlngs);
 
-      if (allLatlngs.length >= 2) {
-        L.polyline(allLatlngs, { color: "#fff", weight: 6, opacity: 0.55 }).addTo(map);
-        L.polyline(allLatlngs, { color: TRACK_COLOR, weight: 3.5, opacity: 0.9 }).addTo(map);
+      const allBounds: [number, number][] = legPoints.map((p) => p.latlng);
+      const usedModes = new Set<string>();
+
+      if (legPoints.length >= 2) {
+        L.polyline(allBounds, { color: "#fff", weight: 6, opacity: 0.55 }).addTo(map);
+        for (let i = 0; i < legPoints.length - 1; i++) {
+          const mode  = classifyLeg(legPoints[i], legPoints[i + 1]);
+          const style = MODE_STYLE[mode] ?? MODE_STYLE.vehicle;
+          usedModes.add(mode);
+          L.polyline([legPoints[i].latlng, legPoints[i + 1].latlng], {
+            color: style.color, weight: 3.5, opacity: 0.9,
+          }).addTo(map);
+        }
       }
+      setModesUsed([...usedModes]);
 
+      markersRef.current = new Map();
       const seen = new Set<string>();
       geojson.features.forEach((feature) => {
         const props = feature.properties;
@@ -173,7 +262,6 @@ export function LocationMap({ geojson, editable = false, date, onVisitAdded, sho
         const key    = name ?? `${latlng.join(",")}`;
         const isStop = !!name && !seen.has(key);
         if (isStop) seen.add(key);
-        allBounds.push(latlng);
 
         const dot = L.circleMarker(latlng, {
           radius: isStop ? 7 : 4,
@@ -181,6 +269,8 @@ export function LocationMap({ geojson, editable = false, date, onVisitAdded, sho
           fillColor: isStop ? STOP_COLOR : MOVE_COLOR,
           fillOpacity: 1,
         }).addTo(map);
+
+        if (isStop) markersRef.current.set(key, dot);
 
         if (name) {
           const icon  = props.semantic_type ? (SEMANTIC_ICON[props.semantic_type] ?? "") : "";
@@ -244,6 +334,20 @@ export function LocationMap({ geojson, editable = false, date, onVisitAdded, sho
         )}
       </div>
 
+      {/* Route legend — only worth showing once the route mixes more than one mode */}
+      {modesUsed.length > 1 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {modesUsed
+            .filter((m) => m !== "stationary")
+            .map((m) => (
+              <span key={m} className="flex items-center gap-1.5 text-[11px] text-[#71717A]">
+                <span className="inline-block w-3 h-[3px] rounded-full" style={{ backgroundColor: MODE_STYLE[m].color }} />
+                {MODE_STYLE[m].label}
+              </span>
+            ))}
+        </div>
+      )}
+
       {/* Confirm popover */}
       {pending && (
         <div className="bg-[#0D0D0F] border border-[#F59E0B]/30 rounded-xl px-4 py-3 flex flex-col gap-3">
@@ -295,4 +399,4 @@ export function LocationMap({ geojson, editable = false, date, onVisitAdded, sho
       )}
     </div>
   );
-}
+});

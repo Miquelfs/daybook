@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { LocationMap } from "@/components/LocationMap";
+import { useRef, useState } from "react";
+import { LocationMap, type LocationMapHandle } from "@/components/LocationMap";
 import type { TracksGeoJSON } from "@/lib/api";
 
 const BASE =
@@ -90,6 +90,9 @@ function computeDistanceM(tracks: TracksGeoJSON): number {
 export function LocationSection({ date, initialTracks, editable = false }: Props) {
   const [tracks, setTracks] = useState<TracksGeoJSON>(initialTracks);
   const [listOpen, setListOpen] = useState(false);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const mapRef = useRef<LocationMapHandle>(null);
+  const mapWrapRef = useRef<HTMLDivElement>(null);
 
   const refresh = () => {
     fetch(`${BASE}/locations/tracks/${date}`, { cache: "no-store" })
@@ -132,12 +135,15 @@ export function LocationSection({ date, initialTracks, editable = false }: Props
       )}
 
       {/* Map */}
-      <LocationMap
-        geojson={tracks}
-        editable={editable}
-        date={date}
-        onVisitAdded={refresh}
-      />
+      <div ref={mapWrapRef}>
+        <LocationMap
+          ref={mapRef}
+          geojson={tracks}
+          editable={editable}
+          date={date}
+          onVisitAdded={refresh}
+        />
+      </div>
 
       {/* Show/hide places toggle + collapsible list */}
       {legendItems.length > 0 && (
@@ -155,17 +161,28 @@ export function LocationSection({ date, initialTracks, editable = false }: Props
               {legendItems.map((f, i) => {
                 const props = f.properties;
                 const name  = props.place_name ?? props.city ?? "Unknown";
+                const key   = props.place_name ?? props.city ?? "";
                 const start = new Date(props.segment_start).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
                 const end   = new Date(props.segment_end).toLocaleTimeString("en-GB",   { hour: "2-digit", minute: "2-digit" });
                 return (
-                  <div key={i} className="flex items-center gap-2 text-xs text-[#A1A1AA]">
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setActiveKey(key);
+                      mapWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      mapRef.current?.focusPlace(key);
+                    }}
+                    className={`flex items-center gap-2 w-full text-xs text-left rounded-lg px-1.5 py-1 -mx-1.5 transition-colors ${
+                      activeKey === key ? "bg-[#18181B] text-[#FAFAFA]" : "text-[#A1A1AA] hover:bg-[#18181B]/60"
+                    }`}
+                  >
                     <span className="shrink-0 w-2.5 h-2.5 rounded-full border-2 border-white/20" style={{ backgroundColor: STOP_COLOR }} />
                     <span className="font-medium text-[#D4D4D8] truncate">{name}</span>
                     {props.city && props.city !== name && (
                       <span className="text-[#52525B] truncate">{props.city}</span>
                     )}
                     <span className="ml-auto shrink-0 tabular-nums text-[#52525B]">{start}–{end}</span>
-                  </div>
+                  </button>
                 );
               })}
             </div>

@@ -7,9 +7,11 @@ All functions return plain dicts suitable for JSON serialisation.
 """
 
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 
 _DB = Path(__file__).parents[2] / "infrastructure" / "db" / "locations.db"
+_DAYBOOK_DB = Path(__file__).parents[2] / "infrastructure" / "db" / "daybook.db"
 
 _CITY_NORM: dict[str, str] = {
     "Palma de Mallorca": "Palma",
@@ -143,6 +145,38 @@ def location_data_for_date(date: str) -> tuple[dict, list[dict]]:
     return summary, [dict(r) for r in visit_rows]
 
 
+def _parse_iso(s: str) -> datetime:
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+def _activities_for_date(date: str) -> list[tuple[datetime, datetime, str | None]]:
+    """(start, end, activity_type) windows for Garmin/Strava activities on a
+    date — authoritative exercise mode (run/ride/hike/walk/swim/...), used to
+    label GPS track segments instead of guessing from speed alone."""
+    con = sqlite3.connect(_DAYBOOK_DB)
+    con.row_factory = sqlite3.Row
+    try:
+        rows = con.execute(
+            "SELECT activity_type, start_time, duration_seconds FROM activities "
+            "WHERE date = ? AND start_time IS NOT NULL",
+            (date,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        con.close()
+
+    out = []
+    for r in rows:
+        try:
+            start = _parse_iso(r["start_time"])
+        except (ValueError, AttributeError):
+            continue
+        end = start + timedelta(seconds=r["duration_seconds"] or 0)
+        out.append((start, end, r["activity_type"]))
+    return out
+
+
 def tracks_for_date(date: str) -> list[dict]:
     """Return GPS track segments for a date as GeoJSON-ready dicts.
 
@@ -151,8 +185,24 @@ def tracks_for_date(date: str) -> list[dict]:
        matched by time overlap) — most descriptive
     2. visit semantic_type (Home / Work) if present
     3. Fallback to the track's own geocode_name / geocode_city (district level)
+
+    Each segment also carries `activity_type` when it overlaps a logged
+    Garmin/Strava activity (run/ride/hike/walk/swim/...) — used by the map to
+    color the route by an authoritative mode rather than guessing from speed.
     """
     import json as _json
+
+    activities = _activities_for_date(date)
+
+    def best_activity(seg_start: str, seg_end: str) -> str | None:
+        try:
+            s, e = _parse_iso(seg_start), _parse_iso(seg_end)
+        except (ValueError, AttributeError):
+            return None
+        for a_start, a_end, a_type in activities:
+            if a_start <= e and a_end >= s:
+                return a_type
+        return None
 
     con = _conn()
     rows = con.execute(
@@ -205,6 +255,7 @@ def tracks_for_date(date: str) -> list[dict]:
             "semantic_type": enrich.get("semantic_type"),
             "city": enrich.get("city") or r["geocode_city"],
             "country": enrich.get("country") or r["geocode_country"],
+            "activity_type": best_activity(r["segment_start"], r["segment_end"]),
             "coordinates": [[p["lng"], p["lat"]] for p in pts],
         })
     return result

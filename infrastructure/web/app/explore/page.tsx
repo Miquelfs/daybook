@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ChevronRight, Globe, PersonStanding, Database } from "lucide-react";
 import { api } from "@/lib/api";
-import { ExploreMap } from "@/components/ExploreMap";
+import { ExploreMapConnected } from "@/components/ExploreMapConnected";
+import { TravelMapProvider } from "@/components/TravelMapContext";
+import { CountriesList } from "@/components/CountriesList";
 import { ManualCountries } from "@/components/ManualCountries";
 import { TripYears } from "@/components/TripYears";
 import { YearSelect } from "@/components/YearSelect";
@@ -113,6 +115,7 @@ export default async function ExplorePage({ searchParams }: Props) {
         </div>
       </div>
 
+      <TravelMapProvider>
       {/* Combined travel map — coverage choropleth / GPS heatmap, one toggle */}
       {(data.points.length > 0 || (coverage && coverage.countries_visited > 0)) && (
         <section className="mb-8">
@@ -143,7 +146,7 @@ export default async function ExplorePage({ searchParams }: Props) {
               </div>
             </div>
           )}
-          <ExploreMap points={data.points} details={coverage?.country_details ?? []} />
+          <ExploreMapConnected points={data.points} details={coverage?.country_details ?? []} />
           {coverage && coverage.countries_visited > 0 && !year && (
             <ManualCountries
               allCountries={coverage.all_countries}
@@ -216,32 +219,7 @@ export default async function ExplorePage({ searchParams }: Props) {
             </div>
           )}
 
-          <div className="flex flex-col gap-1">
-            {data.countries.map((c, idx) => {
-              const pct = totalDays > 0 ? (c.days / totalDays) * 100 : 0;
-              const isTop3 = idx < 3;
-              return (
-                <div key={c.country} className="flex items-center gap-2">
-                  <span className="text-base w-6 text-center shrink-0">
-                    {FLAG[c.country] ?? "🌍"}
-                  </span>
-                  <span className="text-sm text-[#D4D4D8] flex-1 truncate">{c.country}</span>
-                  <div className="w-20 h-1.5 rounded-full bg-[#27272A] shrink-0">
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${Math.max(pct, 2)}%`, background: "#F59E0B" }}
-                    />
-                  </div>
-                  <span
-                    className="text-xs tabular-nums w-8 text-right shrink-0"
-                    style={{ color: isTop3 ? "#F59E0B" : "#52525B" }}
-                  >
-                    {c.days}d
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          <CountriesList countries={data.countries} details={coverage?.country_details ?? []} totalDays={totalDays} flags={FLAG} />
         </section>
 
         {/* Top cities */}
@@ -249,22 +227,27 @@ export default async function ExplorePage({ searchParams }: Props) {
           <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Cities</h2>
           <div className="flex flex-col gap-1">
             {data.cities.slice(0, 20).map((c, i) => (
-              <div key={i} className="flex items-center gap-2">
+              <Link
+                key={i}
+                href={`/explore/place/${encodeURIComponent(c.city)}?country=${encodeURIComponent(c.country)}`}
+                className="flex items-center gap-2 rounded-lg px-1 py-0.5 -mx-1 hover:bg-[#18181B] transition-colors group"
+              >
                 <span className="text-xs text-[#3F3F46] tabular-nums w-4 text-right shrink-0">
                   {i + 1}
                 </span>
-                <span className="text-sm text-[#D4D4D8] flex-1 truncate">{c.city}</span>
+                <span className="text-sm text-[#D4D4D8] flex-1 truncate group-hover:text-[#FAFAFA] transition-colors">{c.city}</span>
                 <span className="text-xs text-[#52525B] truncate max-w-[80px]">
                   {FLAG[c.country] ?? ""} {c.country}
                 </span>
                 <span className="text-xs text-[#52525B] tabular-nums w-8 text-right shrink-0">
                   {c.days}d
                 </span>
-              </div>
+              </Link>
             ))}
           </div>
         </section>
       </div>
+      </TravelMapProvider>
 
       {/* Most visited places */}
       {topPlaces.length > 0 && (
@@ -310,15 +293,19 @@ export default async function ExplorePage({ searchParams }: Props) {
                 ? new Date(stay.first_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
                 : `${new Date(stay.first_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ${new Date(stay.last_date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
               return (
-                <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#18181B] transition-colors">
+                <Link
+                  key={i}
+                  href={`/explore/place/${encodeURIComponent(stay.city)}?country=${encodeURIComponent(stay.country)}`}
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#18181B] transition-colors group"
+                >
                   <span className="text-base w-6 text-center shrink-0">{FLAG[stay.country] ?? "🌍"}</span>
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm text-[#D4D4D8] font-medium">{stay.city}</span>
+                    <span className="text-sm text-[#D4D4D8] font-medium group-hover:text-[#FAFAFA] transition-colors">{stay.city}</span>
                     <span className="text-xs text-[#52525B] ml-2">{stay.country}</span>
                   </div>
                   <span className="text-xs text-[#52525B] tabular-nums shrink-0">{dateLabel}</span>
                   <span className="text-xs text-[#F59E0B] tabular-nums w-8 text-right shrink-0">{stay.days}d</span>
-                </div>
+                </Link>
               );
             })}
           </div>

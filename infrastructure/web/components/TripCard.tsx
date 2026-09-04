@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Pencil, Check, X, Trash2 } from "lucide-react";
 import type { Trip } from "@/lib/api";
 
@@ -106,11 +107,25 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
           )}
         </div>
       </div>
-      <button onClick={go} className="text-xs text-[#52525B] mt-0.5 text-left block w-full">
-        {fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}
-        {trip.cities.length > 0 && <span className="text-[#3F3F46]"> · {trip.cities.slice(0, 3).join(", ")}</span>}
+      <div className="text-xs text-[#52525B] mt-0.5 flex flex-wrap items-baseline gap-x-1">
+        <button onClick={go} className="hover:text-[#A1A1AA] transition-colors">
+          {fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}
+        </button>
+        {trip.cities.length > 0 && (
+          <span className="text-[#3F3F46]">
+            {" "}·{" "}
+            {trip.cities.slice(0, 3).map((city, i) => (
+              <Fragment key={city}>
+                {i > 0 && ", "}
+                <Link href={`/explore/place/${encodeURIComponent(city)}`} className="hover:text-[#A1A1AA] hover:underline transition-colors">
+                  {city}
+                </Link>
+              </Fragment>
+            ))}
+          </span>
+        )}
         {trip.home_at_start && <span className="text-[#3F3F46]"> · from {trip.home_at_start}</span>}
-      </button>
+      </div>
     </div>
   );
 }

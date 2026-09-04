@@ -188,6 +188,7 @@ def get_tracks(date_str: str):
             "semantic_type": seg["semantic_type"],
             "city": seg["city"],
             "country": seg["country"],
+            "activity_type": seg["activity_type"],
         }
         if len(coords) >= 2:
             geometry = {"type": "LineString", "coordinates": coords}
@@ -225,6 +226,7 @@ def get_tracks_range(start: str, end: str):
                 "semantic_type": seg["semantic_type"],
                 "city": seg["city"],
                 "country": seg["country"],
+                "activity_type": seg["activity_type"],
             }
             geometry = (
                 {"type": "LineString", "coordinates": coords}
@@ -476,30 +478,42 @@ def get_city_timeline(year: int | None = None):
 
 
 @router.get("/place-summary")
-def get_place_summary(place: str):
-    """One place's headline: total days, first/last visit, coordinates."""
+def get_place_summary(place: str, country: str | None = None):
+    """One place's headline: total days, first/last visit, coordinates.
+
+    `place` matches either a specific venue (tracks.geocode_name) or a whole
+    city (tracks.geocode_city) — so a city-level link (e.g. from the Explore
+    "Cities"/"Travel log" lists) lands on an aggregate of every visit in that
+    city, not just visits to one exact geocoded venue. `country` disambiguates
+    same-named cities in different countries.
+    """
     con = _conn()
+    country_clause = "AND geocode_country = :country" if country else ""
+    params = {"place": place, "country": country}
     try:
         meta = con.execute(
-            """SELECT COUNT(DISTINCT substr(date,1,10)) AS total_days,
+            f"""SELECT COUNT(DISTINCT substr(date,1,10)) AS total_days,
                       MIN(substr(date,1,10)) AS first_visit,
                       MAX(substr(date,1,10)) AS last_visit,
                       MAX(geocode_city) AS city,
                       MAX(geocode_country) AS country
-               FROM tracks WHERE geocode_name = ?""",
-            (place,),
+               FROM tracks
+               WHERE (geocode_name = :place OR geocode_city = :place) {country_clause}""",
+            params,
         ).fetchone()
         coords = con.execute(
             "SELECT lat, lng FROM place_names WHERE name = ? AND lat IS NOT NULL LIMIT 1",
             (place,),
         ).fetchone()
         if coords is None:
-            # Fall back to the first point of a track segment at this place
+            # Fall back to the first point of a track segment at this place/city
             coords = con.execute(
-                """SELECT json_extract(points_json, '$[0].lat') AS lat,
+                f"""SELECT json_extract(points_json, '$[0].lat') AS lat,
                           json_extract(points_json, '$[0].lng') AS lng
-                   FROM tracks WHERE geocode_name = ? AND points_json IS NOT NULL LIMIT 1""",
-                (place,),
+                   FROM tracks
+                   WHERE (geocode_name = :place OR geocode_city = :place) {country_clause}
+                     AND points_json IS NOT NULL LIMIT 1""",
+                params,
             ).fetchone()
     finally:
         con.close()
@@ -521,14 +535,18 @@ def get_place_dates(
     year: int | None = None,
     limit: int = 100,
     offset: int = 0,
+    country: str | None = None,
 ):
     """
-    Dates a named place was visited (newest first, paginated), with
-    mood/energy from that day.
+    Dates a named place — or, if `place` matches a city rather than one exact
+    venue, a whole city — was visited (newest first, paginated), with
+    mood/energy from that day. `country` disambiguates same-named cities.
     """
     con = _conn()
     year_clause = "AND substr(t.date,1,4) = ?" if year else ""
+    country_clause = "AND t.geocode_country = ?" if country else ""
     params: tuple = (str(year),) if year else ()
+    params += (country,) if country else ()
 
     try:
         rows = con.execute(
@@ -537,12 +555,12 @@ def get_place_dates(
                    t.geocode_city AS city,
                    t.geocode_country AS country
             FROM   tracks t
-            WHERE  t.geocode_name = ?
-                   {year_clause}
+            WHERE  (t.geocode_name = ? OR t.geocode_city = ?)
+                   {year_clause} {country_clause}
             ORDER BY date DESC
             LIMIT ? OFFSET ?
             """,
-            (place,) + params + (limit, offset),
+            (place, place) + params + (limit, offset),
         ).fetchall()
     except Exception:
         con.close()

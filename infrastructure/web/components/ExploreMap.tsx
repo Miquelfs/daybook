@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Globe, Flame } from "lucide-react";
 import type { HeatmapData, WorldCoverage } from "@/lib/api";
 
 type Country = WorldCoverage["country_details"][number];
 type Mode = "coverage" | "heatmap";
 type Theme = "dark" | "light";
+
+/** Lets the Countries list elsewhere on the page jump this map to a country
+ * (switch to coverage mode, fit its shape, pop its info) instead of the list
+ * being a dead read-only ranking. */
+export interface ExploreMapHandle {
+  focusCountry: (c: { country: string; iso2: string | null }) => void;
+}
 
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -32,7 +39,8 @@ const TILE_FILTER: Record<Theme, string> = {
  * coverage choropleth (countries filled by days visited, from the
  * locally-bundled world GeoJSON) and a GPS heatmap. Light/dark selectable.
  */
-export function ExploreMap({ points, details }: { points: HeatmapData["points"]; details: Country[] }) {
+export const ExploreMap = forwardRef<ExploreMapHandle, { points: HeatmapData["points"]; details: Country[] }>(
+  function ExploreMap({ points, details }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef = useRef<any>(null);
@@ -46,6 +54,8 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
   const [mode, setMode] = useState<Mode>("heatmap");
   const [theme, setTheme] = useState<Theme>("dark");
   const [ready, setReady] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pendingFocusRef = useRef<{ country: string; iso2: string | null } | null>(null);
 
   // Follow the app's global light/dark theme (set as data-theme on <html> by
   // ThemeToggle) so the map always matches the view you're in.
@@ -193,6 +203,44 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
     if (mode === "heatmap" && heatRef.current) heatRef.current.addTo(map);
   }, [mode, ready]);
 
+  // Resolves a pending focusCountry() request once the coverage layer is
+  // actually on the map (it may have just been switched on by the effect
+  // above, which runs first on the same commit).
+  const tryFocus = () => {
+    const c = pendingFocusRef.current;
+    const map = mapRef.current;
+    const coverage = coverageRef.current;
+    if (!c || !map || !coverage || !ready || !map.hasLayer(coverage)) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let target: any = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    coverage.eachLayer((layer: any) => {
+      if (target) return;
+      const props = layer.feature?.properties ?? {};
+      const iso = (props.iso2 || "").toUpperCase();
+      if ((c.iso2 && iso === c.iso2.toUpperCase()) || (props.name || "").toLowerCase() === c.country.toLowerCase()) {
+        target = layer;
+      }
+    });
+    pendingFocusRef.current = null;
+    if (!target) return;
+    map.fitBounds(target.getBounds(), { padding: [40, 40], maxZoom: 6 });
+    target.openPopup();
+  };
+
+  useEffect(() => {
+    if (mode === "coverage") tryFocus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, ready]);
+
+  useImperativeHandle(ref, () => ({
+    focusCountry: (c) => {
+      pendingFocusRef.current = c;
+      setMode("coverage");
+      tryFocus(); // covers the case where we're already in coverage mode (no mode change → no effect re-run)
+    },
+  }), []);
+
   const btn = (active: boolean) =>
     `flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
       active ? "bg-[#F59E0B] text-[#0D0D0F]" : "text-[#A1A1AA] hover:text-[#FAFAFA]"
@@ -216,4 +264,4 @@ export function ExploreMap({ points, details }: { points: HeatmapData["points"];
       </div>
     </>
   );
-}
+});
