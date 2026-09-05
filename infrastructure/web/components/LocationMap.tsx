@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { api } from "@/lib/api";
 import type { TracksGeoJSON } from "@/lib/api";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
 
@@ -25,20 +26,35 @@ const SEMANTIC_ICON: Record<string, string> = {
 const STOP_COLOR  = "#EA580C";
 const PIN_COLOR   = "#F59E0B";
 
-// Route coloring: authoritative exercise mode (from a logged Garmin/Strava
-// activity) wins when a leg overlaps one; everything else falls back to a
-// coarse, honest speed tier — we can't reliably tell car from bus from train
-// off raw GPS alone, so "vehicle" doesn't pretend to know which.
+// Route coloring, in priority order: a manual override always wins; then an
+// authoritative exercise mode (a logged Garmin/Strava activity); then
+// Overland's own on-device motion classification (walking/running/cycling/
+// driving, the last refined to car/scooter by the day's transport tag when
+// unambiguous); last resort is a speed-derived tier. "Vehicle" stays muted —
+// it means "some kind of motorized transport, unconfirmed" — while a
+// confirmed mode gets a real color, so confidence reads visually.
 const MODE_STYLE: Record<string, { color: string; label: string }> = {
-  run:        { color: SPORT_COLORS.run,  label: "Run" },
-  ride:       { color: SPORT_COLORS.ride, label: "Ride" },
-  swim:       { color: SPORT_COLORS.swim, label: "Swim" },
-  other_ex:   { color: SPORT_COLORS.other, label: "Exercise" },
-  foot:       { color: "#94A3B8", label: "On foot" },
-  vehicle:    { color: "#8B5CF6", label: "Vehicle" },
-  stationary: { color: "#52525B", label: "Stationary" },
+  run:              { color: SPORT_COLORS.run,  label: "Run" },
+  ride:             { color: SPORT_COLORS.ride, label: "Ride" },
+  swim:             { color: SPORT_COLORS.swim, label: "Swim" },
+  other_ex:         { color: SPORT_COLORS.other, label: "Exercise" },
+  foot:             { color: "#94A3B8", label: "On foot" },
+  car:              { color: "#8B5CF6", label: "Car" },
+  scooter:          { color: "#F97316", label: "Scooter" },
+  public_transport: { color: "#0EA5E9", label: "Public transport" },
+  vehicle:          { color: "#71717A", label: "Vehicle" },
+  stationary:       { color: "#52525B", label: "Stationary" },
 };
 const MOVE_COLOR = MODE_STYLE.foot.color;
+
+// Manually-settable modes, in the order offered in the edit popup.
+const EDITABLE_MODES = ["run", "ride", "swim", "foot", "car", "scooter", "public_transport", "vehicle", "stationary"];
+
+// Backend's raw motion/activity vocabulary → our MODE_STYLE keys.
+const MOTION_TO_MODE: Record<string, string> = {
+  walking: "foot", running: "run", cycling: "ride",
+  driving: "vehicle", car: "car", scooter: "scooter", stationary: "stationary",
+};
 
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6_371_000;
@@ -51,18 +67,22 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Classify the leg between two consecutive track points. An activity_type
- * on either endpoint (a logged Garmin/Strava session) is authoritative;
- * otherwise fall back to a speed-derived tier. */
+/** Auto-detect the leg between two consecutive track points (a manual
+ * override, checked separately by the caller, always wins over this).
+ * Priority: a logged Garmin/Strava activity_type on either endpoint, then
+ * Overland's own on-device motion classification, then a speed-derived
+ * tier as the last resort. */
 function classifyLeg(
-  a: { latlng: [number, number]; time: string; activityType: string | null },
-  b: { latlng: [number, number]; time: string; activityType: string | null }
+  a: { latlng: [number, number]; time: string; activityType: string | null; motion: string | null },
+  b: { latlng: [number, number]; time: string; activityType: string | null; motion: string | null }
 ): string {
   const activityType = b.activityType ?? a.activityType;
   if (activityType) {
     const sport = sportOf(activityType);
     return sport === "other" ? "other_ex" : sport;
   }
+  const motion = b.motion ?? a.motion;
+  if (motion && MOTION_TO_MODE[motion]) return MOTION_TO_MODE[motion];
   const distM = haversineM(a.latlng[0], a.latlng[1], b.latlng[0], b.latlng[1]);
   const durS = (new Date(b.time).getTime() - new Date(a.time).getTime()) / 1000;
   if (durS <= 0 || distM < 15) return "stationary";
@@ -70,6 +90,44 @@ function classifyLeg(
   if (speedKmh < 1.5) return "stationary";
   if (speedKmh <= 7) return "foot";
   return "vehicle";
+}
+
+/** Small DOM popup for correcting a leg's mode by hand — built imperatively
+ * since Leaflet popup content is a raw DOM node, not JSX. */
+function buildModePopup(currentMode: string, isManual: boolean, onPick: (mode: string | null) => void): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "font-family:system-ui;min-width:190px";
+
+  const title = document.createElement("div");
+  title.style.cssText = "font-weight:600;font-size:12px;color:#111;margin-bottom:6px";
+  title.textContent = isManual
+    ? `Set: ${MODE_STYLE[currentMode]?.label ?? currentMode}`
+    : `Detected: ${MODE_STYLE[currentMode]?.label ?? "Unknown"}`;
+  wrap.appendChild(title);
+
+  const grid = document.createElement("div");
+  grid.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:4px";
+  for (const m of EDITABLE_MODES) {
+    const btn = document.createElement("button");
+    btn.textContent = MODE_STYLE[m].label;
+    const active = m === currentMode;
+    btn.style.cssText =
+      `font-size:11px;padding:4px 6px;border-radius:6px;text-align:left;cursor:pointer;` +
+      `border:1px solid ${active ? MODE_STYLE[m].color : "#ddd"};` +
+      `background:${active ? MODE_STYLE[m].color + "22" : "#fff"};color:#111`;
+    btn.onclick = () => onPick(m);
+    grid.appendChild(btn);
+  }
+  wrap.appendChild(grid);
+
+  if (isManual) {
+    const reset = document.createElement("button");
+    reset.textContent = "↺ Reset to auto-detect";
+    reset.style.cssText = "margin-top:6px;font-size:11px;color:#888;background:none;border:none;cursor:pointer;padding:0";
+    reset.onclick = () => onPick(null);
+    wrap.appendChild(reset);
+  }
+  return wrap;
 }
 
 export const LocationMap = forwardRef<LocationMapHandle, Props>(function LocationMap(
@@ -84,6 +142,42 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef   = useRef<Map<string, any>>(new Map());
   const [modesUsed, setModesUsed] = useState<string[]>([]);
+
+  // Manual mode overrides for this day, keyed "legStartIso|legEndIso" — a
+  // ref (not state) because edits patch the map directly; overridesVersion
+  // is what actually triggers redraws (initial load, and each edit).
+  const overridesRef = useRef<Map<string, string>>(new Map());
+  const [overridesVersion, setOverridesVersion] = useState(0);
+  // Preserved pan/zoom, so an override-edit rebuild doesn't snap the map back.
+  const viewRef = useRef<{ center: [number, number]; zoom: number } | null>(null);
+
+  // New data → forget the preserved view so the next build re-fits bounds.
+  useEffect(() => { viewRef.current = null; }, [geojson]);
+
+  useEffect(() => {
+    if (!date) { overridesRef.current = new Map(); setOverridesVersion((v) => v + 1); return; }
+    let cancelled = false;
+    api.modeOverrides(date).then((rows) => {
+      if (cancelled) return;
+      overridesRef.current = new Map(rows.map((r) => [`${r.leg_start}|${r.leg_end}`, r.mode]));
+      setOverridesVersion((v) => v + 1);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [date]);
+
+  const saveOverride = async (legKey: string, mode: string | null) => {
+    if (!date) return;
+    const [legStart, legEnd] = legKey.split("|");
+    const prev = overridesRef.current.get(legKey) ?? null;
+    if (mode) overridesRef.current.set(legKey, mode); else overridesRef.current.delete(legKey);
+    setOverridesVersion((v) => v + 1);
+    try {
+      await api.setModeOverride(date, legStart, legEnd, mode);
+    } catch {
+      if (prev) overridesRef.current.set(legKey, prev); else overridesRef.current.delete(legKey);
+      setOverridesVersion((v) => v + 1);
+    }
+  };
 
   const [pinMode, setPinMode]     = useState(false);
   const [pending, setPending]     = useState<{ lat: number; lng: number } | null>(null);
@@ -209,9 +303,9 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
       ).addTo(map);
 
       // Flatten every feature into an ordered list of points, each carrying
-      // its own timestamp + activity_type, so consecutive legs can be
+      // its own timestamp + activity_type/motion, so consecutive legs can be
       // classified and colored individually instead of drawn as one flat line.
-      type LegPoint = { latlng: [number, number]; time: string; activityType: string | null };
+      type LegPoint = { latlng: [number, number]; time: string; activityType: string | null; motion: string | null };
       const legPoints: LegPoint[] = geojson.features.flatMap((f) => {
         const props = f.properties;
         if (f.geometry.type === "LineString") {
@@ -220,10 +314,11 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
             latlng: [lat, lng],
             time: i === 0 ? props.segment_start : props.segment_end,
             activityType: props.activity_type,
+            motion: props.motion,
           }));
         }
         const [lng, lat] = f.geometry.coordinates as [number, number];
-        return [{ latlng: [lat, lng] as [number, number], time: props.segment_start, activityType: props.activity_type }];
+        return [{ latlng: [lat, lng] as [number, number], time: props.segment_start, activityType: props.activity_type, motion: props.motion }];
       });
 
       const allBounds: [number, number][] = legPoints.map((p) => p.latlng);
@@ -232,12 +327,29 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
       if (legPoints.length >= 2) {
         L.polyline(allBounds, { color: "#fff", weight: 6, opacity: 0.55 }).addTo(map);
         for (let i = 0; i < legPoints.length - 1; i++) {
-          const mode  = classifyLeg(legPoints[i], legPoints[i + 1]);
-          const style = MODE_STYLE[mode] ?? MODE_STYLE.vehicle;
+          const legKey     = `${legPoints[i].time}|${legPoints[i + 1].time}`;
+          const manualMode = overridesRef.current.get(legKey) ?? null;
+          const mode       = manualMode ?? classifyLeg(legPoints[i], legPoints[i + 1]);
+          const style      = MODE_STYLE[mode] ?? MODE_STYLE.vehicle;
           usedModes.add(mode);
-          L.polyline([legPoints[i].latlng, legPoints[i + 1].latlng], {
+          const line = L.polyline([legPoints[i].latlng, legPoints[i + 1].latlng], {
             color: style.color, weight: 3.5, opacity: 0.9,
           }).addTo(map);
+          // A wider, invisible line underneath makes the thin route easier to tap.
+          const hitArea = L.polyline([legPoints[i].latlng, legPoints[i + 1].latlng], {
+            color: "#000", weight: 16, opacity: 0,
+          }).addTo(map);
+          if (date) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            hitArea.on("click", (e: any) => {
+              L.DomEvent.stopPropagation(e);
+              const popupEl = buildModePopup(mode, !!manualMode, (picked) => {
+                saveOverride(legKey, picked);
+                hitArea.closePopup();
+              });
+              hitArea.bindPopup(popupEl, { maxWidth: 230 }).openPopup(e.latlng);
+            });
+          }
         }
       }
       setModesUsed([...usedModes]);
@@ -294,17 +406,28 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
         }
       });
 
-      if (allBounds.length > 0) {
+      // Preserve the user's pan/zoom across a rebuild (an override edit bumps
+      // overridesVersion → full re-render); only re-fit on a genuine data load.
+      if (viewRef.current) {
+        map.setView(viewRef.current.center, viewRef.current.zoom);
+      } else if (allBounds.length > 0) {
         map.fitBounds(L.latLngBounds(allBounds), { padding: [32, 32], maxZoom: 15 });
       }
     });
 
     return () => {
       destroyed = true;
-      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      if (mapRef.current) {
+        try {
+          const c = mapRef.current.getCenter();
+          viewRef.current = { center: [c.lat, c.lng], zoom: mapRef.current.getZoom() };
+        } catch { /* map not ready */ }
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [geojson.features.length, showLabels]);
+  }, [geojson.features.length, showLabels, overridesVersion]);
 
   return (
     <div className="flex flex-col gap-3">

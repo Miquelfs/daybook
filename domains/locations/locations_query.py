@@ -146,16 +146,30 @@ def location_data_for_date(date: str) -> tuple[dict, list[dict]]:
 
 
 def _parse_iso(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    """Segment timestamps are UTC ('...Z' or '+00:00'). Returns a *naive*
+    datetime representing UTC (tzinfo stripped) so it compares cleanly
+    against the naive-UTC activity windows below — mixing aware and naive
+    datetimes raises TypeError instead of comparing."""
+    return datetime.fromisoformat(s.replace("Z", "+00:00")).replace(tzinfo=None)
 
 
 def _activities_for_date(date: str) -> list[tuple[datetime, datetime, str | None]]:
     """(start, end, activity_type) windows for Garmin/Strava activities on a
     date — authoritative exercise mode (run/ride/hike/walk/swim/...), used to
-    label GPS track segments instead of guessing from speed alone."""
+    label GPS track segments instead of guessing from speed alone.
+
+    activities.start_time is naive *local* wall-clock time (no timezone), so
+    it's converted to naive UTC using the day's captured utc_offset_min —
+    the same convention domains/health/stress_context.py uses to reconcile
+    local activity/wellness times against UTC GPS timestamps.
+    """
     con = sqlite3.connect(_DAYBOOK_DB)
     con.row_factory = sqlite3.Row
     try:
+        off_row = con.execute(
+            "SELECT utc_offset_min FROM wellness_daily WHERE date = ?", (date,)
+        ).fetchone()
+        off_min = off_row["utc_offset_min"] if off_row and off_row["utc_offset_min"] is not None else 0
         rows = con.execute(
             "SELECT activity_type, start_time, duration_seconds FROM activities "
             "WHERE date = ? AND start_time IS NOT NULL",
@@ -169,12 +183,125 @@ def _activities_for_date(date: str) -> list[tuple[datetime, datetime, str | None
     out = []
     for r in rows:
         try:
-            start = _parse_iso(r["start_time"])
-        except (ValueError, AttributeError):
+            local_start = datetime.fromisoformat(r["start_time"])
+            start = local_start - timedelta(minutes=off_min)
+        except (ValueError, TypeError):
             continue
         end = start + timedelta(seconds=r["duration_seconds"] or 0)
         out.append((start, end, r["activity_type"]))
     return out
+
+
+# Points this close to the day's home get clustered under one "Casa" label
+# instead of surfacing as several different neighboring-street names (GPS
+# jitter right around the house reverse-geocodes inconsistently). Separate
+# from — and much tighter than — the 40km+ radii used for trip detection and
+# the stress "home" bucket, which are answering a different question ("did
+# you leave town", not "are you literally at the house").
+CASA_RADIUS_KM = 0.1
+
+
+def _casa_coords(date: str) -> tuple[float, float] | None:
+    """Precise home coordinate for a date, from a visits row Google Timeline
+    itself semantically tagged 'Home' — closest to (on or before) that date,
+    since home has moved over the years. Deliberately NOT the life_periods
+    home-base centroid used for trip detection: that's a ~40km region
+    ("did you leave town"), not a street address ("are you at the house"),
+    so it's far too loose to safely cluster under one "Casa" label. No
+    fallback to it here — if there's no precise Home tag near this date,
+    Casa clustering is simply skipped for it rather than risk over-matching.
+    """
+    con = _conn()
+    try:
+        row = con.execute(
+            "SELECT lat, lng FROM visits WHERE semantic_type='Home' AND date <= ? "
+            "ORDER BY date DESC LIMIT 1",
+            (date,),
+        ).fetchone()
+        if row is None:
+            row = con.execute(
+                "SELECT lat, lng FROM visits WHERE semantic_type='Home' AND date >= ? "
+                "ORDER BY date ASC LIMIT 1",
+                (date,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        con.close()
+    if row is None or row["lat"] is None:
+        return None
+    return row["lat"], row["lng"]
+
+
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    from math import radians, sin, cos, sqrt, atan2
+    R = 6371.0
+    dlat, dlng = radians(lat2 - lat1), radians(lng2 - lng1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng / 2) ** 2
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+
+
+# Overland's on-device Core Motion classification per ping (a JSON array,
+# sometimes several at once e.g. ["driving","stationary"]). Priority order
+# when several apply to one window — most specific/confident first.
+_MOTION_PRIORITY = ["cycling", "running", "walking", "driving", "stationary"]
+
+# Day-level tags (domains/locations "matching it with the tags" — CLAUDE.md
+# tags convention) that disambiguate Overland's generic "driving" bucket,
+# which can't tell car/bus/scooter/train apart on its own.
+_TRANSPORT_TAG_SLUGS = {"motorcycle": "scooter", "car_drive": "car"}
+
+
+def _motion_events(con: sqlite3.Connection, date: str) -> list[tuple[datetime, list[str]]]:
+    """(time, motion_labels) for each raw Overland ping with motion data on a
+    date — used to label GPS track segments by actual on-device sensor
+    classification instead of guessing from speed alone."""
+    import json as _json
+
+    try:
+        rows = con.execute(
+            "SELECT recorded_at, motion FROM overland_locations "
+            "WHERE date = ? AND motion IS NOT NULL AND motion != '[]'",
+            (date,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+    out = []
+    for r in rows:
+        try:
+            labels = _json.loads(r["motion"])
+        except (TypeError, ValueError):
+            continue
+        if not labels:
+            continue
+        try:
+            t = _parse_iso(r["recorded_at"])
+        except (ValueError, AttributeError):
+            continue
+        out.append((t, labels))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def _day_transport_hint(date: str) -> str | None:
+    """"car" / "scooter" if the day is tagged with exactly one of them
+    (Scooter ride / Car drive) — None if neither or both, so an ambiguous
+    day falls back to the generic "vehicle" label rather than guessing."""
+    con = sqlite3.connect(_DAYBOOK_DB)
+    con.row_factory = sqlite3.Row
+    try:
+        rows = con.execute(
+            """SELECT t.slug FROM day_tags dt JOIN tags t ON t.id = dt.tag_id
+               WHERE dt.date = ? AND t.slug IN ('motorcycle', 'car_drive')""",
+            (date,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        con.close()
+    found = {_TRANSPORT_TAG_SLUGS[r["slug"]] for r in rows}
+    return found.pop() if len(found) == 1 else None
 
 
 def tracks_for_date(date: str) -> list[dict]:
@@ -186,13 +313,25 @@ def tracks_for_date(date: str) -> list[dict]:
     2. visit semantic_type (Home / Work) if present
     3. Fallback to the track's own geocode_name / geocode_city (district level)
 
-    Each segment also carries `activity_type` when it overlaps a logged
-    Garmin/Strava activity (run/ride/hike/walk/swim/...) — used by the map to
-    color the route by an authoritative mode rather than guessing from speed.
+    Each segment also carries:
+    - `activity_type` when it overlaps a logged Garmin/Strava activity
+      (run/ride/hike/walk/swim/...) — authoritative exercise mode.
+    - `motion` — Overland's on-device Core Motion classification
+      (walking/running/cycling/driving/stationary) when no activity applies;
+      "driving" is refined to "car"/"scooter" using the day's Car
+      drive/Scooter ride tag when exactly one of them is set.
+    These let the map color the route by an actual detected mode instead of
+    guessing from speed alone (speed is still the last-resort fallback).
+
+    Points within CASA_RADIUS_KM of the home active on this date are
+    relabeled "Casa" (semantic_type "Home") instead of their raw reverse-
+    geocoded street name — GPS jitter right around the house otherwise
+    surfaces as several different neighboring-street "places".
     """
     import json as _json
 
     activities = _activities_for_date(date)
+    transport_hint = _day_transport_hint(date)
 
     def best_activity(seg_start: str, seg_end: str) -> str | None:
         try:
@@ -228,7 +367,33 @@ def tracks_for_date(date: str) -> list[dict]:
         """,
         (date,),
     ).fetchall()
+    motion_events = _motion_events(con, date)
     con.close()
+
+    def best_motion(seg_start: str, seg_end: str) -> str | None:
+        try:
+            s, e = _parse_iso(seg_start), _parse_iso(seg_end)
+        except (ValueError, AttributeError):
+            return None
+        window = timedelta(seconds=90)
+        seen: set[str] = set()
+        for t, labels in motion_events:
+            if s - window <= t <= e + window:
+                seen.update(labels)
+        for p in _MOTION_PRIORITY:
+            if p not in seen:
+                continue
+            if p == "driving" and transport_hint:
+                return transport_hint
+            return p
+        return None
+
+    casa_coords = _casa_coords(date)
+
+    def near_home(lat: float, lng: float) -> bool:
+        if casa_coords is None:
+            return False
+        return _haversine_km(lat, lng, casa_coords[0], casa_coords[1]) <= CASA_RADIUS_KM
 
     visits = [dict(r) for r in visit_rows]
 
@@ -248,14 +413,19 @@ def tracks_for_date(date: str) -> list[dict]:
     for r in rows:
         pts = _json.loads(r["points_json"])
         enrich = best_label(r["segment_start"], r["segment_end"])
+        place_name = enrich.get("place_name") or r["geocode_name"]
+        semantic_type = enrich.get("semantic_type")
+        if pts and near_home(pts[0]["lat"], pts[0]["lng"]):
+            place_name, semantic_type = "Casa", "Home"
         result.append({
             "segment_start": r["segment_start"],
             "segment_end": r["segment_end"],
-            "place_name": enrich.get("place_name") or r["geocode_name"],
-            "semantic_type": enrich.get("semantic_type"),
+            "place_name": place_name,
+            "semantic_type": semantic_type,
             "city": enrich.get("city") or r["geocode_city"],
             "country": enrich.get("country") or r["geocode_country"],
             "activity_type": best_activity(r["segment_start"], r["segment_end"]),
+            "motion": best_motion(r["segment_start"], r["segment_end"]),
             "coordinates": [[p["lng"], p["lat"]] for p in pts],
         })
     return result

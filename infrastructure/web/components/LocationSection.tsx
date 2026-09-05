@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowUpRight } from "lucide-react";
 import { LocationMap, type LocationMapHandle } from "@/components/LocationMap";
 import type { TracksGeoJSON } from "@/lib/api";
 
@@ -93,6 +95,10 @@ export function LocationSection({ date, initialTracks, editable = false }: Props
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const mapRef = useRef<LocationMapHandle>(null);
   const mapWrapRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+
+  const placeHref = (name: string, country: string | null) =>
+    `/explore/place/${encodeURIComponent(name)}${country ? `?country=${encodeURIComponent(country)}` : ""}`;
 
   const refresh = () => {
     fetch(`${BASE}/locations/tracks/${date}`, { cache: "no-store" })
@@ -164,16 +170,22 @@ export function LocationSection({ date, initialTracks, editable = false }: Props
                 const key   = props.place_name ?? props.city ?? "";
                 const start = new Date(props.segment_start).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
                 const end   = new Date(props.segment_end).toLocaleTimeString("en-GB",   { hour: "2-digit", minute: "2-digit" });
+                const isActive = activeKey === key;
                 return (
                   <button
                     key={i}
                     onClick={() => {
+                      if (isActive) {
+                        // second tap on an already-focused place → open its Explore page
+                        router.push(placeHref(name, props.city && props.city === name ? props.country : null));
+                        return;
+                      }
                       setActiveKey(key);
                       mapWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
                       mapRef.current?.focusPlace(key);
                     }}
                     className={`flex items-center gap-2 w-full text-xs text-left rounded-lg px-1.5 py-1 -mx-1.5 transition-colors ${
-                      activeKey === key ? "bg-[#18181B] text-[#FAFAFA]" : "text-[#A1A1AA] hover:bg-[#18181B]/60"
+                      isActive ? "bg-[#18181B] text-[#FAFAFA]" : "text-[#A1A1AA] hover:bg-[#18181B]/60"
                     }`}
                   >
                     <span className="shrink-0 w-2.5 h-2.5 rounded-full border-2 border-white/20" style={{ backgroundColor: STOP_COLOR }} />
@@ -182,6 +194,11 @@ export function LocationSection({ date, initialTracks, editable = false }: Props
                       <span className="text-[#52525B] truncate">{props.city}</span>
                     )}
                     <span className="ml-auto shrink-0 tabular-nums text-[#52525B]">{start}–{end}</span>
+                    {isActive && (
+                      <span className="shrink-0 flex items-center gap-0.5 text-[10px] text-[#F59E0B]">
+                        Explore <ArrowUpRight size={11} />
+                      </span>
+                    )}
                   </button>
                 );
               })}

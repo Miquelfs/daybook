@@ -755,6 +755,7 @@ export type GeoFeature = {
     city: string | null;
     country: string | null;
     activity_type: string | null;  // run/ride/hike/walk/swim/... when this leg overlaps a logged Garmin/Strava activity
+    motion: string | null;         // Overland on-device classification (walking/running/cycling/driving→car|scooter/stationary) when no activity applies
   };
 };
 
@@ -762,6 +763,8 @@ export type TracksGeoJSON = {
   type: "FeatureCollection";
   features: GeoFeature[];
 };
+
+export type ModeOverride = { leg_start: string; leg_end: string; mode: string };
 
 export type HeatmapData = {
   points: [number, number, number][];   // [lat, lng, weight]
@@ -997,6 +1000,14 @@ export const api = {
     get<Trip>(`/locations/trips/${start}/${end}`),
   tracksRange: (start: string, end: string) =>
     get<TracksGeoJSON>(`/locations/tracks-range?start=${start}&end=${end}`),
+  modeOverrides: (date: string) =>
+    get<ModeOverride[]>(`/locations/mode-overrides/${date}`),
+  setModeOverride: (date: string, legStart: string, legEnd: string, mode: string | null) =>
+    fetch("/api/locations/mode-override", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date, leg_start: legStart, leg_end: legEnd, mode }),
+    }).then((r) => r.json()),
   trainingCurve: (sport: "run" | "ride" | "swim") =>
     get<CurveBucket[]>(`/training/curve?sport=${sport}&channel=pace`),
 

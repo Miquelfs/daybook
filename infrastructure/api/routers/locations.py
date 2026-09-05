@@ -189,6 +189,7 @@ def get_tracks(date_str: str):
             "city": seg["city"],
             "country": seg["country"],
             "activity_type": seg["activity_type"],
+            "motion": seg["motion"],
         }
         if len(coords) >= 2:
             geometry = {"type": "LineString", "coordinates": coords}
@@ -227,6 +228,7 @@ def get_tracks_range(start: str, end: str):
                 "city": seg["city"],
                 "country": seg["country"],
                 "activity_type": seg["activity_type"],
+                "motion": seg["motion"],
             }
             geometry = (
                 {"type": "LineString", "coordinates": coords}
@@ -236,6 +238,65 @@ def get_tracks_range(start: str, end: str):
             features.append({"type": "Feature", "geometry": geometry, "properties": props})
         cur += _td(days=1)
     return {"type": "FeatureCollection", "features": features}
+
+
+# ── Manual transport-mode overrides ────────────────────────────────────────────
+# Auto-detection (activity_type / Overland motion / speed) is a best guess;
+# this lets a route leg be corrected by hand — the override always wins.
+
+_MODE_OVERRIDE_DDL = """CREATE TABLE IF NOT EXISTS location_mode_overrides (
+    date       TEXT NOT NULL,
+    leg_start  TEXT NOT NULL,
+    leg_end    TEXT NOT NULL,
+    mode       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (date, leg_start, leg_end)
+)"""
+
+_VALID_MODES = {"run", "ride", "swim", "other_ex", "foot", "car", "scooter", "public_transport", "vehicle", "stationary"}
+
+
+@router.get("/mode-overrides/{date_str}")
+def get_mode_overrides(date_str: str):
+    con = _daybook_conn()
+    if not con.execute("SELECT name FROM sqlite_master WHERE name='location_mode_overrides'").fetchone():
+        con.close()
+        return []
+    rows = con.execute(
+        "SELECT leg_start, leg_end, mode FROM location_mode_overrides WHERE date = ?",
+        (date_str,),
+    ).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
+class ModeOverrideIn(BaseModel):
+    date: str
+    leg_start: str
+    leg_end: str
+    mode: str | None = None  # omit/null clears the override, reverting to auto-detection
+
+
+@router.post("/mode-overrides")
+def set_mode_override(body: ModeOverrideIn):
+    con = _daybook_conn()
+    con.execute(_MODE_OVERRIDE_DDL)
+    if body.mode is None:
+        con.execute(
+            "DELETE FROM location_mode_overrides WHERE date=? AND leg_start=? AND leg_end=?",
+            (body.date, body.leg_start, body.leg_end),
+        )
+    else:
+        if body.mode not in _VALID_MODES:
+            con.close()
+            raise HTTPException(422, f"Unknown mode {body.mode!r}")
+        con.execute(
+            "INSERT OR REPLACE INTO location_mode_overrides (date, leg_start, leg_end, mode) VALUES (?,?,?,?)",
+            (body.date, body.leg_start, body.leg_end, body.mode),
+        )
+    con.commit()
+    con.close()
+    return {"status": "ok"}
 
 
 # ── Location day summaries ────────────────────────────────────────────────────

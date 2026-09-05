@@ -85,9 +85,16 @@ export function TripJourney({ dates, geojson }: { dates: string[]; geojson: Trac
         ))}
       </div>
 
-      {/* Map — remount on selection so the frame + labels rebuild cleanly */}
+      {/* Map — remount on selection so the frame + labels rebuild cleanly.
+          Pass `date` only for a single day so per-leg mode editing works there. */}
       <div ref={mapWrapRef}>
-        <LocationMap ref={mapRef} key={selected} geojson={filtered} showLabels={selected !== "all"} />
+        <LocationMap
+          ref={mapRef}
+          key={selected}
+          geojson={filtered}
+          showLabels={selected !== "all"}
+          date={selected !== "all" ? selected : undefined}
+        />
       </div>
 
       {/* Places list */}
