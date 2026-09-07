@@ -277,6 +277,70 @@ class ModeOverrideIn(BaseModel):
     mode: str | None = None  # omit/null clears the override, reverting to auto-detection
 
 
+@router.get("/home-places")
+def get_home_places():
+    con = _daybook_conn()
+    try:
+        rows = con.execute(
+            "SELECT id, label, lat, lng, radius_m, note FROM home_places ORDER BY label"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    finally:
+        con.close()
+    return [dict(r) for r in rows]
+
+
+class HomePlaceIn(BaseModel):
+    id: int | None = None       # omit to create
+    label: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+    radius_m: int | None = None
+    note: str | None = None
+    delete: bool = False
+
+
+@router.post("/home-places")
+def upsert_home_place(body: HomePlaceIn):
+    """Create / adjust / delete a named home. Anchors seeded by migration are
+    rough — this is how they get corrected (drag a pin, rename, retune radius)."""
+    con = _daybook_conn()
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS home_places (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL UNIQUE,
+            lat REAL NOT NULL, lng REAL NOT NULL, radius_m INTEGER NOT NULL DEFAULT 70,
+            note TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))"""
+    )
+    if body.delete and body.id is not None:
+        con.execute("DELETE FROM home_places WHERE id = ?", (body.id,))
+    elif body.id is not None:
+        sets, vals = [], []
+        for f in ("label", "lat", "lng", "radius_m", "note"):
+            v = getattr(body, f)
+            if v is not None:
+                sets.append(f"{f} = ?")
+                vals.append(v)
+        if sets:
+            con.execute(f"UPDATE home_places SET {', '.join(sets)} WHERE id = ?", (*vals, body.id))
+    else:
+        if not (body.label and body.lat is not None and body.lng is not None):
+            con.close()
+            raise HTTPException(422, "label, lat, lng required to create a home")
+        con.execute(
+            "INSERT OR REPLACE INTO home_places (label, lat, lng, radius_m, note) VALUES (?,?,?,?,?)",
+            (body.label, body.lat, body.lng, body.radius_m or 70, body.note),
+        )
+    con.commit()
+    con.close()
+    try:
+        from domains.locations.locations_query import _home_places
+        _home_places.cache_clear()
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
 @router.post("/mode-overrides")
 def set_mode_override(body: ModeOverrideIn):
     con = _daybook_conn()
@@ -538,6 +602,59 @@ def get_city_timeline(year: int | None = None):
     return list(reversed(stays))
 
 
+def _home_by_label(label: str):
+    """(lat, lng, radius_m) for a home_places label, or None."""
+    con = _daybook_conn()
+    try:
+        row = con.execute(
+            "SELECT lat, lng, radius_m FROM home_places WHERE label = ?", (label,)
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        con.close()
+    return (row["lat"], row["lng"], row["radius_m"] or 70) if row else None
+
+
+def _home_track_dates(lat: float, lng: float, radius_m: int) -> list[dict]:
+    """Every distinct date with a track point inside a home's radius, plus
+    that home's city/country from the nearest matched point. A "Casa …" label
+    isn't a real geocode_name, so it can't be looked up by string — this
+    scans track points spatially instead. bbox pre-filter keeps it to one
+    quick pass over `tracks`."""
+    import math
+    dlat = radius_m / 111_000.0
+    dlng = radius_m / (111_000.0 * max(math.cos(math.radians(lat)), 0.01))
+    con = _conn()
+    try:
+        rows = con.execute(
+            """SELECT substr(date,1,10) AS date,
+                      json_extract(points_json,'$[0].lat') AS la,
+                      json_extract(points_json,'$[0].lng') AS ln,
+                      geocode_city AS city, geocode_country AS country
+               FROM tracks
+               WHERE json_extract(points_json,'$[0].lat') BETWEEN ? AND ?
+                 AND json_extract(points_json,'$[0].lng') BETWEEN ? AND ?""",
+            (lat - dlat, lat + dlat, lng - dlng, lng + dlng),
+        ).fetchall()
+    finally:
+        con.close()
+
+    def hav_m(a, b, c, d):
+        R = 6_371_000
+        p1, p2 = math.radians(a), math.radians(c)
+        dp, dl = math.radians(c - a), math.radians(d - b)
+        h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+        return R * 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h))
+
+    seen: dict[str, dict] = {}
+    for r in rows:
+        if r["la"] is None or hav_m(lat, lng, r["la"], r["ln"]) > radius_m:
+            continue
+        seen.setdefault(r["date"], {"city": r["city"], "country": r["country"]})
+    return [{"date": d, **v} for d, v in sorted(seen.items(), reverse=True)]
+
+
 @router.get("/place-summary")
 def get_place_summary(place: str, country: str | None = None):
     """One place's headline: total days, first/last visit, coordinates.
@@ -546,8 +663,26 @@ def get_place_summary(place: str, country: str | None = None):
     city (tracks.geocode_city) — so a city-level link (e.g. from the Explore
     "Cities"/"Travel log" lists) lands on an aggregate of every visit in that
     city, not just visits to one exact geocoded venue. `country` disambiguates
-    same-named cities in different countries.
+    same-named cities in different countries. A "Casa …" home label resolves
+    spatially (it's not a real geocode_name).
     """
+    home = _home_by_label(place)
+    if home:
+        hlat, hlng, hrad = home
+        rows = _home_track_dates(hlat, hlng, hrad)
+        cities = [r["city"] for r in rows if r["city"]]
+        countries = [r["country"] for r in rows if r["country"]]
+        return {
+            "place": place,
+            "total_days": len(rows),
+            "first_visit": rows[-1]["date"] if rows else None,
+            "last_visit": rows[0]["date"] if rows else None,
+            "city": _norm_city(max(set(cities), key=cities.count)) if cities else None,
+            "country": _en(max(set(countries), key=countries.count)) if countries else None,
+            "lat": hlat,
+            "lng": hlng,
+        }
+
     con = _conn()
     country_clause = "AND geocode_country = :country" if country else ""
     params = {"place": place, "country": country}
@@ -602,30 +737,37 @@ def get_place_dates(
     Dates a named place — or, if `place` matches a city rather than one exact
     venue, a whole city — was visited (newest first, paginated), with
     mood/energy from that day. `country` disambiguates same-named cities.
+    A "Casa …" home label resolves spatially.
     """
     con = _conn()
-    year_clause = "AND substr(t.date,1,4) = ?" if year else ""
-    country_clause = "AND t.geocode_country = ?" if country else ""
-    params: tuple = (str(year),) if year else ()
-    params += (country,) if country else ()
-
-    try:
-        rows = con.execute(
-            f"""
-            SELECT DISTINCT substr(t.date,1,10) AS date,
-                   t.geocode_city AS city,
-                   t.geocode_country AS country
-            FROM   tracks t
-            WHERE  (t.geocode_name = ? OR t.geocode_city = ?)
-                   {year_clause} {country_clause}
-            ORDER BY date DESC
-            LIMIT ? OFFSET ?
-            """,
-            (place, place) + params + (limit, offset),
-        ).fetchall()
-    except Exception:
-        con.close()
-        return []
+    home = _home_by_label(place)
+    if home:
+        matched = _home_track_dates(home[0], home[1], home[2])
+        if year:
+            matched = [r for r in matched if r["date"][:4] == str(year)]
+        rows = matched[offset:offset + limit]
+    else:
+        year_clause = "AND substr(t.date,1,4) = ?" if year else ""
+        country_clause = "AND t.geocode_country = ?" if country else ""
+        params: tuple = (str(year),) if year else ()
+        params += (country,) if country else ()
+        try:
+            rows = con.execute(
+                f"""
+                SELECT DISTINCT substr(t.date,1,10) AS date,
+                       t.geocode_city AS city,
+                       t.geocode_country AS country
+                FROM   tracks t
+                WHERE  (t.geocode_name = ? OR t.geocode_city = ?)
+                       {year_clause} {country_clause}
+                ORDER BY date DESC
+                LIMIT ? OFFSET ?
+                """,
+                (place, place) + params + (limit, offset),
+            ).fetchall()
+        except Exception:
+            con.close()
+            return []
 
     if not rows:
         con.close()

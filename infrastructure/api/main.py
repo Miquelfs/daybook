@@ -166,6 +166,10 @@ def _run_migrations() -> None:
     _conn9 = _get_conn()
     _migrate_trip_return(_conn9)
     _conn9.close()
+    from infrastructure.db.migrate_home_places import migrate as _migrate_home_places
+    _conn10 = _get_conn()
+    _migrate_home_places(_conn10)
+    _conn10.close()
 
 
 class ThemeIn(BaseModel):

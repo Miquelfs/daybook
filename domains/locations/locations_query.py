@@ -8,6 +8,7 @@ All functions return plain dicts suitable for JSON serialisation.
 
 import sqlite3
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 
 _DB = Path(__file__).parents[2] / "infrastructure" / "db" / "locations.db"
@@ -192,45 +193,23 @@ def _activities_for_date(date: str) -> list[tuple[datetime, datetime, str | None
     return out
 
 
-# Points this close to the day's home get clustered under one "Casa" label
-# instead of surfacing as several different neighboring-street names (GPS
-# jitter right around the house reverse-geocodes inconsistently). Separate
-# from — and much tighter than — the 40km+ radii used for trip detection and
-# the stress "home" bucket, which are answering a different question ("did
-# you leave town", not "are you literally at the house").
-CASA_RADIUS_KM = 0.1
-
-
-def _casa_coords(date: str) -> tuple[float, float] | None:
-    """Precise home coordinate for a date, from a visits row Google Timeline
-    itself semantically tagged 'Home' — closest to (on or before) that date,
-    since home has moved over the years. Deliberately NOT the life_periods
-    home-base centroid used for trip detection: that's a ~40km region
-    ("did you leave town"), not a street address ("are you at the house"),
-    so it's far too loose to safely cluster under one "Casa" label. No
-    fallback to it here — if there's no precise Home tag near this date,
-    Casa clustering is simply skipped for it rather than risk over-matching.
-    """
-    con = _conn()
+@lru_cache(maxsize=1)
+def _home_places() -> tuple[tuple[str, float, float, float], ...]:
+    """Every named home (label, lat, lng, radius_km) from the home_places
+    table. GPS points within a home's radius get relabeled with that home's
+    name instead of a scatter of neighbouring-street names. Every point is
+    checked against ALL homes regardless of date, so visiting the Barcelona
+    family home during the Mallorca era still reads "Casa Barcelona Pares".
+    Cached per process — call `_home_places.cache_clear()` after an edit."""
+    con = sqlite3.connect(_DAYBOOK_DB)
+    con.row_factory = sqlite3.Row
     try:
-        row = con.execute(
-            "SELECT lat, lng FROM visits WHERE semantic_type='Home' AND date <= ? "
-            "ORDER BY date DESC LIMIT 1",
-            (date,),
-        ).fetchone()
-        if row is None:
-            row = con.execute(
-                "SELECT lat, lng FROM visits WHERE semantic_type='Home' AND date >= ? "
-                "ORDER BY date ASC LIMIT 1",
-                (date,),
-            ).fetchone()
+        rows = con.execute("SELECT label, lat, lng, radius_m FROM home_places").fetchall()
+        return tuple((r["label"], r["lat"], r["lng"], (r["radius_m"] or 70) / 1000.0) for r in rows)
     except sqlite3.OperationalError:
-        return None
+        return ()
     finally:
         con.close()
-    if row is None or row["lat"] is None:
-        return None
-    return row["lat"], row["lng"]
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -323,10 +302,11 @@ def tracks_for_date(date: str) -> list[dict]:
     These let the map color the route by an actual detected mode instead of
     guessing from speed alone (speed is still the last-resort fallback).
 
-    Points within CASA_RADIUS_KM of the home active on this date are
-    relabeled "Casa" (semantic_type "Home") instead of their raw reverse-
-    geocoded street name — GPS jitter right around the house otherwise
-    surfaces as several different neighboring-street "places".
+    Points within a named home's radius (home_places table) are relabeled
+    with that home's name (e.g. "Casa Mallorca"), semantic_type "Home",
+    instead of their raw reverse-geocoded street name — GPS jitter right
+    around a house otherwise surfaces as several different neighboring-
+    street "places". All homes are checked, not just the active one.
     """
     import json as _json
 
@@ -388,12 +368,13 @@ def tracks_for_date(date: str) -> list[dict]:
             return p
         return None
 
-    casa_coords = _casa_coords(date)
+    homes = _home_places()
 
-    def near_home(lat: float, lng: float) -> bool:
-        if casa_coords is None:
-            return False
-        return _haversine_km(lat, lng, casa_coords[0], casa_coords[1]) <= CASA_RADIUS_KM
+    def home_label(lat: float, lng: float) -> str | None:
+        for label, hlat, hlng, hrad_km in homes:
+            if _haversine_km(lat, lng, hlat, hlng) <= hrad_km:
+                return label
+        return None
 
     visits = [dict(r) for r in visit_rows]
 
@@ -415,8 +396,9 @@ def tracks_for_date(date: str) -> list[dict]:
         enrich = best_label(r["segment_start"], r["segment_end"])
         place_name = enrich.get("place_name") or r["geocode_name"]
         semantic_type = enrich.get("semantic_type")
-        if pts and near_home(pts[0]["lat"], pts[0]["lng"]):
-            place_name, semantic_type = "Casa", "Home"
+        hl = home_label(pts[0]["lat"], pts[0]["lng"]) if pts else None
+        if hl:
+            place_name, semantic_type = hl, "Home"
         result.append({
             "segment_start": r["segment_start"],
             "segment_end": r["segment_end"],

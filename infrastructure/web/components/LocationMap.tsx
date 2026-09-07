@@ -26,14 +26,18 @@ const SEMANTIC_ICON: Record<string, string> = {
 const STOP_COLOR  = "#EA580C";
 const PIN_COLOR   = "#F59E0B";
 
-// Route coloring, in priority order: a manual override always wins; then an
-// authoritative exercise mode (a logged Garmin/Strava activity); then
-// Overland's own on-device motion classification (walking/running/cycling/
-// driving, the last refined to car/scooter by the day's transport tag when
-// unambiguous); last resort is a speed-derived tier. "Vehicle" stays muted —
-// it means "some kind of motorized transport, unconfirmed" — while a
-// confirmed mode gets a real color, so confidence reads visually.
-const MODE_STYLE: Record<string, { color: string; label: string }> = {
+// Route coloring, in priority order: a manual override always wins; then a
+// flight (a >250 km/h or long ocean-hop leg is physically unambiguous — this
+// is checked FIRST so a taxi-to-the-gate "driving" motion can't bleed onto
+// the flight leg); then an authoritative exercise mode (a logged Garmin/
+// Strava activity); then Overland's own on-device motion classification
+// (walking/running/cycling/driving, the last refined to car/scooter by the
+// day's transport tag when unambiguous); last resort is a speed-derived
+// tier. "Vehicle" stays muted — "some kind of motorized transport,
+// unconfirmed" — while a confirmed mode gets a real color, so confidence
+// reads visually.
+const MODE_STYLE: Record<string, { color: string; label: string; dash?: string }> = {
+  flight:           { color: "#38BDF8", label: "Flight", dash: "7 6" },
   run:              { color: SPORT_COLORS.run,  label: "Run" },
   ride:             { color: SPORT_COLORS.ride, label: "Ride" },
   swim:             { color: SPORT_COLORS.swim, label: "Swim" },
@@ -48,7 +52,7 @@ const MODE_STYLE: Record<string, { color: string; label: string }> = {
 const MOVE_COLOR = MODE_STYLE.foot.color;
 
 // Manually-settable modes, in the order offered in the edit popup.
-const EDITABLE_MODES = ["run", "ride", "swim", "foot", "car", "scooter", "public_transport", "vehicle", "stationary"];
+const EDITABLE_MODES = ["flight", "run", "ride", "swim", "foot", "car", "scooter", "public_transport", "vehicle", "stationary"];
 
 // Backend's raw motion/activity vocabulary → our MODE_STYLE keys.
 const MOTION_TO_MODE: Record<string, string> = {
@@ -76,6 +80,16 @@ function classifyLeg(
   a: { latlng: [number, number]; time: string; activityType: string | null; motion: string | null },
   b: { latlng: [number, number]; time: string; activityType: string | null; motion: string | null }
 ): string {
+  const distM = haversineM(a.latlng[0], a.latlng[1], b.latlng[0], b.latlng[1]);
+  const durS = (new Date(b.time).getTime() - new Date(a.time).getTime()) / 1000;
+  const speedKmh = durS > 0 ? (distM / 1000) / (durS / 3600) : 0;
+
+  // Flight first — nothing terrestrial sustains >250 km/h over a leg, and a
+  // 150km+ hop between two fixes with no points between is a flight even at
+  // a slower average. Checked before motion so an airport taxi's "driving"
+  // classification can't get painted onto the flight leg.
+  if (speedKmh > 250 || (distM > 150_000 && speedKmh > 120)) return "flight";
+
   const activityType = b.activityType ?? a.activityType;
   if (activityType) {
     const sport = sportOf(activityType);
@@ -83,10 +97,7 @@ function classifyLeg(
   }
   const motion = b.motion ?? a.motion;
   if (motion && MOTION_TO_MODE[motion]) return MOTION_TO_MODE[motion];
-  const distM = haversineM(a.latlng[0], a.latlng[1], b.latlng[0], b.latlng[1]);
-  const durS = (new Date(b.time).getTime() - new Date(a.time).getTime()) / 1000;
   if (durS <= 0 || distM < 15) return "stationary";
-  const speedKmh = (distM / 1000) / (durS / 3600);
   if (speedKmh < 1.5) return "stationary";
   if (speedKmh <= 7) return "foot";
   return "vehicle";
@@ -334,6 +345,7 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
           usedModes.add(mode);
           const line = L.polyline([legPoints[i].latlng, legPoints[i + 1].latlng], {
             color: style.color, weight: 3.5, opacity: 0.9,
+            ...(style.dash ? { dashArray: style.dash } : {}),
           }).addTo(map);
           // A wider, invisible line underneath makes the thin route easier to tap.
           const hitArea = L.polyline([legPoints[i].latlng, legPoints[i + 1].latlng], {
