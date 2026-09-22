@@ -1282,6 +1282,19 @@ export const api = {
   sleepCorrelations: (days = 90) =>
     get<{ correlations: { metric_a: string; metric_b: string; lag: number; r: number | null; n: number }[] }>(`/health/sleep/correlations?days=${days}`),
 
+  addManualSleep: async (body: { date: string; start_time: string; end_time: string }): Promise<{ status: string; date: string; duration_seconds: number }> => {
+    const res = await fetch(`${PROXY_BASE}/api/health/sleep/manual`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`addManualSleep failed ${res.status}${text ? `: ${text}` : ""}`);
+    }
+    return res.json();
+  },
+
   // ─── AI ─────────────────────────────────────────────────────────────────────
   morningBrief: (date: string) =>
     get<{ date: string; brief: string | null; available: boolean }>(`/ai/morning-brief/${date}`),

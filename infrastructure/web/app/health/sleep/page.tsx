@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { SleepOverview } from "@/components/sleep/SleepOverview";
 import { SleepPatterns } from "@/components/sleep/SleepPatterns";
 import { SleepAnalysis } from "@/components/sleep/SleepAnalysis";
+import { ManualSleepEntry } from "@/components/sleep/ManualSleepEntry";
 
 const PERIODS = [
   { label: "2W", days: 14 },
@@ -23,9 +24,9 @@ export default function SleepPage() {
   const [correlations, setCorrelations] = useState<{ correlations: { metric_a: string; metric_b: string; lag: number; r: number | null; n: number }[] } | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  function load() {
     setLoading(true);
-    Promise.all([
+    return Promise.all([
       api.sleepSummary(selectedDays).catch(() => null),
       api.sleepStages(selectedDays * 2).catch(() => []),
       api.sleepCorrelations(selectedDays * 3).catch(() => null),
@@ -35,6 +36,11 @@ export default function SleepPage() {
       setCorrelations(c);
       setLoading(false);
     });
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDays]);
 
   return (
@@ -78,6 +84,10 @@ export default function SleepPage() {
             <AlertTriangle size={13} />Injuries
           </Link>
         </div>
+      </div>
+
+      <div className="mb-6">
+        <ManualSleepEntry onSaved={load} />
       </div>
 
       {loading ? (

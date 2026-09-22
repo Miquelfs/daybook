@@ -8,12 +8,13 @@ import {
   type PassengerFlight,
   type PassengerFlightIn,
 } from "@/lib/passenger-flights-api";
+import { AIRLINE_IATA, airlineIataCode } from "@/lib/airline-logos";
 
 const inputCls =
   "w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]";
 
-const CLASSES = ["Economy", "Economy+", "Business", "First"];
-const SEAT_TYPES = ["Window", "Middle", "Aisle"];
+const CLASSES = ["Economy", "Economy+", "Business", "First", "Jumpseat"];
+const SEAT_TYPES = ["Window", "Middle", "Aisle", "Jumpseat (Aft)", "Jumpseat (Flightdeck)"];
 const REASONS = ["Leisure", "Business", "Crew", "Commuting"];
 
 // Airport autocomplete against the shared 7k-airport DB. Stores the IATA code
@@ -108,12 +109,14 @@ export function PassengerFlightForm({ date, initial, onSaved, submitLabel }: Pro
     setSaving(true);
     setError(null);
     try {
+      const airlineName = airline.trim();
       const body: PassengerFlightIn = {
         date: flightDate,
         flight_number: flightNumber.trim().toUpperCase() || undefined,
         origin: origin.trim().toUpperCase() || undefined,
         destination: destination.trim().toUpperCase() || undefined,
-        airline: airline.trim() || undefined,
+        airline: airlineName || undefined,
+        airline_code: airlineIataCode(airlineName) ?? undefined,
         aircraft: aircraft.trim() || undefined,
         price_paid: price ? parseFloat(price) : undefined,
         reason: reason || undefined,
@@ -149,7 +152,10 @@ export function PassengerFlightForm({ date, initial, onSaved, submitLabel }: Pro
         <input value={flightNumber} onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
           placeholder="Flight # (FR524)" className={`${inputCls} uppercase`} />
         <input value={airline} onChange={(e) => setAirline(e.target.value)}
-          placeholder="Airline" className={inputCls} />
+          placeholder="Airline" list="airline-names" autoComplete="off" className={inputCls} />
+        <datalist id="airline-names">
+          {Object.keys(AIRLINE_IATA).map((name) => <option key={name} value={name} />)}
+        </datalist>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <select value={reason} onChange={(e) => setReason(e.target.value)}

@@ -7,7 +7,7 @@ import sqlite3
 from datetime import date, timedelta
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from infrastructure.db.connection import get_connection
@@ -597,6 +597,51 @@ def week_charts(
         })
 
     return result
+
+
+class ManualSleepIn(BaseModel):
+    date: str
+    start_time: str  # "HH:MM", local time you went to sleep
+    end_time: str    # "HH:MM", local time you woke up (may be next morning)
+
+
+@router.post("/sleep/manual")
+def add_manual_sleep(body: ManualSleepIn, conn: DB):
+    """Log a night's sleep by hand — for when the watch died/wasn't worn and
+    Garmin has nothing for that date. Refuses to clobber a real Garmin sync;
+    re-posting for the same date only overwrites a previous manual entry."""
+    from datetime import datetime, timedelta as _timedelta
+
+    existing = conn.execute("SELECT source FROM sleep WHERE date = ?", (body.date,)).fetchone()
+    if existing and (existing["source"] or "garmin") != "manual":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Sleep already recorded for {body.date} from Garmin sync — not overwriting.",
+        )
+
+    try:
+        start = datetime.strptime(body.start_time, "%H:%M")
+        end = datetime.strptime(body.end_time, "%H:%M")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="start_time/end_time must be HH:MM")
+    if end <= start:
+        end += _timedelta(days=1)
+    duration_seconds = int((end - start).total_seconds())
+
+    conn.execute(
+        """
+        INSERT INTO sleep (date, duration_seconds, start_time, end_time, source)
+        VALUES (?, ?, ?, ?, 'manual')
+        ON CONFLICT(date) DO UPDATE SET
+            duration_seconds = excluded.duration_seconds,
+            start_time       = excluded.start_time,
+            end_time         = excluded.end_time,
+            source           = 'manual'
+        """,
+        (body.date, duration_seconds, body.start_time, body.end_time),
+    )
+    conn.commit()
+    return {"status": "ok", "date": body.date, "duration_seconds": duration_seconds}
 
 
 @router.get("/sleep/summary")
