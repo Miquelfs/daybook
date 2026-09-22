@@ -76,18 +76,24 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
   }
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3 hover:border-[#3F3F46] transition-colors group flex items-center gap-3">
+    <div
+      onClick={go}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter") go(); }}
+      className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3 hover:border-[#3F3F46] hover:bg-[#111113] transition-colors group flex items-center gap-3 cursor-pointer"
+    >
       {trip.cover_photo_path && (
-        <button onClick={go} className="shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-[#27272A]">
+        <div className="shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-[#27272A]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={photoProxy(trip.cover_photo_path)} alt="" className="w-full h-full object-cover" />
-        </button>
+        </div>
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <button onClick={go} className="text-sm text-[#D4D4D8] group-hover:text-[#FAFAFA] font-medium truncate transition-colors text-left flex-1">
+          <p className="text-sm text-[#D4D4D8] group-hover:text-[#FAFAFA] font-medium truncate transition-colors flex-1">
             {flag} {name}
-          </button>
+          </p>
           <div className="flex items-center gap-2 shrink-0">
             {trip.passenger_flight_count > 0 && (
               <span className="text-[10px] text-sky-400 tabular-nums">
@@ -98,7 +104,7 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
               <span className="text-[10px] text-[#3F3F46] tabular-nums">{Math.round(trip.max_distance_from_home_km)} km out</span>
             )}
             {confirmDelete ? (
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                 <span className="text-[10px] text-[#71717A]">Delete?</span>
                 <button onClick={remove} disabled={deleting} className="text-red-400 hover:text-red-300 disabled:opacity-40" aria-label="Confirm delete"><Check size={13} /></button>
                 <button onClick={() => setConfirmDelete(false)} disabled={deleting} className="text-[#52525B] hover:text-[#A1A1AA]" aria-label="Cancel delete"><X size={13} /></button>
@@ -106,15 +112,15 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
             ) : (
               <>
                 <button
-                  onClick={() => { setDraft(trip.user_name ?? ""); setEditing(true); }}
-                  className="text-[#3F3F46] hover:text-[#A1A1AA] transition-colors opacity-0 group-hover:opacity-100"
+                  onClick={(e) => { e.stopPropagation(); setDraft(trip.user_name ?? ""); setEditing(true); }}
+                  className="text-[#3F3F46] hover:text-[#A1A1AA] transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
                   aria-label="Rename trip"
                 >
                   <Pencil size={12} />
                 </button>
                 <button
-                  onClick={() => setConfirmDelete(true)}
-                  className="text-[#3F3F46] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                  onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
+                  className="text-[#3F3F46] hover:text-red-400 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
                   aria-label="Delete trip"
                 >
                   <Trash2 size={12} />
@@ -124,16 +130,20 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
           </div>
         </div>
         <div className="text-xs text-[#52525B] mt-0.5 flex flex-wrap items-baseline gap-x-1">
-          <button onClick={go} className="hover:text-[#A1A1AA] transition-colors">
+          <span>
             {fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}
-          </button>
+          </span>
           {trip.cities.length > 0 && (
             <span className="text-[#3F3F46]">
               {" "}·{" "}
               {trip.cities.slice(0, 3).map((city, i) => (
                 <Fragment key={city}>
                   {i > 0 && ", "}
-                  <Link href={`/explore/place/${encodeURIComponent(city)}`} className="hover:text-[#A1A1AA] hover:underline transition-colors">
+                  <Link
+                    href={`/explore/place/${encodeURIComponent(city)}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="hover:text-[#A1A1AA] hover:underline transition-colors"
+                  >
                     {city}
                   </Link>
                 </Fragment>

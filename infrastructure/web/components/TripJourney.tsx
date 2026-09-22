@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { MapPin, ArrowRight } from "lucide-react";
+import { MapPin, ArrowRight, ChevronDown } from "lucide-react";
 import { LocationMap, type LocationMapHandle } from "@/components/LocationMap";
 import type { TracksGeoJSON } from "@/lib/api";
 
@@ -20,11 +20,25 @@ function hhmm(iso: string): string {
  * place-name labels and a chronological list of the named stops for whichever
  * day (or the whole trip) is selected.
  */
+type Stop = { date?: string; name: string; mapKey: string; city: string | null; start: string; end: string; semantic: string | null };
+
 export function TripJourney({ dates, geojson }: { dates: string[]; geojson: TracksGeoJSON }) {
   const [selected, setSelected] = useState<string>("all");
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  // "All days" starts fully collapsed (one trip can have 100+ stops); a single
+  // day's list starts open since it's already a much shorter list.
+  const [openDates, setOpenDates] = useState<Set<string>>(new Set());
+  const [dayListOpen, setDayListOpen] = useState(true);
   const mapRef = useRef<LocationMapHandle>(null);
   const mapWrapRef = useRef<HTMLDivElement>(null);
+
+  function toggleDate(d: string) {
+    setOpenDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(d)) next.delete(d); else next.add(d);
+      return next;
+    });
+  }
 
   const features = useMemo(
     () => (selected === "all" ? geojson.features : geojson.features.filter((f) => f.properties.date === selected)),
@@ -35,7 +49,7 @@ export function TripJourney({ dates, geojson }: { dates: string[]; geojson: Trac
 
   // Named stops for the current selection, chronological, de-duped.
   const stops = useMemo(() => {
-    const out: { date?: string; name: string; mapKey: string; city: string | null; start: string; end: string; semantic: string | null }[] = [];
+    const out: Stop[] = [];
     const seen = new Set<string>();
     const sorted = [...features].sort((a, b) => a.properties.segment_start.localeCompare(b.properties.segment_start));
     for (const f of sorted) {
@@ -59,6 +73,25 @@ export function TripJourney({ dates, geojson }: { dates: string[]; geojson: Trac
     }
     return out;
   }, [features, selected]);
+
+  // Grouped by day for "all" mode — one collapsible section per date instead
+  // of one giant flat list of every stop across the whole trip.
+  const groupedByDate = useMemo(() => {
+    if (selected !== "all") return null;
+    const map = new Map<string, Stop[]>();
+    for (const s of stops) {
+      const key = s.date ?? "";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(s);
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [stops, selected]);
+
+  function focusStop(s: Stop) {
+    setActiveKey(s.mapKey);
+    mapWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    mapRef.current?.focusPlace(s.mapKey);
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -97,44 +130,107 @@ export function TripJourney({ dates, geojson }: { dates: string[]; geojson: Trac
         />
       </div>
 
-      {/* Places list */}
+      {/* Places list — grouped & collapsible per day in "all" mode; a single
+          collapsible section for one day, so either view can be tucked away
+          instead of dumping every stop in one long flat list. */}
       {stops.length > 0 ? (
-        <div className="flex flex-col gap-1">
-          {selected !== "all" && (
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-[#52525B] uppercase tracking-widest">{stops.length} place{stops.length === 1 ? "" : "s"}</p>
-              <Link href={`/day/${selected}`} className="inline-flex items-center gap-1 text-xs text-[#71717A] hover:text-[#F59E0B] transition-colors">
-                Open day <ArrowRight size={11} />
-              </Link>
-            </div>
-          )}
-          {stops.map((s, i) => (
-            <button
-              key={i}
-              onClick={() => {
-                setActiveKey(s.mapKey);
-                mapWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-                mapRef.current?.focusPlace(s.mapKey);
-              }}
-              className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-lg transition-colors ${
-                activeKey === s.mapKey ? "bg-[#18181B]" : "hover:bg-[#18181B]"
-              }`}
+        groupedByDate ? (
+          <div className="flex flex-col gap-2">
+            {groupedByDate.map(([date, items]) => {
+              const isOpen = openDates.has(date);
+              const dayIdx = dates.indexOf(date);
+              return (
+                <div key={date || "unknown"} className="rounded-lg border border-[#18181B] overflow-hidden">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleDate(date)}
+                    onKeyDown={(e) => { if (e.key === "Enter") toggleDate(date); }}
+                    className="w-full flex items-center justify-between px-3 py-2 hover:bg-[#18181B] transition-colors cursor-pointer"
+                  >
+                    <span className="text-xs font-medium text-[#A1A1AA]">
+                      {dayIdx >= 0 ? `D${dayIdx + 1} · ` : ""}{date ? shortDate(date) : "Unknown day"}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-[10px] text-[#52525B] tabular-nums">{items.length} place{items.length === 1 ? "" : "s"}</span>
+                      <ChevronDown size={12} className={`text-[#52525B] transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                    </span>
+                  </div>
+                  {isOpen && (
+                    <div className="px-2 pb-2 pt-1 border-t border-[#18181B]">
+                      <StopsTimeline items={items} activeKey={activeKey} onFocus={focusStop} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-[#18181B] overflow-hidden">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setDayListOpen((o) => !o)}
+              onKeyDown={(e) => { if (e.key === "Enter") setDayListOpen((o) => !o); }}
+              className="w-full flex items-center justify-between px-3 py-2 hover:bg-[#18181B] transition-colors cursor-pointer"
             >
-              <span className="text-sm w-5 text-center shrink-0">{s.semantic ? SEMANTIC_ICON[s.semantic] ?? <MapPin size={13} className="inline text-[#F59E0B]" /> : <MapPin size={13} className="inline text-[#F59E0B]" />}</span>
-              <div className="flex-1 min-w-0">
-                <span className="text-sm text-[#D4D4D8] truncate">{s.name}</span>
-                {s.city && s.city !== s.name && <span className="text-xs text-[#52525B] ml-2">{s.city}</span>}
+              <span className="text-xs text-[#52525B] uppercase tracking-widest">{stops.length} place{stops.length === 1 ? "" : "s"}</span>
+              <span className="flex items-center gap-3">
+                <Link
+                  href={`/day/${selected}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1 text-xs text-[#71717A] hover:text-[#F59E0B] transition-colors"
+                >
+                  Open day <ArrowRight size={11} />
+                </Link>
+                <ChevronDown size={12} className={`text-[#52525B] transition-transform ${dayListOpen ? "rotate-180" : ""}`} />
+              </span>
+            </div>
+            {dayListOpen && (
+              <div className="px-2 pb-2 pt-1 border-t border-[#18181B]">
+                <StopsTimeline items={stops} activeKey={activeKey} onFocus={focusStop} />
               </div>
-              {selected === "all" && s.date && (
-                <span className="text-[10px] text-[#3F3F46] tabular-nums shrink-0">{shortDate(s.date)}</span>
-              )}
-              <span className="text-xs text-[#52525B] tabular-nums shrink-0">{hhmm(s.start)}</span>
-            </button>
-          ))}
-        </div>
+            )}
+          </div>
+        )
       ) : (
         <p className="text-xs text-[#52525B] text-center py-2">No named stops for this {selected === "all" ? "trip" : "day"}.</p>
       )}
+    </div>
+  );
+}
+
+// One stop row — a small icon "bead" that sits on a continuous vertical line
+// shared by the whole group, giving the list a journey/timeline feel instead
+// of a flat list of disconnected pins.
+function StopsTimeline({ items, activeKey, onFocus }: {
+  items: Stop[];
+  activeKey: string | null;
+  onFocus: (s: Stop) => void;
+}) {
+  return (
+    <div className="relative">
+      {items.length > 1 && <div className="absolute left-3 top-3 bottom-3 w-px bg-[#27272A]" />}
+      <div className="flex flex-col gap-0.5">
+        {items.map((s, i) => (
+          <button
+            key={i}
+            onClick={() => onFocus(s)}
+            className={`relative flex items-start gap-3 w-full text-left py-1.5 pr-2 rounded-lg transition-colors ${
+              activeKey === s.mapKey ? "bg-[#18181B]" : "hover:bg-[#18181B]"
+            }`}
+          >
+            <span className="relative z-10 shrink-0 w-6 h-6 rounded-full bg-[#0D0D0F] border border-[#27272A] flex items-center justify-center text-xs">
+              {s.semantic ? SEMANTIC_ICON[s.semantic] ?? <MapPin size={12} className="text-[#F59E0B]" /> : <MapPin size={12} className="text-[#F59E0B]" />}
+            </span>
+            <div className="flex-1 min-w-0 pt-0.5">
+              <span className="text-sm text-[#D4D4D8] truncate block">{s.name}</span>
+              {s.city && s.city !== s.name && <span className="text-xs text-[#52525B]">{s.city}</span>}
+            </div>
+            <span className="text-xs text-[#52525B] tabular-nums shrink-0 pt-1">{hhmm(s.start)}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
