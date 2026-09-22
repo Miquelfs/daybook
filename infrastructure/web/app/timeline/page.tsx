@@ -11,6 +11,31 @@ import { WeekCharts } from "@/components/WeekCharts";
 
 const PAGE_SIZE = 30;
 
+// Every calendar date covered by an auto-detected trip (through the
+// home-coming day, when known) — cheap to build once and reuse everywhere
+// the Days timeline needs to know "was this date part of a trip".
+function useTripDates(): Set<string> {
+  const { data } = useQuery({
+    queryKey: ["all-trips-dates"],
+    queryFn: () => api.trips(2000),
+    staleTime: 5 * 60 * 1000,
+  });
+  const dates = new Set<string>();
+  for (const t of data?.trips ?? []) {
+    const end = t.return_date ?? t.end_date;
+    for (let d = parseISO(t.start_date); format(d, "yyyy-MM-dd") <= end; d = addOneDay(d)) {
+      dates.add(format(d, "yyyy-MM-dd"));
+    }
+  }
+  return dates;
+}
+
+function addOneDay(d: Date): Date {
+  const next = new Date(d);
+  next.setDate(next.getDate() + 1);
+  return next;
+}
+
 function windowFor(page: number): { start: string; end: string } {
   const end = subDays(new Date(), page * PAGE_SIZE);
   const start = subDays(end, PAGE_SIZE - 1);
@@ -63,6 +88,7 @@ export default function TimelinePage() {
 // ── Days tab ──────────────────────────────────────────────────────────────────
 
 function DaysTab() {
+  const tripDates = useTripDates();
   const { data, fetchNextPage, isFetchingNextPage, isLoading, isError, error } =
     useInfiniteQuery({
       queryKey: ["timeline"],
@@ -112,7 +138,7 @@ function DaysTab() {
                 {[...days]
                   .sort((a, b) => b.date.localeCompare(a.date))
                   .map((day) => (
-                    <DayCard key={day.date} day={day} />
+                    <DayCard key={day.date} day={day} onTrip={tripDates.has(day.date)} />
                   ))}
               </div>
             </div>
@@ -296,6 +322,7 @@ function MonthReviewList({ days, year }: { days: DaySummary[]; year: number }) {
 function ReviewCard({ label, days, start, end }: { label: string; days: DaySummary[]; start: string; end: string }) {
   const [expanded, setExpanded] = useState(false);
   const [expandedView, setExpandedView] = useState<"charts" | "days">("charts");
+  const tripDates = useTripDates();
 
   const mood = avgMood(days);
   const totalFlights = days.reduce((s, d) => s + (d.flight_count ?? 0), 0);
@@ -387,7 +414,7 @@ function ReviewCard({ label, days, start, end }: { label: string; days: DaySumma
               {days
                 .sort((a, b) => b.date.localeCompare(a.date))
                 .map((day) => (
-                  <DayCard key={day.date} day={day} />
+                  <DayCard key={day.date} day={day} onTrip={tripDates.has(day.date)} />
                 ))}
             </div>
           )}

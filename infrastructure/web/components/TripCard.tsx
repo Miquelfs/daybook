@@ -12,6 +12,10 @@ function fmtRange(start: string, end: string): string {
   return `${s} – ${e}`;
 }
 
+function photoProxy(path: string): string {
+  return `/api/photos/${path.split("/").pop()}`;
+}
+
 export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -72,64 +76,72 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
   }
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 hover:border-[#3F3F46] transition-colors group">
-      <div className="flex items-center justify-between gap-2">
-        <button onClick={go} className="text-sm text-[#D4D4D8] group-hover:text-[#FAFAFA] font-medium truncate transition-colors text-left flex-1">
-          {flag} {name}
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3 hover:border-[#3F3F46] transition-colors group flex items-center gap-3">
+      {trip.cover_photo_path && (
+        <button onClick={go} className="shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-[#27272A]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={photoProxy(trip.cover_photo_path)} alt="" className="w-full h-full object-cover" />
         </button>
-        <div className="flex items-center gap-2 shrink-0">
-          {trip.passenger_flight_count > 0 && (
-            <span className="text-[10px] text-sky-400 tabular-nums">
-              ✈ {trip.passenger_flight_count} flight{trip.passenger_flight_count > 1 ? "s" : ""}
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <button onClick={go} className="text-sm text-[#D4D4D8] group-hover:text-[#FAFAFA] font-medium truncate transition-colors text-left flex-1">
+            {flag} {name}
+          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {trip.passenger_flight_count > 0 && (
+              <span className="text-[10px] text-sky-400 tabular-nums">
+                ✈ {trip.passenger_flight_count} flight{trip.passenger_flight_count > 1 ? "s" : ""}
+              </span>
+            )}
+            {trip.max_distance_from_home_km != null && (
+              <span className="text-[10px] text-[#3F3F46] tabular-nums">{Math.round(trip.max_distance_from_home_km)} km out</span>
+            )}
+            {confirmDelete ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-[#71717A]">Delete?</span>
+                <button onClick={remove} disabled={deleting} className="text-red-400 hover:text-red-300 disabled:opacity-40" aria-label="Confirm delete"><Check size={13} /></button>
+                <button onClick={() => setConfirmDelete(false)} disabled={deleting} className="text-[#52525B] hover:text-[#A1A1AA]" aria-label="Cancel delete"><X size={13} /></button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => { setDraft(trip.user_name ?? ""); setEditing(true); }}
+                  className="text-[#3F3F46] hover:text-[#A1A1AA] transition-colors opacity-0 group-hover:opacity-100"
+                  aria-label="Rename trip"
+                >
+                  <Pencil size={12} />
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="text-[#3F3F46] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                  aria-label="Delete trip"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="text-xs text-[#52525B] mt-0.5 flex flex-wrap items-baseline gap-x-1">
+          <button onClick={go} className="hover:text-[#A1A1AA] transition-colors">
+            {fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}
+          </button>
+          {trip.cities.length > 0 && (
+            <span className="text-[#3F3F46]">
+              {" "}·{" "}
+              {trip.cities.slice(0, 3).map((city, i) => (
+                <Fragment key={city}>
+                  {i > 0 && ", "}
+                  <Link href={`/explore/place/${encodeURIComponent(city)}`} className="hover:text-[#A1A1AA] hover:underline transition-colors">
+                    {city}
+                  </Link>
+                </Fragment>
+              ))}
             </span>
           )}
-          {trip.max_distance_from_home_km != null && (
-            <span className="text-[10px] text-[#3F3F46] tabular-nums">{Math.round(trip.max_distance_from_home_km)} km out</span>
-          )}
-          {confirmDelete ? (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-[#71717A]">Delete?</span>
-              <button onClick={remove} disabled={deleting} className="text-red-400 hover:text-red-300 disabled:opacity-40" aria-label="Confirm delete"><Check size={13} /></button>
-              <button onClick={() => setConfirmDelete(false)} disabled={deleting} className="text-[#52525B] hover:text-[#A1A1AA]" aria-label="Cancel delete"><X size={13} /></button>
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={() => { setDraft(trip.user_name ?? ""); setEditing(true); }}
-                className="text-[#3F3F46] hover:text-[#A1A1AA] transition-colors opacity-0 group-hover:opacity-100"
-                aria-label="Rename trip"
-              >
-                <Pencil size={12} />
-              </button>
-              <button
-                onClick={() => setConfirmDelete(true)}
-                className="text-[#3F3F46] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                aria-label="Delete trip"
-              >
-                <Trash2 size={12} />
-              </button>
-            </>
-          )}
+          {trip.home_at_start && <span className="text-[#3F3F46]"> · from {trip.home_at_start}</span>}
         </div>
-      </div>
-      <div className="text-xs text-[#52525B] mt-0.5 flex flex-wrap items-baseline gap-x-1">
-        <button onClick={go} className="hover:text-[#A1A1AA] transition-colors">
-          {fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}
-        </button>
-        {trip.cities.length > 0 && (
-          <span className="text-[#3F3F46]">
-            {" "}·{" "}
-            {trip.cities.slice(0, 3).map((city, i) => (
-              <Fragment key={city}>
-                {i > 0 && ", "}
-                <Link href={`/explore/place/${encodeURIComponent(city)}`} className="hover:text-[#A1A1AA] hover:underline transition-colors">
-                  {city}
-                </Link>
-              </Fragment>
-            ))}
-          </span>
-        )}
-        {trip.home_at_start && <span className="text-[#3F3F46]"> · from {trip.home_at_start}</span>}
       </div>
     </div>
   );

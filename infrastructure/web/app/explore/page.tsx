@@ -57,7 +57,9 @@ export default async function ExplorePage({ searchParams }: Props) {
     api.cityTimeline(year).catch(() => [] as CityStay[]),
     api.worldCoverage(year).catch(() => null as WorldCoverage | null),
     api.funFacts(year).catch(() => null as { cards: FunFactCard[] } | null),
-    api.trips(500, year).catch(() => null as { trips: Trip[]; total: number } | null),
+    // 2000 is comfortably above any realistic lifetime trip count, so the
+    // nights-away total below (summed client-side) never silently truncates.
+    api.trips(2000, year).catch(() => null as { trips: Trip[]; total: number } | null),
   ]);
 
   // Distinct days with location data — per-country counts overlap, so summing
@@ -75,6 +77,7 @@ export default async function ExplorePage({ searchParams }: Props) {
     tripsByYear.get(y)!.push(t);
   }
   const tripGroups = [...tripsByYear.entries()].map(([year, trips]) => ({ year, trips }));
+  const totalNightsAway = (tripsData?.trips ?? []).reduce((s, t) => s + t.n_nights, 0);
 
   return (
     <main className="max-w-3xl mx-auto px-4 pb-20 pt-8">
@@ -188,7 +191,7 @@ export default async function ExplorePage({ searchParams }: Props) {
               Trips{year ? ` in ${year}` : ""}
             </h2>
             <span className="text-xs text-[#3F3F46] tabular-nums">
-              {tripsData.total} · nights not slept at home
+              {tripsData.total} {tripsData.total === 1 ? "trip" : "trips"} · {totalNightsAway} nights not slept at home
             </span>
           </div>
           <TripYears groups={tripGroups} flags={FLAG} filtered={!!year} />

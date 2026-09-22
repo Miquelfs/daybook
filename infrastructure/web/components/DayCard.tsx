@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
+import { Luggage } from "lucide-react";
 import { fmtDuration, fmtDistance, moodEmoji, activityIcon } from "@/lib/api";
 import type { DaySummary } from "@/lib/api";
 
 interface Props {
   day: DaySummary;
+  onTrip?: boolean; // this date falls inside an auto-detected trip
 }
 
 // Mood sets the left accent — same red→amber→green ramp used in the Weeks
@@ -16,7 +18,7 @@ function moodAccent(mood: number | null): string {
   return "#EF4444";
 }
 
-export function DayCard({ day }: Props) {
+export function DayCard({ day, onTrip }: Props) {
   const d = parseISO(day.date);
   const isWeekend = [0, 6].includes(d.getDay());
 
@@ -28,14 +30,19 @@ export function DayCard({ day }: Props) {
   return (
     <Link
       href={`/day/${day.date}`}
-      className="group relative flex items-start gap-4 pl-4 pr-4 py-3.5 rounded-xl bg-[#0D0D0F] border border-[#27272A] hover:border-[#3F3F46] transition-colors overflow-hidden"
+      className={`group relative flex items-start gap-4 pl-4 pr-4 py-3.5 rounded-xl border transition-colors overflow-hidden ${
+        onTrip
+          ? "bg-sky-500/[0.04] border-sky-500/20 hover:border-sky-500/40"
+          : "bg-[#0D0D0F] border-[#27272A] hover:border-[#3F3F46]"
+      }`}
     >
       {/* Mood accent spine */}
       <div className="absolute inset-y-0 left-0 w-1" style={{ background: moodAccent(day.mood) }} />
 
       {/* Date column */}
       <div className="w-16 shrink-0 text-right">
-        <p className={`text-xs uppercase tracking-wider ${isWeekend ? "text-[#F59E0B]" : "text-[#52525B]"}`}>
+        <p className={`text-xs uppercase tracking-wider flex items-center justify-end gap-1 ${isWeekend ? "text-[#F59E0B]" : "text-[#52525B]"}`}>
+          {onTrip && <Luggage size={10} className="text-sky-400" />}
           {format(d, "EEE")}
         </p>
         <p className="text-sm font-semibold text-[#A1A1AA] group-hover:text-[#FAFAFA] transition-colors">
