@@ -42,14 +42,6 @@ export function DatabasesTab() {
           </Link>
           <div className="border-t border-[#18181B]" />
           <Link
-            href="/explore/shows"
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-3 text-sm text-[#A1A1AA] hover:bg-[#18181B] hover:text-[#FAFAFA] transition-colors"
-          >
-            <span>🎬</span> Shows & Movies
-          </Link>
-          <div className="border-t border-[#18181B]" />
-          <Link
             href="/explore/books"
             onClick={() => setOpen(false)}
             className="flex items-center gap-2 px-4 py-3 text-sm text-[#A1A1AA] hover:bg-[#18181B] hover:text-[#FAFAFA] transition-colors"

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from domains.locations.country_names import to_english
 from domains.locations.flight_filter import cleanup_flight_points, is_airborne
 from domains.locations.locations_query import tracks_for_date
+from domains.locations.tz_lookup import local_date_for_point
 
 router = APIRouter(prefix="/locations", tags=["locations"])
 
@@ -1001,7 +1002,10 @@ async def ingest_overland(request: Request, background: BackgroundTasks):
 
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
             recorded_at = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            date = dt.strftime("%Y-%m-%d")
+            # Bucket by the LOCAL calendar date at these coordinates, not UTC —
+            # otherwise points near local midnight during travel (e.g. a 5am
+            # arrival in Osaka) land on the wrong day. See domains/locations/tz_lookup.py.
+            date = local_date_for_point(ts, lat, lng)
 
             con.execute(
                 """INSERT OR IGNORE INTO overland_locations

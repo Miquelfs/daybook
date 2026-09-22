@@ -20,3 +20,4 @@ openpyxl
 pymupdf
 yfinance
 anthropic
+timezonefinder

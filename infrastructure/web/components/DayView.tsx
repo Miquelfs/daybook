@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { api, moodEmoji } from "@/lib/api";
 import { booksApi } from "@/lib/books-api";
-import { showsApi } from "@/lib/shows-api";
 import { DayHeader } from "@/components/DayHeader";
 import { MorningBrief } from "@/components/MorningBrief";
 import { MovementBlock } from "@/components/MovementBlock";
@@ -13,9 +12,7 @@ import { DayRosterBadge } from "@/components/DayRosterBadge";
 import { DayFlights } from "@/components/DayFlights";
 import { DayPassengerFlights } from "@/components/DayPassengerFlights";
 import { DayRestaurants } from "@/components/DayRestaurants";
-import { DayShows } from "@/components/DayShows";
 import { DayBooks } from "@/components/DayBooks";
-import { DaySongs } from "@/components/DaySongs";
 import { DayFood } from "@/components/DayFood";
 import { RecoveryCard } from "@/components/RecoveryCard";
 import { StressEnergyTimeline } from "@/components/StressEnergyTimeline";
@@ -25,8 +22,6 @@ import { ApiOffline } from "@/components/ApiOffline";
 import { DayAddFAB } from "@/components/DayAddFAB";
 import { DayTraining } from "@/components/DayTraining";
 import { format, subYears, parseISO } from "date-fns";
-
-const TYPE_EMOJI: Record<string, string> = { movie: "🎬", show: "📺", documentary: "🎞" };
 
 /**
  * The full single-day view. Rendered identically by both the home ("today")
@@ -45,14 +40,13 @@ export async function DayView({ date }: { date: string }) {
     "http://localhost:8000";
 
   const [day, tracks, pastDay, lifeEvents,
-    pastRestaurants, pastBooks, pastShows, morningBriefData, trainingDay, aiStatus] = await Promise.all([
+    pastRestaurants, pastBooks, morningBriefData, trainingDay, aiStatus] = await Promise.all([
     api.day(date).catch(() => null),
     api.tracks(date).catch(() => ({ type: "FeatureCollection" as const, features: [] })),
     api.day(oneYearAgo).catch(() => null),
     api.lifeEventsOnThisDay(date).catch(() => []),
     api.restaurants({ date: oneYearAgo }).catch(() => []),
     booksApi.list({ date: oneYearAgo }).catch(() => []),
-    showsApi.list({ date: oneYearAgo }).catch(() => []),
     api.morningBrief(date).catch(() => null),
     fetch(`${API_BASE}/race-plans/day/${date}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
@@ -73,7 +67,7 @@ export async function DayView({ date }: { date: string }) {
   }
 
   const hasPastMemories =
-    pastDay?.subjective.mood || pastRestaurants.length > 0 || pastBooks.length > 0 || pastShows.length > 0;
+    pastDay?.subjective.mood || pastRestaurants.length > 0 || pastBooks.length > 0;
 
   return (
     <>
@@ -116,9 +110,7 @@ export async function DayView({ date }: { date: string }) {
         <DayFood date={date} />
 
         <DayRestaurants date={date} />
-        <DayShows date={date} />
         <DayBooks date={date} />
-        <DaySongs date={date} />
 
         <section>
           <SectionLabel>Photo of the day</SectionLabel>
@@ -203,21 +195,6 @@ export async function DayView({ date }: { date: string }) {
                         {r.city && <span className="text-xs text-[#52525B] ml-auto shrink-0">{r.city}</span>}
                         {r.rating_mf != null && (
                           <span className="text-xs text-[#F59E0B] tabular-nums shrink-0">{r.rating_mf}/10</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {pastShows.length > 0 && (
-                  <div className="flex flex-col gap-1 pt-1 border-t border-[#18181B]">
-                    {pastShows.map((s) => (
-                      <div key={s.id} className="flex items-center gap-2">
-                        <span className="text-sm">{TYPE_EMOJI[s.type ?? ""] ?? "🎬"}</span>
-                        <span className="text-xs text-[#A1A1AA] truncate">{s.title}</span>
-                        {s.platform && <span className="text-xs text-[#52525B] ml-auto shrink-0">{s.platform}</span>}
-                        {s.rating_mf != null && (
-                          <span className="text-xs text-[#F59E0B] tabular-nums shrink-0">{s.rating_mf}/10</span>
                         )}
                       </div>
                     ))}

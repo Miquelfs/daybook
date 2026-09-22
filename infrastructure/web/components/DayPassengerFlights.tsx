@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { PassengerFlight } from "@/lib/passenger-flights-api";
 import { SectionLabel } from "@/components/MorningBrief";
+import { airlineLogoUrl } from "@/lib/airline-logos";
 
 // Passenger flights taken on this day (separate from the pilot roster flights).
 // Read-only here — add/edit happens via the day FAB and /explore/passenger-flights.
@@ -29,13 +30,22 @@ export function DayPassengerFlights({ date }: { date: string }) {
           const meta = [f.airline, f.aircraft, f.companion && `with ${f.companion}`]
             .filter(Boolean)
             .join(" · ");
+          const logo = airlineLogoUrl(f.airline, f.airline_code);
           return (
             <a
               key={f.id}
               href="/explore/passenger-flights"
               className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors"
             >
-              <span className="text-xl">✈️</span>
+              {logo ? (
+                <div className="w-7 h-7 rounded-md bg-[#18181B] border border-[#27272A] flex items-center justify-center overflow-hidden shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={logo} alt="" className="w-5 h-5 object-contain"
+                    onError={(e) => { e.currentTarget.parentElement!.style.display = "none"; }} />
+                </div>
+              ) : (
+                <span className="text-xl">✈️</span>
+              )}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-[#FAFAFA] truncate">
                   {route}

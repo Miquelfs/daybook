@@ -10,8 +10,9 @@ import {
   type FlightAnalytics,
 } from "@/lib/passenger-flights-api";
 import { PassengerFlightForm } from "@/components/PassengerFlightForm";
-import { FlightStats } from "@/components/FlightStats";
+import { FlightStats, type FlightFilter } from "@/components/FlightStats";
 import { airlineColor } from "@/lib/airline-colors";
+import { airlineLogoUrl } from "@/lib/airline-logos";
 
 export function PassengerFlightsClient({
   initialFlights,
@@ -22,17 +23,30 @@ export function PassengerFlightsClient({
 }) {
   const router = useRouter();
   const [sheet, setSheet] = useState<null | { edit?: PassengerFlight }>(null);
-  const [tab, setTab] = useState<"stats" | "log">("stats");
+  // Logbook first — the map/stats view (which used to load by default) was
+  // making it hard to get straight to adding/editing a flight.
+  const [tab, setTab] = useState<"stats" | "log">("log");
+  const [filter, setFilter] = useState<FlightFilter | null>(null);
+
+  function handleSelect(f: FlightFilter | null) {
+    setFilter(f);
+    if (f) setTab("log");
+  }
+
+  const filteredFlights = useMemo(
+    () => (filter ? initialFlights.filter(filter.matches) : initialFlights),
+    [initialFlights, filter],
+  );
 
   const byYear = useMemo(() => {
     const map = new Map<string, PassengerFlight[]>();
-    for (const f of initialFlights) {
+    for (const f of filteredFlights) {
       const y = f.date.slice(0, 4);
       if (!map.has(y)) map.set(y, []);
       map.get(y)!.push(f);
     }
     return [...map.entries()].sort(([a], [b]) => b.localeCompare(a));
-  }, [initialFlights]);
+  }, [filteredFlights]);
 
   async function del(id: number) {
     if (!confirm("Delete this flight?")) return;
@@ -46,7 +60,7 @@ export function PassengerFlightsClient({
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Plane size={20} className="text-[#F59E0B]" /> Where I&apos;ve Flown
+            <Plane size={20} className="text-[#F59E0B]" /> Flights as Passenger
           </h1>
           <p className="text-sm text-[#71717A] mt-0.5">Every flight I&apos;ve taken as a passenger</p>
         </div>
@@ -81,21 +95,35 @@ export function PassengerFlightsClient({
           </div>
 
           {tab === "stats" && initialAnalytics ? (
-            <FlightStats a={initialAnalytics} />
+            <FlightStats a={initialAnalytics} onSelect={handleSelect} />
           ) : (
-            <div className="flex flex-col gap-6">
-              {byYear.map(([year, flights]) => (
-                <div key={year}>
-                  <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">
-                    {year} · {flights.length} flight{flights.length > 1 ? "s" : ""}
-                  </p>
-                  <div className="flex flex-col gap-2">
-                    {flights.map((f) => (
-                      <FlightRow key={f.id} f={f} onEdit={() => setSheet({ edit: f })} onDelete={() => del(f.id)} />
-                    ))}
-                  </div>
+            <div className="flex flex-col gap-4">
+              {filter && (
+                <div className="flex items-center gap-2 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-xs">
+                  <span className="text-[#71717A]">Filtered by</span>
+                  <span className="text-[#FAFAFA] font-medium">{filter.label}</span>
+                  <button onClick={() => setFilter(null)} className="ml-auto text-[#52525B] hover:text-[#A1A1AA]">
+                    <X size={14} />
+                  </button>
                 </div>
-              ))}
+              )}
+              <div className="flex flex-col gap-6">
+                {byYear.length === 0 && (
+                  <p className="text-sm text-[#52525B] text-center py-8">No flights match this filter.</p>
+                )}
+                {byYear.map(([year, flights]) => (
+                  <div key={year}>
+                    <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">
+                      {year} · {flights.length} flight{flights.length > 1 ? "s" : ""}
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {flights.map((f) => (
+                        <FlightRow key={f.id} f={f} onEdit={() => setSheet({ edit: f })} onDelete={() => del(f.id)} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </>
@@ -131,6 +159,7 @@ export function PassengerFlightsClient({
 
 function FlightRow({ f, onEdit, onDelete }: { f: PassengerFlight; onEdit: () => void; onDelete: () => void }) {
   const color = airlineColor(f.airline);
+  const logo = airlineLogoUrl(f.airline, f.airline_code);
   const meta = [f.airline, f.aircraft_code ?? f.aircraft, f.companion && `with ${f.companion}`]
     .filter(Boolean).join(" · ");
   const dist = f.distance_km != null ? `${Math.round(f.distance_km * 0.621371).toLocaleString()} mi` : null;
@@ -145,6 +174,15 @@ function FlightRow({ f, onEdit, onDelete }: { f: PassengerFlight; onEdit: () => 
           <p className="text-sm font-semibold text-[#FAFAFA]">{format(parseISO(f.date), "d MMM")}</p>
           <p className="text-[11px] text-[#52525B]">{format(parseISO(f.date), "yyyy")}</p>
         </div>
+
+        {/* Airline logo */}
+        {logo && (
+          <div className="shrink-0 w-7 h-7 rounded-md bg-[#18181B] border border-[#27272A] flex items-center justify-center overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={logo} alt="" className="w-5 h-5 object-contain"
+              onError={(e) => { e.currentTarget.parentElement!.style.display = "none"; }} />
+          </div>
+        )}
 
         {/* Route + meta */}
         <div className="flex-1 min-w-0">
@@ -169,8 +207,9 @@ function FlightRow({ f, onEdit, onDelete }: { f: PassengerFlight; onEdit: () => 
           </span>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Actions — always visible on touch (no hover state on phones);
+            fades in on hover only where a pointer/mouse is actually present. */}
+        <div className="flex items-center gap-1 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           <button onClick={onEdit} className="p-1.5 rounded-lg hover:bg-[#27272A] text-[#71717A]" title="Edit">
             <Pencil size={14} />
           </button>
