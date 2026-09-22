@@ -308,6 +308,7 @@ export type DaySummary = {
   hrv_last_night: number | null;
   activity_count: number;
   flight_count: number;
+  passenger_flight_count: number;
   cities: string[];
   duty_day: boolean;
   away_from_base: boolean;
@@ -853,6 +854,7 @@ export type Trip = {
   home_at_start: string | null;
   n_days: number;
   n_nights: number;                     // nights away from home
+  passenger_flight_count: number;
 };
 
 export type PlaceSummary = {
@@ -1290,7 +1292,8 @@ export const api = {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`addManualSleep failed ${res.status}${text ? `: ${text}` : ""}`);
+      const detail = (() => { try { return JSON.parse(text).detail as string; } catch { return null; } })();
+      throw new Error(detail ?? `addManualSleep failed ${res.status}${text ? `: ${text}` : ""}`);
     }
     return res.json();
   },

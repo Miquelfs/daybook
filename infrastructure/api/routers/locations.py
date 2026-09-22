@@ -1412,12 +1412,12 @@ def list_trips(limit: int = 100, offset: int = 0, year: int | None = None):
         f"""SELECT * FROM trips {yc} ORDER BY start_date DESC LIMIT ? OFFSET ?""",
         yp + (limit, offset),
     ).fetchall()
+    trips = [_trip_row_to_dict(r, con) for r in rows]
     con.close()
-    trips = [_trip_row_to_dict(r) for r in rows]
     return {"trips": trips, "total": total}
 
 
-def _trip_row_to_dict(r: sqlite3.Row) -> dict:
+def _trip_row_to_dict(r: sqlite3.Row, con: sqlite3.Connection) -> dict:
     t = dict(r)
     t["countries"] = [_en(c) for c in json.loads(t.pop("countries_json") or "[]")]
     t["cities"] = json.loads(t.pop("cities_json") or "[]")
@@ -1428,6 +1428,13 @@ def _trip_row_to_dict(r: sqlite3.Row) -> dict:
     ).days
     t["n_days"] = n_nights          # kept for backward compatibility
     t["n_nights"] = n_nights        # nights away from home
+    # Passenger flights (not the pilot roster) within the trip window, including
+    # the home-coming/travel-back day when known.
+    range_end = t.get("return_date") or t["end_date"]
+    t["passenger_flight_count"] = con.execute(
+        "SELECT COUNT(*) FROM passenger_flights WHERE date BETWEEN ? AND ?",
+        (t["start_date"], range_end),
+    ).fetchone()[0]
     return t
 
 
@@ -1442,10 +1449,12 @@ def get_trip(start_date: str, end_date: str):
         "SELECT * FROM trips WHERE start_date = ? AND end_date = ?",
         (start_date, end_date),
     ).fetchone()
-    con.close()
     if row is None:
+        con.close()
         raise HTTPException(404, "Trip not found")
-    return _trip_row_to_dict(row)
+    result = _trip_row_to_dict(row, con)
+    con.close()
+    return result
 
 
 class TripRename(BaseModel):

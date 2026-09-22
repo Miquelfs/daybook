@@ -608,12 +608,20 @@ class ManualSleepIn(BaseModel):
 @router.post("/sleep/manual")
 def add_manual_sleep(body: ManualSleepIn, conn: DB):
     """Log a night's sleep by hand — for when the watch died/wasn't worn and
-    Garmin has nothing for that date. Refuses to clobber a real Garmin sync;
-    re-posting for the same date only overwrites a previous manual entry."""
+    Garmin has nothing for that date. Refuses to clobber a REAL Garmin sync
+    (one that actually recorded a duration); re-posting for the same date
+    only overwrites a previous manual entry or an empty/stub row."""
     from datetime import datetime, timedelta as _timedelta
+    from zoneinfo import ZoneInfo
 
-    existing = conn.execute("SELECT source FROM sleep WHERE date = ?", (body.date,)).fetchone()
-    if existing and (existing["source"] or "garmin") != "manual":
+    today = datetime.now(ZoneInfo("Europe/Madrid")).date().isoformat()
+    if body.date > today:
+        raise HTTPException(status_code=422, detail="Can't log sleep for a future date.")
+
+    existing = conn.execute(
+        "SELECT source, duration_seconds FROM sleep WHERE date = ?", (body.date,)
+    ).fetchone()
+    if existing and (existing["source"] or "garmin") != "manual" and existing["duration_seconds"]:
         raise HTTPException(
             status_code=409,
             detail=f"Sleep already recorded for {body.date} from Garmin sync — not overwriting.",

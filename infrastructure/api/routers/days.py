@@ -344,6 +344,9 @@ def get_range(
         flight_count = conn.execute(
             "SELECT COUNT(*) FROM flights WHERE date=?", (d,)
         ).fetchone()[0]
+        passenger_flight_count = conn.execute(
+            "SELECT COUNT(*) FROM passenger_flights WHERE date=?", (d,)
+        ).fetchone()[0]
 
         tag_slugs = [
             r[0] for r in conn.execute(
@@ -362,6 +365,7 @@ def get_range(
             hrv_last_night=hrv_row["last_night_avg"] if hrv_row else None,
             activity_count=act_count,
             flight_count=flight_count,
+            passenger_flight_count=passenger_flight_count,
             cities=loc["cities"],
             duty_day=bool(row["duty_day"]),
             away_from_base=bool(row["away_from_base"]),

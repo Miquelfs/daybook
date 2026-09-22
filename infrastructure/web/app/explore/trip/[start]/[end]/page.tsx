@@ -61,6 +61,9 @@ export default async function TripDetailPage({ params }: Props) {
         <h1 className="text-2xl font-semibold tracking-tight">🌍 {trip.name}</h1>
         <p className="text-sm text-[#71717A] mt-1">
           {fmtRange(trip.start_date, rangeEnd)} · {trip.n_nights} night{trip.n_nights === 1 ? "" : "s"}
+          {trip.passenger_flight_count > 0 && (
+            <span className="text-sky-400"> · ✈ {trip.passenger_flight_count} flight{trip.passenger_flight_count > 1 ? "s" : ""}</span>
+          )}
           {trip.max_distance_from_home_km != null && (
             <span className="text-[#3F3F46]"> · {Math.round(trip.max_distance_from_home_km)} km out</span>
           )}

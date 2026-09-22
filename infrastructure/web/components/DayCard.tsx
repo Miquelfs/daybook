@@ -7,6 +7,15 @@ interface Props {
   day: DaySummary;
 }
 
+// Mood sets the left accent — same red→amber→green ramp used in the Weeks
+// review ring, so a glance down the list reads like a mood strip.
+function moodAccent(mood: number | null): string {
+  if (mood == null) return "#27272A";
+  if (mood >= 8) return "#22C55E";
+  if (mood >= 5) return "#F59E0B";
+  return "#EF4444";
+}
+
 export function DayCard({ day }: Props) {
   const d = parseISO(day.date);
   const isWeekend = [0, 6].includes(d.getDay());
@@ -19,8 +28,11 @@ export function DayCard({ day }: Props) {
   return (
     <Link
       href={`/day/${day.date}`}
-      className="group flex items-start gap-4 px-4 py-3 rounded-lg hover:bg-[#18181B] transition-colors"
+      className="group relative flex items-start gap-4 pl-4 pr-4 py-3.5 rounded-xl bg-[#0D0D0F] border border-[#27272A] hover:border-[#3F3F46] transition-colors overflow-hidden"
     >
+      {/* Mood accent spine */}
+      <div className="absolute inset-y-0 left-0 w-1" style={{ background: moodAccent(day.mood) }} />
+
       {/* Date column */}
       <div className="w-16 shrink-0 text-right">
         <p className={`text-xs uppercase tracking-wider ${isWeekend ? "text-[#F59E0B]" : "text-[#52525B]"}`}>
@@ -31,7 +43,7 @@ export function DayCard({ day }: Props) {
         </p>
       </div>
 
-      {/* Mood dot */}
+      {/* Mood emoji */}
       <div className="mt-0.5 text-base w-5 shrink-0 text-center">
         {moodEmoji(day.mood)}
       </div>
@@ -43,16 +55,19 @@ export function DayCard({ day }: Props) {
             {preview.join(" · ")}
           </p>
         ) : (
-          <p className="text-sm text-[#52525B]">No data logged</p>
+          <p className="text-sm text-[#3F3F46]">No data logged</p>
         )}
-        {(day.cities.length > 0 || day.duty_day || day.activity_count > 0 || day.flight_count > 0) && (
-          <p className="text-xs text-[#52525B] mt-0.5 flex items-center gap-2 flex-wrap">
+        {(day.cities.length > 0 || day.duty_day || day.activity_count > 0 || day.flight_count > 0 || day.passenger_flight_count > 0) && (
+          <p className="text-xs text-[#52525B] mt-1 flex items-center gap-2 flex-wrap">
             {day.cities.length > 0 && <span>📍 {day.cities[0]}</span>}
             {day.activity_count > 0 && (
               <span>{day.activity_count} activit{day.activity_count === 1 ? "y" : "ies"}</span>
             )}
             {day.flight_count > 0 && (
               <span className="text-sky-400">✈ {day.flight_count} sector{day.flight_count > 1 ? "s" : ""}</span>
+            )}
+            {day.passenger_flight_count > 0 && (
+              <span className="text-cyan-300">🧳 {day.passenger_flight_count} flight{day.passenger_flight_count > 1 ? "s" : ""}</span>
             )}
             {day.duty_day && day.flight_count === 0 && <span className="text-[#F59E0B]">✈ Duty</span>}
           </p>

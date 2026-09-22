@@ -19,20 +19,20 @@ export function DayHeader({ date }: Props) {
 
   return (
     <header className="pt-6 pb-6 border-b border-[#27272A]">
-      <div className="flex items-end justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs text-[#F59E0B] uppercase tracking-[0.2em] mb-1.5">
             {isToday(d) ? "Today" : format(d, "EEEE")}
           </p>
           <h1
             className="font-semibold leading-[1.15] tracking-tight text-[#FAFAFA] truncate"
-            style={{ fontSize: "clamp(1.75rem, 5.5vw, 3.25rem)" }}
+            style={{ fontSize: "clamp(1.5rem, 5.5vw, 3.25rem)" }}
           >
             {format(d, "MMMM d, yyyy")}
           </h1>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0 pb-0.5">
+        <div className="flex items-center gap-1 shrink-0 sm:pb-0.5">
           <GarminSyncButton date={date} />
           <Link
             href={`/day/${prev}`}

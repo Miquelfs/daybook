@@ -105,6 +105,7 @@ class DaySummary(BaseModel):
     hrv_last_night: float | None = None
     activity_count: int = 0
     flight_count: int = 0
+    passenger_flight_count: int = 0
     cities: list[str] = []
     duty_day: bool = False
     away_from_base: bool = False

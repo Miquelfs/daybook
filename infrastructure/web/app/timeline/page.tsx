@@ -100,11 +100,15 @@ function DaysTab() {
         Object.entries(grouped)
           .sort(([a], [b]) => b.localeCompare(a))
           .map(([month, days]) => (
-            <div key={month} className="mb-6">
-              <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2 px-4">
-                {format(parseISO(`${month}-01`), "MMMM yyyy")}
-              </p>
-              <div className="flex flex-col">
+            <div key={month} className="mb-7">
+              <div className="flex items-baseline gap-2 mb-3 px-1">
+                <p className="text-xs font-semibold text-[#A1A1AA] uppercase tracking-widest">
+                  {format(parseISO(`${month}-01`), "MMMM yyyy")}
+                </p>
+                <div className="flex-1 h-px bg-[#18181B]" />
+                <p className="text-[11px] text-[#3F3F46] tabular-nums">{days.length} day{days.length > 1 ? "s" : ""}</p>
+              </div>
+              <div className="flex flex-col gap-2">
                 {[...days]
                   .sort((a, b) => b.date.localeCompare(a.date))
                   .map((day) => (
@@ -295,6 +299,7 @@ function ReviewCard({ label, days, start, end }: { label: string; days: DaySumma
 
   const mood = avgMood(days);
   const totalFlights = days.reduce((s, d) => s + (d.flight_count ?? 0), 0);
+  const totalPassengerFlights = days.reduce((s, d) => s + (d.passenger_flight_count ?? 0), 0);
   const totalActivities = days.reduce((s, d) => s + (d.activity_count ?? 0), 0);
   const daysLogged = days.filter((d) => d.mood != null).length;
   const daysWithPhoto = days.filter((d) => d.photo_path).length;
@@ -319,6 +324,9 @@ function ReviewCard({ label, days, start, end }: { label: string; days: DaySumma
             {mood != null && <MoodRing value={mood} />}
             {totalFlights > 0 && (
               <span className="text-xs text-sky-400">✈ {totalFlights} sector{totalFlights > 1 ? "s" : ""}</span>
+            )}
+            {totalPassengerFlights > 0 && (
+              <span className="text-xs text-cyan-300">🧳 {totalPassengerFlights} flight{totalPassengerFlights > 1 ? "s" : ""}</span>
             )}
             {totalActivities > 0 && (
               <span className="text-xs text-green-400">⚡ {totalActivities} activit{totalActivities > 1 ? "ies" : "y"}</span>
@@ -375,11 +383,13 @@ function ReviewCard({ label, days, start, end }: { label: string; days: DaySumma
           {expandedView === "charts" ? (
             <WeekCharts start={start} end={end} />
           ) : (
-            days
-              .sort((a, b) => b.date.localeCompare(a.date))
-              .map((day) => (
-                <DayCard key={day.date} day={day} />
-              ))
+            <div className="flex flex-col gap-2 px-4 pb-4">
+              {days
+                .sort((a, b) => b.date.localeCompare(a.date))
+                .map((day) => (
+                  <DayCard key={day.date} day={day} />
+                ))}
+            </div>
           )}
         </div>
       )}

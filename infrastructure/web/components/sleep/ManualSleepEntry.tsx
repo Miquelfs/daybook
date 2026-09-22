@@ -12,6 +12,7 @@ const inputCls =
 // times) so sleep debt and dashboards don't have a hole for that night.
 export function ManualSleepEntry({ onSaved }: { onSaved?: () => void }) {
   const [open, setOpen] = useState(false);
+  const today = format(new Date(), "yyyy-MM-dd");
   const [date, setDate] = useState(format(new Date(Date.now() - 86400000), "yyyy-MM-dd"));
   const [startTime, setStartTime] = useState("23:00");
   const [endTime, setEndTime] = useState("07:00");
@@ -53,7 +54,7 @@ export function ManualSleepEntry({ onSaved }: { onSaved?: () => void }) {
         </button>
       </div>
       <form onSubmit={submit} className="space-y-3">
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+        <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} className={inputCls} />
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="text-[11px] text-[#52525B]">Went to sleep</label>

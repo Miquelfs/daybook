@@ -78,6 +78,11 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
           {flag} {name}
         </button>
         <div className="flex items-center gap-2 shrink-0">
+          {trip.passenger_flight_count > 0 && (
+            <span className="text-[10px] text-sky-400 tabular-nums">
+              ✈ {trip.passenger_flight_count} flight{trip.passenger_flight_count > 1 ? "s" : ""}
+            </span>
+          )}
           {trip.max_distance_from_home_km != null && (
             <span className="text-[10px] text-[#3F3F46] tabular-nums">{Math.round(trip.max_distance_from_home_km)} km out</span>
           )}
