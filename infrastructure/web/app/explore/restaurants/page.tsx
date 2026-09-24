@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { api, type Restaurant, type RestaurantIn, type Contact } from "@/lib/api";
 import { ContactsPicker } from "@/components/ContactsPicker";
+import { CUISINE_EMOJI, CUISINE_LIST } from "@/lib/cuisines";
 
 const FLAG: Record<string, string> = {
   Spain: "🇪🇸", France: "🇫🇷", Germany: "🇩🇪", Italy: "🇮🇹",
@@ -14,15 +15,6 @@ const FLAG: Record<string, string> = {
   Norway: "🇳🇴", Sweden: "🇸🇪", Denmark: "🇩🇰", Finland: "🇫🇮",
   "United States": "🇺🇸", Japan: "🇯🇵", Thailand: "🇹🇭",
   Morocco: "🇲🇦", "United Arab Emirates": "🇦🇪",
-};
-
-const CUISINE_EMOJI: Record<string, string> = {
-  Italian: "🍝", Sushi: "🍣", Japanese: "🍱", Tapas: "🥘", Spanish: "🥘",
-  Catalan: "🥘", French: "🥐", Mexican: "🌮", Asian: "🥡", Chinese: "🥟",
-  Indian: "🍛", Thai: "🍜", Greek: "🫒", Pizza: "🍕", Burger: "🍔",
-  Brunch: "🍳", Breakfast: "🥐", "Fast Food": "🍟", Ramen: "🍜",
-  "Bar/Tapas": "🍺", Portuguese: "🍷", "Middle Eastern": "🧆",
-  Peruvian: "🐟", Vegetarian: "🥗",
 };
 
 function RatingBar({ value, max = 10, color = "#F59E0B" }: { value: number | null; max?: number; color?: string }) {
@@ -36,8 +28,6 @@ function RatingBar({ value, max = 10, color = "#F59E0B" }: { value: number | nul
     </span>
   );
 }
-
-const CUISINE_LIST = Object.keys(CUISINE_EMOJI).sort();
 
 const EMOJI_PICKER = ["🍽","🍝","🍣","🍜","🥘","🍕","🍔","🌮","🥡","🥟","🍛","🫒","🥐","🍟","🍺","🍷","🧆","🐟","🥗","🍳","🍱","🌶","🫕","🥩","🦞","🦐","🥪","☕","🍻","🥂","🍾","🧁","🍰","🎂","🧇","🌯","🥙","🫔","🍤","🦑","🦀","🥓","🍖","🍗","🥚","🧀","🥑","🍅","🫙","🥫"];
 

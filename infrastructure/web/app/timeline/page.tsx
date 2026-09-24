@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, Suspense } from "react";
+import { useRouter } from "next/navigation";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { CalendarSearch } from "lucide-react";
 import { format, subDays, parseISO, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachWeekOfInterval, eachMonthOfInterval } from "date-fns";
 import { api, type DaySummary } from "@/lib/api";
 import Link from "next/link";
@@ -49,13 +51,37 @@ type Tab = "days" | "weeks" | "life";
 
 export default function TimelinePage() {
   const [tab, setTab] = useState<Tab>("days");
+  const router = useRouter();
+  const [jumpDate, setJumpDate] = useState("");
+  const today = format(new Date(), "yyyy-MM-dd");
+
+  function jumpToDate(d: string) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) router.push(`/day/${d}`);
+  }
 
   return (
     <main className="w-full px-4 pb-20">
       {/* Header */}
       <header className="pt-8 pb-5 max-w-5xl mx-auto">
-        <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Today</Link>
-        <h1 className="text-2xl font-semibold tracking-tight mb-5">Timeline</h1>
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Today</Link>
+            <h1 className="text-2xl font-semibold tracking-tight">Timeline</h1>
+          </div>
+
+          {/* Jump to a specific date */}
+          <label className="shrink-0 flex items-center gap-1.5 bg-[#0D0D0F] border border-[#27272A] rounded-lg px-2.5 py-1.5 mt-1 cursor-pointer hover:border-[#3F3F46] transition-colors">
+            <CalendarSearch size={13} className="text-[#52525B]" />
+            <input
+              type="date"
+              value={jumpDate}
+              max={today}
+              onChange={(e) => { setJumpDate(e.target.value); jumpToDate(e.target.value); }}
+              className="bg-transparent text-xs text-[#A1A1AA] outline-none [color-scheme:dark] w-[112px]"
+              aria-label="Jump to date"
+            />
+          </label>
+        </div>
       </header>
 
       {/* Tab switcher — centered */}

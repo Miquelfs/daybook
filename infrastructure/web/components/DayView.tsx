@@ -39,12 +39,13 @@ export async function DayView({ date }: { date: string }) {
     process.env.NEXT_PUBLIC_API_URL ??
     "http://localhost:8000";
 
-  const [day, tracks, pastDay, lifeEvents,
+  const [day, tracks, pastDay, lifeEvents, onThisDay,
     pastRestaurants, pastBooks, morningBriefData, trainingDay, aiStatus] = await Promise.all([
     api.day(date).catch(() => null),
     api.tracks(date).catch(() => ({ type: "FeatureCollection" as const, features: [] })),
     api.day(oneYearAgo).catch(() => null),
     api.lifeEventsOnThisDay(date).catch(() => []),
+    api.onThisDay(date).catch(() => null),
     api.restaurants({ date: oneYearAgo }).catch(() => []),
     booksApi.list({ date: oneYearAgo }).catch(() => []),
     api.morningBrief(date).catch(() => null),
@@ -133,7 +134,25 @@ export async function DayView({ date }: { date: string }) {
         <section>
           <SectionLabel>On this day</SectionLabel>
           <div className="flex flex-col gap-3">
-            {/* Life events (any year) */}
+            {/* Jump to this same date in any other year with something logged */}
+            {onThisDay && onThisDay.years.filter((y) => y.date !== oneYearAgo).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {onThisDay.years
+                  .filter((y) => y.date !== oneYearAgo)
+                  .map((y) => (
+                    <Link
+                      key={y.date}
+                      href={`/day/${y.date}`}
+                      className="inline-flex items-center gap-1.5 bg-[#0D0D0F] border border-[#27272A] rounded-full px-3 py-1.5 text-xs text-[#A1A1AA] hover:border-[#F59E0B]/40 hover:text-[#F59E0B] transition-colors"
+                    >
+                      {y.mood != null && <span>{moodEmoji(y.mood)}</span>}
+                      {y.date.slice(0, 4)}
+                    </Link>
+                  ))}
+              </div>
+            )}
+
+            {/* Life events (any year) — tap through to that day */}
             {lifeEvents.map((ev) => {
               const evYear = ev.event_date.slice(0, 4);
               const yearsAgo = parseInt(date.slice(0, 4)) - parseInt(evYear);
@@ -142,7 +161,11 @@ export async function DayView({ date }: { date: string }) {
                 loss: "#a1a1aa", achievement: "#fbbf24", other: "#a78bfa",
               };
               return (
-                <div key={ev.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3.5 flex gap-3 items-start">
+                <Link
+                  key={ev.id}
+                  href={`/day/${ev.event_date}`}
+                  className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3.5 flex gap-3 items-start hover:border-[#3F3F46] transition-colors"
+                >
                   <span
                     className="inline-block h-2 w-2 rounded-full mt-1.5 flex-shrink-0"
                     style={{ background: typeColor[ev.type] ?? "#FAFAFA" }}
@@ -158,16 +181,16 @@ export async function DayView({ date }: { date: string }) {
                       <p className="text-xs text-[#71717A] mt-1 italic">&ldquo;{ev.notes}&rdquo;</p>
                     )}
                   </div>
-                </div>
+                </Link>
               );
             })}
 
             {/* One year ago card */}
             {hasPastMemories && (
               <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 space-y-3">
-                <p className="text-xs text-[#52525B] uppercase tracking-widest">
+                <Link href={`/day/${oneYearAgo}`} className="text-xs text-[#52525B] uppercase tracking-widest hover:text-[#F59E0B] transition-colors">
                   {format(parseISO(oneYearAgo), "d MMM yyyy")} · one year ago
-                </p>
+                </Link>
 
                 {pastDay?.subjective.mood && (
                   <div className="space-y-0.5">
@@ -218,7 +241,7 @@ export async function DayView({ date }: { date: string }) {
               </div>
             )}
 
-            {lifeEvents.length === 0 && !hasPastMemories && (
+            {lifeEvents.length === 0 && !hasPastMemories && !onThisDay?.years.length && (
               <p className="text-xs text-[#3F3F46] text-center py-4">
                 Nothing recorded on this date in previous years
               </p>
