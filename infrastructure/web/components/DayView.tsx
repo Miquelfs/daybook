@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { api, moodEmoji, type LifeEvent } from "@/lib/api";
-import { CUISINE_EMOJI } from "@/lib/cuisines";
+import { api, type LifeEvent } from "@/lib/api";
+import { OnThisDay } from "@/components/OnThisDay";
 import { DayHeader } from "@/components/DayHeader";
 import { MorningBrief } from "@/components/MorningBrief";
 import { MovementBlock } from "@/components/MovementBlock";
@@ -21,7 +21,7 @@ import { ScreenTimeBlock } from "@/components/ScreenTimeBlock";
 import { ApiOffline } from "@/components/ApiOffline";
 import { DayAddFAB } from "@/components/DayAddFAB";
 import { DayTraining } from "@/components/DayTraining";
-import { format, parseISO } from "date-fns";
+import { format } from "date-fns";
 
 /**
  * The full single-day view. Rendered identically by both the home ("today")
@@ -81,11 +81,6 @@ export async function DayView({ date }: { date: string }) {
       restaurants: [], books: [], events: eventsByDate.get(d)!,
     })),
   ].sort((a, b) => b.date.localeCompare(a.date));
-
-  const EVENT_TYPE_COLOR: Record<string, string> = {
-    career: "#60a5fa", relationship: "#f472b6", travel: "#34d399",
-    loss: "#a1a1aa", achievement: "#fbbf24", other: "#a78bfa",
-  };
 
   return (
     <>
@@ -150,113 +145,7 @@ export async function DayView({ date }: { date: string }) {
 
         <section>
           <SectionLabel>On this day</SectionLabel>
-          <div className="flex flex-col gap-3">
-            {/* Jump to any year with something logged */}
-            {yearEntries.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {yearEntries.map((y) => (
-                  <Link
-                    key={y.date}
-                    href={`/day/${y.date}`}
-                    className="inline-flex items-center gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-full pl-2.5 pr-3 py-1.5 text-xs font-medium text-[#A1A1AA] hover:border-[#F59E0B]/50 hover:text-[#F59E0B] hover:bg-[#F59E0B]/[0.06] transition-colors"
-                  >
-                    {y.mood != null && <span>{moodEmoji(y.mood)}</span>}
-                    {y.trip_city && <span title={y.trip_city}>🧳</span>}
-                    {y.events.length > 0 && (
-                      <span
-                        className="inline-block h-1.5 w-1.5 rounded-full"
-                        style={{ background: EVENT_TYPE_COLOR[y.events[0].type] ?? "#FAFAFA" }}
-                      />
-                    )}
-                    {y.date.slice(0, 4)}
-                  </Link>
-                ))}
-              </div>
-            )}
-
-            {/* One card per year with content, most recent first */}
-            {yearEntries.map((y) => {
-              const yearsAgo = parseInt(date.slice(0, 4)) - parseInt(y.date.slice(0, 4));
-              return (
-                <div key={y.date} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3.5 hover:border-[#3F3F46] transition-colors">
-                  <Link href={`/day/${y.date}`} className="flex items-center justify-between gap-3 mb-1">
-                    <span className="text-xs text-[#52525B] uppercase tracking-widest">
-                      {format(parseISO(y.date), "d MMM yyyy")}
-                      <span className="text-[#3F3F46]"> · {yearsAgo} year{yearsAgo !== 1 ? "s" : ""} ago</span>
-                    </span>
-                    {y.mood != null && (
-                      <span className="text-sm font-semibold text-[#F59E0B] shrink-0">
-                        {moodEmoji(y.mood)} {y.mood}/10
-                      </span>
-                    )}
-                  </Link>
-
-                  {y.trip_city && (
-                    <p className="text-xs text-sky-400 mb-1.5">🧳 In {y.trip_city}</p>
-                  )}
-
-                  {(y.mood_note || y.notes) && (
-                    <p className="text-sm text-[#A1A1AA] italic mb-1.5">
-                      &ldquo;{y.mood_note || y.notes}&rdquo;
-                    </p>
-                  )}
-
-                  {y.events.length > 0 && (
-                    <div className="flex flex-col gap-1.5 mb-1.5">
-                      {y.events.map((ev) => (
-                        <div key={ev.id} className="flex gap-2 items-start">
-                          <span
-                            className="inline-block h-2 w-2 rounded-full mt-1 flex-shrink-0"
-                            style={{ background: EVENT_TYPE_COLOR[ev.type] ?? "#FAFAFA" }}
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-[#FAFAFA]">{ev.label}</p>
-                            {ev.notes && <p className="text-xs text-[#71717A] italic">&ldquo;{ev.notes}&rdquo;</p>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {y.restaurants.length > 0 && (
-                    <div className="flex flex-col gap-1 pt-1.5 border-t border-[#18181B]">
-                      {y.restaurants.map((r, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <span className="text-sm">{CUISINE_EMOJI[r.cuisine ?? ""] ?? "🍽"}</span>
-                          <span className="text-xs text-[#A1A1AA] truncate">{r.name}</span>
-                          {r.city && <span className="text-xs text-[#52525B] ml-auto shrink-0">{r.city}</span>}
-                          {r.rating_mf != null && (
-                            <span className="text-xs text-[#F59E0B] tabular-nums shrink-0">{r.rating_mf}/10</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {y.books.length > 0 && (
-                    <div className="flex flex-col gap-1 pt-1.5 border-t border-[#18181B]">
-                      {y.books.map((b, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <span className="text-sm">📖</span>
-                          <span className="text-xs text-[#A1A1AA] truncate">{b.title}</span>
-                          {b.author && <span className="text-xs text-[#52525B] ml-auto shrink-0 max-w-[80px] truncate">{b.author}</span>}
-                          {b.rating != null && (
-                            <span className="text-xs text-[#F59E0B] tabular-nums shrink-0">{"⭐".repeat(b.rating)}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {yearEntries.length === 0 && (
-              <p className="text-xs text-[#3F3F46] text-center py-4">
-                Nothing recorded on this date in previous years
-              </p>
-            )}
-          </div>
+          <OnThisDay entries={yearEntries} todayDate={date} />
         </section>
       </div>
 
