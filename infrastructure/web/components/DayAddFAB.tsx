@@ -158,20 +158,23 @@ function MiniRow({ icon, label, sub, onEdit, onDelete }: {
   );
 }
 
-const MODE_META: Record<Mode, { label: string; icon: React.ReactNode; color: string }> = {
-  food:       { label: "Food", icon: <Apple size={15} />, color: "text-amber-400" },
-  restaurant: { label: "Restaurant", icon: <UtensilsCrossed size={15} />, color: "text-orange-400" },
-  book:       { label: "Book", icon: <BookOpen size={15} />, color: "text-emerald-400" },
-  flight:     { label: "Flight", icon: <Plane size={15} />, color: "text-sky-400" },
+const MODE_META: Record<Mode, { label: string; icon: React.ReactNode }> = {
+  food:       { label: "Food", icon: <Apple size={15} /> },
+  restaurant: { label: "Restaurant", icon: <UtensilsCrossed size={15} /> },
+  book:       { label: "Book", icon: <BookOpen size={15} /> },
+  flight:     { label: "Flight", icon: <Plane size={15} /> },
 };
 
-// These two don't hold an inline form in the sheet — they hand off to the
-// exact same standalone add-sheet the money/life-in-weeks sections already
-// use, so behaviour is identical rather than a re-implementation.
-const LAUNCHERS: { key: "transaction" | "event"; label: string; icon: React.ReactNode }[] = [
-  { key: "transaction", label: "Transaction", icon: <Wallet size={15} /> },
-  { key: "event", label: "Event", icon: <Sparkles size={15} /> },
-];
+// "transaction" and "event" don't hold an inline form in the sheet — they
+// hand off to the exact same standalone add-sheet the money/life-in-weeks
+// sections already use, so behaviour is identical rather than a re-build.
+const LAUNCHER_META: Record<"transaction" | "event", { label: string; icon: React.ReactNode }> = {
+  transaction: { label: "Transaction", icon: <Wallet size={15} /> },
+  event: { label: "Event", icon: <Sparkles size={15} /> },
+};
+
+// Display order across both inline-form modes and launchers.
+const TAB_ORDER: (Mode | "transaction" | "event")[] = ["transaction", "food", "restaurant", "book", "event", "flight"];
 
 export function DayAddFAB({ date }: { date: string }) {
   const qc = useQueryClient();
@@ -252,21 +255,27 @@ export function DayAddFAB({ date }: { date: string }) {
 
               {/* Type selector */}
               <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mb-5 overflow-x-auto">
-                {(Object.keys(MODE_META) as Mode[]).map(m => (
-                  <button key={m} onClick={() => selectMode(m)}
-                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap ${
-                      mode === m ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"
-                    }`}>
-                    {MODE_META[m].icon}{MODE_META[m].label}
-                  </button>
-                ))}
-                {LAUNCHERS.map(l => (
-                  <button key={l.key}
-                    onClick={() => { setOpen(false); if (l.key === "transaction") setMoneyOpen(true); else setEventOpen(true); }}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap text-[#52525B] hover:text-[#A1A1AA] transition-colors">
-                    {l.icon}{l.label}
-                  </button>
-                ))}
+                {TAB_ORDER.map(key => {
+                  if (key === "transaction" || key === "event") {
+                    const l = LAUNCHER_META[key];
+                    return (
+                      <button key={key}
+                        onClick={() => { setOpen(false); if (key === "transaction") setMoneyOpen(true); else setEventOpen(true); }}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap text-[#52525B] hover:text-[#A1A1AA] transition-colors">
+                        {l.icon}{l.label}
+                      </button>
+                    );
+                  }
+                  const m = MODE_META[key];
+                  return (
+                    <button key={key} onClick={() => selectMode(key)}
+                      className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap ${
+                        mode === key ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"
+                      }`}>
+                      {m.icon}{m.label}
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Form */}

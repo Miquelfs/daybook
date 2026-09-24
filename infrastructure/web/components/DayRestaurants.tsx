@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import type { Restaurant } from "@/lib/api";
 import { SectionLabel } from "@/components/MorningBrief";
+import { CUISINE_EMOJI } from "@/lib/cuisines";
 import { X } from "lucide-react";
 
 function AddRestaurantSheet({ date, onClose, onSaved }: { date: string; onClose: () => void; onSaved: () => void }) {
@@ -145,7 +146,7 @@ export function DayRestaurants({ date }: { date: string }) {
                 href={`/explore/restaurants?id=${r.id}`}
                 className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors"
               >
-                <span className="text-xl">🍽</span>
+                <span className="text-xl">{CUISINE_EMOJI[r.cuisine ?? ""] ?? "🍽"}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-[#FAFAFA] truncate">{r.name}</p>
                   <p className="text-xs text-[#52525B]">

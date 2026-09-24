@@ -1276,9 +1276,19 @@ export const api = {
   lifeEvents: () => get<LifeEvent[]>("/life/events"),
   lifeEventsOnThisDay: (date: string) => get<LifeEvent[]>(`/life/events/on-this-day?date=${date}`),
   onThisDay: (date: string) =>
-    get<{ date: string; month_day: string; years: { date: string; mood: number | null; notes: string | null }[] }>(
-      `/insights/on-this-day/${date}`
-    ),
+    get<{
+      date: string;
+      month_day: string;
+      years: {
+        date: string;
+        mood: number | null;
+        notes: string | null;
+        mood_note: string | null;
+        trip_city: string | null;
+        restaurants: { name: string; city: string | null; cuisine: string | null; rating_mf: number | null }[];
+        books: { title: string; author: string; rating: number | null }[];
+      }[];
+    }>(`/insights/on-this-day/${date}`),
 
   // ─── Sleep ──────────────────────────────────────────────────────────────────
   sleepSummary: (days = 30) =>
