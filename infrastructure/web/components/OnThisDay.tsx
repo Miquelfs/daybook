@@ -22,10 +22,18 @@ const EVENT_TYPE_COLOR: Record<string, string> = {
   loss: "#a1a1aa", achievement: "#fbbf24", other: "#a78bfa",
 };
 
-// A year selector, not a wall of cards: the pill row carries the at-a-glance
-// signals (mood, trip, event) for every year, but only the SELECTED year's
-// detail renders below — tapping a pill swaps it, rather than everything
-// being visible (and scrolled past) at once.
+// Same red→amber→green ramp DayCard uses for its mood accent — keeps the
+// "day" visual language consistent between the timeline and this card.
+function moodAccent(mood: number | null): string {
+  if (mood == null) return "#27272A";
+  if (mood >= 8) return "#22C55E";
+  if (mood >= 5) return "#F59E0B";
+  return "#EF4444";
+}
+
+// A year selector, not a wall of cards: one shared track (like the Timeline
+// tab bar / Sleep period picker) carries every year's at-a-glance signal
+// (mood, trip, event), and only the tapped year's detail renders below.
 export function OnThisDay({ entries, todayDate }: { entries: OnThisDayYear[]; todayDate: string }) {
   const [selected, setSelected] = useState(0);
 
@@ -39,40 +47,45 @@ export function OnThisDay({ entries, todayDate }: { entries: OnThisDayYear[]; to
 
   const y = entries[Math.min(selected, entries.length - 1)];
   const yearsAgo = parseInt(todayDate.slice(0, 4)) - parseInt(y.date.slice(0, 4));
+  const accent = moodAccent(y.mood);
+  const isEmpty = y.events.length === 0 && y.restaurants.length === 0 && y.books.length === 0
+    && !y.mood_note && !y.notes && !y.mood && !y.trip_city;
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Year selector */}
-      <div className="flex flex-wrap gap-1.5">
+      {/* Year selector — one continuous track, not a grid of separate pills */}
+      <div className="flex gap-0.5 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 overflow-x-auto">
         {entries.map((e, i) => {
           const isSelected = i === selected;
           return (
             <button
               key={e.date}
               onClick={() => setSelected(i)}
-              className={`inline-flex items-center gap-1 rounded-full pl-2.5 pr-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`shrink-0 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
                 isSelected
-                  ? "bg-[#F59E0B] text-[#09090B]"
-                  : "bg-[#0D0D0F] border border-[#27272A] text-[#A1A1AA] hover:border-[#3F3F46] hover:text-[#FAFAFA]"
+                  ? "bg-[#F59E0B]/15 text-[#F59E0B]"
+                  : "text-[#71717A] hover:text-[#A1A1AA] hover:bg-[#18181B]"
               }`}
             >
-              {e.mood != null && <span>{moodEmoji(e.mood)}</span>}
-              {e.trip_city && <span title={e.trip_city}>🧳</span>}
+              {e.mood != null && <span className="leading-none">{moodEmoji(e.mood)}</span>}
+              {e.trip_city && <span className="leading-none" title={e.trip_city}>🧳</span>}
               {e.events.length > 0 && (
                 <span
-                  className="inline-block h-1.5 w-1.5 rounded-full"
-                  style={{ background: isSelected ? "#09090B" : EVENT_TYPE_COLOR[e.events[0].type] ?? "#FAFAFA" }}
+                  className="inline-block h-1.5 w-1.5 rounded-full ring-1 ring-black/20"
+                  style={{ background: EVENT_TYPE_COLOR[e.events[0].type] ?? "#FAFAFA" }}
                 />
               )}
-              {e.date.slice(0, 4)}
+              <span className="tabular-nums">{e.date.slice(0, 4)}</span>
             </button>
           );
         })}
       </div>
 
       {/* Selected year's detail */}
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3.5">
-        <Link href={`/day/${y.date}`} className="flex items-center justify-between gap-3 mb-1 group">
+      <div className="relative bg-[#0D0D0F] border border-[#27272A] rounded-xl pl-4 pr-4 py-3.5 overflow-hidden">
+        <div className="absolute inset-y-0 left-0 w-1" style={{ background: accent }} />
+
+        <Link href={`/day/${y.date}`} className="flex items-center justify-between gap-3 mb-2 group">
           <span className="text-xs text-[#52525B] uppercase tracking-widest group-hover:text-[#F59E0B] transition-colors">
             {format(parseISO(y.date), "d MMM yyyy")}
             <span className="text-[#3F3F46]"> · {yearsAgo} year{yearsAgo !== 1 ? "s" : ""} ago</span>
@@ -84,27 +97,34 @@ export function OnThisDay({ entries, todayDate }: { entries: OnThisDayYear[]; to
           )}
         </Link>
 
-        {y.trip_city && <p className="text-xs text-sky-400 mb-1.5">🧳 In {y.trip_city}</p>}
-
-        {(y.mood_note || y.notes) && (
-          <p className="text-sm text-[#A1A1AA] italic mb-1.5">&ldquo;{y.mood_note || y.notes}&rdquo;</p>
+        {y.trip_city && (
+          <span className="inline-flex items-center gap-1 bg-sky-500/10 text-sky-400 text-xs font-medium rounded-full px-2.5 py-1 mb-2">
+            🧳 {y.trip_city}
+          </span>
         )}
 
-        {y.events.length === 0 && y.restaurants.length === 0 && y.books.length === 0 && !y.mood_note && !y.notes && !y.mood && !y.trip_city && (
+        {(y.mood_note || y.notes) && (
+          <p className="text-sm text-[#A1A1AA] italic mb-2">&ldquo;{y.mood_note || y.notes}&rdquo;</p>
+        )}
+
+        {isEmpty && (
           <p className="text-xs text-[#3F3F46]">Nothing specific logged — just marking the date.</p>
         )}
 
         {y.events.length > 0 && (
-          <div className="flex flex-col gap-1.5 mb-1.5">
+          <div className="flex flex-col gap-2 mb-2">
             {y.events.map((ev) => (
-              <div key={ev.id} className="flex gap-2 items-start">
+              <div key={ev.id} className="flex gap-2.5 items-start">
                 <span
-                  className="inline-block h-2 w-2 rounded-full mt-1 flex-shrink-0"
+                  className="inline-block h-2 w-2 rounded-full mt-1.5 flex-shrink-0"
                   style={{ background: EVENT_TYPE_COLOR[ev.type] ?? "#FAFAFA" }}
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[#FAFAFA]">{ev.label}</p>
-                  {ev.notes && <p className="text-xs text-[#71717A] italic">&ldquo;{ev.notes}&rdquo;</p>}
+                  <p className="text-sm font-medium text-[#FAFAFA]">
+                    {ev.label}
+                    <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-[#52525B]">{ev.type}</span>
+                  </p>
+                  {ev.notes && <p className="text-xs text-[#71717A] italic mt-0.5">&ldquo;{ev.notes}&rdquo;</p>}
                 </div>
               </div>
             ))}
@@ -112,7 +132,7 @@ export function OnThisDay({ entries, todayDate }: { entries: OnThisDayYear[]; to
         )}
 
         {y.restaurants.length > 0 && (
-          <div className="flex flex-col gap-1 pt-1.5 border-t border-[#18181B]">
+          <div className="flex flex-col gap-1.5 pt-2 border-t border-[#18181B]">
             {y.restaurants.map((r, i) => (
               <div key={i} className="flex items-center gap-2">
                 <span className="text-sm">{CUISINE_EMOJI[r.cuisine ?? ""] ?? "🍽"}</span>
@@ -127,7 +147,7 @@ export function OnThisDay({ entries, todayDate }: { entries: OnThisDayYear[]; to
         )}
 
         {y.books.length > 0 && (
-          <div className="flex flex-col gap-1 pt-1.5 border-t border-[#18181B]">
+          <div className="flex flex-col gap-1.5 pt-2 border-t border-[#18181B]">
             {y.books.map((b, i) => (
               <div key={i} className="flex items-center gap-2">
                 <span className="text-sm">📖</span>
