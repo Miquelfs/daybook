@@ -35,9 +35,9 @@ rsync -av --delete --exclude='.git' --exclude='.next' --exclude='node_modules' -
 scp infrastructure/web/.env.local pi@daybook-pi:~/daybook/infrastructure/web/.env.local
 ```
 
-4. Ship the prebuilt frontend (`-z --partial` so it resumes if the link hiccups):
+4. Ship the prebuilt frontend (`-z --partial` so it resumes if the link hiccups; `--delete` so old build chunks don't pile up and fill the SD card):
 ```bash
-rsync -avz --partial --timeout=120 infrastructure/web/.next/ pi@daybook-pi:~/daybook/infrastructure/web/.next/
+rsync -avz --partial --delete --timeout=120 infrastructure/web/.next/ pi@daybook-pi:~/daybook/infrastructure/web/.next/
 ```
 
 5. Restart services on the Pi (no build — serves the new `.next` and applies API startup migrations):

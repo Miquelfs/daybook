@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # backup.sh — snapshot all SQLite databases to data/backups/ with a timestamp.
-# Keeps the last 30 backups; deletes older ones automatically.
+# Keeps the last 7 backups per database; deletes older ones automatically.
+# Skips the backup when free disk is low — a full SD card takes the whole app
+# down (SQLite can't open its WAL files), which is worse than a missed backup.
 #
 # Usage:
 #   bash infrastructure/scripts/backup.sh
@@ -12,10 +14,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DB_DIR="$ROOT/infrastructure/db"
 BACKUP_DIR="$ROOT/data/backups"
-KEEP=30
+KEEP=7
+MIN_FREE_MB=1500
 STAMP="$(date +%Y-%m-%d_%H%M%S)"
 
 mkdir -p "$BACKUP_DIR"
+
+free_mb=$(df -Pm "$BACKUP_DIR" | awk 'NR==2 {print $4}')
+if (( free_mb < MIN_FREE_MB )); then
+  echo "==> Skipping backup: only ${free_mb} MB free (need ${MIN_FREE_MB} MB)" >&2
+  exit 1
+fi
 
 echo "==> Backing up databases (stamp: $STAMP)..."
 
