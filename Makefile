@@ -8,7 +8,7 @@ VENV  := $(ROOT)/.venv
 PY    := $(VENV)/bin/python
 WEB   := $(ROOT)/infrastructure/web
 
-.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-notion sync-notion-full sync-strava sync-strava-full strava-auth import-tracks geocode-tracks aviation-init import-full-csv import-aerolink api web dev prod kill cron-install cron-remove verify backup clean-pyc deploy help
+.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-notion sync-notion-full sync-strava sync-strava-full strava-auth import-tracks geocode-tracks aviation-init import-full-csv import-aerolink api web dev prod kill cron-install cron-remove verify backup backup-cron-install backup-pull backup-pull-install backup-pull-remove storage-report clean-pyc deploy help
 
 PI_HOST ?= pi@daybook-pi
 PI_DIR  ?= ~/daybook
@@ -216,6 +216,52 @@ verify:
 backup:
 	@bash $(ROOT)/infrastructure/scripts/backup.sh
 
+# Run on the Pi: nightly DB snapshot at 03:30 (replaces any existing backup.sh cron line).
+backup-cron-install:
+	@CRON_LINE="30 3 * * * cd $(ROOT) && $(ROOT)/infrastructure/scripts/backup.sh >> $(ROOT)/infrastructure/scripts/logs/backup.log 2>&1"; \
+	( crontab -l 2>/dev/null | grep -v "backup.sh"; echo "$$CRON_LINE" ) | crontab -
+	@echo "    Backup cron installed: 03:30 daily → data/backups/ (keeps 3)"
+
+# Run on the Mac: pull the Pi's snapshots into ~/Backups/daybook (keeps history).
+PULL_LABEL  := com.daybook.pull-backups
+PULL_SCRIPT := $(HOME)/.local/share/daybook/pull_backups.sh
+PULL_PLIST  := $(HOME)/Library/LaunchAgents/$(PULL_LABEL).plist
+PULL_LOG    := $(HOME)/Library/Logs/daybook-backup-pull.log
+
+backup-pull:
+	@bash $(ROOT)/infrastructure/scripts/pull_backups.sh
+
+# launchd can't run scripts from ~/Desktop (macOS privacy protection), so the
+# script is copied to ~/.local/share/daybook. Re-run after editing pull_backups.sh.
+# Runs daily at 10:00; if the Mac was asleep, launchd runs it on wake.
+backup-pull-install:
+	@mkdir -p $(dir $(PULL_SCRIPT)) $(HOME)/Library/LaunchAgents $(HOME)/Library/Logs
+	@install -m 755 $(ROOT)/infrastructure/scripts/pull_backups.sh $(PULL_SCRIPT)
+	@printf '%s\n' \
+		'<?xml version="1.0" encoding="UTF-8"?>' \
+		'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+		'<plist version="1.0"><dict>' \
+		'  <key>Label</key><string>$(PULL_LABEL)</string>' \
+		'  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$(PULL_SCRIPT)</string></array>' \
+		'  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>' \
+		'  <key>StandardOutPath</key><string>$(PULL_LOG)</string>' \
+		'  <key>StandardErrorPath</key><string>$(PULL_LOG)</string>' \
+		'</dict></plist>' > $(PULL_PLIST)
+	@launchctl bootout gui/$$(id -u)/$(PULL_LABEL) 2>/dev/null || true
+	@launchctl bootstrap gui/$$(id -u) $(PULL_PLIST)
+	@echo "    Installed $(PULL_LABEL): daily 10:00 → ~/Backups/daybook"
+	@echo "    Log: $(PULL_LOG)"
+	@echo "    Run now: launchctl kickstart gui/$$(id -u)/$(PULL_LABEL)"
+
+backup-pull-remove:
+	@launchctl bootout gui/$$(id -u)/$(PULL_LABEL) 2>/dev/null || true
+	@rm -f $(PULL_PLIST) $(PULL_SCRIPT)
+	@echo "    Removed $(PULL_LABEL) (pulled backups in ~/Backups/daybook are kept)"
+
+# Run on the Pi: disk usage + measured daily growth + days until the SD card is full.
+storage-report:
+	@python3 $(ROOT)/infrastructure/scripts/storage_report.py
+
 # ── Deploy to Pi ──────────────────────────────────────────────────────────────
 
 deploy:
@@ -286,6 +332,11 @@ help:
 	@echo "  make kill              Kill anything on ports 8000 and 3000"
 	@echo "  make verify            Print coverage + gap report for all domains"
 	@echo "  make backup            Snapshot databases to data/backups/"
+	@echo "  make backup-cron-install  (Pi) Nightly 03:30 DB snapshot cron"
+	@echo "  make backup-pull       (Mac) Pull Pi snapshots into ~/Backups/daybook now"
+	@echo "  make backup-pull-install  (Mac) Schedule the pull daily via launchd"
+	@echo "  make backup-pull-remove   (Mac) Remove the launchd pull job"
+	@echo "  make storage-report    (Pi) Disk usage, growth rate, days until full"
 	@echo "  make clean-pyc         Remove __pycache__ directories"
 	@echo "  make deploy            Rsync code to Pi, build frontend, restart services"
 	@echo ""

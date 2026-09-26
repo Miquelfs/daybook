@@ -63,6 +63,14 @@ The rsync already excludes `*.db` files — DBs are never overwritten by normal 
 
 If a schema migration is needed on Pi, write a migration script and run it on the Pi directly.
 
+## Backups & Disk Space
+
+The Pi's SD card is 15 GB. When it hits 100%, SQLite can't open its WAL files and **every** DB endpoint returns 500 (the browser shows "Failed to fetch" / "Waiting for API..."). First check: `ssh pi@daybook-pi "df -h /"`.
+
+- **Pi** (`backup.sh`, cron 03:30 via `make backup-cron-install`): SQLite online-backup snapshots → `data/backups/`, keeps only 3 per DB, skips if <1.5 GB free.
+- **Mac** (`pull_backups.sh`, launchd 10:00 via `make backup-pull-install`): pulls those into `~/Backups/daybook`, keeps the last 30 per DB + the first of every month forever, and sends a macOS notification if the pull fails or the Pi's newest snapshot is >3 days old. Re-run `make backup-pull-install` after editing `pull_backups.sh` (launchd runs an installed copy — it can't read `~/Desktop`).
+- `make storage-report` on the Pi: space per table/folder, measured growth/day, and the date the card fills.
+
 ## Project Stack
 
 - **Backend**: FastAPI (Python) on Raspberry Pi via Tailscale (100.67.252.76)
