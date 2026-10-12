@@ -52,6 +52,8 @@ export type Activity = {
   max_heart_rate: number | null;
   calories: number | null;
   has_polyline: boolean;
+  /** Encoded route — present on the day payload so the day view can map it. */
+  polyline?: string | null;
   user_notes: string | null;
   user_rating: number | null;
 };
@@ -792,6 +794,23 @@ export type CityStay = {
   days: number;
 };
 
+export type CountryStay = {
+  start: string;
+  end: string;
+  n_days: number;
+  cities: string[];
+  days: { date: string; mood: number | null; energy: number | null }[];
+  trip: { start_date: string; end_date: string; name: string } | null;
+};
+
+export type CountryVisits = {
+  country: string;
+  total_days: number;
+  first_visit: string | null;
+  last_visit: string | null;
+  stays: CountryStay[];
+};
+
 export type PlaceDate = {
   date: string;
   city: string | null;
@@ -989,6 +1008,11 @@ export const api = {
     get<PlaceSummary>(
       `/locations/place-summary?place=${encodeURIComponent(place)}` +
         (country ? `&country=${encodeURIComponent(country)}` : "")
+    ),
+  countryVisits: (country: string, year?: number) =>
+    get<CountryVisits>(
+      `/locations/country-visits?country=${encodeURIComponent(country)}` +
+        (year ? `&year=${year}` : "")
     ),
   movementStats: (year?: number) =>
     get<MovementStats>(`/locations/movement/stats${year ? `?year=${year}` : ""}`),

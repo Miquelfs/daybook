@@ -8,7 +8,6 @@ import { foodApi, type FoodEntry, type FoodSummary } from "@/lib/food-api";
 import { groupByMeal } from "@/lib/food-meals";
 import { SectionLabel } from "@/components/MorningBrief";
 import { WaterTracker } from "@/components/WaterTracker";
-import { HeartHealthyPick } from "@/components/HeartHealthyPick";
 import { HeartDot } from "@/components/HeartRatingBadge";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -77,13 +76,6 @@ export function DayFood({ date }: { date: string }) {
           Open <ArrowUpRight size={12} />
         </Link>
       </div>
-
-      {/* Heart-healthy meal of the day — only forward-looking (today) */}
-      {date === TODAY && (
-        <div className="mb-2">
-          <HeartHealthyPick date={date} />
-        </div>
-      )}
 
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
         {/* Collapsible summary header */}

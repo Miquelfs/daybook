@@ -10,8 +10,14 @@ A trip = consecutive away nights. Sleeping at home breaks the trip. Days with
 no data between two away nights are bridged (assumed still away, up to 3 days).
 Single-night layovers count.
 
-Approximation: a red-eye landing home after midnight still marks the previous
-day as away (last observation of that day is at the outstation).
+Late landings: a pilot working an evening rotation often lands back home after
+midnight, so the last observation of the calendar day is still at the
+outstation. Two signals rescue those nights (see detect/_home_landings):
+  - GPS: if the first fix of the next day is at home and comes within
+    LATE_RETURN_MAX_GAP_H of the day's last (away) fix, you flew home that
+    night — the night counts as home.
+  - Logbook: if the day's last logged flight lands at an airport inside the
+    home radius and no GPS fix is later than that on-block, it's a home night.
 
 Usage:
   python -m domains.locations.trip_detection            # last 120 days
@@ -27,7 +33,7 @@ import math
 import sqlite3
 import sys
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from domains.locations.country_names import to_english
@@ -39,6 +45,8 @@ _LOCATIONS_DB = _ROOT / "infrastructure" / "db" / "locations.db"
 
 MIN_AWAY_KM = 40.0        # floor for the "not sleeping at home" radius
 BRIDGE_UNKNOWN_DAYS = 3   # no-data days between away nights assumed still away
+LATE_RETURN_MAX_GAP_H = 7.0  # away fix → home fix gap that still means "flew
+                              # home tonight" (sector + turnaround + drive)
 TRIP_LOOKBACK_DAYS = 60   # buffer scanned before the window to catch a trip
                           # already in progress at `start` (longest plausible trip)
 
@@ -60,27 +68,35 @@ def _conn(path: Path) -> sqlite3.Connection:
 
 def _parse_ts(ts: str) -> datetime | None:
     try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return None
+    # Naive stamps are UTC; normalise so visits and pings compare safely.
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _night_coords(lcon: sqlite3.Connection, start: str, end: str) -> dict[str, tuple]:
-    """date → (lat, lng) of the LAST observation that day (visits ∪ overland)."""
-    best: dict[str, tuple] = {}  # date → (ts, lat, lng)
+def _observations(lcon: sqlite3.Connection, start: str, end: str) -> dict[str, tuple]:
+    """date → ((ts, lat, lng) first fix, (ts, lat, lng) last fix), visits ∪ overland."""
+    first: dict[str, tuple] = {}
+    last: dict[str, tuple] = {}
+
+    def _add(d: str, ts_raw: str, lat: float, lng: float) -> None:
+        ts = _parse_ts(ts_raw)
+        if ts is None:
+            return
+        if d not in first or ts < first[d][0]:
+            first[d] = (ts, lat, lng)
+        if d not in last or ts > last[d][0]:
+            last[d] = (ts, lat, lng)
 
     for r in lcon.execute(
-        """SELECT date, lat, lng, COALESCE(end_time, start_time) AS ts
+        """SELECT date, lat, lng, start_time, COALESCE(end_time, start_time) AS end_ts
            FROM visits
            WHERE date BETWEEN ? AND ? AND lat IS NOT NULL AND lat != 0""",
         (start, end),
     ):
-        ts = _parse_ts(r["ts"])
-        if ts is None:
-            continue
-        cur = best.get(r["date"])
-        if cur is None or ts > cur[0]:
-            best[r["date"]] = (ts, r["lat"], r["lng"])
+        _add(r["date"], r["start_time"], r["lat"], r["lng"])
+        _add(r["date"], r["end_ts"], r["lat"], r["lng"])
 
     for r in lcon.execute(
         """SELECT date, lat, lng, recorded_at AS ts
@@ -88,14 +104,33 @@ def _night_coords(lcon: sqlite3.Connection, start: str, end: str) -> dict[str, t
            WHERE date BETWEEN ? AND ? AND lat IS NOT NULL""",
         (start, end),
     ):
+        _add(r["date"], r["ts"], r["lat"], r["lng"])
+
+    return {d: (first[d], last[d]) for d in last}
+
+
+def _home_landings(dcon: sqlite3.Connection, start: str, end: str) -> dict[str, tuple]:
+    """date → (on_block ts, lat, lng) of the day's LAST logged flight arrival."""
+    try:
+        rows = dcon.execute(
+            """SELECT f.date, COALESCE(f.on_block_utc, f.landing_utc) AS ts,
+                      a.latitude AS lat, a.longitude AS lng
+               FROM flights f JOIN airports a ON a.icao = f.arr_icao
+               WHERE f.is_sim = 0 AND f.date BETWEEN ? AND ?
+                 AND a.latitude IS NOT NULL""",
+            (start, end),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}  # no logbook tables
+    out: dict[str, tuple] = {}
+    for r in rows:
         ts = _parse_ts(r["ts"])
         if ts is None:
             continue
-        cur = best.get(r["date"])
+        cur = out.get(r["date"])
         if cur is None or ts > cur[0]:
-            best[r["date"]] = (ts, r["lat"], r["lng"])
-
-    return {d: (v[1], v[2]) for d, v in best.items()}
+            out[r["date"]] = (ts, r["lat"], r["lng"])
+    return out
 
 
 def _day_context(lcon: sqlite3.Connection, start: str, end: str) -> dict[str, dict]:
@@ -142,18 +177,37 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
         # trip behind AND creating an overlapping fragment for the same days.)
         scan_start = (date.fromisoformat(start) - timedelta(days=TRIP_LOOKBACK_DAYS)).isoformat()
 
-        nights = _night_coords(lcon, scan_start, end)
+        obs = _observations(lcon, scan_start, end)
+        landings = _home_landings(dcon, scan_start, end)
 
         # Classify each observed date: away night / home night
         away: dict[str, float] = {}   # date → distance from home that night
         home_nights: set[str] = set()
-        for d in sorted(nights):
+        for d in sorted(obs):
             home = home_for(d)
             if home is None:
                 continue
-            lat, lng = nights[d]
-            dist = _haversine_km(home["lat"], home["lng"], lat, lng)
             radius = max(home.get("radius_km") or MIN_AWAY_KM, MIN_AWAY_KM)
+
+            def _dist(lat: float, lng: float) -> float:
+                return _haversine_km(home["lat"], home["lng"], lat, lng)
+
+            last_ts, lat, lng = obs[d][1]
+            dist = _dist(lat, lng)
+            if dist > radius:
+                # Late return: woke up at home after a short gap → flew home
+                # after midnight; the night was spent in your own bed.
+                nxt = obs.get((date.fromisoformat(d) + timedelta(days=1)).isoformat())
+                if nxt:
+                    n_ts, n_lat, n_lng = nxt[0]
+                    gap_h = (n_ts - last_ts).total_seconds() / 3600
+                    if gap_h <= LATE_RETURN_MAX_GAP_H and _dist(n_lat, n_lng) <= radius:
+                        dist = 0.0
+                # Logbook: last sector landed at home and nothing later says
+                # otherwise (GPS gap at the end of a late duty).
+                landing = landings.get(d)
+                if landing and landing[0] >= last_ts and _dist(landing[1], landing[2]) <= radius:
+                    dist = 0.0
             if dist > radius:
                 away[d] = dist
             else:

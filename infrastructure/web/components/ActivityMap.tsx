@@ -5,9 +5,11 @@ import { useEffect, useRef } from "react";
 interface Props {
   polyline: string;         // Google-encoded polyline string
   height?: string;
+  /** false → static preview (no pan/zoom), e.g. inside a tappable card. */
+  interactive?: boolean;
 }
 
-export function ActivityMap({ polyline, height = "280px" }: Props) {
+export function ActivityMap({ polyline, height = "280px", interactive = true }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,7 +32,16 @@ export function ActivityMap({ polyline, height = "280px" }: Props) {
         map.remove();
       }
 
-      map = L.map(ref.current!, { zoomControl: true, attributionControl: false });
+      map = L.map(ref.current!, {
+        zoomControl: interactive,
+        attributionControl: false,
+        dragging: interactive,
+        touchZoom: interactive,
+        scrollWheelZoom: interactive,
+        doubleClickZoom: interactive,
+        boxZoom: interactive,
+        keyboard: interactive,
+      });
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
@@ -68,7 +79,7 @@ export function ActivityMap({ polyline, height = "280px" }: Props) {
     return () => {
       map?.remove();
     };
-  }, [polyline]);
+  }, [polyline, interactive]);
 
   return (
     <div

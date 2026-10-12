@@ -6,6 +6,7 @@ import { api, fmtDuration, fmtDistance, activityIcon } from "@/lib/api";
 import type { Activity, DailyStats } from "@/lib/api";
 import { foodApi } from "@/lib/food-api";
 import { SectionLabel } from "./MorningBrief";
+import { ActivityMap } from "./ActivityMap";
 import type { ReactNode } from "react";
 
 interface Props {
@@ -163,6 +164,11 @@ function ActivityRow({ activity: a }: { activity: Activity }) {
   return (
     <Link href={`/activity/${encodeURIComponent(a.id)}`} className="block">
       {inner}
+      {a.polyline && (
+        <div className="mt-1.5 pointer-events-none">
+          <ActivityMap polyline={a.polyline} height="180px" interactive={false} />
+        </div>
+      )}
     </Link>
   );
 }

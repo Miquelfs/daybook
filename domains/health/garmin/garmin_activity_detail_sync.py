@@ -31,6 +31,7 @@ from pathlib import Path
 _ROOT = Path(__file__).parents[3]
 
 from infrastructure.db.connection import get_connection
+from domains.health.garmin.polyline_backfill import backfill as backfill_polylines
 from domains.health.garmin.garmin_client import get_client
 
 RATE_LIMIT_SLEEP = 1.2
@@ -468,6 +469,11 @@ def main() -> None:
 
         print("", file=sys.stderr)
         conn.commit()
+
+    # ── Routes: fill activities.polyline from the cached detail GPS ──────────
+    n_routes = backfill_polylines(conn, cutoff, verbose=False)
+    if n_routes:
+        print(f"  routes filled: {n_routes}", file=sys.stderr)
 
     # ── Physio metrics ────────────────────────────────────────────────────────
     physio_count = 0

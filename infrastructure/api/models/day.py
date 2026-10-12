@@ -44,6 +44,7 @@ class ActivityData(BaseModel):
     max_heart_rate: float | None = None
     calories: float | None = None
     has_polyline: bool = False
+    polyline: str | None = None
 
 
 class LocationVisit(BaseModel):

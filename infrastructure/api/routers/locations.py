@@ -802,6 +802,113 @@ def get_place_dates(
     return result
 
 
+@router.get("/country-visits")
+def get_country_visits(country: str, year: int | None = None):
+    """
+    Every stay in one country (English name, as listed in the Explore rollup),
+    newest first. A stay = consecutive days seen there (a single missing day is
+    bridged, e.g. a no-GPS day mid-holiday). Each stay carries its dates (with
+    mood), the cities seen, and the overlapping auto-detected trip if any — so
+    the country page can link straight into days and trips.
+    """
+    from datetime import date as _date
+
+    yv = "AND substr(v.date,1,4) = ?" if year else ""
+    yt = "AND substr(t.date,1,4) = ?" if year else ""
+    params: tuple = (str(year),) if year else ()
+
+    con = _conn()
+    try:
+        rows = con.execute(
+            f"""SELECT DISTINCT substr(v.date,1,10) AS date, p.country, p.city
+                FROM visits v LEFT JOIN place_names p ON p.place_id = v.place_id
+                WHERE p.country IS NOT NULL {yv}
+                UNION
+                SELECT DISTINCT substr(t.date,1,10) AS date, t.geocode_country, t.geocode_city
+                FROM tracks t
+                WHERE t.geocode_country IS NOT NULL {yt}""",
+            params + params,
+        ).fetchall()
+    finally:
+        con.close()
+
+    # Same name normalisation as /heatmap so "España" rows count as "Spain".
+    cities_by_date: dict[str, set] = {}
+    for r in rows:
+        if (_en(r["country"]) or r["country"]) != country:
+            continue
+        cs = cities_by_date.setdefault(r["date"], set())
+        if r["city"]:
+            cs.add(_norm_city(r["city"]))
+
+    dates = sorted(cities_by_date)
+    if not dates:
+        return {"country": country, "total_days": 0, "first_visit": None,
+                "last_visit": None, "stays": []}
+
+    # Mood/energy + trips live in daybook.db
+    dcon = _daybook_conn()
+    try:
+        day_map: dict[str, dict] = {}
+        for i in range(0, len(dates), 500):
+            chunk = dates[i:i + 500]
+            for r in dcon.execute(
+                f"SELECT date, mood, energy FROM days WHERE date IN ({','.join('?' * len(chunk))})",
+                chunk,
+            ):
+                day_map[r["date"]] = {"mood": r["mood"], "energy": r["energy"]}
+        trips: list[dict] = []
+        if dcon.execute("SELECT name FROM sqlite_master WHERE name='trips'").fetchone():
+            has_hidden = any(r["name"] == "hidden" for r in dcon.execute("PRAGMA table_info(trips)"))
+            trips = [dict(r) for r in dcon.execute(
+                "SELECT start_date, end_date, return_date, user_name, auto_name FROM trips"
+                + (" WHERE hidden = 0" if has_hidden else "")
+            )]
+    finally:
+        dcon.close()
+
+    # Group into stays: next day within 2 calendar days stays in the same run.
+    runs: list[list[str]] = []
+    for d in dates:
+        if runs and (_date.fromisoformat(d) - _date.fromisoformat(runs[-1][-1])).days <= 2:
+            runs[-1].append(d)
+        else:
+            runs.append([d])
+
+    stays = []
+    for run in reversed(runs):
+        start, end = run[0], run[-1]
+        city_counts: dict[str, int] = {}
+        for d in run:
+            for c in cities_by_date[d]:
+                city_counts[c] = city_counts.get(c, 0) + 1
+        trip = next(
+            (t for t in trips
+             if t["start_date"] <= end and (t["return_date"] or t["end_date"]) >= start),
+            None,
+        )
+        stays.append({
+            "start": start,
+            "end": end,
+            "n_days": len(run),
+            "cities": [c for c, _ in sorted(city_counts.items(), key=lambda x: -x[1])][:6],
+            "days": [{"date": d, **day_map.get(d, {"mood": None, "energy": None})} for d in reversed(run)],
+            "trip": {
+                "start_date": trip["start_date"],
+                "end_date": trip["end_date"],
+                "name": trip["user_name"] or trip["auto_name"],
+            } if trip else None,
+        })
+
+    return {
+        "country": country,
+        "total_days": len(dates),
+        "first_visit": dates[0],
+        "last_visit": dates[-1],
+        "stays": stays,
+    }
+
+
 # ── Overland ingestion ────────────────────────────────────────────────────────
 
 OVERLAND_SCHEMA = """

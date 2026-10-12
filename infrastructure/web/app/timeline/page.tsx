@@ -55,8 +55,11 @@ export default function TimelinePage() {
   const [jumpDate, setJumpDate] = useState("");
   const today = format(new Date(), "yyyy-MM-dd");
 
+  // Navigate only on an explicit confirm (Go / Enter / closing the picker).
+  // iOS fires `change` on every wheel spin — prefilled with today — so
+  // navigating on change jumped straight to today before a date was picked.
   function jumpToDate(d: string) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) router.push(`/day/${d}`);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d >= "1990-01-01" && d <= today) router.push(`/day/${d}`);
   }
 
   return (
@@ -76,10 +79,24 @@ export default function TimelinePage() {
               type="date"
               value={jumpDate}
               max={today}
-              onChange={(e) => { setJumpDate(e.target.value); jumpToDate(e.target.value); }}
+              onChange={(e) => setJumpDate(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") jumpToDate(jumpDate); }}
+              onBlur={() => {
+                // Touch pickers (iOS "Done") blur on close — treat that as confirm.
+                if (window.matchMedia("(pointer: coarse)").matches) jumpToDate(jumpDate);
+              }}
               className="bg-transparent text-xs text-[#A1A1AA] outline-none [color-scheme:dark] w-[112px]"
               aria-label="Jump to date"
             />
+            {jumpDate && (
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); jumpToDate(jumpDate); }}
+                className="text-xs font-medium text-[#A1A1AA] hover:text-[#FAFAFA] px-1"
+              >
+                Go
+              </button>
+            )}
           </label>
         </div>
       </header>

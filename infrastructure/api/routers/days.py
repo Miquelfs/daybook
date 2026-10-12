@@ -187,6 +187,7 @@ def _activities(conn: sqlite3.Connection, date_str: str) -> list[ActivityData]:
             max_heart_rate=r["max_heart_rate"],
             calories=r["calories"],
             has_polyline=bool(r["polyline"]),
+            polyline=r["polyline"] or None,
         )
         for r in rows
     ]
