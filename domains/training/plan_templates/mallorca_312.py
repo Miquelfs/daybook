@@ -33,7 +33,8 @@ layover nights). Rest days are simply the days nothing lands on.
 
 Foundation (F1–F7, before the source plan's week 1): learn the trainer, set
 FTP, build gym tolerance and a 3h aerobic ride, so week 1 of the race plan
-isn't a shock. trim_plan keeps the LAST N weeks, so a later start simply drops
+isn't a shock. F1–F2 mirror the source's 24-week variant (whose weeks 3–22 are
+exactly the 20-week plan): easy Z2 only, ~2.5h → 4h. trim_plan keeps the LAST N weeks, so a later start simply drops
 foundation weeks first.
 
 Zones follow the app's Z1–Z5 (HR/RPE, or power when a power meter is present):
@@ -199,14 +200,17 @@ def activation(reps, mins):
 
 _FOUNDATION = [
     # === FOUNDATION (F1–F7): trainer, FTP, gym, aerobic durability ===
-    [ftp_test(), z2(60), long_ride(120), spin(45), gym("adapt"), gym("adapt", optional=True)],
-    [sweetspot(3, 8, 60), z2(75), long_ride(135), spin(45), gym("adapt"), gym("adapt", optional=True)],
-    [sweetspot(3, 10, 70), z2(75), long_ride(150), z2(60, optional=True), gym("adapt"), gym("adapt")],
+    # F1–F2 follow the 24-week plan's gentle opening (easy Z2 only, ~2.5–4h) —
+    # plus the baseline trainer FTP test and gym intro; intensity starts in F3.
+    [ftp_test(), z2(45), long_ride(90, cue="Easy endurance — just ride"), gym("adapt")],
+    [z2(60), z2(60), long_ride(120), gym("adapt"), gym("adapt", optional=True)],
+    [sweetspot(3, 8, 60), z2(75), long_ride(150), spin(45), gym("adapt"), gym("adapt", optional=True)],
+    [sweetspot(3, 10, 70), z2(75), long_ride(165), z2(60, optional=True), gym("adapt"), gym("adapt")],
     [z2(60), long_ride(105), spin(45), gym("adapt")],                                   # recovery
-    [climb_sim(2, 12, 70), z2(75), long_ride(165), spin(45), gym("max"), gym("max", optional=True)],
-    [sweetspot(3, 12, 80), z2(90), long_ride(180), spin(45), gym("max"), gym("max")],
+    [climb_sim(2, 12, 70), z2(75), long_ride(180), spin(45), gym("max"), gym("max", optional=True)],
     [ftp_test(), z2(60), long_ride(120), gym("max")],                                   # recovery + re-test
 ]
+
 
 _RACE_PLAN = [
     # === PHASE 1 — AEROBIC BASE (weeks 1–8) ===
