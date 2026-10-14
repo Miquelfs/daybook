@@ -9,6 +9,7 @@ from domains.training.plan_templates.ironman_balanced import IRONMAN_BALANCED_TE
 from domains.training.plan_templates.ironman_polarized import IRONMAN_POLARIZED_TEMPLATE
 from domains.training.plan_templates.cycling_gran_fondo_100 import CYCLING_GRAN_FONDO_100_TEMPLATE
 from domains.training.plan_templates.cycling_gran_fondo_160 import CYCLING_GRAN_FONDO_160_TEMPLATE
+from domains.training.plan_templates.mallorca_312 import MALLORCA_312_TEMPLATE
 
 TEMPLATES = {
     "half_marathon_balanced":   RUNNING_HALF_MARATHON_BALANCED_TEMPLATE,
@@ -22,6 +23,7 @@ TEMPLATES = {
     "ironman_polarized":        IRONMAN_POLARIZED_TEMPLATE,
     "gran_fondo_100":           CYCLING_GRAN_FONDO_100_TEMPLATE,
     "gran_fondo_160":           CYCLING_GRAN_FONDO_160_TEMPLATE,
+    "mallorca_312":             MALLORCA_312_TEMPLATE,
 }
 
 RACE_TYPE_WEEKS = {
@@ -32,6 +34,7 @@ RACE_TYPE_WEEKS = {
     "ironman":        30,
     "gran_fondo_100": 12,
     "gran_fondo_160": 16,
+    "mallorca_312":   27,
 }
 
 RACE_TYPE_VARIANTS = {
@@ -42,6 +45,7 @@ RACE_TYPE_VARIANTS = {
     "ironman":        ["balanced", "polarized"],
     "gran_fondo_100": ["balanced"],
     "gran_fondo_160": ["balanced"],
+    "mallorca_312":   ["balanced"],
 }
 
 RACE_TYPE_DISCIPLINES = {
@@ -52,10 +56,11 @@ RACE_TYPE_DISCIPLINES = {
     "ironman":        ["run", "ride", "swim"],
     "gran_fondo_100": ["ride"],
     "gran_fondo_160": ["ride"],
+    "mallorca_312":   ["ride"],
 }
 
 
 def get_template_key(race_type: str, variant: str) -> str:
-    if race_type in ("olympic_tri", "gran_fondo_100", "gran_fondo_160"):
+    if race_type in ("olympic_tri", "gran_fondo_100", "gran_fondo_160", "mallorca_312"):
         return race_type
     return f"{race_type}_{variant}"

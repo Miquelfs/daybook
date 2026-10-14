@@ -61,7 +61,7 @@ export interface DisciplineZones {
 }
 
 export interface StructureStep {
-  kind: "steady" | "intervals" | "swim_set";
+  kind: "steady" | "intervals" | "swim_set" | "exercise";
   label: string;
   zone?: string;
   work_zone?: string;
@@ -116,6 +116,11 @@ export function resolveStructure(
   for (const step of structure) {
     const disc = stepDiscipline(step.label, sessionDiscipline);
 
+    if (step.kind === "exercise") {
+      // Gym: no zone target — sets × reps live in the cue.
+      phases.push({ label: step.label, duration_min: step.duration_min ?? 0, zone: "GYM", cue: step.cue ?? "" });
+      continue;
+    }
     if (step.kind === "intervals") {
       const reps = step.reps ?? 1;
       const work = step.work_min ?? 0;

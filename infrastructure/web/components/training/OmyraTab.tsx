@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { WeekPlanner } from "@/components/training/WeekPlanner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import RaceReadinessPanel from "@/components/training/RaceReadinessPanel";
 import { SessionActualStats } from "@/components/training/SessionActualStats";
@@ -73,6 +74,7 @@ interface PlanSession {
   structure: StructureStep[] | null;
   auto_matched: boolean;
   actual: SessionActual | null;
+  schedule_note?: string | null;
 }
 
 interface GoalCreate {
@@ -110,6 +112,7 @@ const RACE_TYPE_LABELS: Record<string, string> = {
   half_marathon: "Half Marathon", marathon: "Marathon",
   olympic_tri: "Olympic Triathlon", half_ironman: "Half Ironman 70.3",
   ironman: "Full Ironman 140.6", gran_fondo_100: "Gran Fondo 100km", gran_fondo_160: "Gran Fondo 160km",
+  mallorca_312: "Mallorca 312",
 };
 const RPE_LABELS: Record<number, string> = {
   1: "Very easy", 2: "Easy", 3: "Moderate easy", 4: "Moderate",
@@ -362,7 +365,7 @@ function WeekCalendar({ goalId, onSelectSession }: {
     <div className="grid grid-cols-7 gap-1 text-center">
       {days.map((d) => {
         const isToday = d.date === today;
-        const hasDuty = d.roster === "FLT" || d.roster === "SBY";
+        const hasDuty = d.roster === "flying_duty" || d.roster === "standby" || d.roster === "ground_duty";
         const visible = d.sessions.filter((s) => s.status === "pending" || s.status === "completed");
         const allDone = visible.length > 0 && visible.every((s) => s.status === "completed");
 
@@ -531,7 +534,9 @@ function FullSchedule({ goal, onSelectSession, onClose }: {
                       <span className="text-base">{discIcon(s.discipline)}</span>
                       <div className="flex-1 min-w-0">
                         <p className={`text-xs font-medium truncate ${isMissed ? "line-through text-[#52525B]" : "text-[#FAFAFA]"}`}>{s.session_type}</p>
-                        <p className="text-[10px] text-[#52525B]">{s.session_date}</p>
+                        <p className="text-[10px] text-[#52525B] truncate">
+                          {s.session_date}{s.schedule_note ? ` · ${s.schedule_note}` : ""}
+                        </p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {isCompleted && <span className="text-xs text-[#4ADE80]">✓</span>}
@@ -641,6 +646,15 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [selectedSession, setSelectedSession] = useState<PlanSession | null>(null);
   const [showFullSchedule, setShowFullSchedule] = useState(false);
+  // Week planner: opened from "Plan week" or the weekend nudge (?plan=next)
+  const [plannerDate, setPlannerDate] = useState<string | null>(null);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("plan") === "next") {
+      const d = new Date();
+      d.setDate(d.getDate() + 7);
+      setPlannerDate(d.toISOString().slice(0, 10));
+    }
+  }, []);
   const queryClient = useQueryClient();
 
   const { data: compliance } = useQuery({
@@ -721,6 +735,18 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
     } finally { setRematerializing(false); }
   }
 
+  const [reflowing, setReflowing] = useState(false);
+  async function reflow() {
+    setReflowing(true);
+    try {
+      await fetch(`${BASE}/race-plans/goals/${goal.id}/reflow`, { method: "POST" });
+      queryClient.invalidateQueries({ queryKey: ["omyra-upcoming", goal.id] });
+      queryClient.invalidateQueries({ queryKey: ["omyra-all-sessions", goal.id] });
+      queryClient.invalidateQueries({ queryKey: ["omyra-week", goal.id] });
+      onRefresh();
+    } finally { setReflowing(false); }
+  }
+
   function invalidateWeek() {
     queryClient.invalidateQueries({ queryKey: ["omyra-week", goal.id] });
     queryClient.invalidateQueries({ queryKey: ["omyra-upcoming", goal.id] });
@@ -793,16 +819,27 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
             {/* Adaptation history */}
             {!goal.waiting && <AdaptationHistory goalId={goal.id} />}
 
-            {/* This week calendar */}
-            {!goal.waiting && !dim && (
+            {/* This week calendar (shown while waiting too — the plan exists already) */}
+            {!dim && (
               <div>
-                <p className="text-xs text-[#52525B] uppercase tracking-wider mb-2">This Week</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-[#52525B] uppercase tracking-wider">This Week</p>
+                  <div className="flex gap-3">
+                    <button onClick={() => setPlannerDate(todayStr())}
+                      className="text-[10px] text-[#71717A] hover:text-[#FAFAFA]">Edit week</button>
+                    <button onClick={() => {
+                        const d = new Date(); d.setDate(d.getDate() + 7);
+                        setPlannerDate(d.toISOString().slice(0, 10));
+                      }}
+                      className="text-[10px] text-[#F59E0B] hover:text-[#FBBF24]">Plan next week →</button>
+                  </div>
+                </div>
                 <WeekCalendar goalId={goal.id} onSelectSession={setSelectedSession} />
               </div>
             )}
 
             {/* Upcoming sessions */}
-            {!goal.waiting && !dim && (
+            {!dim && (
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs text-[#52525B] uppercase tracking-wider">Upcoming</p>
@@ -898,6 +935,13 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
                   {rematerializing ? "Regenerating…" : "Regenerate plan"}
                 </button>
               )}
+              {!dim && (
+                <button onClick={reflow} disabled={reflowing}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[#18181B] border border-[#27272A] rounded-lg text-[#A1A1AA] hover:bg-[#27272A] disabled:opacity-50">
+                  <RefreshCw size={11} className={reflowing ? "animate-spin" : ""} />
+                  {reflowing ? "Re-planning…" : "Re-plan around roster"}
+                </button>
+              )}
               {goal.waiting && (
                 <button onClick={startEarly}
                   className="text-xs px-3 py-1.5 bg-[#052E16] border border-[#14532D] rounded-lg text-[#4ADE80] hover:bg-[#14532D]">
@@ -952,6 +996,10 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
         />
       )}
 
+      {plannerDate && (
+        <WeekPlanner goalId={goal.id} initialDate={plannerDate} onClose={() => setPlannerDate(null)} />
+      )}
+
       {/* Full schedule overlay */}
       {showFullSchedule && (
         <FullSchedule
@@ -972,6 +1020,7 @@ const RACE_TYPES = [
   { key: "ironman",        label: "Full Ironman 140.6", variants: ["balanced", "polarized"] },
   { key: "half_ironman",   label: "Half Ironman 70.3",  variants: ["balanced", "polarized"] },
   { key: "olympic_tri",    label: "Olympic Tri",        variants: ["balanced"] },
+  { key: "mallorca_312",   label: "Mallorca 312 (312km · 4,750m)", variants: ["balanced"] },
   { key: "gran_fondo_160", label: "Gran Fondo 160km",   variants: ["balanced"] },
   { key: "gran_fondo_100", label: "Gran Fondo 100km",   variants: ["balanced"] },
 ];

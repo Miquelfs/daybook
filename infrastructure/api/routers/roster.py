@@ -68,7 +68,20 @@ async def upload_roster(file: UploadFile = File(...)):
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    return {"period": period, "imported": count, "legs": len(legs) if 'legs' in dir() else 0}
+    # New duties → re-place training sessions around them right away.
+    replanned = 0
+    try:
+        from domains.training.reflow import reflow_all
+        rconn = _get_conn()
+        try:
+            replanned = reflow_all(rconn)
+        finally:
+            rconn.close()
+    except Exception as e:  # never fail a roster import over the training plan
+        print(f"WARN reflow after roster import: {e}")
+
+    return {"period": period, "imported": count, "legs": len(legs) if 'legs' in dir() else 0,
+            "training_sessions_replanned": replanned}
 
 
 @router.get("/months")

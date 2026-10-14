@@ -14,6 +14,8 @@ from pydantic import BaseModel, field_validator
 from infrastructure.api.db import get_db
 from domains.training.plan_templates import TEMPLATES, RACE_TYPE_WEEKS, RACE_TYPE_VARIANTS, get_template_key
 from domains.training.scheduler import generate_plan, get_discipline as _discipline_from_type
+from domains.training.day_context import DayContextReader, today_advice
+from domains.training.reflow import reflow_goal, infer_role, _ensure_columns as _ensure_reflow_columns
 from domains.training.adaptation_engine import (
     OMYRATrainingEngine,
     PlanPhase,
@@ -99,12 +101,19 @@ def _week_bounds(date_str: str):
 
 def _fetch_roster_blocked(conn: sqlite3.Connection, start: str, end: str) -> set[str]:
     """
-    Returns roster-blocked dates only for multi-day trips (away from base).
-    FLT/SBY days are NOT blocked — they just get a warning in the day view.
-    Only block dates where the pilot is genuinely unavailable (layovers / multi-day trips).
-    For now returns empty set; override is per-session via roster_warning.
+    Dates you wake up away from base (roster layovers + detected trips) — no
+    session can land there. Duty days are NOT blocked here: how much they can
+    hold (ride window before report / after an early duty) is decided per week
+    by domains.training.reflow, which runs right after materialization.
     """
-    return set()
+    reader = DayContextReader(conn)
+    blocked: set[str] = set()
+    d, last = date.fromisoformat(start), date.fromisoformat(end)
+    while d <= last:
+        if reader.night_away((d - timedelta(days=1)).isoformat()):
+            blocked.add(d.isoformat())
+        d += timedelta(days=1)
+    return blocked
 
 
 def _effective_duration(duration_min: int, volume_factor: float) -> int:
@@ -123,6 +132,9 @@ _ZONE_META = {
 
 # threshold-pace multipliers (Z3 = threshold)
 _PACE_MULT = {"Z1": 1.37, "Z2": 1.15, "Z3": 1.00, "Z4": 0.885, "Z5": 0.80}
+# %FTP bands for trainer (ERG) sessions — the road bike has no power meter, so
+# outdoor rides keep HR; Z3 is sweet spot, matching the plans' intent.
+_FTP_PCT = {"Z1": (0, 55), "Z2": (56, 75), "Z3": (88, 94), "Z4": (95, 105), "Z5": (106, 120)}
 # speed factors relative to a hard-steady reference speed (bike, no power meter)
 _SPEED_FACTOR = {"Z1": 0.72, "Z2": 0.85, "Z3": 0.93, "Z4": 1.00, "Z5": 1.06}
 # swim CSS offsets in seconds/100m (Z4 = CSS)
@@ -236,6 +248,7 @@ def _materialize_sessions(
         schedule_all_weeks=True,
     )
 
+    _ensure_reflow_columns(conn)
     count = 0
     for week in plan.get("plan", []):
         week_num = week["week"]
@@ -256,8 +269,8 @@ def _materialize_sessions(
                 """INSERT INTO plan_sessions
                    (goal_id, session_date, original_date, week_number,
                     session_type, discipline, duration_min, intensity_zone,
-                    is_optional, effective_duration_min, status, structure_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?)""",
+                    is_optional, effective_duration_min, status, structure_json, role)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?,?)""",
                 (
                     goal_id,
                     s_date,
@@ -270,10 +283,15 @@ def _materialize_sessions(
                     1 if session.get("optional") else 0,
                     eff_dur,
                     json.dumps(structure) if structure else None,
+                    session.get("role") or infer_role(session["type"], session["duration"],
+                                                      session.get("intensity_zone", "Z2")),
                 ),
             )
             count += 1
     conn.commit()
+    # Place this week and the rest around the roster / travel actually known.
+    if goal_row["respect_roster"]:
+        reflow_goal(conn, goal_id)
     return count
 
 
@@ -507,6 +525,8 @@ def _session_out(row: sqlite3.Row, conn: Optional[sqlite3.Connection] = None) ->
         "auto_matched": bool(row["auto_matched"]) if "auto_matched" in keys else False,
         "rpe_actual": row["rpe_actual"],
         "notes": row["notes"],
+        "schedule_note": row["schedule_note"] if "schedule_note" in keys else None,
+        "role": row["role"] if "role" in keys else None,
         "structure": structure,
         "actual": _session_actual(conn, completed_activity_id) if conn is not None else None,
         "created_at": row["created_at"],
@@ -595,7 +615,10 @@ def create_goal(body: GoalCreate, conn: DB):
 
     total_weeks = RACE_TYPE_WEEKS[race_type]
     race_date_d = date.fromisoformat(body.race_date)
-    plan_start_d = race_date_d - timedelta(weeks=total_weeks)
+    # Start on a Monday so week 1 is a full week (race_date − N weeks lands on the
+    # race's weekday, e.g. a Saturday → a 2-day stub week 1 that drops sessions).
+    race_monday = race_date_d - timedelta(days=race_date_d.weekday())
+    plan_start_d = race_monday - timedelta(weeks=total_weeks - 1)
     plan_start_str = plan_start_d.isoformat()
     today_d = date.today()
 
@@ -619,10 +642,10 @@ def create_goal(body: GoalCreate, conn: DB):
     goal_id = cur.lastrowid
     goal_row = _row(conn, "race_goals", goal_id)
 
-    sessions_created = 0
+    # Materialize the whole plan now (future weeks included) so it's visible and
+    # schedulable from day one; nightly reflow keeps placing it around the roster.
     waiting = plan_start_d > today_d
-    if not waiting:
-        sessions_created = _materialize_sessions(conn, goal_id, goal_row)
+    sessions_created = _materialize_sessions(conn, goal_id, goal_row)
 
     out = _goal_out(goal_row, conn)
     out["sessions_created"] = sessions_created
@@ -732,6 +755,86 @@ def start_plan_early(goal_id: int, conn: DB):
     )
     conn.commit()
     return {"sessions_created": count}
+
+
+@router.post("/goals/{goal_id}/reflow", status_code=200)
+def reflow_goal_endpoint(goal_id: int, conn: DB, reset_week: Optional[str] = Query(None)):
+    """Re-place this and future weeks' pending sessions around roster / travel.
+    reset_week=<Monday> also releases that week's hand-moved sessions first."""
+    _row(conn, "race_goals", goal_id)
+    changes = reflow_goal(conn, goal_id, reset_week=reset_week)
+    return {"changed": len(changes), "changes": changes}
+
+
+# ── Week planner: day blocks + weekly confirmation ──────────────────────────
+
+class DayBlock(BaseModel):
+    date: str
+    note: Optional[str] = None
+
+
+def _reflow_active(conn: sqlite3.Connection) -> None:
+    for g in conn.execute("SELECT id FROM race_goals WHERE status='active'").fetchall():
+        reflow_goal(conn, g["id"])
+
+
+@router.post("/day-blocks", status_code=201)
+def add_day_block(body: DayBlock, conn: DB):
+    """Mark a day unavailable (busy, family, sick…) → the week re-plans around it."""
+    _ensure_reflow_columns(conn)
+    conn.execute("INSERT OR REPLACE INTO training_day_blocks (date, note) VALUES (?, ?)",
+                 (body.date, (body.note or "").strip() or None))
+    conn.commit()
+    _reflow_active(conn)
+    return {"date": body.date, "note": body.note}
+
+
+@router.delete("/day-blocks/{date_str}", status_code=200)
+def remove_day_block(date_str: str, conn: DB):
+    _ensure_reflow_columns(conn)
+    conn.execute("DELETE FROM training_day_blocks WHERE date=?", (date_str,))
+    conn.commit()
+    _reflow_active(conn)
+    return {"date": date_str, "removed": True}
+
+
+class WeekConfirm(BaseModel):
+    week_start: str
+
+
+@router.post("/goals/{goal_id}/week/confirm", status_code=200)
+def confirm_week(goal_id: int, body: WeekConfirm, conn: DB):
+    """'I've planned this week' — clears the Sunday planning nudge."""
+    _ensure_reflow_columns(conn)
+    _row(conn, "race_goals", goal_id)
+    mon, _ = _week_bounds(body.week_start)
+    conn.execute(
+        """INSERT OR REPLACE INTO training_week_plans (goal_id, week_start, confirmed_at)
+           VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))""",
+        (goal_id, mon),
+    )
+    conn.commit()
+    return {"goal_id": goal_id, "week_start": mon, "confirmed": True}
+
+
+@router.get("/planning-status")
+def planning_status(conn: DB):
+    """Is next week planned? Drives the weekend 'plan next week' nudge."""
+    _ensure_reflow_columns(conn)
+    today = date.today()
+    next_mon = (today - timedelta(days=today.weekday()) + timedelta(days=7)).isoformat()
+    out = []
+    for g in conn.execute("SELECT id, name, race_date FROM race_goals WHERE status='active'").fetchall():
+        if g["race_date"] < next_mon:
+            continue
+        done = conn.execute(
+            "SELECT confirmed_at FROM training_week_plans WHERE goal_id=? AND week_start=?",
+            (g["id"], next_mon),
+        ).fetchone()
+        out.append({"goal_id": g["id"], "goal_name": g["name"], "next_week_start": next_mon,
+                    "confirmed_at": done["confirmed_at"] if done else None})
+    return {"next_week_start": next_mon, "goals": out,
+            "needs_planning": any(x["confirmed_at"] is None for x in out)}
 
 
 @router.post("/goals/{goal_id}/rematerialize", status_code=200)
@@ -967,13 +1070,21 @@ def get_discipline_zones(goal_id: int, conn: DB):
                 entry["display"] = f"{hr_lo}{hi_disp} bpm"
         if ref_speed_kmh:
             entry["speed_kmh_hint"] = round(ref_speed_kmh * _SPEED_FACTOR[z], 1)
+        ftp = ride_row["ftp_w"] if ride_row else None
+        if ftp:
+            lo, hi = _FTP_PCT[z]
+            entry["watts_lo"] = round(ftp * lo / 100) if lo else None
+            entry["watts_hi"] = round(ftp * hi / 100)
+            watts = f"{entry['watts_lo']}–{entry['watts_hi']} W" if lo else f"<{entry['watts_hi']} W"
+            entry["display"] = f"{watts} (trainer) · {entry['display']}" if entry.get("display") else f"{watts} (trainer)"
         ride_zones[z] = entry
     out["ride"] = {
         "source": (ride_row and ("placeholder" if ride_row["valid_from"] == "2019-01-01" else "derived")),
         "threshold_hr": threshold_hr,
         "ref_speed_kmh": ref_speed_kmh,
+        "ftp_w": ride_row["ftp_w"] if ride_row else None,
         "zones": ride_zones,
-        "note": "No power meter — pace by HR + RPE + speed feel.",
+        "note": "Trainer sessions by watts (ERG); outdoor rides by HR + RPE — no power meter on the bike.",
     }
 
     # ---- SWIM: CSS-offset pace/100m ----
@@ -1036,13 +1147,18 @@ def create_benchmark(body: BenchmarkCreate, conn: DB):
     elif body.test_type == "bike_20min":
         avg_hr = float(r.get("avg_hr") or 0)
         avg_speed = float(r.get("avg_speed_kmh") or 0)
-        if avg_hr <= 0:
-            raise HTTPException(status_code=422, detail="bike_20min needs result.avg_hr")
-        threshold_hr = round(avg_hr * 0.98)
+        avg_power = float(r.get("avg_power_w") or 0)   # from the smart trainer
+        if avg_hr <= 0 and avg_power <= 0:
+            raise HTTPException(status_code=422, detail="bike_20min needs result.avg_hr and/or avg_power_w")
+        derived = {}
+        if avg_hr > 0:
+            derived["threshold_hr"] = round(avg_hr * 0.98)
         ref_s_km = round(3600.0 / avg_speed) if avg_speed > 0 else (prev["threshold_pace_s_per_km"] if prev else None)
-        derived = {"threshold_hr": threshold_hr, "threshold_pace_s_per_km": ref_s_km}
-        old_val = prev["threshold_hr"] if prev else None
-        new_val = threshold_hr
+        derived["threshold_pace_s_per_km"] = ref_s_km
+        if avg_power > 0:
+            derived["ftp_w"] = round(avg_power * 0.95)
+        old_val = (prev["ftp_w"] if prev else None) if avg_power > 0 else (prev["threshold_hr"] if prev else None)
+        new_val = derived.get("ftp_w") or derived.get("threshold_hr")
     elif body.test_type == "swim_css":
         t400 = float(r.get("t400_s") or 0)
         t200 = float(r.get("t200_s") or 0)
@@ -1059,7 +1175,7 @@ def create_benchmark(body: BenchmarkCreate, conn: DB):
     row_vals = {
         "max_hr": max_hr,
         "threshold_hr": derived.get("threshold_hr", prev["threshold_hr"] if prev else None),
-        "ftp_w": prev["ftp_w"] if prev else None,
+        "ftp_w": derived.get("ftp_w", prev["ftp_w"] if prev else None),
         "threshold_pace_s_per_km": derived.get("threshold_pace_s_per_km",
                                                prev["threshold_pace_s_per_km"] if prev else None),
         "css_pace_s_per_100m": derived.get("css_pace_s_per_100m",
@@ -1152,6 +1268,8 @@ def day_prescription(date_str: str, conn: DB):
         (date_str,)
     ).fetchone()
 
+    day_ctx = DayContextReader(conn).context(date_str)
+
     tsb = tl["tsb"] if tl else None
     overall_signal = "moderate"
     if tsb is not None:
@@ -1167,6 +1285,9 @@ def day_prescription(date_str: str, conn: DB):
         "training_readiness": physio["training_readiness_score"] if physio else None,
         "hrv_status": hrv["status"] if hrv else None,
         "roster_today": roster["duty_type"] if roster else None,
+        "day_label": day_ctx["label"],
+        "ride_window_min": day_ctx["window_min"],
+        "sleep_h": day_ctx["sleep_h"],
         "overall_signal": overall_signal,
         "fatigue_score": load_idx["fatigue_score"] if load_idx else None,
         "recovery_status": load_idx["recovery_status"] if load_idx else None,
@@ -1199,9 +1320,10 @@ def day_prescription(date_str: str, conn: DB):
             except Exception:
                 pass
 
-        roster_warning = None
-        if roster and roster["duty_type"] in ("FLT", "SBY"):
-            roster_warning = f"{roster['duty_type']} duty today — session optional"
+        # Today's reality vs the plan: duty window, late finish, sleep, travel.
+        advice = today_advice(day_ctx, dict(r)) if r["status"] == "pending" else \
+            {"notes": [], "duration_min": None, "zone": None}
+        roster_warning = " · ".join(advice["notes"]) or None
 
         # Compute current phase for display
         plan_start = r["plan_start_date"]
@@ -1225,6 +1347,9 @@ def day_prescription(date_str: str, conn: DB):
             "goal_name": r["goal_name"],
             "adaptation_note": adaptation_note,
             "roster_warning": roster_warning,
+            "context_notes": advice["notes"],
+            "suggested_duration_min": advice["duration_min"],
+            "suggested_zone": advice["zone"],
             "current_phase": phase.value,
             "current_week": current_week_num,
             "total_weeks": total_weeks,
@@ -1432,17 +1557,28 @@ def goal_week(goal_id: int, conn: DB, date: Optional[str] = Query(None)):
     for r in rows:
         sessions_by_date.setdefault(r["session_date"], []).append(_session_out(r, conn))
 
+    _ensure_reflow_columns(conn)
+    goal = _row(conn, "race_goals", goal_id)
+    reader = DayContextReader(conn, (goal["available_days"] or "").split(","))
     for _ in range(7):
         ds = d.strftime("%Y-%m-%d")
+        ctx = reader.context(ds)
         days_out.append({
             "date": ds,
             "day_name": d.strftime("%A"),
             "sessions": sessions_by_date.get(ds, []),
             "roster": roster_map.get(ds),
+            "context": {k: ctx[k] for k in ("label", "window_min", "intense_ok", "blocked",
+                                            "woke_away", "night_away", "report_time", "end_time")},
+            "block_note": reader.block(ds),
         })
         d += timedelta(days=1)
 
-    return {"week_start": mon, "week_end": sun, "days": days_out}
+    confirmed = conn.execute(
+        "SELECT confirmed_at FROM training_week_plans WHERE goal_id=? AND week_start=?", (goal_id, mon)
+    ).fetchone()
+    return {"week_start": mon, "week_end": sun, "days": days_out,
+            "confirmed_at": confirmed["confirmed_at"] if confirmed else None}
 
 
 # ── Full schedule ────────────────────────────────────────────────────────────

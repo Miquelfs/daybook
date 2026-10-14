@@ -145,6 +145,12 @@ log "Syncing roster tags..."
 python -m domains.aviation.roster_tag_sync \
   >> "$LOG_FILE" 2>&1 || log "WARN: Roster tag sync failed (non-fatal)"
 
+# Training plan: start goals whose plan begins today, then re-place this and
+# future weeks' sessions around the roster, layovers and detected trips.
+log "Re-placing training sessions around roster/travel..."
+python -m domains.training.reflow \
+  >> "$LOG_FILE" 2>&1 || log "WARN: Training reflow failed (non-fatal)"
+
 # Activity detail sync: fetch splits, Garmin TE, physio metrics for new activities.
 log "Syncing Garmin activity details + physio (last 7 days)..."
 python -m domains.health.garmin.garmin_activity_detail_sync --days 7 \

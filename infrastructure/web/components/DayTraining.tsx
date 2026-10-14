@@ -66,6 +66,12 @@ interface PlanSession {
   status: string;
   adaptation_note: string | null;
   roster_warning: string | null;
+  /** Today vs plan: duty window, late finish, sleep, travel */
+  context_notes?: string[];
+  suggested_duration_min?: number | null;
+  suggested_zone?: string | null;
+  /** Why the weekly re-plan put the session on this day */
+  schedule_note?: string | null;
   rpe_actual: number | null;
   current_phase: string | null;
   current_week: number | null;
@@ -215,6 +221,7 @@ function BenchmarkForm({ session, date, onDone }: {
   const meta = testTypeOf(session.session_type);
   const [a, setA] = useState("");
   const [b, setB] = useState("");
+  const [c, setC] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [delta, setDelta] = useState<string | null>(null);
@@ -228,9 +235,10 @@ function BenchmarkForm({ session, date, onDone }: {
       if (!t) { setErr("Enter your 1km time (m:ss)"); return; }
       result = { time_s: t };
     } else if (m.test_type === "bike_20min") {
-      const hr = parseFloat(a), sp = parseFloat(b);
-      if (!hr) { setErr("Enter average HR"); return; }
-      result = { avg_hr: hr, avg_speed_kmh: sp || 0 };
+      // Trainer test: avg power sets FTP (95%); avg HR sets outdoor HR zones.
+      const w = parseFloat(a), hr = parseFloat(b), sp = parseFloat(c);
+      if (!w && !hr) { setErr("Enter average power and/or HR"); return; }
+      result = { avg_power_w: w || 0, avg_hr: hr || 0, avg_speed_kmh: sp || 0 };
     } else {
       const t400 = parseMMSS(a), t200 = parseMMSS(b);
       if (!t400 || !t200) { setErr("Enter 400m and 200m times (m:ss)"); return; }
@@ -255,7 +263,8 @@ function BenchmarkForm({ session, date, onDone }: {
   const fields = m.test_type === "run_1k_tt"
     ? [{ v: a, set: setA, ph: "1km time (m:ss)" }]
     : m.test_type === "bike_20min"
-    ? [{ v: a, set: setA, ph: "avg HR (bpm)" }, { v: b, set: setB, ph: "avg speed (km/h)" }]
+    ? [{ v: a, set: setA, ph: "avg power (W)" }, { v: b, set: setB, ph: "avg HR (bpm)" },
+       { v: c, set: setC, ph: "avg speed (km/h, outdoor)" }]
     : [{ v: a, set: setA, ph: "400m time (m:ss)" }, { v: b, set: setB, ph: "200m time (m:ss)" }];
 
   return (
@@ -592,10 +601,25 @@ function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
             <p className="text-xs text-[#71717A]">📊 {session.adaptation_note}</p>
           </div>
         )}
-        {session.roster_warning && (
+        {(session.context_notes?.length ?? 0) > 0 ? (
+          <div className="bg-[#1C1700] border border-[#B45309] rounded-xl px-4 py-3 space-y-1">
+            {session.context_notes!.map((n, i) => (
+              <p key={i} className="text-xs text-[#FCD34D]">{i === 0 ? "✈ " : "· "}{n}</p>
+            ))}
+            {(session.suggested_duration_min || session.suggested_zone) && (
+              <p className="text-xs font-semibold text-[#FDE68A] pt-1">
+                Today: {session.suggested_duration_min ?? session.effective_duration_min} min
+                {session.suggested_zone ? ` at ${session.suggested_zone}` : ""}
+              </p>
+            )}
+          </div>
+        ) : session.roster_warning ? (
           <div className="bg-[#1C1700] border border-[#B45309] rounded-xl px-4 py-3">
             <p className="text-xs text-[#FCD34D]">✈ {session.roster_warning}</p>
           </div>
+        ) : null}
+        {session.schedule_note && (
+          <p className="text-[11px] text-[#71717A] px-1">📅 Placed here: {session.schedule_note}</p>
         )}
         {session.is_optional && (
           <div className="bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-3">
@@ -689,6 +713,35 @@ function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
 
 // ── Main component ──────────────────────────────────────────────────────────
 
+// Weekend ritual: on Sat/Sun (today only) until next week is confirmed in the
+// week planner, nudge to lay it out around the new roster.
+function PlanNextWeekNudge({ date }: { date: string }) {
+  const [needs, setNeeds] = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+  const dow = new Date(date + "T12:00:00").getDay();
+  const weekend = date === today && (dow === 0 || dow === 6);
+  useEffect(() => {
+    if (!weekend) return;
+    fetch("/api/race-plans/planning-status", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setNeeds(!!d?.needs_planning))
+      .catch(() => {});
+  }, [weekend]);
+  if (!weekend || !needs) return null;
+  return (
+    <Link
+      href="/training?tab=omyra&plan=next"
+      className="flex items-center justify-between gap-3 bg-[#1C1700] border border-[#B45309] rounded-xl px-4 py-3 hover:border-[#F59E0B] transition-colors"
+    >
+      <div>
+        <p className="text-sm font-semibold text-[#FCD34D]">Plan next week</p>
+        <p className="text-xs text-[#A1A1AA]">Check the roster, move or block days, then confirm.</p>
+      </div>
+      <span className="text-[#FCD34D]">→</span>
+    </Link>
+  );
+}
+
 export function DayTraining({ initialPrescription, date }: {
   initialPrescription: DayPrescription | null;
   date: string;
@@ -776,6 +829,8 @@ export function DayTraining({ initialPrescription, date }: {
     <>
       <section className="space-y-3">
         <SectionLabel>Training</SectionLabel>
+
+        <PlanNextWeekNudge date={date} />
 
         {/* Injury banners */}
         {(data.injury_suggestions ?? [])

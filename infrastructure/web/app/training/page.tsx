@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
@@ -303,6 +303,11 @@ type Records = {
 
 export default function TrainingPage() {
   const [tab, setTab] = useState<Tab>("overview");
+  // Deep link (e.g. the weekend "plan next week" nudge → ?tab=omyra&plan=next)
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "omyra") setTab("omyra" as Tab);
+  }, []);
   const [weeks, setWeeks] = useState(12);
   const [sportFilter, setSportFilter] = useState<string | null>(null);
   const [sportBreakdownMetric, setSportBreakdownMetric] = useState<"hours" | "km" | "count">("hours");
