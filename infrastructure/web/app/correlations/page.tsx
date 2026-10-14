@@ -10,9 +10,9 @@ import {
 } from "recharts";
 import { format, parseISO } from "date-fns";
 import { correlationsApi } from "@/lib/correlations-api";
-import { AINarrative } from "@/components/AINarrative";
+import { WeeklyReview } from "@/components/insights/WeeklyReview";
 import type { MetricMeta, TopCorrelation, TagImpact, PrecomputedCorrelation } from "@/lib/correlations-api";
-import { TrendingUp, Minus, ArrowUpRight, ArrowDownRight, Plus, X, CheckCircle, Trash2, Sparkles, GitCompare, CalendarDays, BarChart2, Flame, FlaskConical, Activity } from "lucide-react";
+import { TrendingUp, Minus, ArrowUpRight, ArrowDownRight, Plus, X, CheckCircle, Trash2, Sparkles, GitCompare, CalendarDays, BarChart2, Flame, FlaskConical, Activity, ClipboardCheck } from "lucide-react";
 import { TagStatsDrawer } from "@/components/TagStatsDrawer";
 import { HabitCalendar } from "@/components/HabitCalendar";
 import { StressLifeInsights } from "@/components/StressLifeInsights";
@@ -126,7 +126,7 @@ const TOOLTIP_STYLE = {
   itemStyle: { color: "#FAFAFA" },
 };
 
-type Tab = "discover" | "compare" | "weekly" | "period" | "habits" | "stress" | "experiments";
+type Tab = "review" | "discover" | "compare" | "weekly" | "period" | "habits" | "stress" | "experiments";
 
 function rColor(r: number | null) {
   if (r === null) return "text-[#52525B]";
@@ -199,7 +199,7 @@ function directionBadge(c: PrecomputedCorrelation) {
 }
 
 export default function CorrelationsPage() {
-  const [tab, setTab] = useState<Tab>("discover");
+  const [tab, setTab] = useState<Tab>("review");
   const [metricA, setMetricA] = useState<string>("");
   const [metricB, setMetricB] = useState<string>("");
   const [days, setDays] = useState(90);
@@ -339,6 +339,7 @@ export default function CorrelationsPage() {
       <div className="flex gap-0 mb-6 p-1 bg-[#0D0D0F] border border-[#27272A] rounded-lg overflow-x-auto">
         {(
           [
+            { id: "review" as Tab, label: "Review", icon: <ClipboardCheck size={13} /> },
             { id: "discover" as Tab, label: "Discover", icon: <Sparkles size={13} /> },
             { id: "compare" as Tab, label: "Compare", icon: <GitCompare size={13} /> },
             { id: "weekly" as Tab, label: "Weekly", icon: <CalendarDays size={13} /> },
@@ -361,6 +362,8 @@ export default function CorrelationsPage() {
       </div>
 
       {/* ── DISCOVER TAB ── */}
+      {tab === "review" && <WeeklyReview />}
+
       {tab === "discover" && (
         <div className="space-y-8">
           {/* Precomputed snapshot (weekly batch) */}
@@ -1196,14 +1199,7 @@ export default function CorrelationsPage() {
 
       {tab === "experiments" && <ExperimentsTab />}
 
-      <div className="mt-10 pt-6 border-t border-[#18181B]">
-        <AINarrative
-          topic="insights"
-          label="AI Interpretation"
-          blurb="Let AI read your strongest cross-domain correlations — surfacing the interesting patterns, one experiment to try, and any likely confounds."
-          cta="Interpret my correlations"
-        />
-      </div>
+
     </main>
   );
 }

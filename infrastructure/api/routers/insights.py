@@ -6,16 +6,19 @@ on-this-day is partially functional via the locations domain.
 import json
 import sqlite3
 from datetime import date as _date, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from infrastructure.api.db import get_db
 
 router = APIRouter(prefix="/insights", tags=["insights"])
 
 TIMEZONE = "Europe/Madrid"
+
+DB = Annotated[sqlite3.Connection, Depends(get_db)]
 
 
 @router.get("/on-this-day/{date_str}")
@@ -132,3 +135,44 @@ def streaks():
 def correlations():
     """Placeholder — Phase 2."""
     return {"correlations": [], "note": "Not yet implemented"}
+
+
+# ── Weekly life review (AI-coach pattern across all of Daybook) ──────────────
+
+class ReviewAction(BaseModel):
+    status: str   # committed | done | skipped | experiment
+
+
+@router.get("/review")
+def get_review(conn: DB, week_start: Optional[str] = Query(None)):
+    """Latest weekly review for the week (default: coming week on Fri–Sun, else this week),
+    plus last week's for the accountability loop. Never calls the LLM."""
+    from domains.insights import life_review as lr
+    ws = week_start or lr.default_week()
+    return {"week_start": ws, "review": lr.latest(conn, ws), "previous": lr.previous(conn, ws)}
+
+
+@router.post("/review")
+def generate_review(conn: DB, week_start: Optional[str] = Query(None)):
+    from domains.insights import life_review as lr
+    ws = week_start or lr.default_week()
+    review = lr.generate(conn, ws)
+    if review is None:
+        raise HTTPException(status_code=503, detail="Review unavailable (not enough data or AI not reachable)")
+    return {"week_start": ws, "review": review, "previous": lr.previous(conn, ws)}
+
+
+@router.post("/review/{review_id}/actions/{index}")
+def review_action(review_id: int, index: int, body: ReviewAction, conn: DB):
+    from domains.insights import life_review as lr
+    try:
+        return lr.set_action(conn, review_id, index, body.status)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/levers")
+def get_levers(conn: DB, days: int = Query(180, ge=60, le=730)):
+    """What moves your energy, mood, HRV and sleep — computed, no AI."""
+    from domains.insights import life_review as lr
+    return {"days": days, "levers": lr.levers(conn, days=days), "week_vs_normal": lr.week_vs_normal(conn)}
