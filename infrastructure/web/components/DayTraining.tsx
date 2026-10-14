@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { FoodEntryComposer } from "@/components/FoodEntryComposer";
 import { SectionLabel } from "@/components/MorningBrief";
 import { SessionActualStats } from "@/components/training/SessionActualStats";
 import type { SessionActual } from "@/lib/api";
@@ -79,6 +80,7 @@ interface PlanSession {
   structure: StructureStep[] | null;
   days_until_race: number | null;
   fueling: Fueling | null;
+  ride_fuel?: { carbs_g: number; items: string[]; carbs_g_h: number | null; target_g_h: number | null; ride_min: number } | null;
   auto_matched: boolean;
   actual: SessionActual | null;
 }
@@ -343,58 +345,68 @@ function FuelingSection({ fueling }: { fueling: Fueling }) {
   );
 }
 
-function FuelQuickLog({ session, date, onLogged }: {
+// Ride fuel comes from the normal food log: anything eaten during the ride, or
+// logged as "On the bike". Only the stomach rating is stored separately.
+function RideFuelBlock({ session, date, onLogged }: {
   session: PlanSession; date: string; onLogged: () => void;
 }) {
-  const [carbs, setCarbs] = useState("");
-  const [fluids, setFluids] = useState("");
+  const [adding, setAdding] = useState(false);
   const [gi, setGi] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const rf = session.ride_fuel;
+  const target = rf?.target_g_h ?? session.fueling?.during.carbs_g_h ?? null;
+  const pct = rf?.carbs_g_h && target ? Math.min(100, (rf.carbs_g_h / target) * 100) : 0;
 
-  async function submit() {
-    setSaving(true);
-    try {
-      await fetch(`/api/nutrition/fueling-logs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date,
-          plan_session_id: session.id,
-          carbs_g: carbs ? parseFloat(carbs) : null,
-          fluids_ml: fluids ? parseFloat(fluids) : null,
-          gi_severity: gi,
-        }),
-      });
-      setSaved(true);
-      onLogged();
-    } catch { /* non-fatal */ }
-    finally { setSaving(false); }
+  async function rateGut(n: number) {
+    setGi(n);
+    await fetch(`/api/nutrition/fueling-logs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date, plan_session_id: session.id, carbs_g: null, gi_severity: n }),
+    }).catch(() => {});
   }
 
-  if (saved) return <p className="text-xs text-[#4ADE80] border-t border-[#18181B] pt-4">Fueling logged ✓</p>;
-
   return (
-    <div className="space-y-2 border-t border-[#18181B] pt-4">
-      <p className="text-xs text-[#71717A] uppercase tracking-wider">Log what you actually took</p>
-      <div className="flex gap-2 flex-wrap">
-        <input value={carbs} onChange={(e) => setCarbs(e.target.value)} placeholder="carbs total (g)"
-          className="flex-1 min-w-[110px] bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#52525B]" />
-        <input value={fluids} onChange={(e) => setFluids(e.target.value)} placeholder="fluids (ml)"
-          className="flex-1 min-w-[110px] bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#52525B]" />
+    <div className="space-y-2.5 border-t border-[#18181B] pt-4">
+      <div className="flex items-baseline justify-between">
+        <p className="text-xs text-[#71717A] uppercase tracking-wider">🚴 Ride fuel</p>
+        <p className="text-xs tabular-nums">
+          {rf?.carbs_g_h != null ? (
+            <span className={rf.carbs_g_h >= (target ?? 0) * 0.85 ? "text-[#4ADE80]" : "text-[#F59E0B]"}>
+              {rf.carbs_g_h} g/h
+            </span>
+          ) : <span className="text-[#52525B]">nothing logged</span>}
+          {target ? <span className="text-[#52525B]"> / {target} target</span> : null}
+        </p>
       </div>
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] text-[#52525B] uppercase">Gut (1 fine → 5 bad)</span>
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button key={n} onClick={() => setGi(n)}
-            className={`w-7 h-7 rounded-md text-xs font-semibold ${gi === n ? "bg-[#FAFAFA] text-[#09090B]" : "bg-[#18181B] text-[#71717A] hover:bg-[#27272A]"}`}>
-            {n}
+      {target ? (
+        <div className="h-1.5 rounded-full bg-[#27272A] overflow-hidden">
+          <div className="h-full rounded-full bg-[#F59E0B]" style={{ width: `${pct}%` }} />
+        </div>
+      ) : null}
+      {rf && rf.items.length > 0 && (
+        <p className="text-[11px] text-[#71717A]">{rf.items.join(" · ")} · {rf.carbs_g} g total</p>
+      )}
+      {adding ? (
+        <div className="rounded-xl border border-[#27272A] p-3">
+          <FoodEntryComposer date={date} initialMealType="ride" onDone={() => { setAdding(false); onLogged(); }} />
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)}
+          className="w-full text-xs py-2 rounded-lg border border-[#27272A] text-[#A1A1AA] hover:bg-[#18181B]">
+          + Log what you ate on the bike
+        </button>
+      )}
+      <p className="text-[10px] text-[#52525B]">
+        Anything in your food log eaten during the ride counts automatically. Logged as "On the bike", it counts even without a time.
+      </p>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] text-[#52525B] uppercase mr-1">Stomach</span>
+        {[[1, "Fine"], [3, "Some issues"], [5, "Bad"]].map(([n, l]) => (
+          <button key={n} onClick={() => rateGut(n as number)}
+            className={`text-[11px] px-2.5 py-1 rounded-md ${gi === n ? "bg-[#FAFAFA] text-[#09090B]" : "bg-[#18181B] text-[#71717A] hover:bg-[#27272A]"}`}>
+            {l}
           </button>
         ))}
-        <button onClick={submit} disabled={saving}
-          className="ml-auto px-4 py-1.5 bg-[#27272A] rounded-lg text-xs text-[#A1A1AA] hover:bg-[#3F3F46] disabled:opacity-50">
-          {saving ? "…" : "Log fuel"}
-        </button>
       </div>
     </div>
   );
@@ -632,9 +644,9 @@ function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
           <BenchmarkForm session={session} date={date} onDone={() => { onUpdate(); onClose(); }} />
         )}
 
-        {/* Fueling quick-log — for sessions that actually need fuel */}
-        {!isTest && session.fueling && session.fueling.during.carbs_g_h > 0 && (
-          <FuelQuickLog session={session} date={date} onLogged={onUpdate} />
+        {/* Ride fuel — from the food log (eaten during the ride / "On the bike") */}
+        {!isTest && (session.ride_fuel || (session.fueling && session.fueling.during.carbs_g_h > 0)) && (
+          <RideFuelBlock session={session} date={date} onLogged={onUpdate} />
         )}
 
         {/* RPE picker */}

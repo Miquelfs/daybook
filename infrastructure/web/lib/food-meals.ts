@@ -1,13 +1,15 @@
 // Shared meal-type ordering + labels, and a grouping helper used by the food
 // dashboard and the day-view food block.
 
-export const MEAL_ORDER = ["breakfast", "lunch", "dinner", "snack", "extra"] as const;
+// "ride" = eaten on the bike — counts toward that ride's carbs/h in the training plan.
+export const MEAL_ORDER = ["breakfast", "lunch", "dinner", "snack", "ride", "extra"] as const;
 
 export const MEAL_LABEL: Record<string, string> = {
   breakfast: "Breakfast",
   lunch: "Lunch",
   dinner: "Dinner",
   snack: "Snacks",
+  ride: "On the bike",
   extra: "Extra",
   other: "Other",
 };
@@ -17,6 +19,7 @@ export const MEAL_EMOJI: Record<string, string> = {
   lunch: "🥗",
   dinner: "🍽️",
   snack: "🍎",
+  ride: "🚴",
   extra: "☕",
   other: "•",
 };

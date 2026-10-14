@@ -522,14 +522,14 @@ function RideQualityCard({ goalId }: { goalId: number }) {
                   {r.decoupling_pct != null ? `${r.decoupling_pct}%` : "—"}
                 </span>
                 <span className={`text-xs tabular-nums text-right ${carbsOk == null ? "text-[#52525B]" : carbsOk ? "text-[#4ADE80]" : "text-[#F59E0B]"}`}>
-                  {r.carbs_g_h != null ? `${r.carbs_g_h}` : "log"}{r.target_carbs_g_h ? <span className="text-[#52525B]">/{r.target_carbs_g_h}</span> : null}
+                  {r.carbs_g_h != null ? `${r.carbs_g_h}` : "—"}{r.target_carbs_g_h ? <span className="text-[#52525B]">/{r.target_carbs_g_h}</span> : null}
                 </span>
                 <span className="text-xs tabular-nums text-right text-[#A1A1AA]">{r.climb_m ? `${r.climb_m} m` : "—"}</span>
               </div>
             );
           })
         )}
-        <p className="text-[10px] text-[#52525B] mt-1.5">HR drift under 5% = durable. Log what you eat in the Fuel tab to see carbs per hour.</p>
+        <p className="text-[10px] text-[#52525B] mt-1.5">HR drift under 5% = durable. Carbs/h come from your food log: anything eaten during the ride, or logged as 🚴 On the bike.</p>
       </div>
 
       {/* Climbing */}

@@ -1,12 +1,13 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { MEAL_ORDER, MEAL_LABEL, MEAL_EMOJI } from "@/lib/food-meals";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Sparkles, X } from "lucide-react";
 import { foodApi, type AnalyzeItem, type RecentFood, type HeartRating } from "@/lib/food-api";
 import { HeartRatingBadge, HeartDot } from "@/components/HeartRatingBadge";
 
-const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack", "extra"];
+const MEAL_TYPES = MEAL_ORDER;
 
 type EditItem = AnalyzeItem & { _key: string };
 
@@ -20,12 +21,16 @@ function blankItem(): EditItem {
 // Shared add-food form. Type what you ate (photo optional) → AI proposes macros
 // → confirm/edit → save one entry per item. A "duty meal: …" line matches the
 // PMI crew-meal presets server-side.
-export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () => void }) {
+export function FoodEntryComposer({ date, onDone, initialMealType = "" }: {
+  date: string; onDone?: () => void;
+  /** e.g. "ride" when opened from a long-ride session ("what did you eat on the bike?") */
+  initialMealType?: string;
+}) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [mealType, setMealType] = useState("");
+  const [mealType, setMealType] = useState(initialMealType);
   const [time, setTime] = useState(() => new Date().toTimeString().slice(0, 5)); // local HH:MM, editable
   const [items, setItems] = useState<EditItem[] | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
@@ -180,7 +185,7 @@ export function FoodEntryComposer({ date, onDone }: { date: string; onDone?: () 
         <select value={mealType} onChange={(e) => setMealType(e.target.value)} className={`flex-1 ${inputCls}`}>
           <option value="">Meal type (optional)</option>
           {MEAL_TYPES.map((m) => (
-            <option key={m} value={m}>{m}</option>
+            <option key={m} value={m}>{MEAL_EMOJI[m]} {MEAL_LABEL[m] ?? m}</option>
           ))}
         </select>
         <input

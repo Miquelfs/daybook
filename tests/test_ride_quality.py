@@ -37,3 +37,38 @@ class ClimbTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RideCarbsTest(unittest.TestCase):
+    """Ride carbs come from the normal food log."""
+
+    def setUp(self):
+        import sqlite3
+        c = sqlite3.connect(":memory:")
+        c.row_factory = sqlite3.Row
+        c.executescript("""
+            CREATE TABLE activities(id, date, activity_type, start_time, duration_seconds);
+            CREATE TABLE food_entries(id INTEGER PRIMARY KEY, date, description, carbs_g, meal_type, eaten_at);
+            INSERT INTO activities VALUES('a1','2026-11-07','road_biking','2026-11-07 09:00:00',14400);  -- 09:00–13:00
+            INSERT INTO activities VALUES('a2','2026-11-07','cycling','2026-11-07 17:00:00',1800);        -- short spin
+            INSERT INTO food_entries(date, description, carbs_g, meal_type, eaten_at) VALUES
+              ('2026-11-07','Porridge',70,'breakfast','2026-11-07T07:30'),     -- before: not counted
+              ('2026-11-07','2 gels',50,'snack','2026-11-07T10:15'),           -- during: counted (any meal type)
+              ('2026-11-07','Bar',40,'ride',NULL),                              -- "on the bike", no time
+              ('2026-11-07','Bocadillo',60,'lunch','2026-11-07T13:10'),        -- 10 min after: grace window
+              ('2026-11-07','Dinner',90,'dinner','2026-11-07T20:00');""")
+        self.c = c
+
+    def test_counts_during_ride_and_on_the_bike(self):
+        from domains.training.ride_quality import ride_carbs
+        r = ride_carbs(self.c, None, "a1", "2026-11-07")
+        self.assertEqual(r["carbs_g"], 50 + 40 + 60)
+        self.assertEqual(r["minutes"], 240)
+
+    def test_untimed_bike_food_goes_to_the_longest_ride_only(self):
+        from domains.training.ride_quality import ride_carbs
+        self.assertEqual(ride_carbs(self.c, None, "a2", "2026-11-07")["carbs_g"], 0)
+
+    def test_no_activity_yet_uses_on_the_bike_entries(self):
+        from domains.training.ride_quality import ride_carbs
+        self.assertEqual(ride_carbs(self.c, 5, None, "2026-11-07")["carbs_g"], 40)

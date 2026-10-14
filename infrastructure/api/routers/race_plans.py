@@ -1588,8 +1588,23 @@ def day_prescription(date_str: str, conn: DB):
         fuel = _session_fuel(conn, r["effective_duration_min"] or r["duration_min"],
                              r["intensity_zone"], r["discipline"], weeks_to_race)
 
+        # Ride fuel from the normal food log (eaten during the ride / "On the bike")
+        ride_fuel = None
+        eff_min = r["effective_duration_min"] or r["duration_min"] or 0
+        if r["discipline"] == "cycling" and eff_min >= 90:
+            from domains.training.ride_quality import ride_carbs
+            rc = ride_carbs(conn, r["id"], r["completed_activity_id"], date_str)
+            mins = rc["minutes"] or eff_min
+            ride_fuel = {
+                "carbs_g": rc["carbs_g"], "items": rc["items"][:8],
+                "carbs_g_h": round(rc["carbs_g"] / (mins / 60)) if rc["carbs_g"] and mins else None,
+                "target_g_h": (fuel or {}).get("during", {}).get("carbs_g_h"),
+                "ride_min": mins,
+            }
+
         sessions.append({
             **_session_out(r, conn),
+            "ride_fuel": ride_fuel,
             "goal_name": r["goal_name"],
             "adaptation_note": adaptation_note,
             "roster_warning": roster_warning,

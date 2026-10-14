@@ -31,13 +31,73 @@ def _tables(conn) -> set[str]:
     return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
 
 
+# ── ride fuel (from the normal food log) ─────────────────────────────────────
+
+RIDE_MEAL = "ride"          # food_entries.meal_type for "on the bike"
+GRACE_MIN = 15              # food logged just before rolling out / right after still counts
+
+
+def _local_dt(ts: str | None):
+    from datetime import datetime
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace(" ", "T")[:16])
+    except ValueError:
+        return None
+
+
+def ride_carbs(conn: sqlite3.Connection, session_id: int | None, activity_id: str | None,
+               day: str) -> dict:
+    """
+    Carbs eaten during a ride, from what you already log:
+      - food entries (Food tab / day view) whose eaten_at falls inside the ride
+        (± 15 min), or that are tagged "On the bike" (meal_type 'ride') that day
+        — "on the bike" entries go to the day's longest ride if there are several;
+      - any legacy fueling_logs rows for the session/activity.
+    Returns {"carbs_g", "items": [descriptions], "minutes"}.
+    """
+    t = _tables(conn)
+    start = end = None
+    minutes = None
+    longest_that_day = True
+    if activity_id and "activities" in t:
+        a = conn.execute("SELECT start_time, duration_seconds FROM activities WHERE id=?", (activity_id,)).fetchone()
+        if a and a["duration_seconds"]:
+            minutes = round(a["duration_seconds"] / 60)
+            st = _local_dt(a["start_time"])
+            if st:
+                start, end = st - timedelta(minutes=GRACE_MIN), st + timedelta(seconds=a["duration_seconds"] + GRACE_MIN * 60)
+            other = conn.execute(
+                """SELECT MAX(duration_seconds) FROM activities WHERE date=? AND id != ?
+                   AND (lower(activity_type) LIKE '%cycl%' OR lower(activity_type) LIKE '%bik%')""",
+                (day, activity_id)).fetchone()[0]
+            longest_that_day = not other or other <= a["duration_seconds"]
+
+    carbs, items = 0.0, []
+    if "food_entries" in t:
+        for f in conn.execute(
+            "SELECT description, carbs_g, meal_type, eaten_at FROM food_entries WHERE date=?", (day,)):
+            eaten = _local_dt(f["eaten_at"])
+            inside = bool(start and eaten and start <= eaten <= end)
+            tagged = f["meal_type"] == RIDE_MEAL and (inside or longest_that_day)
+            if inside or tagged:
+                carbs += f["carbs_g"] or 0
+                items.append(f["description"])
+    if "fueling_logs" in t:
+        r = conn.execute(
+            "SELECT SUM(carbs_g) FROM fueling_logs WHERE plan_session_id=? OR (activity_id IS NOT NULL AND activity_id=?)",
+            (session_id, activity_id)).fetchone()
+        carbs += r[0] or 0
+    return {"carbs_g": round(carbs), "items": items, "minutes": minutes}
+
+
 # ── long rides ───────────────────────────────────────────────────────────────
 
 def long_rides(conn: sqlite3.Connection, goal_id: int, days: int = 120, target_fn=None) -> list[dict]:
     t = _tables(conn)
     since = (date.today() - timedelta(days=days)).isoformat()
     has_detail = "activity_detail" in t
-    has_fuel = "fueling_logs" in t
     cols = {r[1] for r in conn.execute("PRAGMA table_info(plan_sessions)")}
     role_sql = "ps.role" if "role" in cols else "NULL"
     rows = conn.execute(
@@ -57,13 +117,7 @@ def long_rides(conn: sqlite3.Connection, goal_id: int, days: int = 120, target_f
     out = []
     for r in rows:
         mins = round(r["duration_seconds"] / 60) if r["duration_seconds"] else (r["effective_duration_min"] or 0)
-        carbs = None
-        if has_fuel:
-            f = conn.execute(
-                "SELECT SUM(carbs_g) AS g FROM fueling_logs WHERE plan_session_id=? OR (activity_id IS NOT NULL AND activity_id=?)",
-                (r["id"], r["completed_activity_id"]),
-            ).fetchone()
-            carbs = f["g"] if f and f["g"] else None
+        carbs = ride_carbs(conn, r["id"], r["completed_activity_id"], r["session_date"])["carbs_g"] or None
         target = target_fn(mins, r["intensity_zone"], r["discipline"]) if target_fn else None
         out.append({
             "session_id": r["id"], "date": r["session_date"], "type": r["session_type"],
