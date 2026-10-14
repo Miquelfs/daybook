@@ -172,6 +172,9 @@ step compute_training_load python -m domains.health.compute_training_load
 log "Computing correlation snapshot..."
 step compute_correlations python -m domains.insights.compute_correlations
 
+# Weekly life review: Sunday, once — patterns + actions for the coming week.
+step life_review python -m domains.insights.life_review --auto
+
 # Portfolio price sync: fetch yesterday's closes for all active holdings via yfinance.
 log "Syncing portfolio prices..."
 step price_sync python -m domains.money.price_sync
