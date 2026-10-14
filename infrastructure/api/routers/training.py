@@ -1123,7 +1123,7 @@ _INDOOR_TYPES = (
     "fitness_equipment", "yoga", "pilates",
 )
 
-_RIDE_TYPES = ("cycling", "road_biking", "mountain_biking", "gravel_cycling", "indoor_cycling")
+_RIDE_TYPES = ("cycling", "road_biking", "mountain_biking", "gravel_cycling", "indoor_cycling", "virtual_ride")
 _RUN_TYPES = ("running", "trail_running", "treadmill_running", "indoor_running", "virtual_run")
 _SWIM_TYPES = ("lap_swimming", "open_water_swimming", "swimming")
 

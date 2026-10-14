@@ -397,6 +397,10 @@ _DISCIPLINE_MAP: dict[str, str] = {
     "cycling": "ride",
     "cycling_road": "ride",
     "mountain_biking": "ride",
+    "road_biking": "ride",
+    "gravel_cycling": "ride",
+    "indoor_cycling": "ride",     # smart trainer via a Garmin device
+    "virtual_ride": "ride",       # trainer apps (Zwift, MyWhoosh…) uploading to Garmin
     "swimming": "swimming",
     "open_water_swimming": "swimming",
     "pool_swimming": "swimming",
