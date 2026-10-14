@@ -18,7 +18,13 @@ ssh pi@daybook-pi "echo connected — no password"
 ```
 (If `ssh-copy-id` is missing: `cat ~/.ssh/id_ed25519.pub | ssh pi@daybook-pi "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"`.) Once the key is in place the deploy is prompt-free; the "one block at a time / password" caution below only applies if key auth isn't set up.
 
-When deployment is needed, output these commands for the user to run **one block at a time** (without a key, each of the last four prompts for the Pi password — pasting several at once can let a password prompt swallow the next line; with key auth there are no prompts). Do **not** include `#` comment lines in the blocks the user pastes — their interactive zsh does not treat `#` as a comment and it throws errors.
+**Default: one command.** When deployment is needed, give the user:
+```bash
+make deploy
+```
+It builds the frontend on the Mac (type-checked — a type error stops the deploy), syncs code + `.env.local`, ships the prebuilt `.next`, restarts both services and health-checks them (prints the System status). It reuses one SSH connection, so without key auth there is a single password prompt. Backend/script-only changes: `make deploy-api` (no build, restarts the API). Web dependency changes: `make deploy-deps` once. Run `make test` before deploying (stdlib unittest, runs on the Mac).
+
+**Fallback (manual, if `make deploy` itself fails):** output these commands for the user to run **one block at a time** (without a key, each of the last four prompts for the Pi password — pasting several at once can let a password prompt swallow the next line; with key auth there are no prompts). Do **not** include `#` comment lines in the blocks the user pastes — their interactive zsh does not treat `#` as a comment and it throws errors.
 
 1. Build the frontend on the Mac (no password):
 ```bash
@@ -49,6 +55,8 @@ ssh pi@daybook-pi "sudo systemctl restart daybook-api daybook-web"
 - If step 4's rsync drops with "connection unexpectedly closed", a stuck build is hogging RAM — clear it: `ssh pi@daybook-pi "pkill -f 'next build'; pkill -f 'npm run build'"`, then re-run step 4. If SSH itself times out, the Pi needs a physical power-cycle (services + Tailscale auto-start on boot).
 
 The user will paste back the output for Claude to review.
+
+**Nightly jobs & status:** every step in `daily_sync.sh` runs through `step <name> <cmd>` — a failing job no longer aborts the rest, and each outcome lands in `daybook.db → job_runs`. `/status` (and a banner on Today when anything is off) shows failing jobs, stale data, roster horizon, backups and disk. New nightly jobs must use `step`.
 
 ## Pi is the Source of Truth — Never Restore DB from Mac
 

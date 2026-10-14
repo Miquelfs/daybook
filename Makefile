@@ -8,7 +8,7 @@ VENV  := $(ROOT)/.venv
 PY    := $(VENV)/bin/python
 WEB   := $(ROOT)/infrastructure/web
 
-.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-notion sync-notion-full sync-strava sync-strava-full strava-auth import-tracks geocode-tracks aviation-init import-full-csv import-aerolink api web dev prod kill cron-install cron-remove verify backup backup-cron-install backup-pull backup-pull-install backup-pull-remove storage-report clean-pyc deploy help
+.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-notion sync-notion-full sync-strava sync-strava-full strava-auth import-tracks geocode-tracks aviation-init import-full-csv import-aerolink api web dev prod kill cron-install cron-remove verify backup backup-cron-install backup-pull backup-pull-install backup-pull-remove storage-report clean-pyc deploy deploy-api deploy-deps _ship-code _health test help
 
 PI_HOST ?= pi@daybook-pi
 PI_DIR  ?= ~/daybook
@@ -264,33 +264,61 @@ storage-report:
 
 # ── Deploy to Pi ──────────────────────────────────────────────────────────────
 
-deploy:
-	@echo "==> Syncing code to $(PI_HOST):$(PI_DIR) ..."
-	rsync -av --delete \
-		--exclude='.git' \
-		--exclude='.next' \
-		--exclude='node_modules' \
-		--exclude='__pycache__' \
-		--exclude='*.pyc' \
-		--exclude='.venv' \
-		--exclude='data/' \
-		--exclude='infrastructure/db/*.db' \
-		--exclude='infrastructure/db/*.db-wal' \
-		--exclude='infrastructure/db/*.db-shm' \
-		--exclude='infrastructure/scripts/logs/' \
-		--exclude='nohup.out' \
-		--exclude='.env' \
-		$(ROOT)/ $(PI_HOST):$(PI_DIR)/
-	@echo "==> Copying .env.local to Pi ..."
-	scp $(WEB)/.env.local $(PI_HOST):$(PI_DIR)/infrastructure/web/.env.local
-	@echo "==> Installing deps on Pi ..."
-	ssh $(PI_HOST) "cd $(PI_DIR)/infrastructure/web && npm install --include=dev --silent"
-	@echo "==> Building frontend on Pi ..."
-	ssh $(PI_HOST) "cd $(PI_DIR)/infrastructure/web && npm run build"
-	@echo "==> Restarting services on Pi ..."
-	ssh $(PI_HOST) "sudo systemctl restart daybook-api daybook-web"
-	@echo "==> Deploy complete. http://100.67.252.76:3000"
+# ── Deploy (build on the Mac, never on the Pi) ──────────────────────────────
+# The Pi (1 CPU, ~1 GB) cannot run `next build` — it OOM-thrashes until it needs
+# a power-cycle. So: build here, ship code + the prebuilt .next, restart, then
+# health-check. One SSH connection is reused for every step (ControlMaster), so
+# even without key auth there is a single password prompt.
+#   make deploy        full deploy (frontend + backend)
+#   make deploy-api    backend/scripts only (no build, restarts the API)
+#   make deploy-deps   once, when web dependencies change (npm install on the Pi)
+SSH_OPTS := -o ControlMaster=auto -o ControlPath=$(HOME)/.ssh/cm-daybook-%r@%h:%p -o ControlPersist=180
+SSH      := ssh $(SSH_OPTS)
+RSYNC_EXCLUDES := --exclude='.git' --exclude='.next' --exclude='node_modules' --exclude='__pycache__' \
+	--exclude='*.pyc' --exclude='.venv' --exclude='data/' --exclude='infrastructure/db/*.db' \
+	--exclude='infrastructure/db/*.db-wal' --exclude='infrastructure/db/*.db-shm' \
+	--exclude='infrastructure/scripts/logs/' --exclude='nohup.out' --exclude='.env'
 
+deploy:
+	@echo "==> [1/5] Building frontend on the Mac (type-checked) ..."
+	cd $(WEB) && npm run build
+	@$(MAKE) --no-print-directory _ship-code
+	@echo "==> [3/5] Shipping prebuilt .next ..."
+	rsync -az --partial --delete --timeout=120 -e "$(SSH)" $(WEB)/.next/ $(PI_HOST):$(PI_DIR)/infrastructure/web/.next/
+	@echo "==> [4/5] Restarting services ..."
+	$(SSH) $(PI_HOST) "sudo systemctl restart daybook-api daybook-web"
+	@$(MAKE) --no-print-directory _health
+
+deploy-api:
+	@$(MAKE) --no-print-directory _ship-code
+	@echo "==> Restarting API ..."
+	$(SSH) $(PI_HOST) "sudo systemctl restart daybook-api"
+	@$(MAKE) --no-print-directory _health
+
+deploy-deps:
+	$(SSH) $(PI_HOST) "cd $(PI_DIR)/infrastructure/web && npm install --omit=dev"
+
+_ship-code:
+	@echo "==> [2/5] Syncing code + web env to $(PI_HOST) ..."
+	rsync -a --delete $(RSYNC_EXCLUDES) -e "$(SSH)" $(ROOT)/ $(PI_HOST):$(PI_DIR)/
+	rsync -a -e "$(SSH)" $(WEB)/.env.local $(PI_HOST):$(PI_DIR)/infrastructure/web/.env.local
+
+_health:
+	@echo "==> [5/5] Health check ..."
+	@ok=0; for i in $$(seq 1 20); do \
+	  if $(SSH) $(PI_HOST) "curl -fsS -m 5 -o /dev/null http://localhost:8000/system/status && curl -fsS -m 15 -o /dev/null http://localhost:3000/" 2>/dev/null; then ok=1; break; fi; \
+	  sleep 3; \
+	done; \
+	if [ $$ok -ne 1 ]; then echo "!! Services did not come back — check: ssh $(PI_HOST) 'journalctl -u daybook-api -u daybook-web -n 50'"; exit 1; fi; \
+	$(SSH) $(PI_HOST) "curl -fsS -m 10 http://localhost:8000/system/status" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("    API + web up. System status:", d["overall"].upper()); [print("    -", c["level"], c["label"], "—", c["detail"]) for c in d["checks"] if c["level"]!="ok"]'
+	@echo "==> Deploy complete → http://100.67.252.76:3000"
+
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+# Stdlib unittest — runs on the Mac (no venv needed) and on the Pi. Router-level
+# tests that need FastAPI skip themselves when it isn't installed.
+test:
+	python3 -m unittest discover -s tests -t . -v
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 

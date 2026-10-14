@@ -630,10 +630,12 @@ function HeartBalance({ entries }: { entries: FoodEntry[] }) {
   }
   const total = entries.length;
   const flagged = counts.limit + counts.avoid;
-  const segs: { rating: "good" | "ok" | "limit" | "avoid"; n: number }[] = [
+  type Seg = { rating: "good" | "ok" | "limit" | "avoid"; n: number };
+  const allSegs: Seg[] = [
     { rating: "good", n: counts.good }, { rating: "ok", n: counts.ok },
     { rating: "limit", n: counts.limit }, { rating: "avoid", n: counts.avoid },
-  ].filter((s) => s.n > 0);
+  ];
+  const segs = allSegs.filter((s) => s.n > 0);
 
   const msg = flagged === 0
     ? "Great cholesterol day — nothing flagged."

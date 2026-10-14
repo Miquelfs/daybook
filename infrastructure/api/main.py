@@ -41,6 +41,7 @@ from infrastructure.api.routers import race_plans as race_plans_module
 from infrastructure.api.routers import nutrition as nutrition_module
 from infrastructure.api.routers import food as food_module
 from infrastructure.api.routers import wellness as wellness_module
+from infrastructure.api.routers import system as system_module
 
 VERSION = "0.1.0"
 ROOT = Path(__file__).parents[2]
@@ -74,6 +75,7 @@ app.add_middleware(
 )
 
 app.include_router(days.router)
+app.include_router(system_module.router)
 app.include_router(insights.router)
 app.include_router(questionnaire.router)
 app.include_router(locations.router)

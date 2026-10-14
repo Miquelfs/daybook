@@ -188,7 +188,20 @@ def gather(conn: sqlite3.Connection, goal_id: int, week_start: str) -> dict:
         week.append({"date": dd.isoformat(), "day": dd.strftime("%a"), "context": ctx["label"],
                      "ride_window_min": ctx["window_min"], "sessions": sessions})
 
+    quality = {}
+    try:
+        from domains.training import ride_quality as rq
+        quality["long_rides"] = [
+            {k: v for k, v in r.items() if k in ("date", "minutes", "km", "climb_m", "avg_hr",
+                                                 "decoupling_pct", "carbs_g_h")}
+            for r in rq.long_rides(conn, goal_id, days=42)[:4]]
+        quality["climbs"] = [{k: c[k] for k in ("date", "gain_m", "duration_min", "vam", "avg_hr")}
+                             for c in rq.climbs(conn, days=120)[:4]]
+    except Exception:
+        pass
+
     return {
+        "ride_quality": quality,
         "goal": {"name": goal["name"], "race_date": goal["race_date"], "race_type": goal["race_type"],
                  "days_to_race": (date.fromisoformat(goal["race_date"]) - today).days},
         "today": today.isoformat(),
@@ -213,6 +226,8 @@ Principles:
   or trim easy volume before touching the long ride.
 - Consistent misses on a weekday pattern → move sessions to days that actually work.
 - Good adherence + good recovery → keep the plan; don't add volume (> 10% jumps are not allowed).
+- ride_quality: decoupling > 5 % on long rides = durability still building (keep them aerobic);
+  carbs_g_h well under ~80 = fuelling must be practised; climb VAM trend = climbing progress.
 - Never schedule hard work the morning after a duty that ended after 23:00, or on a day with
   ride_window_min 0. Respect sessions moved_by_user unless there's a clear safety reason.
 - Moves stay inside the week ({week_start}..{week_end}) and on or after {today}.

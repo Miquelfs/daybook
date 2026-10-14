@@ -20,6 +20,7 @@ interface PlannerSession {
   is_displaced: boolean;
   status: string;
   schedule_note?: string | null;
+  on_garmin?: boolean;
 }
 
 interface PlannerDay {
@@ -196,7 +197,7 @@ export function WeekPlanner({ goalId, initialDate, onClose }: {
                           {s.is_optional ? <span className="text-[#52525B]"> · optional</span> : null}
                         </p>
                         <p className="text-[10px] text-[#52525B]">
-                          {s.effective_duration_min} min · {s.intensity_zone}{s.is_displaced ? " · moved by you" : ""}
+                          {s.effective_duration_min} min · {s.intensity_zone}{s.is_displaced ? " · moved by you" : ""}{s.on_garmin ? " · ⌚ on Garmin" : ""}
                         </p>
                       </div>
                       {s.status === "pending" && !past && (

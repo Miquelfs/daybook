@@ -24,6 +24,20 @@ log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
 }
 
+# step <job-name> <command...> — run one job, never abort the whole sync on its
+# failure (set -e would otherwise stop every later job silently), and record the
+# outcome in daybook.db → job_runs so the app's System status can show it.
+step() {
+  local name="$1"; shift
+  local start rc
+  start=$(date +%s)
+  if "$@" >> "$LOG_FILE" 2>&1; then rc=0; else rc=$?; fi
+  python3 "$ROOT/infrastructure/scripts/job_status.py" record "$name" "$rc" "$(( $(date +%s) - start ))" \
+    "$(tail -n 4 "$LOG_FILE" | tr '\n' ' ' | cut -c1-400)" >/dev/null 2>&1 || true
+  if [[ $rc -ne 0 ]]; then log "WARN: $name failed (exit $rc)"; fi
+  return 0
+}
+
 on_error() {
   local msg="[$DATE] daily_sync.sh failed at line $1"
   echo "$msg" | tee -a "$ERROR_LOG" >&2
@@ -57,18 +71,15 @@ fi
 # Garmin: auto-detect start from last synced date so gaps are filled automatically.
 # On a normal day this picks up yesterday; after a gap it catches up.
 log "Syncing Garmin (auto catch-up, with streams)..."
-python -m domains.health.garmin.garmin_sync --streams \
-  >> "$LOG_FILE" 2>&1
+step garmin_sync python -m domains.health.garmin.garmin_sync --streams
 
 # Overland: process any raw GPS points received since last run.
 log "Processing Overland GPS points..."
-python -m domains.locations.overland_process \
-  >> "$LOG_FILE" 2>&1
+step overland_process python -m domains.locations.overland_process
 
 # Trips: re-detect trips over the last 120 days (Plan B.2, nights-based).
 log "Detecting trips..."
-python -m domains.locations.trip_detection \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Trip detection failed (non-fatal)"
+step trip_detection python -m domains.locations.trip_detection
 
 # Warm the expensive explore caches so the page is never cold (6h TTL,
 # hourly cron keeps them fresh).
@@ -82,32 +93,26 @@ curl -s -m 60 -o /dev/null "http://localhost:8000/locations/fun-facts" || true
 # Skips gracefully if STRAVA_CLIENT_ID is not set or tokens are missing.
 if [[ -n "${STRAVA_CLIENT_ID:-}" ]]; then
   log "Syncing Strava enrichment (last 7 days)..."
-  python -m domains.health.strava.strava_sync --days 7 \
-    >> "$LOG_FILE" 2>&1 || log "WARN: Strava sync failed (non-fatal)"
+  step strava_sync python -m domains.health.strava.strava_sync --days 7
 else
   log "Skipping Strava sync (STRAVA_CLIENT_ID not set)"
 fi
 
 # Weather: fetch last 3 days so today + yesterday are always covered.
 log "Syncing weather (last 3 days)..."
-python -m domains.weather.weather_sync "$YESTERDAY" "$DATE" \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Weather sync failed (non-fatal)"
+step weather_sync python -m domains.weather.weather_sync "$YESTERDAY" "$DATE"
 
 # Intraday HR: fetch continuous heart rate readings for yesterday, then refresh
 # today (partial day, --force) so the current-day timeline stays live.
 log "Syncing intraday heart rate..."
-python -m domains.health.garmin.intraday_hr_sync \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Intraday HR sync failed (non-fatal)"
-python -m domains.health.garmin.intraday_hr_sync --date "$DATE" --force \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Intraday HR (today) failed (non-fatal)"
+step intraday_hr_sync python -m domains.health.garmin.intraday_hr_sync
+step intraday_hr_sync:today python -m domains.health.garmin.intraday_hr_sync --date "$DATE" --force
 
 # All-day wellness (CIRQA): intraday stress, Body Battery, respiration, SpO2 —
 # yesterday, then today (partial, --force) so stress/energy show for the day so far.
 log "Syncing all-day wellness..."
-python -m domains.health.garmin.wellness_sync \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Wellness sync failed (non-fatal)"
-python -m domains.health.garmin.wellness_sync --date "$DATE" --force \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Wellness (today) failed (non-fatal)"
+step wellness_sync python -m domains.health.garmin.wellness_sync
+step wellness_sync:today python -m domains.health.garmin.wellness_sync --date "$DATE" --force
 
 # Finalize the completed previous day. Once past midnight, Garmin holds the full
 # 00:00–23:59 of yesterday's intraday stress / Body Battery / HR — including the
@@ -119,72 +124,62 @@ python -m domains.health.garmin.wellness_sync --date "$DATE" --force \
 # (INSERT OR REPLACE) so repeats within the window are harmless.
 if [[ "$HOUR" -lt 8 ]]; then
   log "Finalizing yesterday's completed day (forced re-sync)..."
-  python -m domains.health.garmin.wellness_sync --date "$YESTERDAY" --force \
-    >> "$LOG_FILE" 2>&1 || log "WARN: Wellness finalize (yesterday) failed (non-fatal)"
-  python -m domains.health.garmin.intraday_hr_sync --date "$YESTERDAY" --force \
-    >> "$LOG_FILE" 2>&1 || log "WARN: Intraday HR finalize (yesterday) failed (non-fatal)"
+  step wellness_sync:finalize python -m domains.health.garmin.wellness_sync --date "$YESTERDAY" --force
+  step intraday_hr_sync:finalize python -m domains.health.garmin.intraday_hr_sync --date "$YESTERDAY" --force
 fi
 
 # Flight physio + stress-by-context: snapshot yesterday & today so the takeoff/
 # landing spikes and "what stresses you" roll up across all of life.
 log "Snapshotting flight physio + stress contexts..."
 for D in "$YESTERDAY" "$DATE"; do
-  python -m domains.health.flight_physio --date "$D" \
-    >> "$LOG_FILE" 2>&1 || log "WARN: flight_physio ($D) failed (non-fatal)"
-  python -m domains.health.stress_context --date "$D" \
-    >> "$LOG_FILE" 2>&1 || log "WARN: stress_context ($D) failed (non-fatal)"
+  step flight_physio python -m domains.health.flight_physio --date "$D"
+  step stress_context python -m domains.health.stress_context --date "$D"
 done
 
 # Load Index: compute fatigue composite for yesterday (Horizon 1).
 log "Computing Load Index..."
-python -m domains.health.compute_load_index \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Load Index compute failed (non-fatal)"
+step compute_load_index python -m domains.health.compute_load_index
 
 # Roster tags: auto-apply flew/standby/ground_duty tags from the duty roster.
 log "Syncing roster tags..."
-python -m domains.aviation.roster_tag_sync \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Roster tag sync failed (non-fatal)"
+step roster_tag_sync python -m domains.aviation.roster_tag_sync
 
 # Training plan: start goals whose plan begins today, then re-place this and
 # future weeks' sessions around the roster, layovers and detected trips.
 log "Re-placing training sessions around roster/travel..."
-python -m domains.training.reflow \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Training reflow failed (non-fatal)"
+step reflow python -m domains.training.reflow
 
 # AI coach: on Sat/Sun, have next week's review waiting for the planning ritual.
-python -m domains.training.coach --auto \
-  >> "$LOG_FILE" 2>&1 || log "WARN: AI coach review failed (non-fatal)"
+step coach python -m domains.training.coach --auto
+
+# Garmin: send the next ~9 days of sessions as structured workouts (trainer =
+# ERG watts, outdoor = HR), re-sending anything the re-plan moved or changed.
+step garmin_workout_push python -m domains.health.garmin.workout_push
 
 # Activity detail sync: fetch splits, Garmin TE, physio metrics for new activities.
 log "Syncing Garmin activity details + physio (last 7 days)..."
-python -m domains.health.garmin.garmin_activity_detail_sync --days 7 \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Activity detail sync failed (non-fatal)"
+step garmin_activity_detail_sync python -m domains.health.garmin.garmin_activity_detail_sync --days 7
 
 # Compute per-activity metrics: NP, IF, EF, decoupling, MMP curves.
 log "Computing per-activity metrics (last 7 days)..."
-python -m domains.health.compute_activity_metrics --days 7 \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Activity metrics compute failed (non-fatal)"
+step compute_activity_metrics python -m domains.health.compute_activity_metrics --days 7
 
 # CTL/ATL/TSB: update fitness & freshness for all sports.
 log "Computing training load (CTL/ATL/TSB)..."
-python -m domains.health.compute_training_load \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Training load compute failed (non-fatal)"
+step compute_training_load python -m domains.health.compute_training_load
 
 # Correlations: recompute snapshot so the Discover tab stays fresh.
 log "Computing correlation snapshot..."
-python -m domains.insights.compute_correlations \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Correlation snapshot failed (non-fatal)"
+step compute_correlations python -m domains.insights.compute_correlations
 
 # Portfolio price sync: fetch yesterday's closes for all active holdings via yfinance.
 log "Syncing portfolio prices..."
-python -m domains.money.price_sync \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Price sync failed (non-fatal)"
+step price_sync python -m domains.money.price_sync
 
 # Recurring investment plans (DCA): execute any plans whose next date has arrived.
 # Uses today's cached price. Idempotent — safe to run repeatedly.
 log "Executing due investment plans..."
-python -m domains.money.plan_executor \
-  >> "$LOG_FILE" 2>&1 || log "WARN: Plan executor failed (non-fatal)"
+step plan_executor python -m domains.money.plan_executor
 
 # AI: morning brief (requires Ollama at OLLAMA_HOST; skips gracefully otherwise).
 # The cron runs hourly — attempt across the 05–11h window so the brief lands
@@ -194,8 +189,7 @@ python -m domains.money.plan_executor \
 # just landed for a brief that was written without it.
 if [[ "$HOUR" -ge 5 && "$HOUR" -le 11 ]]; then
   log "Generating AI morning brief..."
-  python -m domains.ai.morning_brief --date "$DATE" \
-    >> "$LOG_FILE" 2>&1 || log "WARN: Morning brief generation failed (non-fatal)"
+  step morning_brief python -m domains.ai.morning_brief --date "$DATE"
 else
   log "Skipping morning brief (outside 05-11h window)"
 fi

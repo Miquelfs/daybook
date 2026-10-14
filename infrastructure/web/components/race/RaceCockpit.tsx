@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Sparkles, RefreshCw, Check, Plane, BedDouble, Ban, Dumbbell, Flag, Mountain, Timer } from "lucide-react";
+import { ArrowRight, Sparkles, RefreshCw, Check, Plane, BedDouble, Ban, Dumbbell, Flag, Mountain, Timer, Watch } from "lucide-react";
 import { SectionLabel } from "@/components/MorningBrief";
 import { WeekPlanner } from "@/components/training/WeekPlanner";
 import RaceReadinessPanel from "@/components/training/RaceReadinessPanel";
@@ -205,13 +205,29 @@ function TodayCard() {
 
 type WeekDayT = {
   date: string; day_name: string;
-  sessions: { id: number; session_type: string; effective_duration_min: number; intensity_zone: string; status: string }[];
+  sessions: { id: number; session_type: string; effective_duration_min: number; intensity_zone: string; status: string;
+              on_garmin?: boolean; garmin_error?: string | null }[];
   context: { label: string; window_min: number; blocked: boolean; woke_away: boolean };
   roster: string | null;
 };
 
 function WeekStrip({ goalId, onPlan }: { goalId: number; onPlan: (d: string) => void }) {
   const today = todayIso();
+  const qc = useQueryClient();
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState<string | null>(null);
+  async function sendToGarmin() {
+    setSending(true); setSent(null);
+    try {
+      const r = await fetch(`${BASE}/race-plans/garmin/push`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.detail ?? "Garmin push failed");
+      const n = (d.created ?? 0) + (d.updated ?? 0);
+      setSent(d.errors?.length ? `${d.errors.length} failed — see Status` : n ? `${n} sent to Garmin ✓` : "Already on Garmin ✓");
+      qc.invalidateQueries({ queryKey: ["omyra-week", goalId] });
+    } catch (e) { setSent(e instanceof Error ? e.message : "Garmin push failed"); }
+    finally { setSending(false); }
+  }
   const { data } = useQuery<{ week_start: string; days: WeekDayT[]; confirmed_at: string | null }>({
     queryKey: ["omyra-week", goalId, today],
     queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/week?date=${today}`, { cache: "no-store" }).then((r) => r.json()),
@@ -253,6 +269,7 @@ function WeekStrip({ goalId, onPlan }: { goalId: number; onPlan: (d: string) => 
                       color: s.status === "completed" ? "#16A34A" : undefined,
                     }}>
                     {s.session_type.startsWith("Strength") ? <Dumbbell size={9} /> : null}
+                    {s.on_garmin && s.status !== "completed" ? <Watch size={9} className="text-[#71717A]" /> : null}
                     <span className={s.status === "completed" ? "" : "text-[#D4D4D8]"}>{s.status === "completed" ? "✓" : fmtH(s.effective_duration_min)}</span>
                   </div>
                 ))}
@@ -261,7 +278,16 @@ function WeekStrip({ goalId, onPlan }: { goalId: number; onPlan: (d: string) => 
           );
         })}
       </div>
-      <div className="flex gap-2 mt-4">
+      <div className="flex items-center justify-between mt-3">
+        <span className="text-[10px] text-[#52525B] flex items-center gap-1">
+          <Watch size={10} /> {live.filter((s) => s.on_garmin && s.status === "pending").length} on your Garmin
+        </span>
+        <button onClick={sendToGarmin} disabled={sending}
+          className="text-[11px] text-[#71717A] hover:text-[#F59E0B] disabled:opacity-50">
+          {sending ? "Sending…" : sent ?? "Send to Garmin"}
+        </button>
+      </div>
+      <div className="flex gap-2 mt-3">
         <button onClick={() => onPlan(today)}
           className="flex-1 text-xs py-2 rounded-xl border border-[#27272A] text-[#A1A1AA] hover:bg-[#18181B]">Edit this week</button>
         <button onClick={() => onPlan(iso(next))}
@@ -444,6 +470,102 @@ function Milestones({ ov }: { ov: Overview }) {
   );
 }
 
+// ── Ride quality: long-ride durability + fuelling, climbing ───────────────────
+
+type RideQ = {
+  long_rides: { session_id: number; date: string; type: string; minutes: number; km: number | null; climb_m: number | null;
+                avg_hr: number | null; decoupling_pct: number | null; carbs_g_h: number | null;
+                target_carbs_g_h: number | null; linked: boolean }[];
+  climbs: { activity_id: string; date: string; gain_m: number; distance_km: number; duration_min: number;
+            grade_pct: number | null; vam: number; avg_hr: number | null; puig_major_min: number | null }[];
+  benchmarks: { activity_id: string; date: string; vam: number; puig_major_min: number | null }[];
+  best_recent_climb: { date: string; gain_m: number; vam: number; puig_major_min: number | null } | null;
+  puig_major_gain_m: number;
+};
+
+function driftClass(p: number | null) {
+  if (p == null) return "text-[#52525B]";
+  return p < 5 ? "text-[#4ADE80]" : p < 8 ? "text-[#F59E0B]" : "text-[#F87171]";
+}
+
+function RideQualityCard({ goalId }: { goalId: number }) {
+  const { data } = useQuery<RideQ>({
+    queryKey: ["ride-quality", goalId],
+    queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/ride-quality`, { cache: "no-store" }).then((r) => r.json()),
+  });
+  if (!data) return null;
+  const climbs = [...data.climbs].reverse();
+  const maxVam = Math.max(...climbs.map((c) => c.vam), 1);
+  const bench = new Set(data.benchmarks.map((b) => b.activity_id));
+
+  return (
+    <Card className="p-5">
+      <SectionLabel>Long rides & climbing</SectionLabel>
+
+      {/* Long rides */}
+      <div className="mt-3">
+        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 text-[10px] uppercase tracking-widest text-[#52525B] pb-1">
+          <span>Ride</span><span className="text-right">HR drift</span><span className="text-right">Carbs/h</span><span className="text-right">Climb</span>
+        </div>
+        {data.long_rides.length === 0 ? (
+          <p className="text-xs text-[#71717A] py-2">No completed long rides yet. Each one gets scored here for heart-rate drift and fuelling.</p>
+        ) : (
+          data.long_rides.slice(0, 6).map((r) => {
+            const carbsOk = r.carbs_g_h != null && r.target_carbs_g_h ? r.carbs_g_h >= r.target_carbs_g_h * 0.85 : null;
+            return (
+              <div key={r.session_id} className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 items-center py-1.5 border-t border-[#18181B]">
+                <span className="min-w-0">
+                  <span className="text-sm text-[#E4E4E7] tabular-nums">{fmtH(r.minutes)}</span>
+                  <span className="text-[11px] text-[#71717A]"> · {fmtDay(r.date)}{r.km ? ` · ${r.km} km` : ""}</span>
+                </span>
+                <span className={`text-xs tabular-nums text-right ${driftClass(r.decoupling_pct)}`}>
+                  {r.decoupling_pct != null ? `${r.decoupling_pct}%` : "—"}
+                </span>
+                <span className={`text-xs tabular-nums text-right ${carbsOk == null ? "text-[#52525B]" : carbsOk ? "text-[#4ADE80]" : "text-[#F59E0B]"}`}>
+                  {r.carbs_g_h != null ? `${r.carbs_g_h}` : "log"}{r.target_carbs_g_h ? <span className="text-[#52525B]">/{r.target_carbs_g_h}</span> : null}
+                </span>
+                <span className="text-xs tabular-nums text-right text-[#A1A1AA]">{r.climb_m ? `${r.climb_m} m` : "—"}</span>
+              </div>
+            );
+          })
+        )}
+        <p className="text-[10px] text-[#52525B] mt-1.5">HR drift under 5% = durable. Log what you eat in the Fuel tab to see carbs per hour.</p>
+      </div>
+
+      {/* Climbing */}
+      <div className="mt-5 pt-4 border-t border-[#18181B]">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="text-[10px] uppercase tracking-widest text-[#71717A]">Climbing (VAM, m/h)</p>
+          {data.best_recent_climb?.puig_major_min && (
+            <p className="text-xs text-[#A1A1AA]">
+              Puig Major ≈ <span className="text-[#F59E0B] font-semibold tabular-nums">{data.best_recent_climb.puig_major_min} min</span> at your best recent rate
+            </p>
+          )}
+        </div>
+        {climbs.length === 0 ? (
+          <p className="text-xs text-[#71717A] mt-2">
+            No long climbs recorded yet. Any outdoor ride with a climb of 250 m or more shows up here; the benchmark sessions use the same climb each time.
+          </p>
+        ) : (
+          <div className="flex items-end gap-1 h-20 mt-3">
+            {climbs.map((c) => (
+              <div key={c.activity_id} className="flex-1 flex flex-col items-center justify-end h-full min-w-0"
+                title={`${fmtDay(c.date)} · ${c.gain_m} m in ${Math.round(c.duration_min)} min · ${c.vam} m/h`}>
+                <span className="text-[9px] text-[#71717A] tabular-nums">{c.vam}</span>
+                <div className="w-full rounded-t-[3px]" style={{
+                  height: `${Math.max(8, (c.vam / maxVam) * 70)}%`,
+                  background: bench.has(c.activity_id) ? "#F59E0B" : "#F59E0B55",
+                }} />
+              </div>
+            ))}
+          </div>
+        )}
+        {climbs.length > 0 && <p className="text-[10px] text-[#52525B] mt-1.5">Solid = benchmark climb test · faded = any long climb</p>}
+      </div>
+    </Card>
+  );
+}
+
 function RaceFacts() {
   // 2026 rules (start 06:30): km 97 by 11:15, km 220 by 16:30, finish 20:40.
   const cps = [
@@ -520,6 +642,7 @@ export function RaceCockpit() {
           <Milestones ov={ov} />
         </div>
       )}
+      <RideQualityCard goalId={goal.id} />
       <RaceFacts />
       {ov && (
         <Card className="p-5">

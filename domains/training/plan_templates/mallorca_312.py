@@ -181,6 +181,17 @@ def gym(phase="max", optional=False, mins=50):
     ], role="gym", optional=optional)
 
 
+def climb_test():
+    """Outdoor benchmark: one long climb (ideally Puig Major from Sóller, ~14 km / ~850 m)
+    at the best STEADY effort you could repeat — ride_quality tracks VAM from the GPS."""
+    return _sess("Test - Long climb benchmark (outdoor)", 120, "Z4", [
+        _steady("Ride to the foot of the climb", 35, "Z2", "Easy, eat something, 2× 1min openers"),
+        _intervals("The climb — steady best effort", 1, 50, 0, "Z4", "Z1",
+                   "Even pacing, seated, no surge in the first 5 min. Same climb every time if you can."),
+        _steady("Ride home", 35, "Z1", "Easy spin, refuel"),
+    ], role="key")
+
+
 def pacing(mins=60):
     return _sess("Cycling - Pacing Discipline Ride", mins, "Z2", [
         _steady("Warm-up", 10, "Z1"),
@@ -206,7 +217,7 @@ _FOUNDATION = [
     [z2(60), z2(60), long_ride(120), gym("adapt"), gym("adapt", optional=True)],
     [sweetspot(3, 8, 60), z2(75), long_ride(150), spin(45), gym("adapt"), gym("adapt", optional=True)],
     [sweetspot(3, 10, 70), z2(75), long_ride(165), z2(60, optional=True), gym("adapt"), gym("adapt")],
-    [z2(60), long_ride(105), spin(45), gym("adapt")],                                   # recovery
+    [climb_test(), long_ride(105), spin(45), gym("adapt")],                             # recovery + climb baseline
     [climb_sim(2, 12, 70), z2(75), long_ride(180), spin(45), gym("max"), gym("max", optional=True)],
     [ftp_test(), z2(60), long_ride(120), gym("max")],                                   # recovery + re-test
 ]
@@ -217,7 +228,7 @@ _RACE_PLAN = [
     {"week": 1, "sessions": [threshold(2, 15, 80), z2(75), spin(45), long_ride(150), spin(45)]},
     {"week": 2, "sessions": [threshold(2, 20, 85), z2(90), spin(45), long_ride(180), spin(60)]},
     {"week": 3, "sessions": [climb_sim(3, 12, 85), z2(90), spin(45), long_ride(210, 1000), spin(60)]},
-    {"week": 4, "sessions": [sweetspot(2, 12, 60), z2(60), long_ride(120), spin(45)]},  # ✦ recovery
+    {"week": 4, "sessions": [sweetspot(2, 12, 60), climb_test(), long_ride(120), spin(45)]},  # ✦ recovery + climb test
     {"week": 5, "sessions": [threshold(2, 20, 90), z2(90), spin(60), long_ride(240), z2(75, optional=True)]},
     {"week": 6, "sessions": [climb_sim(3, 15, 90), z2(90), spin(60), long_ride(270, 1000), z2(75, optional=True)]},
     {"week": 7, "sessions": [threshold(3, 15, 90), z2(90), spin(60), long_ride(300, 1200), z2(90, optional=True)]},
@@ -232,7 +243,7 @@ _RACE_PLAN = [
                               long_ride(300, 1500), b2b_day2(165)]},
     {"week": 11, "sessions": [threshold(3, 18), sweetspot(4, 15), z2(120), spin(60),
                               long_ride(330, 1800), b2b_day2(180)]},
-    {"week": 12, "sessions": [ftp_test(), z2(75), long_ride(180), spin(60)]},  # ✦ recovery + test
+    {"week": 12, "sessions": [ftp_test(), climb_test(), long_ride(180), spin(60)]},  # ✦ recovery + tests
     {"week": 13, "sessions": [climb_sim(3, 20), sweetspot(4, 15), z2(120), spin(60),
                               long_ride(330, 1500, "Cycling - Back-to-back Day 1"), b2b_day2(210)]},
     {"week": 14, "sessions": [threshold(2, 25), vo2(5, 5), z2(120), spin(60),

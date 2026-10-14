@@ -298,7 +298,7 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
                   <Tooltip
                     contentStyle={{ background: "#18181B", border: "1px solid #27272A", borderRadius: 6, fontSize: 11 }}
                     labelFormatter={(l) => { try { return format(parseISO(l), "d MMM yyyy"); } catch { return l; } }}
-                    formatter={(v: number) => [v?.toFixed(3), "EF"]}
+                    formatter={(v) => [typeof v === "number" ? v.toFixed(3) : String(v ?? ""), "EF"]}
                   />
                   <Line dataKey="ef" stroke="#F59E0B" dot={false} strokeWidth={2} />
                 </LineChart>

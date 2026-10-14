@@ -128,8 +128,8 @@ export function VolumeChart() {
             <Tooltip
               contentStyle={{ background: "#18181B", border: "1px solid #27272A", borderRadius: 6 }}
               labelStyle={{ color: "#A1A1AA", fontSize: 11 }}
-              labelFormatter={fmtDate}
-              formatter={(v: number) => [v, metricLabel]}
+              labelFormatter={(l) => fmtDate(String(l))}
+              formatter={(v) => [v as number, metricLabel]}
             />
             <Bar dataKey="value" fill="#3B82F6" radius={[2, 2, 0, 0]} name={metricLabel} />
           </BarChart>
@@ -227,8 +227,8 @@ export function ProgressComparisonChart() {
             <Tooltip
               contentStyle={{ background: "#18181B", border: "1px solid #27272A", borderRadius: 6 }}
               labelStyle={{ color: "#A1A1AA", fontSize: 11 }}
-              labelFormatter={fmtDate}
-              formatter={(v: number, name: string) => [
+              labelFormatter={(l) => fmtDate(String(l))}
+              formatter={(v, name) => [
                 v ?? "—",
                 name === "value" ? "This period" : "Year ago",
               ]}

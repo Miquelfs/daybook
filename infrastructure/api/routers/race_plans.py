@@ -960,6 +960,50 @@ def _coach_default_week() -> str:
     return (mon + timedelta(days=7) if today.weekday() >= 4 else mon).isoformat()
 
 
+# ── Ride quality: long-ride durability + fuelling, climbing benchmark ────────
+
+@router.get("/goals/{goal_id}/ride-quality")
+def ride_quality(goal_id: int, conn: DB):
+    from domains.training import ride_quality as rq
+    goal = _row(conn, "race_goals", goal_id)
+    wtr = max(0, (date.fromisoformat(goal["race_date"]) - date.today()).days // 7)
+
+    def target(mins, zone, disc):
+        f = _session_fuel(conn, mins, zone, disc, wtr)
+        return (f or {}).get("during", {}).get("carbs_g_h")
+
+    rides = rq.long_rides(conn, goal_id, target_fn=target)
+    climbs = rq.climbs(conn)
+    best_recent = max((c for c in climbs if c["date"] >= (date.today() - timedelta(days=90)).isoformat()),
+                      key=lambda c: c["vam"] or 0, default=None)
+    bench_ids = {r["completed_activity_id"] for r in conn.execute(
+        "SELECT completed_activity_id FROM plan_sessions WHERE goal_id=? AND status='completed' "
+        "AND session_type LIKE 'Test - Long climb%'", (goal_id,)) if r["completed_activity_id"]}
+    return {
+        "long_rides": rides[:8],
+        "climbs": climbs[:12],
+        "benchmarks": [c for c in climbs if c["activity_id"] in bench_ids],
+        "best_recent_climb": best_recent,
+        "puig_major_gain_m": rq.PUIG_MAJOR_GAIN_M,
+    }
+
+
+# ── Garmin workout push ──────────────────────────────────────────────────────
+
+@router.post("/garmin/push")
+def garmin_push(conn: DB, days: int = Query(9, ge=1, le=21)):
+    """Send upcoming sessions to Garmin Connect now (also runs nightly)."""
+    from domains.health.garmin import workout_push as wp
+    if not wp.enabled():
+        raise HTTPException(status_code=409, detail="Garmin workout push is disabled (GARMIN_WORKOUT_PUSH=0)")
+    try:
+        return wp.push_upcoming(conn, days=days, verbose=False)
+    except SystemExit as e:          # get_client() exits when no Garmin session/credentials
+        raise HTTPException(status_code=503, detail=f"Garmin login unavailable: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Garmin push failed: {e}")
+
+
 # ── Week planner: day blocks + weekly confirmation ──────────────────────────
 
 class DayBlock(BaseModel):
@@ -1008,7 +1052,15 @@ def confirm_week(goal_id: int, body: WeekConfirm, conn: DB):
         (goal_id, mon),
     )
     conn.commit()
-    return {"goal_id": goal_id, "week_start": mon, "confirmed": True}
+    # A confirmed week goes straight to the watch (best effort — nightly retries).
+    garmin = None
+    try:
+        from domains.health.garmin import workout_push as wp
+        if wp.enabled():
+            garmin = wp.push_upcoming(conn, verbose=False)
+    except (Exception, SystemExit) as e:   # SystemExit: no Garmin session on the Pi
+        garmin = {"errors": [str(e)]}
+    return {"goal_id": goal_id, "week_start": mon, "confirmed": True, "garmin": garmin}
 
 
 @router.get("/planning-status")
@@ -1767,6 +1819,14 @@ def goal_week(goal_id: int, conn: DB, date: Optional[str] = Query(None)):
             "block_note": reader.block(ds),
         })
         d += timedelta(days=1)
+
+    from domains.health.garmin import workout_push as wp
+    pushed = wp.push_status(conn)
+    for day in days_out:
+        for s_ in day["sessions"]:
+            p_ = pushed.get(s_["id"])
+            s_["on_garmin"] = bool(p_ and p_["workout_id"] and p_["date"] == s_["session_date"])
+            s_["garmin_error"] = p_["error"] if p_ else None
 
     confirmed = conn.execute(
         "SELECT confirmed_at FROM training_week_plans WHERE goal_id=? AND week_start=?", (goal_id, mon)

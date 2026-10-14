@@ -47,7 +47,7 @@ export function SleepPatterns({ summary, correlations, stages }: Props) {
   const dowMap: Record<number, { dur: number[]; score: number[] }> = {};
   for (const r of stages) {
     if (!r.date || !r.duration_seconds) continue;
-    const dow = getDay(parseISO(r.date as string));
+    const dow = getDay(parseISO(String(r.date)));
     if (!dowMap[dow]) dowMap[dow] = { dur: [], score: [] };
     dowMap[dow].dur.push(r.duration_seconds as number);
     if (r.score) dowMap[dow].score.push(r.score as number);
