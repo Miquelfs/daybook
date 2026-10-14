@@ -10,6 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from infrastructure.api.db import get_db
 from infrastructure.api.models.aviation import (
@@ -1591,14 +1592,14 @@ def delete_flight(flight_id: str, conn: DB):
 
 # ── Logbook integrity ────────────────────────────────────────────────────────
 
-@router.get("/integrity")
+@router.get("/checks/integrity")
 def logbook_integrity(conn: DB):
     """Impossible / inconsistent flight times (night > block, wrong on-block dates, …)."""
     from domains.aviation import integrity
     return integrity.check(conn)
 
 
-@router.post("/integrity/fix")
+@router.post("/checks/integrity/fix")
 def logbook_integrity_fix(conn: DB):
     """Repair only what's provable (date rollovers, missing block, night over block), then re-check."""
     from domains.aviation import integrity
@@ -1608,7 +1609,7 @@ def logbook_integrity_fix(conn: DB):
 
 # ── METARs + weather × stress ────────────────────────────────────────────────
 
-@router.get("/weather-stress")
+@router.get("/analysis/weather-stress")
 def weather_stress(conn: DB, phase: str = Query("landing", pattern="^(takeoff|landing)$")):
     """How METAR conditions at takeoff/landing move your stress spike; toughest ones with notes."""
     from domains.aviation import weather_stress as ws
@@ -1617,10 +1618,58 @@ def weather_stress(conn: DB, phase: str = Query("landing", pattern="^(takeoff|la
     return {**ws.effects(conn, phase), "toughest": ws.toughest(conn, phase), "coverage": ws.coverage(conn)}
 
 
-@router.get("/flights/{flight_id}/metars")
+@router.get("/{flight_id}/metars")
 def flight_metars(flight_id: str, conn: DB):
     from domains.aviation.metar import ensure_table
     ensure_table(conn)
     rows = conn.execute("SELECT * FROM flight_metars WHERE flight_id=? AND obs_time IS NOT NULL ORDER BY phase DESC",
                         (flight_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Landing runways ──────────────────────────────────────────────────────────
+
+class RunwaySet(BaseModel):
+    runway: str
+
+
+@router.get("/{flight_id}/runway")
+def flight_runway(flight_id: str, conn: DB):
+    """Landing runway (manual / ADS-B / wind) + the arrival airport's runways for the picker."""
+    from domains.aviation import runways as rw
+    rw.ensure_tables(conn)
+    f = conn.execute("SELECT arr_icao FROM flights WHERE id=?", (flight_id,)).fetchone()
+    if not f:
+        raise HTTPException(status_code=404, detail="flight not found")
+    cur = conn.execute("SELECT * FROM flight_runways WHERE flight_id=?", (flight_id,)).fetchone()
+    return {"current": dict(cur) if cur else None,
+            "options": sorted({e["ident"] for e in rw.runway_ends(conn, f["arr_icao"])})}
+
+
+@router.put("/{flight_id}/runway")
+def set_flight_runway(flight_id: str, body: RunwaySet, conn: DB):
+    from domains.aviation import runways as rw
+    try:
+        return rw.set_manual(conn, flight_id, body.runway)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/airports/{icao}/runways")
+def airport_runways(icao: str, conn: DB):
+    """Runway designators at an airport (for the landing-runway picker)."""
+    from domains.aviation import runways as rw
+    return {"icao": icao.upper(), "runways": rw.runways_for(conn, icao)}
+
+
+@router.get("/runways/summary")
+def runway_summary(conn: DB):
+    """Landings per airport and runway."""
+    from domains.aviation import runways as rw
+    rw.ensure_tables(conn)
+    rows = conn.execute(
+        """SELECT f.arr_icao AS icao, fr.runway, COUNT(*) AS n,
+                  SUM(fr.source != 'wind') AS measured, ROUND(MAX(fr.crosswind_kt), 0) AS max_xw
+           FROM flight_runways fr JOIN flights f ON f.id = fr.flight_id
+           GROUP BY f.arr_icao, fr.runway ORDER BY f.arr_icao, n DESC""").fetchall()
     return [dict(r) for r in rows]

@@ -27,14 +27,14 @@ export function LogbookChecks() {
   const [done, setDone] = useState<string | null>(null);
   const { data, refetch } = useQuery<Report>({
     queryKey: ["logbook-integrity"],
-    queryFn: () => fetch(`${BASE}/aviation/integrity`, { cache: "no-store" }).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/flights/checks/integrity`, { cache: "no-store" }).then((r) => r.json()),
   });
   if (!data || data.total === 0) return null;
 
   async function fix() {
     setFixing(true);
     try {
-      const r = await fetch(`${BASE}/aviation/integrity/fix`, { method: "POST" }).then((x) => x.json());
+      const r = await fetch(`${BASE}/flights/checks/integrity/fix`, { method: "POST" }).then((x) => x.json());
       const f = r.fixed ?? {};
       setDone(`Fixed ${f.rollover ?? 0} wrong dates, filled ${f.block_filled ?? 0} block times, recomputed night on ${f.night_recomputed ?? 0} flights.`);
       await refetch();

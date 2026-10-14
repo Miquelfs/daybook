@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { FlightWeatherRunway } from "@/components/aviation/FlightWeatherRunway";
 import { useParams, useRouter } from "next/navigation";
 import { FlightPhysioCard } from "@/components/FlightPhysioCard";
 import Link from "next/link";
@@ -687,6 +688,9 @@ export default function FlightDetailPage() {
           </div>
         )}
       </Section>
+
+      {/* Landing runway + METARs */}
+      <FlightWeatherRunway flightId={f.id} isSim={!!f.is_sim} />
 
       {/* Notes — private, not exported */}
       <Section title="Notes" icon={<FileText size={14} />}>

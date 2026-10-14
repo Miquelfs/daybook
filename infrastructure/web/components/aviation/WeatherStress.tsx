@@ -14,6 +14,7 @@ type Effect = {
 type Tough = {
   flight_id: string; date: string; route: string; stress_delta: number; hr_delta: number | null; you_flew: boolean;
   crew: string | null; weather: string; raw: string; notes: string | null; conditions: string[];
+  runway?: string | null; runway_source?: string | null; crosswind_kt?: number | null;
 };
 type Resp = {
   phase: string; flights: number; avg_stress_delta: number | null; effects: Effect[]; toughest: Tough[];
@@ -25,7 +26,7 @@ export function WeatherStress() {
   const [open, setOpen] = useState<string | null>(null);
   const { data, isLoading } = useQuery<Resp>({
     queryKey: ["weather-stress", phase],
-    queryFn: () => fetch(`${BASE}/aviation/weather-stress?phase=${phase}`, { cache: "no-store" }).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/flights/analysis/weather-stress?phase=${phase}`, { cache: "no-store" }).then((r) => r.json()),
   });
 
   const shown = (data?.effects ?? []).filter((e) => e.enough_data);
@@ -97,16 +98,22 @@ export function WeatherStress() {
             {data!.toughest.map((t) => (
               <li key={t.flight_id} className="py-2.5">
                 <button onClick={() => setOpen(open === t.flight_id ? null : t.flight_id)} className="w-full text-left">
+                  {/* tap: raw METAR · the flight page has the runway picker */}
                   <div className="flex items-baseline gap-2">
                     <span className="text-sm text-[#E4E4E7] font-medium">{t.route}</span>
                     <span className="text-[11px] text-[#71717A]">{t.date}{t.you_flew ? " · you flew" : t.crew ? ` · ${t.crew}` : ""}</span>
                     <span className="ml-auto text-sm font-semibold tabular-nums text-[#F87171]">+{t.stress_delta}</span>
                   </div>
-                  <p className="text-[11px] text-[#A1A1AA] mt-0.5">{t.weather}</p>
+                  <p className="text-[11px] text-[#A1A1AA] mt-0.5">
+                    {t.runway ? `RWY ${t.runway}${t.runway_source === "wind" ? " (likely)" : ""}${t.crosswind_kt != null ? ` · xwind ${t.crosswind_kt} kt` : ""} · ` : ""}{t.weather}
+                  </p>
                   {t.notes && <p className="text-[11px] text-[#F59E0B] mt-0.5">“{t.notes}”</p>}
                 </button>
                 {open === t.flight_id && (
-                  <p className="mt-1.5 font-mono text-[10px] text-[#71717A] break-all bg-[#18181B] rounded-lg px-2.5 py-1.5">{t.raw}</p>
+                  <div className="mt-1.5 space-y-1">
+                    <p className="font-mono text-[10px] text-[#71717A] break-all bg-[#18181B] rounded-lg px-2.5 py-1.5">{t.raw}</p>
+                    <a href={`/aviation/${encodeURIComponent(t.flight_id)}`} className="text-[11px] text-[#F59E0B]">Open flight →</a>
+                  </div>
                 )}
               </li>
             ))}

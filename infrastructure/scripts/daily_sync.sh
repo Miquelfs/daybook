@@ -138,6 +138,8 @@ done
 
 # METARs for recent takeoffs/landings (Iowa Mesonet archive) → weather × stress.
 step metar python -m domains.aviation.metar --days 30
+# Landing runways: ADS-B track (OpenSky, last ~29 days) or METAR wind; crosswind at landing.
+step runways python -m domains.aviation.runways
 
 # Load Index: compute fatigue composite for yesterday (Horizon 1).
 log "Computing Load Index..."

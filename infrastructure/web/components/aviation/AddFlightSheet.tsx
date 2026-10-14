@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X, Loader, PlaneTakeoff, PlaneLanding, ChevronDown, ChevronRight, Moon } from "lucide-react";
 import { api, type FlightIn, type AirportInfo } from "@/lib/api";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
 interface Props {
   date: string;
   isOpen: boolean;
@@ -150,6 +152,7 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
   const [ldgDay, setLdgDay] = useState(0);
   const [ldgNight, setLdgNight] = useState(0);
   const [notes, setNotes] = useState("");
+  const [landingRunway, setLandingRunway] = useState("");
   const [opDataOpen, setOpDataOpen] = useState(false);
 
   // Operational data
@@ -181,7 +184,7 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
   useEffect(() => {
     if (isOpen) {
       setFlightDate(date);
-      setDepIcao(""); setArrIcao("");
+      setDepIcao(""); setArrIcao(""); setLandingRunway("");
       setFlightNumber(""); setReg("");
       setOperatorPreset("Norwegian"); setOperatorCustom("");
       setRole("first_officer"); setPicName("");
@@ -247,6 +250,13 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
     retry: false,
   });
 
+  const { data: runwayData } = useQuery<{ runways: string[] }>({
+    queryKey: ["airportRunways", arrIcao.toUpperCase()],
+    queryFn: () => fetch(`${API_BASE}/flights/airports/${arrIcao.toUpperCase()}/runways`).then((r) => r.json()),
+    enabled: !isSim && arrIcao.length === 4,
+    staleTime: Infinity,
+  });
+
   const { mutate: save, isPending, error } = useMutation({
     mutationFn: () => {
       const toNum = (s: string) => s !== "" ? Number(s) : undefined;
@@ -288,7 +298,16 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
         delay_code: delayCode || undefined,
         delay_reason: delayReason || undefined,
       };
-      return api.createFlight(body);
+      return api.createFlight(body).then(async (created) => {
+        // Landing runway is stored alongside the flight (manual = exact, beats ADS-B/wind guesses)
+        if (landingRunway && created?.id) {
+          await fetch(`${API_BASE}/flights/${encodeURIComponent(created.id)}/runway`, {
+            method: "PUT", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ runway: landingRunway }),
+          }).catch(() => {});
+        }
+        return created;
+      });
     },
     onSuccess: () => {
       if (picName) savePicName(picName);
@@ -451,6 +470,24 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
               </div>
             </div>
           </div>
+
+          {/* Landing runway — tap the one you landed on */}
+          {!isSim && arrIcao.length === 4 && (runwayData?.runways?.length ?? 0) > 0 && (
+            <div>
+              <p className={labelCls}>Landing runway at {arrIcao.toUpperCase()}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {runwayData!.runways.map((r) => (
+                  <button key={r} type="button" onClick={() => setLandingRunway(landingRunway === r ? "" : r)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-mono border transition-colors ${
+                      landingRunway === r
+                        ? "bg-[#F59E0B] text-[#09090B] border-transparent font-semibold"
+                        : "border-[#27272A] text-[#A1A1AA] hover:border-[#3F3F46]"}`}>
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Takeoff/Landing + Flight time */}
           <div>

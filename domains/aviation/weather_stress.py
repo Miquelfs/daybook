@@ -24,6 +24,7 @@ LABELS = {
     "precipitation": "Rain / snow",
     "thunderstorm": "Thunderstorm / CB around",
     "imc": "IFR conditions",
+    "crosswind": "Crosswind ≥ 15 kt on the runway",
     "night": "Night",
     "you_flew": "You were pilot flying",
 }
@@ -62,11 +63,14 @@ def _rows(conn, phase: str) -> list[dict]:
                    fp.{p}_stress_delta AS stress_delta, fp.{p}_hr_delta AS hr_delta, fp.{p}_stress AS stress,
                    fp.{p}_you_flew AS you_flew, fp.{p}_crew AS crew,
                    fm.raw, fm.obs_time, fm.wind_dir, fm.wind_kt, fm.gust_kt, fm.vis_m, fm.ceiling_ft, fm.wx, fm.cb,
-                   fm.category, f.notes, a.latitude AS lat, a.longitude AS lon
+                   fm.category, f.notes, a.latitude AS lat, a.longitude AS lon,
+                   {"fr.runway, fr.source AS runway_source, fr.crosswind_kt, fr.headwind_kt" if p == "landing" and "flight_runways" in t
+                    else "NULL AS runway, NULL AS runway_source, NULL AS crosswind_kt, NULL AS headwind_kt"}
             FROM flight_physio fp
             JOIN flight_metars fm ON fm.flight_id = fp.flight_id AND fm.phase = ?
             JOIN flights f ON f.id = fp.flight_id
             LEFT JOIN airports a ON a.icao = f.{apt}
+            {"LEFT JOIN flight_runways fr ON fr.flight_id = fp.flight_id" if p == "landing" and "flight_runways" in t else ""}
             WHERE fm.obs_time IS NOT NULL AND fp.{p}_stress_delta IS NOT NULL""",
         (p,),
     ).fetchall()
@@ -80,6 +84,8 @@ def _rows(conn, phase: str) -> list[dict]:
         if n is not None:
             d["cond"]["night"] = n
         d["cond"]["you_flew"] = bool(r["you_flew"])
+        if r["crosswind_kt"] is not None:
+            d["cond"]["crosswind"] = r["crosswind_kt"] >= 15
         out.append(d)
     return out
 
@@ -133,6 +139,8 @@ def toughest(conn: sqlite3.Connection, phase: str = "landing", limit: int = 8) -
         "flight_id": r["flight_id"], "date": r["date"], "route": f"{r['dep_iata'] or '?'}→{r['arr_iata'] or '?'}",
         "stress_delta": r["stress_delta"], "hr_delta": r["hr_delta"], "you_flew": bool(r["you_flew"]),
         "crew": r["crew"], "weather": _metar_summary(r), "raw": r["raw"], "notes": r["notes"],
+        "runway": r["runway"], "runway_source": r["runway_source"],
+        "crosswind_kt": r["crosswind_kt"], "headwind_kt": r["headwind_kt"],
         "conditions": [LABELS[k].split(" (")[0] for k, v in r["cond"].items() if v and k != "you_flew"],
     } for r in rows]
 
