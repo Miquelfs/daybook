@@ -300,6 +300,10 @@ deploy-deps:
 
 _ship-code:
 	@echo "==> [2/5] Syncing code + web env to $(PI_HOST) ..."
+	@# Drop the Pi's __pycache__ dirs (outside .venv/node_modules) first: they're excluded
+	@# from the sync, so a module deleted on the Mac would otherwise leave a dir rsync
+	@# "cannot delete". Python regenerates them on the next import.
+	$(SSH) $(PI_HOST) "cd $(PI_DIR) && find . -path ./.venv -prune -o -path ./infrastructure/web/node_modules -prune -o -type d -name __pycache__ -prune -exec rm -rf {} +"
 	rsync -a --delete $(RSYNC_EXCLUDES) -e "$(SSH)" $(ROOT)/ $(PI_HOST):$(PI_DIR)/
 	rsync -a -e "$(SSH)" $(WEB)/.env.local $(PI_HOST):$(PI_DIR)/infrastructure/web/.env.local
 
