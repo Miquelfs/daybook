@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X, Check, Loader } from "lucide-react";
-import { moneyApi, type MoneyMeta } from "@/lib/money-api";
+import { moneyApi, type MoneyMeta, type MerchantSuggestion } from "@/lib/money-api";
 import { CATEGORY_EMOJI, accountBadgeClass } from "./CategoryPills";
 
 const INCOME_CATS = new Set(["Income", "OMYRA", "Finance"]);
@@ -29,7 +29,12 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
   const [notes, setNotes] = useState("");
   const [autocompleteQ, setAutocompleteQ] = useState("");
   const [subcatQ, setSubcatQ] = useState("");
+  // Once the user picks a category by hand, stop auto-guessing it from the merchant.
+  const [categoryTouched, setCategoryTouched] = useState(false);
+  const [autoCategory, setAutoCategory] = useState<string | null>(null);
   const amountRef = useRef<HTMLInputElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const vv = useVisualViewport(isOpen);
 
   // Debounce merchant autocomplete
   useEffect(() => {
@@ -48,6 +53,34 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
     queryFn: () => moneyApi.merchants(autocompleteQ),
     enabled: autocompleteQ.length >= 1,
   });
+
+  // Preselect a past merchant's usual category (and subcategory).
+  function applyMerchant(s: MerchantSuggestion) {
+    if (categoryTouched || !s.category) return;
+    if (meta.categories.some((c) => c.key === s.category)) {
+      setCategory(s.category);
+      setCustomCategory("");
+    } else {
+      setCustomCategory(s.category);
+    }
+    setSubcategory((cur) => cur || s.subcategory || "");
+    setSign(INCOME_CATS.has(s.category) ? "+" : "-");
+    setAutoCategory(s.category);
+  }
+
+  // Typed merchant → guess: an exact (case-insensitive) past name wins; else,
+  // once 3+ letters are in, if every match shares one category, use that.
+  useEffect(() => {
+    const typed = merchant.trim().toLowerCase();
+    if (!typed || autocompleteQ !== merchant || categoryTouched) return;
+    const exact = suggestions.find((s) => s.name.trim().toLowerCase() === typed);
+    if (exact) return applyMerchant(exact);
+    const cats = new Set(suggestions.map((s) => s.category).filter(Boolean));
+    if (typed.length >= 3 && suggestions.length > 0 && cats.size === 1) {
+      applyMerchant(suggestions.find((s) => s.category)!);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestions, merchant, autocompleteQ, categoryTouched]);
 
   const activeCategory = customCategory.trim() || category;
   const { data: subcatSuggestions = [] } = useQuery({
@@ -68,9 +101,25 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
       setAccount(meta.defaults.account || "");
       setTxDate(date);
       setNotes("");
+      setCategoryTouched(false);
+      setAutoCategory(null);
       setTimeout(() => amountRef.current?.focus(), 80);
     }
   }, [isOpen, date, meta.defaults.category, meta.defaults.account]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [isOpen]);
+
+  // Keep the focused field visible inside the (now keyboard-sized) sheet.
+  function revealFocused(e: React.FocusEvent<HTMLDivElement>) {
+    const el = e.target as HTMLElement;
+    if (!["INPUT", "TEXTAREA"].includes(el.tagName)) return;
+    setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+  }
 
   const { mutate: save, isPending, error } = useMutation({
     mutationFn: () =>
@@ -98,9 +147,20 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
     <>
       <div className="fixed inset-0 bg-black/60 z-40" onClick={onClose} />
 
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#09090B] border-t border-[#27272A] rounded-t-2xl max-h-[92vh] overflow-y-auto">
+      {/* Pinned to the VISIBLE viewport: when the iOS keyboard opens, the sheet
+          shrinks to the space above it instead of sliding under / off-screen. */}
+      <div
+        ref={sheetRef}
+        onFocus={revealFocused}
+        className="fixed left-0 right-0 z-50 bg-[#09090B] border-t border-[#27272A] rounded-t-2xl overflow-y-auto overscroll-contain"
+        style={
+          vv
+            ? { top: "auto", bottom: vv.bottomInset, maxHeight: vv.height * 0.96 }
+            : { bottom: 0, maxHeight: "92vh" }
+        }
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-[#18181B]">
+        <div className="sticky top-0 z-10 bg-[#09090B] flex items-center justify-between px-6 pt-5 pb-4 border-b border-[#18181B]">
           <h2 className="text-base font-semibold text-[#FAFAFA]">Add transaction</h2>
           <button type="button" onClick={onClose} className="text-[#52525B] hover:text-[#A1A1AA]">
             <X size={18} />
@@ -158,7 +218,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
               onChange={(e) => setMerchant(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && canSave && save()}
               placeholder="e.g. Mercadona, Bar Tony…"
-              className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-3 text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#52525B]"
+              className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-3 text-base text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#52525B]"
             />
             {suggestions.length > 0 && merchant.length >= 1 && (
               <div className="mt-1 border border-[#27272A] rounded-xl overflow-hidden">
@@ -168,6 +228,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
                     type="button"
                     onClick={() => {
                       setMerchant(s.name);
+                      applyMerchant(s);
                     }}
                     className="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-[#18181B] border-b border-[#1C1C1F] last:border-0 active:bg-[#27272A]"
                   >
@@ -182,13 +243,18 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
 
           {/* Category */}
           <div>
-            <label className="text-xs text-[#52525B] uppercase tracking-widest mb-2 block">Category</label>
+            <label className="text-xs text-[#52525B] uppercase tracking-widest mb-2 block">
+              Category
+              {autoCategory && (
+                <span className="normal-case tracking-normal text-[#F59E0B]/80 ml-2">· auto from {merchant.trim()}</span>
+              )}
+            </label>
             <div className="flex flex-wrap gap-2 mb-3">
               {meta.categories.map(({ key, emoji }) => (
                 <button
                   key={key}
                   type="button"
-                  onClick={() => { setCategory(key); setCustomCategory(""); }}
+                  onClick={() => { setCategory(key); setCustomCategory(""); setCategoryTouched(true); setAutoCategory(null); }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
                     category === key && !customCategory
                       ? "bg-[#F59E0B] text-[#09090B]"
@@ -203,9 +269,9 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
             <input
               type="text"
               value={customCategory}
-              onChange={(e) => setCustomCategory(e.target.value)}
+              onChange={(e) => { setCustomCategory(e.target.value); setCategoryTouched(true); setAutoCategory(null); }}
               placeholder="Or type a new category…"
-              className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-2.5 text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#F59E0B]"
+              className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-2.5 text-base sm:text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#F59E0B]"
             />
           </div>
 
@@ -219,7 +285,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
               value={subcategory}
               onChange={(e) => setSubcategory(e.target.value)}
               placeholder={`e.g. ${activeCategory === "Transportation" ? "Car, Motorcycle" : activeCategory === "Sports" ? "Running, Cycling" : activeCategory === "Home" ? "Rent, Utilities" : "specify…"}`}
-              className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-2.5 text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#52525B]"
+              className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-2.5 text-base sm:text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#52525B]"
             />
             {subcatSuggestions.length > 0 && (
               <div className="mt-1 border border-[#27272A] rounded-xl overflow-hidden">
@@ -270,7 +336,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
               value={account}
               onChange={(e) => setAccount(e.target.value)}
               placeholder="Type a new account…"
-              className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-2.5 text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#52525B]"
+              className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-2.5 text-base sm:text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#52525B]"
             />
           </div>
 
@@ -282,7 +348,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
                 type="date"
                 value={txDate}
                 onChange={(e) => setTxDate(e.target.value)}
-                className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-3 py-2.5 text-sm text-[#FAFAFA] outline-none focus:border-[#52525B] [color-scheme:dark]"
+                className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-3 py-2.5 text-base sm:text-sm text-[#FAFAFA] outline-none focus:border-[#52525B] [color-scheme:dark]"
               />
             </div>
             <div>
@@ -292,7 +358,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Optional"
-                className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-3 py-2.5 text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#52525B]"
+                className="w-full bg-[#18181B] border border-[#27272A] rounded-xl px-3 py-2.5 text-base sm:text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none focus:border-[#52525B]"
               />
             </div>
           </div>
@@ -318,4 +384,31 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
       </div>
     </>
   );
+}
+
+/**
+ * Visible-viewport geometry while the sheet is open. On iOS the on-screen
+ * keyboard shrinks window.visualViewport but not the layout viewport, so a
+ * `bottom: 0` sheet ends up hidden behind the keyboard and Safari scrolls the
+ * page to compensate — pushing the amount field off the top. bottomInset is
+ * how much of the layout viewport the keyboard covers.
+ */
+function useVisualViewport(active: boolean) {
+  const [state, setState] = useState<{ height: number; bottomInset: number } | null>(null);
+  useEffect(() => {
+    const v = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!active || !v) return;
+    const update = () => {
+      const bottomInset = Math.max(0, window.innerHeight - (v.height + v.offsetTop));
+      setState({ height: v.height, bottomInset });
+    };
+    update();
+    v.addEventListener("resize", update);
+    v.addEventListener("scroll", update);
+    return () => {
+      v.removeEventListener("resize", update);
+      v.removeEventListener("scroll", update);
+    };
+  }, [active]);
+  return active ? state : null;
 }

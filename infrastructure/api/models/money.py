@@ -65,6 +65,7 @@ class MerchantSuggestion(BaseModel):
     name: str
     last_used: str
     category: Optional[str]
+    subcategory: Optional[str] = None
 
 
 class CategoryMeta(BaseModel):

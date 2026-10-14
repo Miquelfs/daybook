@@ -252,26 +252,42 @@ def autocomplete_merchants(
     conn: DB,
     q: str = Query("", min_length=0),
 ):
-    if not q:
-        rows = conn.execute(
-            """SELECT name, MAX(date) as last_used, category
-               FROM transactions
-               WHERE transaction_type = 'Expense' AND deleted_at IS NULL
-               GROUP BY name
-               ORDER BY last_used DESC
-               LIMIT 10"""
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """SELECT name, MAX(date) as last_used, category
-               FROM transactions
-               WHERE name LIKE ? AND transaction_type = 'Expense' AND deleted_at IS NULL
-               GROUP BY name
-               ORDER BY last_used DESC
-               LIMIT 10""",
-            (f"{q}%",),
-        ).fetchall()
-    return [MerchantSuggestion(name=r["name"], last_used=r["last_used"] or "", category=r["category"]) for r in rows]
+    """Past merchants matching a prefix, newest first. Each carries the category
+    it is MOST OFTEN filed under (not just the latest — one mis-tag shouldn't
+    flip the guess) and that category's most recent subcategory, so the add
+    sheet can preselect them. Names group case-insensitively."""
+    where = "transaction_type = 'Expense' AND deleted_at IS NULL"
+    params: tuple = ()
+    if q:
+        where += " AND name LIKE ?"
+        params = (f"{q}%",)
+    rows = conn.execute(
+        f"""SELECT name, date, category, subcategory FROM transactions
+            WHERE {where} ORDER BY date DESC LIMIT 2000""",
+        params,
+    ).fetchall()
+
+    merchants: dict[str, dict] = {}
+    for r in rows:  # newest first
+        key = (r["name"] or "").strip().lower()
+        if not key:
+            continue
+        m = merchants.setdefault(key, {"name": r["name"], "last_used": r["date"] or "",
+                                       "cats": {}, "sub": {}})
+        if r["category"]:
+            m["cats"][r["category"]] = m["cats"].get(r["category"], 0) + 1
+            if r["subcategory"]:
+                m["sub"].setdefault(r["category"], r["subcategory"])
+
+    out = []
+    for m in list(merchants.values())[:10]:
+        # Most frequent; ties go to the most recent (dict keeps first-seen = newest order)
+        cat = max(m["cats"], key=m["cats"].get) if m["cats"] else None
+        out.append(MerchantSuggestion(
+            name=m["name"], last_used=m["last_used"], category=cat,
+            subcategory=m["sub"].get(cat) if cat else None,
+        ))
+    return out
 
 
 @router.get("/autocomplete/subcategories", response_model=list[str])

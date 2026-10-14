@@ -119,7 +119,9 @@ export type TransactionPatch = Partial<Omit<TransactionCreate, "date"> & { date:
 export type MerchantSuggestion = {
   name: string;
   last_used: string;
+  /** Category this merchant is most often filed under */
   category: string | null;
+  subcategory?: string | null;
 };
 
 export type CategoryMeta = {
