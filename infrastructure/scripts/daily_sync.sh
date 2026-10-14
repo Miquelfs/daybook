@@ -136,6 +136,9 @@ for D in "$YESTERDAY" "$DATE"; do
   step stress_context python -m domains.health.stress_context --date "$D"
 done
 
+# METARs for recent takeoffs/landings (Iowa Mesonet archive) → weather × stress.
+step metar python -m domains.aviation.metar --days 30
+
 # Load Index: compute fatigue composite for yesterday (Horizon 1).
 log "Computing Load Index..."
 step compute_load_index python -m domains.health.compute_load_index

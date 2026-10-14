@@ -1447,6 +1447,8 @@ def create_flight(flight: FlightIn, conn: DB):
 
     # Derive PIC/SIC seconds from role and block_seconds
     block_s = block_s_explicit or 0
+    if block_s and computed_night:
+        computed_night = min(int(computed_night), int(block_s))   # night can never exceed block
     if flight.crew_role == "pic":
         pic_s, sic_s = block_s, 0
     else:
@@ -1585,3 +1587,40 @@ def delete_flight(flight_id: str, conn: DB):
         raise HTTPException(status_code=403, detail="Only manual flights can be deleted")
     conn.execute("DELETE FROM flights WHERE id = ?", (flight_id,))
     conn.commit()
+
+
+# ── Logbook integrity ────────────────────────────────────────────────────────
+
+@router.get("/integrity")
+def logbook_integrity(conn: DB):
+    """Impossible / inconsistent flight times (night > block, wrong on-block dates, …)."""
+    from domains.aviation import integrity
+    return integrity.check(conn)
+
+
+@router.post("/integrity/fix")
+def logbook_integrity_fix(conn: DB):
+    """Repair only what's provable (date rollovers, missing block, night over block), then re-check."""
+    from domains.aviation import integrity
+    fixed = integrity.repair(conn)
+    return {"fixed": fixed, "after": integrity.check(conn)}
+
+
+# ── METARs + weather × stress ────────────────────────────────────────────────
+
+@router.get("/weather-stress")
+def weather_stress(conn: DB, phase: str = Query("landing", pattern="^(takeoff|landing)$")):
+    """How METAR conditions at takeoff/landing move your stress spike; toughest ones with notes."""
+    from domains.aviation import weather_stress as ws
+    from domains.aviation.metar import ensure_table
+    ensure_table(conn)
+    return {**ws.effects(conn, phase), "toughest": ws.toughest(conn, phase), "coverage": ws.coverage(conn)}
+
+
+@router.get("/flights/{flight_id}/metars")
+def flight_metars(flight_id: str, conn: DB):
+    from domains.aviation.metar import ensure_table
+    ensure_table(conn)
+    rows = conn.execute("SELECT * FROM flight_metars WHERE flight_id=? AND obs_time IS NOT NULL ORDER BY phase DESC",
+                        (flight_id,)).fetchall()
+    return [dict(r) for r in rows]

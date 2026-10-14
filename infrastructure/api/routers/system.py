@@ -42,7 +42,7 @@ JOB_LABEL = {
     "compute_load_index": "Load index", "reflow": "Training re-plan", "coach": "AI coach",
     "garmin_activity_detail_sync": "Activity details", "compute_activity_metrics": "Activity metrics",
     "compute_training_load": "Fitness / form", "price_sync": "Portfolio prices", "morning_brief": "Morning brief",
-    "garmin_workout_push": "Workouts → Garmin", "plan_executor": "Investment plans",
+    "garmin_workout_push": "Workouts → Garmin", "metar": "METARs", "life_review": "Weekly review", "plan_executor": "Investment plans",
     "compute_correlations": "Correlations", "roster_tag_sync": "Roster tags", "strava_sync": "Strava",
 }
 

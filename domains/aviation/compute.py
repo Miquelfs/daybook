@@ -142,3 +142,25 @@ def hhmm_to_seconds(hhmm: str) -> int | None:
         return int(h) * 3600 + int(m) * 60
     except ValueError:
         return None
+
+
+def fix_on_block_rollover(off_utc: datetime | None, on_utc: datetime | None,
+                          block_s: int | None) -> datetime | None:
+    """On-block stored with the wrong date (±1 day around midnight UTC) → corrected,
+    using the source's block duration as the truth. Otherwise unchanged."""
+    if not (off_utc and on_utc and block_s):
+        return on_utc
+    diff = (on_utc - off_utc).total_seconds() - block_s
+    if abs(abs(diff) - 86400) <= 600:
+        return on_utc + timedelta(days=-1 if diff > 0 else 1)
+    return on_utc
+
+
+def block_night_seconds(dep_lat: float, dep_lon: float, off_utc: datetime, block_s: int,
+                        arr_lat: float | None = None, arr_lon: float | None = None) -> int:
+    """Night time over [off-block, off-block + block], never more than block —
+    immune to a wrong on-block date."""
+    if not (off_utc and block_s):
+        return 0
+    return min(night_seconds(dep_lat, dep_lon, off_utc, off_utc + timedelta(seconds=block_s),
+                             arr_lat, arr_lon), int(block_s))

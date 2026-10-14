@@ -31,7 +31,8 @@ CSV_PATH = ROOT / "data" / "raw" / "aviation" / "Full.csv"
 FLEET_CSV = ROOT / "data" / "raw" / "aviation" / "ryanair_fleet.csv"
 
 from domains.aviation.aviation_config import PILOT_CODE, PIC_START_DATE, DEFAULT_OPERATOR
-from domains.aviation.compute import great_circle_nm, night_seconds, is_night_moment, hhmm_to_seconds
+from domains.aviation.compute import (great_circle_nm, night_seconds, is_night_moment, hhmm_to_seconds,
+                                      block_night_seconds)
 from infrastructure.db.connection import get_connection
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -265,8 +266,11 @@ def _parse_row(row: dict, date_iso: str, fleet: dict[str, str], captain_index: d
     ngt_secs = 0
     ngt_from = off_block_utc or takeoff_utc
     ngt_to = on_block_utc or landing_utc
-    if ngt_from and ngt_to and dep_lat is not None and dep_lon is not None:
-        ngt_secs = night_seconds(dep_lat, dep_lon, ngt_from, ngt_to, arr_lat, arr_lon)
+    if ngt_from and dep_lat is not None and dep_lon is not None:
+        if block_seconds:   # over off-block + block, capped — immune to a wrong on-block date
+            ngt_secs = block_night_seconds(dep_lat, dep_lon, ngt_from, block_seconds, arr_lat, arr_lon)
+        elif ngt_to:
+            ngt_secs = night_seconds(dep_lat, dep_lon, ngt_from, ngt_to, arr_lat, arr_lon)
 
     # Distance
     dist_nm = None

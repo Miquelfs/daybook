@@ -25,6 +25,8 @@ import type { MapStyle } from "@/components/aviation/FlightRouteMap";
 import { LicensesCard } from "@/components/aviation/LicensesCard";
 import { PunctualityTab } from "@/components/aviation/PunctualityTab";
 import { FlightLoadRollup } from "@/components/StressLifeInsights";
+import { WeatherStress } from "@/components/aviation/WeatherStress";
+import { LogbookChecks } from "@/components/aviation/LogbookChecks";
 
 const MAP_STYLE_KEY = "daybook_aviation_map_style";
 
@@ -755,6 +757,7 @@ export default function AviationPage() {
       {/* ── ANALYTICS ── */}
       {tab === "stats" && analytics && (
         <div className="space-y-5">
+          <LogbookChecks />
 
           {/* Records grid */}
           <div>
@@ -1029,6 +1032,7 @@ export default function AviationPage() {
           <p className="text-xs text-[#52525B]">
             Physiological load of flying — HR &amp; stress deltas in the takeoff / approach windows vs the day baseline, from the CIRQA.
           </p>
+          <WeatherStress />
           <FlightLoadRollup />
         </div>
       )}

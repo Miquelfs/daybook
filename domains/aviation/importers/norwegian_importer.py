@@ -24,7 +24,8 @@ from pathlib import Path
 ROOT = Path(__file__).parents[3]
 DEFAULT_CSV = ROOT / "data" / "raw" / "aviation" / "flight_log_merged.csv"
 
-from domains.aviation.compute import great_circle_nm, night_seconds, is_night_moment
+from domains.aviation.compute import (great_circle_nm, night_seconds, is_night_moment,
+                                      fix_on_block_rollover, block_night_seconds)
 from infrastructure.db.connection import get_connection
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -126,6 +127,12 @@ def _parse_row(row: dict, conn) -> dict | None:
 
     block_secs = _hhmm_to_seconds(row.get("Block Duration") or row.get("Block Time (HH:mm)") or "")
     airborne_secs = _hhmm_to_seconds(row.get("Airborne Duration") or "")
+    # Block duration is the truth: fix an on-block stored with the wrong date, and
+    # derive block from the times when the column is empty.
+    on_block_utc = fix_on_block_rollover(off_block_utc, on_block_utc, block_secs)
+    if not block_secs and off_block_utc and on_block_utc:
+        span = int((on_block_utc - off_block_utc).total_seconds())
+        block_secs = span if 300 <= span <= 18 * 3600 else None
 
     # PF identification — PF column holds employee ID
     pf_id = (row.get("PF") or "").strip()
@@ -142,8 +149,11 @@ def _parse_row(row: dict, conn) -> dict | None:
 
     # Night seconds
     ngt_secs = 0
-    if takeoff_utc and landing_utc and dep_lat is not None and dep_lon is not None:
-        ngt_secs = night_seconds(dep_lat, dep_lon, takeoff_utc, landing_utc, arr_lat, arr_lon)
+    if takeoff_utc and dep_lat is not None and dep_lon is not None:
+        if block_secs:
+            ngt_secs = block_night_seconds(dep_lat, dep_lon, takeoff_utc, block_secs, arr_lat, arr_lon)
+        elif landing_utc:
+            ngt_secs = night_seconds(dep_lat, dep_lon, takeoff_utc, landing_utc, arr_lat, arr_lon)
 
     # All Norwegian flights are SIC regardless of PF
     crew_role = "first_officer"
