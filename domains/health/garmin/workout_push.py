@@ -134,6 +134,12 @@ def build_workout(session: dict, tg: dict) -> dict | None:
                 else "recovery" if st.get("zone") == "Z1" and "spin" not in label else "interval"
             steps.append(exe(role, st["duration_min"] * 60, st.get("zone") or "Z2",
                              " — ".join(x for x in (st.get("label"), st.get("cue")) if x)))
+        elif kind == "intervals" and st.get("reps") == 1 and st.get("work_min"):
+            # A single effort (FTP test, climb benchmark) is one plain step, not a repeat ×1.
+            steps.append(exe("interval", st["work_min"] * 60, st.get("work_zone") or "Z4",
+                             " — ".join(x for x in (st.get("label"), st.get("cue")) if x), free=is_test))
+            if st.get("rest_min"):
+                steps.append(exe("recovery", st["rest_min"] * 60, st.get("rest_zone") or "Z1", None))
         elif kind == "intervals" and st.get("reps") and st.get("work_min"):
             order += 1
             group = {"type": "RepeatGroupDTO", "stepOrder": order,
@@ -152,8 +158,13 @@ def build_workout(session: dict, tg: dict) -> dict | None:
 
     name = stype.replace("Cycling - ", "").replace("Test - ", "Test ").replace(" (trainer)", "")
     name = f"312 · {name} {eff}′"[:60]
-    desc = (f"{'Trainer — ERG watts from FTP ' + str(round(tg['ftp'])) + ' W' if indoor and tg['ftp'] else 'Outdoor — heart-rate targets'}"
-            f" · Daybook plan session #{session['id']}")
+    if indoor and tg["ftp"]:
+        how = f"Trainer — ERG watts from FTP {round(tg['ftp'])} W"
+    elif indoor:
+        how = "Trainer — no FTP yet, so heart-rate targets (do the FTP test first)"
+    else:
+        how = "Outdoor — heart-rate targets"
+    desc = f"{how} · Daybook plan session #{session['id']}"
     return {"workoutName": name, "description": desc, "sportType": CYCLING,
             "estimatedDurationInSecs": int(eff * 60),
             "workoutSegments": [{"segmentOrder": 1, "sportType": CYCLING, "workoutSteps": steps}]}

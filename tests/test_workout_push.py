@@ -35,10 +35,17 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(main["targetType"]["workoutTargetTypeKey"], "heart.rate.zone")
         self.assertEqual((main["targetValueOne"], main["targetValueTwo"]), (134, 147))
 
-    def test_ftp_test_effort_is_not_erg_capped(self):
+    def test_ftp_test_effort_is_one_uncapped_step(self):
         w = wp.build_workout(session(ftp_test()), TG)
-        rep = [s for s in w["workoutSegments"][0]["workoutSteps"] if s["type"] == "RepeatGroupDTO"][0]
-        self.assertEqual(rep["workoutSteps"][0]["targetType"]["workoutTargetTypeKey"], "no.target")
+        steps = w["workoutSegments"][0]["workoutSteps"]
+        self.assertFalse([s for s in steps if s["type"] == "RepeatGroupDTO"])      # not a repeat ×1
+        effort = [s for s in steps if s["stepType"]["stepTypeKey"] == "interval"][0]
+        self.assertEqual(effort["endConditionValue"], 20 * 60)
+        self.assertEqual(effort["targetType"]["workoutTargetTypeKey"], "no.target")
+
+    def test_trainer_session_without_ftp_says_so(self):
+        w = wp.build_workout(session(ftp_test()), {"ftp": None, "hr": TG["hr"]})
+        self.assertTrue(w["description"].startswith("Trainer — no FTP yet"))
 
     def test_shortened_session_trims_the_main_block(self):
         w = wp.build_workout(session(long_ride(240), eff=180), TG)
