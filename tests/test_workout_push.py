@@ -60,8 +60,10 @@ class PayloadTest(unittest.TestCase):
 
 
 class FakeGarmin:
+    """Older garth-based garminconnect: Garmin.garth.connectapi(path, method=..., json=...)."""
     def __init__(self):
         self.calls, self.next_id = [], 100
+        self.garth = self
 
     def connectapi(self, path, method="GET", json=None):
         self.calls.append((method, path))
@@ -71,6 +73,40 @@ class FakeGarmin:
         if method == "POST" and path.startswith("/workout-service/schedule/"):
             return {"workoutScheduleId": 9000 + self.next_id}
         return None
+
+
+class FakeResponse:
+    def __init__(self, status, body=None):
+        self.status_code, self._body = status, body
+        self.content = b"{}" if body is not None else b""
+        self.text = ""
+
+    def json(self):
+        return self._body
+
+
+class FakeNewClient:
+    """garminconnect ≥ 0.3 style: Garmin.client._run_request(method, path, **kw); connectapi is GET-only."""
+    def __init__(self):
+        self.calls, self.next_id = [], 100
+
+    def _run_request(self, method, path, **kw):
+        self.calls.append((method, path))
+        if method == "POST" and path == "/workout-service/workout":
+            self.next_id += 1
+            return FakeResponse(200, {"workoutId": self.next_id})
+        if method == "POST" and path.startswith("/workout-service/schedule/"):
+            return FakeResponse(200, {"workoutScheduleId": 7})
+        return FakeResponse(204)
+
+
+class FakeNewGarmin:
+    def __init__(self):
+        self.client = FakeNewClient()
+
+    def connectapi(self, path, **kw):            # the GET-only wrapper that broke on the Pi
+        if "method" in kw:
+            raise TypeError("Client._run_request() got multiple values for argument 'method'")
 
 
 class SyncTest(unittest.TestCase):
@@ -103,6 +139,12 @@ class SyncTest(unittest.TestCase):
         self.c.execute("UPDATE plan_sessions SET status='skipped'")
         self.assertEqual(wp.push_upcoming(self.c, self.g, verbose=False)["removed"], 1)
         self.assertEqual(self.c.execute("SELECT COUNT(*) FROM garmin_workout_push").fetchone()[0], 0)
+
+    def test_newer_garminconnect_without_garth(self):
+        g = FakeNewGarmin()
+        r = wp.push_upcoming(self.c, g, verbose=False)
+        self.assertEqual((r["created"], r["errors"]), (1, []))
+        self.assertIn(("POST", "/workout-service/schedule/101"), g.client.calls)
 
 
 if __name__ == "__main__":

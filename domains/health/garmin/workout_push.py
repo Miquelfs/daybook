@@ -177,11 +177,31 @@ def _hash(payload: dict, day: str) -> str:
 # ── Garmin API (generic connectapi calls — independent of library helpers) ───
 
 def _api(client, method: str, path: str, payload: dict | None = None):
-    garth = getattr(client, "garth", None)
+    """
+    POST/DELETE against connectapi across garminconnect versions:
+      - newer (own HTTP client, no garth): Garmin.connectapi() is GET-only, so go
+        through its client's _run_request(method, path, json=...) → Response
+      - older (garth-based): garth.connectapi(path, method=..., json=...)
+    """
     kw = {"json": payload} if payload is not None else {}
+    inner = getattr(client, "client", None)
+    if inner is not None and hasattr(inner, "_run_request"):
+        resp = inner._run_request(method, path, **kw)
+        status = getattr(resp, "status_code", 200)
+        if status >= 400:
+            raise RuntimeError(f"HTTP {status}: {getattr(resp, 'text', '')[:200]}")
+        if status == 204 or not getattr(resp, "content", b"x"):
+            return None
+        try:
+            return resp.json()
+        except ValueError:
+            return None
+    garth = getattr(client, "garth", None)
     if garth is not None and hasattr(garth, "connectapi"):
         return garth.connectapi(path, method=method, **kw)
-    return client.connectapi(path, method=method, **kw)
+    if method == "GET":
+        return client.connectapi(path)
+    raise RuntimeError("this garminconnect version exposes no way to POST/DELETE to connectapi")
 
 
 def _create_and_schedule(client, payload: dict, day: str) -> tuple[str, str | None]:
