@@ -766,6 +766,200 @@ def reflow_goal_endpoint(goal_id: int, conn: DB, reset_week: Optional[str] = Que
     return {"changed": len(changes), "changes": changes}
 
 
+# ── Race cockpit overview ───────────────────────────────────────────────────
+
+_PHASE_LABEL = {"foundation": "Foundation", "base": "Aerobic base", "base_building": "Aerobic base",
+                "build": "Build", "peak": "Peak", "race_prep": "Race prep", "taper": "Taper",
+                "recovery": "Recovery"}
+
+
+@router.get("/goals/{goal_id}/overview")
+def goal_overview(goal_id: int, conn: DB):
+    """
+    Everything the race cockpit needs in one call: countdown, a per-week map
+    (phase, recovery, planned vs done minutes, longest ride, tests), upcoming
+    milestones, and the engine (FTP, W/kg, threshold HR, 4-week compliance).
+    """
+    goal = _row(conn, "race_goals", goal_id)
+    total_weeks = _plan_total_weeks(conn, goal)
+    current_week = _current_week(goal["plan_start_date"], total_weeks)
+    today = _today()
+    race_date = goal["race_date"]
+
+    template = TEMPLATES.get(get_template_key(goal["race_type"], goal["variant"])) or []
+    offset = max(0, len(template) - total_weeks)   # a trimmed plan keeps the template's LAST weeks
+
+    rows = conn.execute(
+        """SELECT ps.*, a.duration_seconds AS act_s
+           FROM plan_sessions ps LEFT JOIN activities a ON a.id = ps.completed_activity_id
+           WHERE ps.goal_id=? ORDER BY ps.session_date""",
+        (goal_id,),
+    ).fetchall()
+
+    weeks: dict[int, dict] = {}
+    for r in rows:
+        wn = r["week_number"]
+        w = weeks.setdefault(wn, {"week": wn, "start": r["session_date"], "end": r["session_date"],
+                                  "planned_min": 0, "done_min": 0, "sessions": 0, "done": 0,
+                                  "missed": 0, "longest_min": 0, "has_test": False, "has_b2b": False,
+                                  "gym": 0})
+        w["start"] = min(w["start"], r["session_date"])
+        w["end"] = max(w["end"], r["session_date"])
+        stype = (r["session_type"] or "").lower()
+        if stype == "race day":
+            continue
+        if stype.startswith("test"):
+            w["has_test"] = True
+        if "back-to-back" in stype:
+            w["has_b2b"] = True
+        if stype.startswith("strength"):
+            w["gym"] += 1
+        if r["status"] in ("pending", "completed"):
+            eff = r["effective_duration_min"] or r["duration_min"] or 0
+            w["planned_min"] += eff
+            w["sessions"] += 1
+            if not stype.startswith("strength"):
+                w["longest_min"] = max(w["longest_min"], eff)
+        if r["status"] == "completed":
+            w["done"] += 1
+            w["done_min"] += round(r["act_s"] / 60) if r["act_s"] else (r["effective_duration_min"] or 0)
+        elif r["status"] == "pending" and r["session_date"] < today:
+            w["missed"] += 1
+
+    plan_start = date.fromisoformat(goal["plan_start_date"]) if goal["plan_start_date"] else None
+    week_list = []
+    for wn in range(1, total_weeks + 1):
+        w = weeks.get(wn) or {"week": wn, "planned_min": 0, "done_min": 0, "sessions": 0, "done": 0,
+                              "missed": 0, "longest_min": 0, "has_test": False, "has_b2b": False, "gym": 0}
+        if plan_start:
+            ws = plan_start + timedelta(weeks=wn - 1)
+            w["start"], w["end"] = ws.isoformat(), (ws + timedelta(days=6)).isoformat()
+        tmeta = template[offset + wn - 1] if offset + wn - 1 < len(template) else {}
+        phase = tmeta.get("phase") or _phase_for_week(wn, total_weeks).value
+        w["phase"] = phase
+        w["phase_label"] = _PHASE_LABEL.get(phase, phase.title())
+        w["recovery"] = bool(tmeta.get("recovery"))
+        w["is_current"] = wn == current_week
+        w["is_past"] = bool(w.get("end") and w["end"] < today)
+        week_list.append(w)
+
+    # Milestones (upcoming first)
+    ms = []
+    for r in rows:
+        stype = r["session_type"] or ""
+        low = stype.lower()
+        kind = None
+        if low.startswith("test"):
+            kind, label = "test", "FTP test"
+        elif low == "race day":
+            kind, label = "race", "Race day — Mallorca 312"
+        elif "back-to-back day 1" in low:
+            kind, label = "b2b", f"Back-to-back weekend ({round((r['duration_min'] or 0) / 60, 1)}h + day 2)"
+        elif (r["duration_min"] or 0) >= 300 and not low.startswith("strength"):
+            kind, label = "long", f"{round((r['duration_min'] or 0) / 60, 1)}h long ride"
+        if r["structure_json"] and "Cut-off rehearsal" in r["structure_json"]:
+            kind, label = "rehearsal", "Cut-off rehearsal — 100 km in ≤ 4h15"
+        if kind:
+            ms.append({"date": r["session_date"], "kind": kind, "label": label, "status": r["status"],
+                       "session_id": r["id"], "min": r["duration_min"] or 0})
+    upcoming = [m for m in ms if m["date"] >= today and m["status"] in ("pending",)]
+    # The story, not a calendar dump: next FTP test, next ≥5h ride, the single
+    # biggest day, every back-to-back weekend, the cut-off rehearsal, race day.
+    picked: list[dict] = []
+    nxt_test = next((m for m in upcoming if m["kind"] == "test"), None)
+    nxt_long = next((m for m in upcoming if m["kind"] == "long"), None)
+    longs = [m for m in upcoming if m["kind"] in ("long", "b2b")]
+    biggest = max(longs, key=lambda m: m["min"], default=None)
+    for m in (nxt_test, nxt_long):
+        if m:
+            picked.append(m)
+    if biggest and biggest not in picked:
+        picked.append({**biggest, "label": "Biggest day — " + biggest["label"]})
+    picked += [m for m in upcoming if m["kind"] in ("b2b", "rehearsal", "race") and m not in picked
+               and not (biggest and m["session_id"] == biggest["session_id"])]
+    if not any(m["kind"] == "race" for m in picked):
+        picked.append({"date": race_date, "kind": "race", "label": "Race day — Mallorca 312",
+                       "status": "pending", "session_id": None})
+    picked.sort(key=lambda m: m["date"])
+
+    # Engine
+    ride = _latest_zone_row(conn, "ride")
+    weight = None
+    if _table_exists(conn, "weight_log"):
+        wrow = conn.execute("SELECT weight_kg FROM weight_log ORDER BY date DESC LIMIT 1").fetchone()
+        weight = wrow["weight_kg"] if wrow else None
+    ftp = ride["ftp_w"] if ride and ride["ftp_w"] else None
+    four_wk = (date.today() - timedelta(days=28)).isoformat()
+    comp = conn.execute(
+        """SELECT SUM(status='completed') AS done, COUNT(*) AS due FROM plan_sessions
+           WHERE goal_id=? AND session_date BETWEEN ? AND ? AND is_optional=0
+             AND status IN ('pending','completed','skipped')
+             AND lower(session_type) != 'race day'""",
+        (goal_id, four_wk, (date.today() - timedelta(days=1)).isoformat()),
+    ).fetchone()
+    longest_done = max((w["longest_min"] for w in week_list if w["done"] and w["is_past"]), default=0)
+
+    return {
+        "goal": {"id": goal["id"], "name": goal["name"], "race_type": goal["race_type"],
+                 "race_date": race_date, "plan_start_date": goal["plan_start_date"]},
+        "days_until_race": max(0, (date.fromisoformat(race_date) - date.today()).days),
+        "current_week": current_week,
+        "total_weeks": total_weeks,
+        "started": bool(plan_start and plan_start <= date.today()),
+        "phase": week_list[current_week - 1]["phase"] if week_list else None,
+        "phase_label": week_list[current_week - 1]["phase_label"] if week_list else None,
+        "weeks": week_list,
+        "milestones": picked,
+        "engine": {
+            "ftp_w": ftp,
+            "weight_kg": weight,
+            "w_per_kg": round(ftp / weight, 2) if ftp and weight else None,
+            "threshold_hr": ride["threshold_hr"] if ride else None,
+            "zones_from": ride["valid_from"] if ride and ride["valid_from"] != "2019-01-01" else None,
+            "compliance_4w": round(comp["done"] / comp["due"], 2) if comp and comp["due"] else None,
+            "longest_ride_min": longest_done,
+        },
+    }
+
+
+# ── AI coach: weekly review with one-tap adjustments ─────────────────────────
+
+@router.get("/goals/{goal_id}/coach")
+def coach_get(goal_id: int, conn: DB, week_start: Optional[str] = Query(None)):
+    """Latest coach review for the week (default: next week on Fri–Sun, else this week)."""
+    from domains.training import coach
+    _row(conn, "race_goals", goal_id)
+    ws = week_start or _coach_default_week()
+    return {"week_start": _week_bounds(ws)[0], "review": coach.latest_review(conn, goal_id, ws)}
+
+
+@router.post("/goals/{goal_id}/coach")
+def coach_generate(goal_id: int, conn: DB, week_start: Optional[str] = Query(None)):
+    """Ask the coach to review the week now (reads all recent data; ~10–30 s)."""
+    from domains.training import coach
+    _row(conn, "race_goals", goal_id)
+    ws = week_start or _coach_default_week()
+    review = coach.generate_review(conn, goal_id, ws)
+    if review is None:
+        raise HTTPException(status_code=503, detail="AI coach unavailable (LLM not reachable)")
+    return {"week_start": _week_bounds(ws)[0], "review": review}
+
+
+@router.post("/coach/{review_id}/apply/{index}")
+def coach_apply(review_id: int, index: int, conn: DB):
+    from domains.training import coach
+    try:
+        return coach.apply_adjustment(conn, review_id, index)
+    except (ValueError, IndexError) as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+def _coach_default_week() -> str:
+    today = date.today()
+    mon = today - timedelta(days=today.weekday())
+    return (mon + timedelta(days=7) if today.weekday() >= 4 else mon).isoformat()
+
+
 # ── Week planner: day blocks + weekly confirmation ──────────────────────────
 
 class DayBlock(BaseModel):

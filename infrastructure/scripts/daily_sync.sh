@@ -151,6 +151,10 @@ log "Re-placing training sessions around roster/travel..."
 python -m domains.training.reflow \
   >> "$LOG_FILE" 2>&1 || log "WARN: Training reflow failed (non-fatal)"
 
+# AI coach: on Sat/Sun, have next week's review waiting for the planning ritual.
+python -m domains.training.coach --auto \
+  >> "$LOG_FILE" 2>&1 || log "WARN: AI coach review failed (non-fatal)"
+
 # Activity detail sync: fetch splits, Garmin TE, physio metrics for new activities.
 log "Syncing Garmin activity details + physio (last 7 days)..."
 python -m domains.health.garmin.garmin_activity_detail_sync --days 7 \

@@ -405,6 +405,9 @@ export default function TrainingPage() {
             <Link href="/health" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Health</Link>
             <h1 className="text-2xl font-semibold tracking-tight">Training</h1>
             <p className="text-sm text-[#71717A] mt-0.5">Load, fitness & race readiness</p>
+            <Link href="/race" className="inline-flex items-center gap-1 mt-2 text-xs text-[#F59E0B] hover:text-[#FBBF24]">
+              Mallorca 312 cockpit →
+            </Link>
           </div>
           <button onClick={() => setShowAdd(true)}
             className="mt-1 text-xs bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#F59E0B] hover:bg-[#F59E0B]/20 rounded-lg px-3 py-1.5 transition-colors">

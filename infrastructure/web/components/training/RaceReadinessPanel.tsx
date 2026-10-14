@@ -34,29 +34,35 @@ type Readiness = {
 };
 
 const DECOUPLING_COLOR: Record<string, string> = {
-  ready: "text-emerald-400",
-  borderline: "text-amber-400",
-  not_ready: "text-rose-400",
+  ready: "text-[#4ADE80]",
+  borderline: "text-[#F59E0B]",
+  not_ready: "text-[#F87171]",
 };
 
 const RECOVERY_COLOR: Record<string, string> = {
-  recovering: "text-emerald-400",
+  recovering: "text-[#4ADE80]",
   balanced: "text-zinc-300",
-  accumulating: "text-rose-400",
+  accumulating: "text-[#F87171]",
 };
 
 function StatCard({ label, value, sub, accent }: { label: string; value: string | number | null; sub?: string; accent?: string }) {
   return (
     <div className="bg-[#18181B] border border-[#27272A] rounded-lg p-3 space-y-0.5">
       <div className="text-xs text-zinc-500">{label}</div>
-      <div className={`text-lg font-semibold ${accent ?? "text-white"}`}>{value ?? "—"}</div>
+      <div className={`text-lg font-semibold ${accent ?? "text-[#FAFAFA]"}`}>{value ?? "—"}</div>
       {sub && <div className="text-xs text-zinc-500">{sub}</div>}
     </div>
   );
 }
 
-// Race-type distance targets for volume progress bars
-const RACE_TARGETS: Record<string, { swim_km?: number; bike_km?: number; run_km: number; label: string }> = {
+// Race-type distance targets for volume progress bars. Cycling events track the
+// longest ride against the plan's PEAK training ride (not the race distance —
+// nobody rides 312 km in training).
+type Targets = { swim_km?: number; bike_km?: number; run_km?: number; label: string; bike_label?: string };
+const RACE_TARGETS: Record<string, Targets> = {
+  "gran_fondo_100":  { bike_km: 100, label: "Gran Fondo 100" },
+  "gran_fondo_160":  { bike_km: 130, label: "Gran Fondo 160", bike_label: "Bike — longest ride vs 130 km peak" },
+  "mallorca_312":    { bike_km: 200, label: "Mallorca 312", bike_label: "Longest ride (90d) vs ~200 km training peak" },
   "5k":              { run_km: 5,    label: "5K" },
   "10k":             { run_km: 10,   label: "10K" },
   "half_marathon":   { run_km: 21.1, label: "Half Marathon" },
@@ -66,17 +72,33 @@ const RACE_TARGETS: Record<string, { swim_km?: number; bike_km?: number; run_km:
   "ironman":         { swim_km: 3.8, bike_km: 180, run_km: 42.2, label: "Ironman" },
 };
 
-export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType }: {
+// Phase advice for cycling events — the backend's generic advice is triathlon-flavoured.
+const CYCLING_PHASE_ADVICE: Record<string, string> = {
+  foundation: "Foundation: easy Z2, learn the trainer, set FTP, build gym tolerance. No heroics.",
+  base: "Aerobic base: long Z2 rides grow every week; one quality session (threshold / sweet spot) on the trainer.",
+  build: "Build: Puig Major climbing efforts, back-to-back weekends, 80–90 g/h fuelling on every long ride.",
+  race_prep: "Race prep: volume drops, sharpness stays. Sleep, fuel and arrive fresh.",
+};
+
+export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType, planPhase, planPhaseLabel }: {
   defaultRaceDate?: string;
   goalName?: string;
   raceType?: string;
+  /** Phase from the materialized plan (overview) — beats the date-based guess */
+  planPhase?: string | null;
+  planPhaseLabel?: string | null;
 }) {
   const [raceDate, setRaceDate] = useState(defaultRaceDate ?? "");
   const [data, setData] = useState<Readiness | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const targets: { swim_km?: number; bike_km?: number; run_km: number; label: string } =
+  const targets: Targets =
     (raceType ? RACE_TARGETS[raceType] : null) ?? RACE_TARGETS["ironman"];
+  const cycling = targets.swim_km == null && targets.run_km == null;
+  // The backend's phase is a date-based triathlon guess — for cycling plans only
+  // trust the plan's own phase (passed in from the race overview).
+  const phaseLabel = planPhaseLabel ?? (!cycling && data?.training_phase ? `${data.training_phase.replace("_", " ")} phase` : null);
+  const phaseAdvice = (cycling && planPhase && CYCLING_PHASE_ADVICE[planPhase]) || (!cycling ? data?.training_phase_advice : null);
   const displayLabel = goalName ?? targets.label;
 
   function load(rd?: string) {
@@ -94,18 +116,19 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
 
   return (
     <div className="space-y-5">
-      {/* Race date picker */}
+      {/* Race date picker (only when no goal supplies the date) */}
+      {!defaultRaceDate ? (
       <div className="flex items-center gap-3">
         <label className="text-xs text-zinc-400">Race date</label>
         <input
           type="date"
           value={raceDate}
           onChange={(e) => setRaceDate(e.target.value)}
-          className="bg-[#18181B] border border-[#27272A] rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+          className="bg-[#18181B] border border-[#27272A] rounded px-2 py-1 text-xs text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
         />
         <button
           onClick={() => load(raceDate)}
-          className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded transition-colors"
+          className="px-3 py-1 bg-[#F59E0B] text-[#09090B] text-xs font-semibold rounded transition-colors"
         >
           Update
         </button>
@@ -116,12 +139,18 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
           </span>
         )}
       </div>
+      ) : data ? (
+        <p className="text-xs text-[#71717A]">
+          {data.days_to_race > 0 ? `${data.days_to_race} days to go` : "Race day!"}
+          {data.taper_window_start && ` · taper from ${format(parseISO(data.taper_window_start), "d MMM")}`}
+        </p>
+      ) : null}
 
       {/* Flags */}
       {data?.flags && data.flags.length > 0 && (
         <div className="space-y-1.5">
           {data.flags.map((f) => (
-            <div key={f.code} className="flex items-start gap-2 px-3 py-2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs">
+            <div key={f.code} className="flex items-start gap-2 px-3 py-2 rounded bg-amber-500/10 border border-amber-500/30 text-[#F59E0B] text-xs">
               <span>⚠</span><span>{f.msg}</span>
             </div>
           ))}
@@ -134,9 +163,9 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
           <div className="bg-[#18181B] border border-[#27272A] rounded-lg p-3 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-zinc-200">{displayLabel} progress</span>
-              {data.training_phase && (
-                <span className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 capitalize">
-                  {data.training_phase.replace("_", " ")} phase
+              {phaseLabel && (
+                <span className="text-xs px-2 py-0.5 rounded bg-[#F59E0B]/10 text-[#F59E0B] capitalize">
+                  {phaseLabel}
                 </span>
               )}
             </div>
@@ -149,7 +178,7 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
                 <div>
                   <div className="flex justify-between text-xs text-zinc-400 mb-1">
                     <span>Swim — monthly volume</span>
-                    <span className={pct >= 100 ? "text-emerald-400" : "text-zinc-400"}>
+                    <span className={pct >= 100 ? "text-[#4ADE80]" : "text-zinc-400"}>
                       {swimKm > 0 ? swimKm.toFixed(1) : "—"} / {targets.swim_km} km ({pct}%)
                     </span>
                   </div>
@@ -168,28 +197,28 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
               return (
                 <div>
                   <div className="flex justify-between text-xs text-zinc-400 mb-1">
-                    <span>Bike — longest ride (90d)</span>
-                    <span className={pct >= 100 ? "text-emerald-400" : "text-zinc-400"}>
+                    <span>{targets.bike_label ?? "Bike — longest ride (90d)"}</span>
+                    <span className={pct >= 100 ? "text-[#4ADE80]" : "text-zinc-400"}>
                       {m > 0 ? (m / 1000).toFixed(1) : "—"} / {targets.bike_km} km ({pct}%)
                     </span>
                   </div>
                   <div className="h-1.5 bg-[#27272A] rounded-full overflow-hidden">
-                    <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
+                    <div className="h-full rounded-full bg-[#F59E0B] transition-all" style={{ width: `${pct}%` }} />
                   </div>
                 </div>
               );
             })()}
 
-            {/* Run */}
-            {(() => {
+            {/* Run — only for running / triathlon types */}
+            {targets.run_km != null && (() => {
               const m = data.longest_recent_run_m ?? 0;
-              const targetM = targets.run_km * 1000;
+              const targetM = targets.run_km! * 1000;
               const pct = Math.min(100, Math.round((m / targetM) * 100));
               return (
                 <div>
                   <div className="flex justify-between text-xs text-zinc-400 mb-1">
                     <span>Run — longest run (90d)</span>
-                    <span className={pct >= 100 ? "text-emerald-400" : "text-zinc-400"}>
+                    <span className={pct >= 100 ? "text-[#4ADE80]" : "text-zinc-400"}>
                       {m > 0 ? (m / 1000).toFixed(1) : "—"} / {targets.run_km} km ({pct}%)
                     </span>
                   </div>
@@ -200,9 +229,9 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
               );
             })()}
 
-            {data.training_phase_advice && (
+            {phaseAdvice && (
               <p className="text-xs text-zinc-500 pt-1 border-t border-[#27272A]">
-                {data.training_phase_advice}
+                {phaseAdvice}
               </p>
             )}
           </div>
@@ -213,13 +242,13 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
               label="Form (TSB)"
               value={data.tsb !== null ? Math.round(data.tsb) : null}
               sub={data.tsb_trend ?? undefined}
-              accent={(data.tsb ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}
+              accent={(data.tsb ?? 0) >= 0 ? "text-[#4ADE80]" : "text-[#F87171]"}
             />
             <StatCard
               label="Fitness (CTL)"
               value={data.ctl !== null ? Math.round(data.ctl) : null}
               sub={data.ramp_rate !== null ? `${data.ramp_rate > 0 ? "+" : ""}${data.ramp_rate?.toFixed(1)} pts/wk` : undefined}
-              accent="text-blue-400"
+              accent="text-[#60A5FA]"
             />
             <StatCard
               label="Decoupling"
@@ -233,20 +262,20 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
               sub={data.garmin_training_status ? `Status: ${data.garmin_training_status}` : undefined}
               accent={
                 data.training_readiness !== null
-                  ? data.training_readiness >= 70 ? "text-emerald-400" : data.training_readiness >= 40 ? "text-amber-400" : "text-rose-400"
+                  ? data.training_readiness >= 70 ? "text-[#4ADE80]" : data.training_readiness >= 40 ? "text-[#F59E0B]" : "text-[#F87171]"
                   : "text-zinc-400"
               }
             />
           </div>
 
           {/* VO2max */}
-          {(data.vo2max_run || data.vo2max_bike) && (
+          {((!cycling && data.vo2max_run) || data.vo2max_bike) && (
             <div className="grid grid-cols-2 gap-2">
-              {data.vo2max_run && (
-                <StatCard label="VO₂max Run" value={data.vo2max_run} sub="ml/kg/min" accent="text-amber-400" />
+              {!cycling && data.vo2max_run && (
+                <StatCard label="VO₂max Run" value={data.vo2max_run} sub="ml/kg/min" accent="text-[#F59E0B]" />
               )}
               {data.vo2max_bike && (
-                <StatCard label="VO₂max Bike" value={data.vo2max_bike} sub="ml/kg/min" accent="text-blue-400" />
+                <StatCard label="VO₂max Bike" value={data.vo2max_bike} sub="ml/kg/min" accent="text-[#60A5FA]" />
               )}
             </div>
           )}
@@ -257,7 +286,7 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-zinc-400">Efficiency Factor trend (90d long efforts)</span>
                 {data.ef_trend && (
-                  <span className={`text-xs font-medium ${data.ef_trend === "improving" ? "text-emerald-400" : "text-rose-400"}`}>
+                  <span className={`text-xs font-medium ${data.ef_trend === "improving" ? "text-[#4ADE80]" : "text-[#F87171]"}`}>
                     {data.ef_trend === "improving" ? "↑ improving" : "↓ declining"}
                   </span>
                 )}
@@ -317,7 +346,7 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
                   <div key={i} className="flex items-center justify-between text-xs py-1 border-b border-[#27272A] last:border-0">
                     <span className="text-zinc-300">{e.date} — {e.name}</span>
                     <span className={`font-medium ${
-                      e.decoupling_pct < 5 ? "text-emerald-400" : e.decoupling_pct < 8 ? "text-amber-400" : "text-rose-400"
+                      e.decoupling_pct < 5 ? "text-[#4ADE80]" : e.decoupling_pct < 8 ? "text-[#F59E0B]" : "text-[#F87171]"
                     }`}>
                       {e.decoupling_pct?.toFixed(1)}%
                     </span>

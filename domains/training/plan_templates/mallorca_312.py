@@ -280,7 +280,15 @@ _GYM_BY_WEEK = {
 for wk in _RACE_PLAN:
     wk["sessions"] = wk["sessions"] + _GYM_BY_WEEK.get(wk["week"], [])
 
+def _race_phase(w: int) -> str:
+    return "base" if w <= 8 else "build" if w <= 16 else "race_prep"
+
+
+# Week metadata for the race cockpit: phase band + recovery (✦) weeks.
 MALLORCA_312_TEMPLATE = (
-    [{"week": i + 1, "sessions": sess} for i, sess in enumerate(_FOUNDATION)]
-    + [{"week": len(_FOUNDATION) + wk["week"], "sessions": wk["sessions"]} for wk in _RACE_PLAN]
+    [{"week": i + 1, "sessions": sess, "phase": "foundation", "recovery": i in (4, 6)}
+     for i, sess in enumerate(_FOUNDATION)]
+    + [{"week": len(_FOUNDATION) + wk["week"], "sessions": wk["sessions"],
+        "phase": _race_phase(wk["week"]), "recovery": wk["week"] in (4, 8, 12)}
+       for wk in _RACE_PLAN]
 )

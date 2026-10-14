@@ -730,7 +730,7 @@ function PlanNextWeekNudge({ date }: { date: string }) {
   if (!weekend || !needs) return null;
   return (
     <Link
-      href="/training?tab=omyra&plan=next"
+      href="/race?plan=next"
       className="flex items-center justify-between gap-3 bg-[#1C1700] border border-[#B45309] rounded-xl px-4 py-3 hover:border-[#F59E0B] transition-colors"
     >
       <div>
@@ -828,7 +828,15 @@ export function DayTraining({ initialPrescription, date }: {
   return (
     <>
       <section className="space-y-3">
-        <SectionLabel>Training</SectionLabel>
+        <div className="flex items-center justify-between">
+          <SectionLabel>Training</SectionLabel>
+          {sessions[0]?.days_until_race != null && (
+            <Link href="/race" className="text-[11px] text-[#71717A] hover:text-[#F59E0B]">
+              {sessions[0].goal_name} · {sessions[0].days_until_race}d
+              {sessions[0].current_week ? ` · wk ${sessions[0].current_week}/${sessions[0].total_weeks}` : ""} →
+            </Link>
+          )}
+        </div>
 
         <PlanNextWeekNudge date={date} />
 
