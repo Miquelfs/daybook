@@ -7,10 +7,10 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 const tabs = [
   { href: "/",             label: "Today",    icon: CalendarDays },
-  { href: "/race",         label: "Mallorca 312", icon: Mountain },
   { href: "/timeline",     label: "Timeline", icon: List },
   { href: "/moments",      label: "Moments",  icon: Camera },
   { href: "/money",        label: "Finance",  icon: Wallet },
+  { href: "/race",         label: "Mallorca 312", icon: Mountain },
   { href: "/health",       label: "Health",   icon: HeartPulse },
   { href: "/food",         label: "Food",     icon: Apple },
   { href: "/aviation",     label: "Logbook",  icon: PlaneTakeoff },
