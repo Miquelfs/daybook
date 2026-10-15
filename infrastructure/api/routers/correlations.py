@@ -132,20 +132,7 @@ _TOP_CANDIDATES = [
 # between two members of one family is trivially high and not an insight
 # (e.g. distance↔moving-time↔calories, or two names for Body Battery low). We
 # suppress within-family pairs so the discover lists surface real relationships.
-_REDUNDANT_FAMILIES: list[set[str]] = [
-    {"total_dist_km", "moving_time_hours", "activity_cal", "activity_count",
-     "elevation_gain_m", "training_stress"},                      # exercise volume
-    {"hr_daytime_avg", "hr_duty_avg", "hr_daytime_peak"},         # intraday-HR windows
-    {"stress_avg", "stress_high_min", "stress_peak"},             # Garmin stress
-    {"battery_low", "battery_high", "body_battery_low", "energy_drained"},  # Body Battery
-    {"food_kcal", "food_protein", "food_carbs", "food_fat", "food_sugar", "biggest_meal_kcal"},  # intake
-]
-
-
-def _redundant_pair(a: str, b: str) -> bool:
-    if a == b:
-        return True
-    return any(a in fam and b in fam for fam in _REDUNDANT_FAMILIES)
+from domains.insights.metric_families import REDUNDANT_FAMILIES as _REDUNDANT_FAMILIES, redundant as _redundant_pair  # noqa: E402
 
 
 def _tag_impact_on(conn, value_by_date: dict[str, float], tag_rows, min_n: int = 3) -> list[dict]:
@@ -926,6 +913,116 @@ def precomputed_correlations(
             break
 
     return {"computed_at": computed_at, "correlations": results}
+
+
+# ─── Links: the redesigned Discover feed ──────────────────────────────────────
+
+# Outcome direction: True = higher is better, False = lower is better
+_OUTCOME_GOOD = {"energy": True, "mood": True, "sleep_quality": True, "sleep_duration": True, "hrv_avg": True,
+                 "training_readiness": True, "body_battery_low": True, "battery_high": True,
+                 "stress": False, "stress_avg": False, "resting_hr": False, "fatigue_score": False}
+
+# How big a step of the driver to describe a slope with ("per 1000 steps", not "per step")
+_STEP_BY_UNIT = {"steps": 1000, "": 1, "ms": 10, "bpm": 5, "min": 30, "kcal": 500, "€": 50, "g": 25,
+                 "km": 10, "m": 250, "%": 10, "count": 1, "hours": 1, "h": 1, "1-10": 1}
+
+
+def _short_label(meta: dict) -> str:
+    lab = meta["label"]
+    for pre in ("Tag: ", "With: "):
+        if lab.startswith(pre):
+            return lab[len(pre):]
+    return lab
+
+
+def _fmt_num(v: float) -> str:
+    a = abs(v)
+    return f"{v:+.0f}" if a >= 100 else f"{v:+.1f}" if a >= 1 else f"{v:+.2f}"
+
+
+@router.get("/links")
+def correlation_links(conn: DB, window: int = Query(90, ge=30, le=365), outcome: str = Query("")):
+    """
+    Plain-language links from the latest snapshot: driver → outcome, effect in
+    units, strength, next-day vs same-day, and whether it holds in both windows.
+    Only FDR-surviving pairs are in the snapshot; same-thing pairs never are.
+    """
+    latest = conn.execute("SELECT MAX(computed_at) AS ts FROM correlation_snapshots WHERE window_days=?",
+                          (window,)).fetchone()
+    if not latest or not latest["ts"]:
+        return {"computed_at": None, "window": window, "links": [], "outcomes": []}
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(correlation_snapshots)")}
+    extra = ", q_value, effect, effect_kind" if "q_value" in cols else ", NULL AS q_value, NULL AS effect, NULL AS effect_kind"
+    rows = conn.execute(f"SELECT metric_a, metric_b, r, n, lag, is_new{extra} FROM correlation_snapshots "
+                        f"WHERE window_days=? AND computed_at=? ORDER BY ABS(r) DESC", (window, latest["ts"])).fetchall()
+
+    other_w = 180 if window != 180 else 90
+    other_ts = conn.execute("SELECT MAX(computed_at) AS ts FROM correlation_snapshots WHERE window_days=?",
+                            (other_w,)).fetchone()["ts"]
+    other = {}
+    if other_ts:
+        for o in conn.execute("SELECT metric_a, metric_b, lag, r FROM correlation_snapshots WHERE window_days=? AND computed_at=?",
+                              (other_w, other_ts)):
+            other[(o["metric_a"], o["metric_b"], o["lag"])] = o["r"]
+
+    meta_cache: dict[str, dict] = {}
+
+    def meta(k):
+        if k not in meta_cache:
+            meta_cache[k] = _metric_meta(conn, k)
+        return meta_cache[k]
+
+    links, counts = [], {}
+    for row in rows:
+        a, b, lag, eff, kind = row["metric_a"], row["metric_b"], row["lag"], row["effect"], row["effect_kind"]
+        if _redundant_pair(a, b):
+            continue
+        # Orient same-day pairs towards an outcome (effect is only valid in the stored direction)
+        if lag == 0 and a in _OUTCOME_GOOD and b not in _OUTCOME_GOOD:
+            a, b, eff, kind = b, a, None, None
+        if b not in _OUTCOME_GOOD:
+            continue                       # the feed is about what moves your outcomes
+        if outcome and b != outcome:
+            counts[b] = counts.get(b, 0) + 1
+            continue
+        counts[b] = counts.get(b, 0) + 1
+        ma, mb = meta(a), meta(b)
+        driver = _short_label(ma)
+        ol = _short_label(mb)
+        out_label = ol if ol[:3].isupper() else ol.lower()          # keep "HRV", lower "Energy"
+        when = "the next day" if lag == 1 else "the same day"
+        if eff is not None and kind == "diff":
+            effect_txt = f"{_fmt_num(eff)} {mb['unit'] if mb['unit'] not in ('1-10', '') else ''}".strip()
+            sentence = f"{driver} → {out_label} {when}"
+        elif eff is not None and kind == "slope":
+            step = _STEP_BY_UNIT.get(ma["unit"], 1)
+            eff = eff * step
+            effect_txt = f"{_fmt_num(eff)} {mb['unit'] if mb['unit'] not in ('1-10', '') else ''}".strip()
+            unit_a = {"hours": "h", "1-10": "point", "": "", "0/1": ""}.get(ma["unit"], ma["unit"])
+            d = driver.lower()
+            # "+1000 steps", "+1 h sleep duration", "+30 min screen time"
+            amount = f"+{step} {unit_a}".strip() if unit_a and unit_a in d else f"+{step} {unit_a} {d}".replace("  ", " ")
+            sentence = f"{amount} → {out_label} {when}"
+        else:
+            effect_txt = None
+            sentence = f"{driver} ↔ {out_label} {when}"
+        good = None
+        if row["r"]:
+            good = (row["r"] > 0) == _OUTCOME_GOOD[b]
+        o_r = other.get((row["metric_a"], row["metric_b"], lag))
+        links.append({
+            "metric_a": row["metric_a"], "metric_b": row["metric_b"], "driver": driver, "outcome": b,
+            "outcome_label": _short_label(mb), "sentence": sentence, "effect": effect_txt,
+            "r": round(row["r"], 2), "n": row["n"], "lag": lag, "q": row["q_value"],
+            "strength": "strong" if abs(row["r"]) >= 0.5 else "moderate" if abs(row["r"]) >= 0.3 else "weak",
+            "good": good, "is_new": bool(row["is_new"]),
+            "consistent": (o_r is not None and (o_r > 0) == (row["r"] > 0)) if other_ts else None,
+            "category": ma["category"],
+        })
+    outcomes = [{"key": k, "label": _short_label(meta(k)), "count": v}
+                for k, v in sorted(counts.items(), key=lambda kv: -kv[1])]
+    return {"computed_at": latest["ts"], "window": window, "other_window": other_w if other_ts else None,
+            "links": links[:60], "outcomes": outcomes, "tested_note": "FDR q ≤ 0.10, same-thing pairs excluded"}
 
 
 @router.get("/compare")

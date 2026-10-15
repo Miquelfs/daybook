@@ -14,12 +14,12 @@ def seeded(end=date(2026, 10, 18), days=180):
     c.row_factory = sqlite3.Row
     c.executescript("""
         CREATE TABLE days(date PRIMARY KEY, energy, mood, stress, duty_day, sleep_quality);
-        CREATE TABLE tags(id INTEGER PRIMARY KEY, slug, name);
+        CREATE TABLE tags(id INTEGER PRIMARY KEY, slug, name, icon);
         CREATE TABLE day_tags(date, tag_id);
         CREATE TABLE sleep(date PRIMARY KEY, duration_seconds);
         CREATE TABLE hrv(date PRIMARY KEY, last_night_avg);
         CREATE TABLE roster(date PRIMARY KEY, duty_type, end_time);
-        INSERT INTO tags VALUES (1,'alcohol','Alcohol'), (2,'outdoors','Outdoors');""")
+        INSERT INTO tags VALUES (1,'alcohol','Alcohol','🍷'), (2,'outdoors','Outdoors','🌲');""")
     start = end - timedelta(days=days)
     alcohol, late = set(), set()
     d = start

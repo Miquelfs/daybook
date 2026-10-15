@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
@@ -11,6 +11,7 @@ import {
 import { format, parseISO } from "date-fns";
 import { correlationsApi } from "@/lib/correlations-api";
 import { WeeklyReview } from "@/components/insights/WeeklyReview";
+import { Links } from "@/components/insights/Links";
 import type { MetricMeta, TopCorrelation, TagImpact, PrecomputedCorrelation } from "@/lib/correlations-api";
 import { TrendingUp, Minus, ArrowUpRight, ArrowDownRight, Plus, X, CheckCircle, Trash2, Sparkles, GitCompare, CalendarDays, BarChart2, Flame, FlaskConical, Activity, ClipboardCheck } from "lucide-react";
 import { TagStatsDrawer } from "@/components/TagStatsDrawer";
@@ -200,6 +201,11 @@ function directionBadge(c: PrecomputedCorrelation) {
 
 export default function CorrelationsPage() {
   const [tab, setTab] = useState<Tab>("review");
+  // Deep link: /correlations?tab=discover
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t) setTab(t as Tab);
+  }, []);
   const [metricA, setMetricA] = useState<string>("");
   const [metricB, setMetricB] = useState<string>("");
   const [days, setDays] = useState(90);
@@ -366,105 +372,10 @@ export default function CorrelationsPage() {
 
       {tab === "discover" && (
         <div className="space-y-8">
-          {/* Precomputed snapshot (weekly batch) */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs text-[#52525B] uppercase tracking-widest">Snapshot</p>
-              {precomputedData?.computed_at && (
-                <p className="text-[10px] text-[#3F3F46]">
-                  Updated {format(new Date(precomputedData.computed_at), "d MMM · HH:mm")}
-                </p>
-              )}
-            </div>
-            {/* Domain filter pills */}
-            <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 -mx-1 px-1">
-              {["", "health", "activity", "aviation", "environment", "tags", "people", "screen"].map((d) => (
-                <button
-                  key={d}
-                  onClick={() => { setPrecomputedDomain(d); setPrecomputedVisible(5); }}
-                  className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors ${
-                    precomputedDomain === d
-                      ? "bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/40"
-                      : "bg-[#18181B] border border-[#27272A] text-[#52525B] hover:text-[#A1A1AA]"
-                  }`}
-                >
-                  {d === "" ? "All" : d.charAt(0).toUpperCase() + d.slice(1)}
-                </button>
-              ))}
-            </div>
-            {precomputed.length > 0 ? (
-              <div className="space-y-2">
-                {precomputed.slice(0, precomputedVisible).map((c, i) => (
-                  <button
-                    key={i}
-                    onClick={() => { setMetricA(c.metric_a); setMetricB(c.metric_b); setTab("compare"); setTimeout(() => compareRef.current?.scrollIntoView({ behavior: "smooth" }), 100); }}
-                    className="w-full flex items-center gap-3 px-4 py-3 bg-[#0D0D0F] border border-[#27272A] rounded-xl hover:border-[#3F3F46] transition-colors text-left"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <p className="text-xs text-[#A1A1AA] truncate">{c.label_a}</p>
-                        {c.lag === 1 && <span className="text-[9px] text-[#52525B] shrink-0">→next</span>}
-                      </div>
-                      <p className="text-[10px] text-[#52525B] truncate">{c.label_b}</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {directionBadge(c)}
-                      <div className="text-right">
-                        <p className={`text-sm font-semibold tabular-nums ${rColor(c.r)}`}>
-                          {c.r > 0 ? "+" : ""}{c.r.toFixed(2)}
-                        </p>
-                        {/* Strength bar */}
-                        <div className="w-16 h-1 rounded-full bg-[#27272A] mt-1">
-                          <div
-                            className={`h-full rounded-full ${Math.abs(c.r) >= 0.5 ? "bg-emerald-400" : Math.abs(c.r) >= 0.3 ? "bg-amber-400" : "bg-[#52525B]"}`}
-                            style={{ width: `${Math.min(Math.abs(c.r) * 100, 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-                {precomputed.length > precomputedVisible && (
-                  <button
-                    onClick={() => setPrecomputedVisible(v => v + 10)}
-                    className="w-full py-2.5 text-xs text-[#52525B] hover:text-[#A1A1AA] border border-dashed border-[#27272A] hover:border-[#3F3F46] rounded-xl transition-colors"
-                  >
-                    Load {Math.min(precomputed.length - precomputedVisible, 10)} more correlations ({precomputed.length - precomputedVisible} remaining)
-                  </button>
-                )}
-              </div>
-            ) : precomputedDomain !== "" ? (
-              <div className="border border-dashed border-[#27272A] rounded-xl px-4 py-8 text-center">
-                <p className="text-sm text-[#52525B]">No {precomputedDomain} correlations in snapshot yet.</p>
-                <p className="text-xs text-[#3F3F46] mt-1">Run the correlation job on Pi to populate this category.</p>
-              </div>
-            ) : null}
-          </div>
-
-          {/* Real-time top correlations strip */}
-          {top.length > 0 && (
-            <div>
-              <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Top correlations</p>
-              <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-thin">
-                {top.map((c, i) => (
-                  <button
-                    key={i}
-                    onClick={() => pickTop(c)}
-                    className="shrink-0 flex flex-col items-start gap-1 px-4 py-3 rounded-xl border transition-all
-                               hover:border-[#3F3F46] bg-[#0D0D0F] border-[#27272A] min-w-[140px]"
-                  >
-                    <p className="text-[10px] text-[#52525B] truncate w-full text-left">{c.label_a}</p>
-                    <p className="text-[10px] text-[#3F3F46]">↕</p>
-                    <p className="text-[10px] text-[#52525B] truncate w-full text-left">{c.label_b}</p>
-                    <p className={`text-xl font-semibold tabular-nums mt-1 ${rColor(c.r)}`}>
-                      {c.r.toFixed(2)}
-                    </p>
-                    <p className="text-[10px] text-[#52525B]">{c.interpretation}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          <Links onPick={(a, b) => {
+            setMetricA(a); setMetricB(b); setTab("compare");
+            setTimeout(() => compareRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+          }} />
 
           {/* What makes you happier? */}
           {(weeklyData?.top_tags ?? []).length > 0 && (
@@ -540,12 +451,6 @@ export default function CorrelationsPage() {
             </div>
           )}
 
-          {top.length === 0 && (weeklyData?.top_tags ?? []).length === 0 && (
-            <div className="border border-dashed border-[#27272A] rounded-lg px-4 py-12 text-center">
-              <p className="text-sm text-[#52525B]">Not enough data yet to discover patterns.</p>
-              <p className="text-xs text-[#3F3F46] mt-1">Keep logging daily entries.</p>
-            </div>
-          )}
         </div>
       )}
 

@@ -175,7 +175,7 @@ step compute_training_load python -m domains.health.compute_training_load
 
 # Correlations: recompute snapshot so the Discover tab stays fresh.
 log "Computing correlation snapshot..."
-step compute_correlations python -m domains.insights.compute_correlations
+step compute_correlations python -m domains.insights.compute_correlations --both --if-stale 20
 
 # Weekly life review: Sunday, once — patterns + actions for the coming week.
 step life_review python -m domains.insights.life_review --auto

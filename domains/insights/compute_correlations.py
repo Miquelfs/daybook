@@ -507,114 +507,162 @@ def _prior_snapshot_r(conn, metric_a: str, metric_b: str, lag: int, window_days:
 
 # ─── Main computation ─────────────────────────────────────────────────────────
 
+KEEP_SNAPSHOTS = 6      # per window — the job used to keep every hourly run forever
+_FDR_Q = 0.10           # Benjamini–Hochberg false-discovery rate
+
+
+def _ensure_columns(conn) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(correlation_snapshots)")}
+    for name, ddl in (("q_value", "REAL"), ("effect", "REAL"), ("effect_kind", "TEXT")):
+        if name not in cols:
+            conn.execute(f"ALTER TABLE correlation_snapshots ADD COLUMN {name} {ddl}")
+    conn.commit()
+
+
+def bh_qvalues(pvals: list[float]) -> list[float]:
+    """Benjamini–Hochberg adjusted p-values (q), same order as input."""
+    m = len(pvals)
+    order = sorted(range(m), key=lambda i: pvals[i])
+    q = [1.0] * m
+    prev = 1.0
+    for rank in range(m, 0, -1):
+        i = order[rank - 1]
+        prev = min(prev, pvals[i] * m / rank)
+        q[i] = prev
+    return q
+
+
+def _effect(xs: list[float], ys: list[float]) -> tuple[float | None, str | None]:
+    """Binary driver → difference in means of y (with − without); else OLS slope (y per unit x)."""
+    if set(xs) <= {0.0, 1.0}:
+        on = [y for x, y in zip(xs, ys) if x == 1.0]
+        off = [y for x, y in zip(xs, ys) if x == 0.0]
+        if len(on) >= 3 and len(off) >= 3:
+            return sum(on) / len(on) - sum(off) / len(off), "diff"
+        return None, None
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    vx = sum((x - mx) ** 2 for x in xs)
+    if not vx:
+        return None, None
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / vx, "slope"
+
+
+def _pairs(data_a: dict, data_b: dict, lag: int) -> tuple[list[float], list[float]]:
+    """lag 0: same day. lag 1: a on day t vs b on day t+1."""
+    if lag == 0:
+        common = sorted(set(data_a) & set(data_b))
+        return [data_a[d] for d in common], [data_b[d] for d in common]
+    xs, ys = [], []
+    for d, v in data_a.items():
+        nd = (date.fromisoformat(d) + timedelta(days=1)).isoformat()
+        if nd in data_b:
+            xs.append(v)
+            ys.append(data_b[nd])
+    return xs, ys
+
+
 def run(window_days: int = 90, dry_run: bool = False) -> int:
+    from domains.insights.metric_families import redundant
+
     conn = get_connection()
+    _ensure_columns(conn)
     today = date.today()
     end = today.isoformat()
     start = (today - timedelta(days=window_days)).isoformat()
     computed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    all_metrics = list(_STATIC_METRICS) + _dynamic_candidates(conn, start, end)
-    # Deduplicate while preserving order
-    seen = set()
-    metrics = []
-    for m in all_metrics:
-        if m not in seen:
-            seen.add(m)
-            metrics.append(m)
+    metrics = list(dict.fromkeys(list(_STATIC_METRICS) + _dynamic_candidates(conn, start, end)))
+    data: dict[str, dict[str, float]] = {k: _fetch(conn, k, start, end) for k in metrics}
 
-    print(f"[correlations] window={window_days}d  metrics={len(metrics)}  pairs={len(metrics)*(len(metrics)-1)//2 * 2}")
-
-    # Pre-fetch all metric data to avoid repeated DB round-trips
-    data: dict[str, dict[str, float]] = {}
-    for key in metrics:
-        data[key] = _fetch(conn, key, start, end)
-
-    results = []
-    skipped = 0
-
+    # Every test: same day once per pair, next-day in BOTH directions
+    # (the old loop only tested a[t]→b[t+1] in combinations() order, so
+    # "tag today → energy tomorrow" was never tested for tags appended last).
+    tests = []
     for a, b in combinations(metrics, 2):
-        for lag in (0, 1):
-            data_a = data[a]
-            data_b = data[b]
+        if redundant(a, b):
+            continue
+        tests.append((a, b, 0))
+        tests.append((a, b, 1))
+        tests.append((b, a, 1))
 
-            if lag == 0:
-                common_dates = sorted(set(data_a) & set(data_b))
-                xs = [data_a[d] for d in common_dates]
-                ys = [data_b[d] for d in common_dates]
-            else:
-                # lag-1: a[t] correlated with b[t+1]
-                all_dates_a = sorted(data_a)
-                xs, ys = [], []
-                for d in all_dates_a:
-                    next_d = (date.fromisoformat(d) + timedelta(days=1)).isoformat()
-                    if next_d in data_b:
-                        xs.append(data_a[d])
-                        ys.append(data_b[next_d])
+    candidates = []
+    for a, b, lag in tests:
+        xs, ys = _pairs(data[a], data[b], lag)
+        if len(xs) < _MIN_N:
+            continue
+        r = pearson(xs, ys)
+        if r is None:
+            continue
+        p = p_value_approx(r, len(xs))
+        if p is None:
+            continue
+        candidates.append((a, b, lag, r, p, len(xs), xs, ys))
 
-            n = len(xs)
-            if n < _MIN_N:
-                skipped += 1
-                continue
-
-            r = pearson(xs, ys)
-            if r is None or abs(r) < _MIN_R:
-                skipped += 1
-                continue
-
-            p = p_value_approx(r, n)
-            if p is None or p > _MAX_P:
-                skipped += 1
-                continue
-
-            r_prev = _prior_snapshot_r(conn, a, b, lag, window_days)
-            is_new = 1 if r_prev is None else 0
-
-            results.append({
-                "computed_at": computed_at,
-                "window_days": window_days,
-                "metric_a": a,
-                "metric_b": b,
-                "r": r,
-                "p_value": p,
-                "n": n,
-                "lag": lag,
-                "is_new": is_new,
-                "r_prev": r_prev,
-            })
+    qs = bh_qvalues([c[4] for c in candidates]) if candidates else []
+    results = []
+    for (a, b, lag, r, p, n, xs, ys), q in zip(candidates, qs):
+        if q > _FDR_Q or abs(r) < _MIN_R:
+            continue
+        eff, kind = _effect(xs, ys)
+        r_prev = _prior_snapshot_r(conn, a, b, lag, window_days)
+        results.append({
+            "computed_at": computed_at, "window_days": window_days, "metric_a": a, "metric_b": b,
+            "r": r, "p_value": p, "q_value": q, "n": n, "lag": lag,
+            "is_new": 1 if r_prev is None else 0, "r_prev": r_prev,
+            "effect": round(eff, 4) if eff is not None else None, "effect_kind": kind,
+        })
 
     results.sort(key=lambda x: abs(x["r"]), reverse=True)
-    print(f"[correlations] found={len(results)}  skipped={skipped}")
+    print(f"[correlations] window={window_days}d metrics={len(metrics)} tests={len(candidates)} "
+          f"kept={len(results)} (BH q≤{_FDR_Q})")
 
     if dry_run:
-        for row in results[:20]:
-            direction = "→next" if row["lag"] else "same"
-            new_marker = " NEW" if row["is_new"] else ""
-            print(f"  {row['metric_a']:25s} × {row['metric_b']:25s}  r={row['r']:+.3f}  p={row['p_value']:.4f}  n={row['n']}  [{direction}]{new_marker}")
+        for row in results[:25]:
+            arrow = "→next day" if row["lag"] else "same day"
+            print(f"  {row['metric_a']:24s} {arrow:9s} {row['metric_b']:24s} r={row['r']:+.2f} "
+                  f"q={row['q_value']:.3f} n={row['n']} effect={row['effect']} ({row['effect_kind']})")
+        conn.close()
         return len(results)
 
     conn.executemany(
-        """
-        INSERT OR REPLACE INTO correlation_snapshots
-            (computed_at, window_days, metric_a, metric_b, r, p_value, n, lag, is_new, r_prev)
-        VALUES
-            (:computed_at, :window_days, :metric_a, :metric_b, :r, :p_value, :n, :lag, :is_new, :r_prev)
-        """,
+        """INSERT OR REPLACE INTO correlation_snapshots
+               (computed_at, window_days, metric_a, metric_b, r, p_value, q_value, n, lag, is_new, r_prev,
+                effect, effect_kind)
+           VALUES (:computed_at, :window_days, :metric_a, :metric_b, :r, :p_value, :q_value, :n, :lag,
+                   :is_new, :r_prev, :effect, :effect_kind)""",
         results,
     )
-
+    # Keep only the latest few snapshots per window (the hourly cron used to grow this forever).
     conn.execute(
-        """
-        INSERT INTO sync_log (source, data_type, run_at, status, records_synced)
-        VALUES ('insights', 'correlations', ?, 'ok', ?)
-        """,
+        """DELETE FROM correlation_snapshots WHERE window_days = ? AND computed_at NOT IN (
+               SELECT computed_at FROM correlation_snapshots WHERE window_days = ?
+               GROUP BY computed_at ORDER BY computed_at DESC LIMIT ?)""",
+        (window_days, window_days, KEEP_SNAPSHOTS),
+    )
+    conn.execute(
+        "INSERT INTO sync_log (source, data_type, run_at, status, records_synced) VALUES ('insights','correlations',?,'ok',?)",
         (computed_at, len(results)),
     )
     conn.commit()
     conn.close()
-
-    print(f"[correlations] wrote {len(results)} rows to correlation_snapshots")
+    print(f"[correlations] wrote {len(results)} rows")
     return len(results)
+
+
+def _stale(window_days: int, hours: float) -> bool:
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT MAX(computed_at) FROM correlation_snapshots WHERE window_days=?",
+                           (window_days,)).fetchone()
+    except Exception:
+        return True
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        return True
+    last = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
+    return (datetime.now(timezone.utc) - last).total_seconds() > hours * 3600
 
 
 if __name__ == "__main__":
@@ -622,8 +670,13 @@ if __name__ == "__main__":
     parser.add_argument("--window", type=int, default=90, help="Look-back window in days (default 90)")
     parser.add_argument("--both", action="store_true", help="Also run 180-day window")
     parser.add_argument("--dry-run", action="store_true", help="Print without writing")
+    parser.add_argument("--if-stale", type=float, default=None,
+                        help="Only run if the last snapshot is older than this many hours (hourly cron)")
     args = parser.parse_args()
 
-    run(window_days=args.window, dry_run=args.dry_run)
-    if args.both and not args.dry_run:
-        run(window_days=180, dry_run=False)
+    if args.if_stale is not None and not args.dry_run and not _stale(args.window, args.if_stale):
+        print("[correlations] fresh enough — skipping")
+    else:
+        run(window_days=args.window, dry_run=args.dry_run)
+        if args.both and not args.dry_run:
+            run(window_days=180, dry_run=False)
