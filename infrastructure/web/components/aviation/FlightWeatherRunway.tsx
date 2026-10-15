@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CloudSun, PlaneLanding } from "lucide-react";
 
@@ -14,6 +15,7 @@ type RunwayResp = {
   current: { runway: string; source: "manual" | "adsb" | "wind"; confidence: string;
              headwind_kt: number | null; crosswind_kt: number | null } | null;
   options: string[];
+  airport?: string | null;
 };
 
 const SOURCE: Record<string, string> = { manual: "set by you", adsb: "from ADS-B track", wind: "likely, from wind" };
@@ -40,6 +42,7 @@ function wind(m: Metar) {
 /** Landing runway (pick / correct it) + the METARs at takeoff and landing. */
 export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isSim?: boolean }) {
   const qc = useQueryClient();
+  const [typed, setTyped] = useState("");
   const { data: rw } = useQuery<RunwayResp>({
     queryKey: ["flight-runway", flightId],
     queryFn: () => fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/runway`).then((r) => r.json()),
@@ -62,8 +65,8 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
   const cur = rw?.current;
   return (
     <>
-      {(rw?.options.length ?? 0) > 0 && (
-        <Card title="Landing runway" icon={<PlaneLanding size={14} />}>
+      <Card title="Landing runway" icon={<PlaneLanding size={14} />}>
+        {(rw?.options?.length ?? 0) > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {rw!.options.map((r) => {
               const on = cur?.runway === r || (cur?.source === "wind" && cur.runway.split("/").includes(r));
@@ -77,18 +80,30 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
               );
             })}
           </div>
+        ) : (
+          // No runway list for this airport (unknown code or no data) — type it instead
+          <div className="flex gap-2">
+            <input value={typed} onChange={(e) => setTyped(e.target.value.toUpperCase())} placeholder="e.g. 24L"
+              maxLength={4}
+              className="w-24 bg-[#09090B] border border-[#27272A] rounded-lg px-3 py-1.5 text-sm font-mono text-[#FAFAFA] outline-none focus:border-[#52525B]" />
+            <button onClick={() => typed && pick(typed)} disabled={!typed}
+              className="px-3 py-1.5 rounded-lg text-xs bg-[#27272A] text-[#A1A1AA] disabled:opacity-40">Save</button>
+          </div>
+        )}
           <p className="text-[11px] text-[#71717A] mt-2">
             {cur ? <>RWY {cur.runway} · {SOURCE[cur.source] ?? cur.source}
               {cur.headwind_kt != null ? ` · ${cur.headwind_kt >= 0 ? "headwind" : "tailwind"} ${Math.abs(cur.headwind_kt)} kt` : ""}
               {cur.crosswind_kt != null ? ` · crosswind ${cur.crosswind_kt} kt` : ""}</>
               : "Not known yet. Tap the runway you landed on."}
-            {cur && cur.source !== "manual" ? " · tap to correct" : ""}
+            {cur && cur.source !== "manual" && (rw?.options?.length ?? 0) > 0 ? " · tap to correct" : ""}
+            {(rw?.options?.length ?? 0) === 0 && !cur ? ` No runway list for ${rw?.airport ?? "this airport"}.` : ""}
           </p>
         </Card>
-      )}
 
-      {metars.length > 0 && (
-        <Card title="Weather (METAR)" icon={<CloudSun size={14} />}>
+      <Card title="Weather (METAR)" icon={<CloudSun size={14} />}>
+        {metars.length === 0 ? (
+          <p className="text-xs text-[#71717A]">No METAR yet for this flight. They're fetched overnight for takeoff and landing.</p>
+        ) : (
           <div className="space-y-3">
             {metars.map((m) => (
               <div key={m.phase}>
@@ -109,8 +124,8 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
               </div>
             ))}
           </div>
-        </Card>
-      )}
+        )}
+      </Card>
     </>
   );
 }

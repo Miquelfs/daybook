@@ -53,10 +53,13 @@ class SyncTest(unittest.TestCase):
         c.row_factory = sqlite3.Row
         landed = datetime.now(timezone.utc) - timedelta(days=2)
         c.executescript("""CREATE TABLE flights(id, dep_icao, arr_icao, aircraft_reg, landing_utc, on_block_utc,
-                                                is_sim INTEGER DEFAULT 0);
+                                                is_sim INTEGER DEFAULT 0, dep_iata, arr_iata);
+                           CREATE TABLE airports(icao, iata);
+                           INSERT INTO airports VALUES ('LEPA','PMI');
                            CREATE TABLE flight_metars(flight_id, phase, wind_dir, wind_kt);""")
-        c.execute("INSERT INTO flights VALUES ('f1','EGKK','LEPA','EC-NJM',?,NULL,0)", (landed.isoformat(),))
-        c.execute("INSERT INTO flights VALUES ('old','EGKK','LEPA','EC-NJM','2024-01-01T12:00:00+00:00',NULL,0)")
+        c.execute("INSERT INTO flights VALUES ('f1','EGKK','LEPA','EC-NJM',?,NULL,0,'LGW','PMI')", (landed.isoformat(),))
+        # stored with IATA only (no ICAO) — must still get a runway via the airports table
+        c.execute("INSERT INTO flights VALUES ('old',NULL,NULL,'EC-NJM','2024-01-01T12:00:00+00:00',NULL,0,'LGW','PMI')")
         c.execute("INSERT INTO flight_metars VALUES ('f1','landing',60,12), ('old','landing',240,20)")
         csv_text = "airport_ident,le_ident,le_latitude_deg,le_longitude_deg,le_heading_degT,he_ident,he_latitude_deg,he_longitude_deg,he_heading_degT,length_ft,closed\n" + \
             "\n".join(f"LEPA,{a['ident']},{a['lat']},{a['lon']},{a['heading']},{b['ident']},{b['lat']},{b['lon']},{b['heading']},{a['length_ft']},0"

@@ -77,3 +77,22 @@ class RetimeCsvTest(unittest.TestCase):
         self.assertEqual((r["off_block_utc"][11:16], r["takeoff_utc"][11:16], r["landing_utc"][11:16], r["on_block_utc"][11:16]),
                          ("05:00", "05:12", "07:01", "07:08"))
         self.assertEqual(integrity.retime_csv_utc(c)["ids"], [])        # idempotent
+
+
+class IcaoFillTest(unittest.TestCase):
+    def test_iata_only_flights_get_icao(self):
+        c = sqlite3.connect(":memory:")
+        c.row_factory = sqlite3.Row
+        c.executescript("""
+            CREATE TABLE airports(icao, iata, latitude, longitude);
+            INSERT INTO airports VALUES ('LEPA','PMI',39.55,2.73), ('EGKK','LGW',51.15,-0.18);
+            CREATE TABLE flights(id, date, dep_icao, arr_icao, dep_iata, arr_iata, off_block_utc, on_block_utc,
+                                 takeoff_utc, landing_utc, block_seconds, airborne_seconds, night_seconds,
+                                 is_sim INTEGER DEFAULT 0);
+            INSERT INTO flights VALUES ('n1','2026-09-01',NULL,NULL,'PMI','LGW','2026-09-01T10:00:00+00:00',
+                                        '2026-09-01T12:20:00+00:00',NULL,NULL,8400,NULL,0,0);""")
+        self.assertEqual(len(integrity.check(c)["issues"]["icao_missing"]), 1)
+        self.assertEqual(integrity.repair(c)["icao_filled"], 2)
+        r = c.execute("SELECT dep_icao, arr_icao FROM flights").fetchone()
+        self.assertEqual(tuple(r), ("LEPA", "EGKK"))
+        self.assertFalse(integrity.check(c)["issues"].get("icao_missing"))

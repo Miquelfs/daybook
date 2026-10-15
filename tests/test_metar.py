@@ -37,9 +37,10 @@ class SyncTest(unittest.TestCase):
         c = sqlite3.connect(":memory:")
         c.row_factory = sqlite3.Row
         c.execute("""CREATE TABLE flights(id, date, dep_icao, arr_icao, takeoff_utc, landing_utc,
-                     off_block_utc, on_block_utc, is_sim INTEGER DEFAULT 0)""")
+                     off_block_utc, on_block_utc, is_sim INTEGER DEFAULT 0, dep_iata, arr_iata)""")
+        c.execute("CREATE TABLE airports(icao, iata)")
         today = datetime.now(timezone.utc).date().isoformat()
-        c.execute("INSERT INTO flights VALUES('f1',?,'LEPA','EGKK',?,?,NULL,NULL,0)",
+        c.execute("INSERT INTO flights VALUES('f1',?,'LEPA','EGKK',?,?,NULL,NULL,0,'PMI','LGW')",
                   (today, f"{today}T09:12:00+00:00", f"{today}T11:20:00+00:00"))
         d = today.replace("-", "")[6:8]
 

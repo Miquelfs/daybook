@@ -1638,12 +1638,13 @@ def flight_runway(flight_id: str, conn: DB):
     """Landing runway (manual / ADS-B / wind) + the arrival airport's runways for the picker."""
     from domains.aviation import runways as rw
     rw.ensure_tables(conn)
-    f = conn.execute("SELECT arr_icao FROM flights WHERE id=?", (flight_id,)).fetchone()
+    f = conn.execute("SELECT COALESCE(arr_icao, (SELECT icao FROM airports WHERE iata = flights.arr_iata LIMIT 1)) "
+                     "AS arr_icao FROM flights WHERE id=?", (flight_id,)).fetchone()
     if not f:
         raise HTTPException(status_code=404, detail="flight not found")
     cur = conn.execute("SELECT * FROM flight_runways WHERE flight_id=?", (flight_id,)).fetchone()
-    return {"current": dict(cur) if cur else None,
-            "options": sorted({e["ident"] for e in rw.runway_ends(conn, f["arr_icao"])})}
+    return {"current": dict(cur) if cur else None, "airport": f["arr_icao"],
+            "options": rw.runways_for(conn, f["arr_icao"]) if f["arr_icao"] else []}
 
 
 @router.put("/{flight_id}/runway")

@@ -71,7 +71,9 @@ def load_runways(conn, fetcher=None, force: bool = False, only: set[str] | None 
         if fresh and not force and fresh > (datetime.now(timezone.utc) - timedelta(days=180)).strftime("%Y-%m-%d"):
             return 0
     wanted = only or {r[0] for r in conn.execute(
-        "SELECT dep_icao FROM flights UNION SELECT arr_icao FROM flights") if r[0]}
+        """SELECT COALESCE(dep_icao, (SELECT icao FROM airports WHERE iata = flights.dep_iata LIMIT 1)) FROM flights
+           UNION SELECT COALESCE(arr_icao, (SELECT icao FROM airports WHERE iata = flights.arr_iata LIMIT 1)) FROM flights""")
+        if r[0]}
     text = (fetcher or _get)(RUNWAYS_CSV)
     n = 0
     for row in csv.DictReader(io.StringIO(text)):
@@ -229,15 +231,16 @@ def sync(conn: sqlite3.Connection, adsb_days: int = 29, fetcher=None, verbose: b
     stats = {"adsb": 0, "wind": 0, "no_track": 0, "errors": 0}
     has_metars = bool(conn.execute("SELECT 1 FROM sqlite_master WHERE name='flight_metars'").fetchone())
     rows = conn.execute(
-        f"""SELECT f.id, f.arr_icao, f.aircraft_reg, f.landing_utc, f.on_block_utc, fr.source AS have
+        f"""SELECT f.id, COALESCE(f.arr_icao, (SELECT icao FROM airports WHERE iata = f.arr_iata LIMIT 1)) AS arr_icao,
+                   f.aircraft_reg, f.landing_utc, f.on_block_utc, fr.source AS have
                    {", m.wind_dir, m.wind_kt" if has_metars else ", NULL AS wind_dir, NULL AS wind_kt"}
             FROM flights f
             LEFT JOIN flight_runways fr ON fr.flight_id = f.id
             {"LEFT JOIN flight_metars m ON m.flight_id = f.id AND m.phase = 'landing'" if has_metars else ""}
-            WHERE f.is_sim = 0 AND f.arr_icao IS NOT NULL""").fetchall()
+            WHERE f.is_sim = 0""").fetchall()
     cutoff = datetime.now(timezone.utc) - timedelta(days=adsb_days)
     for r in rows:
-        if r["have"] == "manual":
+        if r["have"] == "manual" or not r["arr_icao"]:
             continue
         ends = runway_ends(conn, r["arr_icao"])
         if not ends:
@@ -272,7 +275,8 @@ def sync(conn: sqlite3.Connection, adsb_days: int = 29, fetcher=None, verbose: b
 
 def set_manual(conn, flight_id: str, runway: str) -> dict:
     ensure_tables(conn)
-    f = conn.execute("SELECT arr_icao FROM flights WHERE id=?", (flight_id,)).fetchone()
+    f = conn.execute("SELECT COALESCE(arr_icao, (SELECT icao FROM airports WHERE iata = flights.arr_iata LIMIT 1)) "
+                     "AS arr_icao FROM flights WHERE id=?", (flight_id,)).fetchone()
     if not f:
         raise ValueError("flight not found")
     rw = runway.strip().upper()

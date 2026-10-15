@@ -86,6 +86,17 @@ def check(conn: sqlite3.Connection) -> dict:
             issues["airborne_gt_block"].append({**base, "airborne_s": r["airborne_seconds"]})
         if block and not (MIN_BLOCK_S <= block <= MAX_BLOCK_S):
             issues["absurd_block"].append(base)
+    # Flights stored with IATA codes only: METARs, runways and night time all key off ICAO.
+    try:
+        for r in conn.execute(
+            """SELECT f.id, f.date, f.dep_iata, f.arr_iata, f.dep_icao, f.arr_icao, f.block_seconds, f.night_seconds
+               FROM flights f WHERE f.is_sim = 0
+                 AND ((f.dep_icao IS NULL AND f.dep_iata IS NOT NULL) OR (f.arr_icao IS NULL AND f.arr_iata IS NOT NULL))"""):
+            issues.setdefault("icao_missing", []).append(
+                {"id": r["id"], "date": r["date"], "route": f"{r['dep_icao'] or r['dep_iata']}→{r['arr_icao'] or r['arr_iata']}",
+                 "block_s": r["block_seconds"] or 0, "night_s": r["night_seconds"] or 0})
+    except sqlite3.OperationalError:
+        pass
     return {"flights_checked": len(rows),
             "issues": {k: v for k, v in issues.items()},
             "total": sum(len(v) for v in issues.values())}
@@ -94,7 +105,16 @@ def check(conn: sqlite3.Connection) -> dict:
 def repair(conn: sqlite3.Connection, dry_run: bool = False) -> dict:
     from domains.aviation.compute import night_seconds as compute_night
 
-    fixed = {"rollover": 0, "block_filled": 0, "night_recomputed": 0}
+    fixed = {"rollover": 0, "block_filled": 0, "night_recomputed": 0, "icao_filled": 0}
+    try:
+        for col in ("dep", "arr"):
+            cur = conn.execute(
+                f"""UPDATE flights SET {col}_icao = (SELECT a.icao FROM airports a WHERE a.iata = flights.{col}_iata LIMIT 1)
+                    WHERE {col}_icao IS NULL AND {col}_iata IS NOT NULL
+                      AND EXISTS (SELECT 1 FROM airports a WHERE a.iata = flights.{col}_iata)""") if not dry_run else None
+            fixed["icao_filled"] += cur.rowcount if cur is not None else 0
+    except sqlite3.OperationalError:
+        pass
     for r in _rows(conn):
         off, on = _dt(r["off_block_utc"]), _dt(r["on_block_utc"])
         block = r["block_seconds"] or 0

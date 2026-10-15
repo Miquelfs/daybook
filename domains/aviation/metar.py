@@ -177,7 +177,10 @@ def ensure_table(conn) -> None:
 def _events(conn, since: str) -> list[tuple[str, str, str, datetime]]:
     """(flight_id, phase, station, event_utc) still lacking a METAR lookup."""
     rows = conn.execute(
-        """SELECT f.id, f.dep_icao, f.arr_icao, f.takeoff_utc, f.landing_utc, f.off_block_utc, f.on_block_utc
+        """SELECT f.id,
+                  COALESCE(f.dep_icao, (SELECT icao FROM airports WHERE iata = f.dep_iata LIMIT 1)) AS dep_icao,
+                  COALESCE(f.arr_icao, (SELECT icao FROM airports WHERE iata = f.arr_iata LIMIT 1)) AS arr_icao,
+                  f.takeoff_utc, f.landing_utc, f.off_block_utc, f.on_block_utc
            FROM flights f WHERE f.is_sim = 0 AND f.date >= ?""", (since,)).fetchall()
     done = {(r[0], r[1]) for r in conn.execute("SELECT flight_id, phase FROM flight_metars")}
     ev = []
