@@ -137,6 +137,85 @@ def repair(conn: sqlite3.Connection, dry_run: bool = False) -> dict:
     return fixed
 
 
+def retime_csv_utc(conn: sqlite3.Connection, dry_run: bool = False) -> dict:
+    """
+    Re-derive times for flights from the full-CSV import, whose HH:MM columns are
+    UTC but were stored as if local. Re-parsed from raw_payload; a flight is only
+    updated when the new off→on span matches its block duration (≤ 10 min) and the
+    old one didn't — so it can never make a flight worse. Returns ids + date range.
+    """
+    import json
+
+    def at(date_s, hhmm):
+        if not hhmm or ":" not in hhmm:
+            return None
+        try:
+            h, m = hhmm.strip().split(":")[:2]
+            d = datetime.fromisoformat(date_s)
+            return datetime(d.year, d.month, d.day, int(h), int(m), tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    changed, dates = [], []
+    rows = conn.execute(
+        "SELECT id, date, raw_payload, block_seconds, off_block_utc, on_block_utc FROM flights "
+        "WHERE source='full_csv' AND is_sim=0").fetchall()
+    for r in rows:
+        try:
+            raw = json.loads(r["raw_payload"] or "{}")
+        except ValueError:
+            continue
+        seq = [at(r["date"], raw.get(k)) for k in ("Off Block", "Airborne", "Landed", "On Block")]
+        latest = None
+        for i, t in enumerate(seq):                 # roll midnight crossings forward
+            if t is not None:
+                while latest is not None and t < latest:
+                    t += timedelta(days=1)
+                seq[i] = latest = t
+        off, tko, ldg, on = seq
+        block = r["block_seconds"] or 0
+        if not (off and on and block):
+            continue
+        new_ok = abs((on - off).total_seconds() - block) <= TOLERANCE_S
+        o_off, o_on = _dt(r["off_block_utc"]), _dt(r["on_block_utc"])
+        old_ok = bool(o_off and o_on and abs((o_on - o_off).total_seconds() - block) <= TOLERANCE_S)
+        if not new_ok or (old_ok and o_off == off):
+            continue
+        changed.append(r["id"])
+        dates.append(r["date"])
+        if not dry_run:
+            conn.execute(
+                "UPDATE flights SET off_block_utc=?, takeoff_utc=?, landing_utc=?, on_block_utc=? WHERE id=?",
+                (off.isoformat(), tko.isoformat() if tko else None, ldg.isoformat() if ldg else None,
+                 on.isoformat(), r["id"]))
+    if not dry_run:
+        conn.commit()
+    return {"ids": changed, "start": min(dates) if dates else None, "end": max(dates) if dates else None}
+
+
+def refresh_dependents(conn: sqlite3.Connection, ids: list[str], start: str, end: str) -> dict:
+    """After times change: night time + day/night T/O·LDG, stress windows, METARs, wind runways."""
+    out = {}
+    from domains.aviation import backfill_night_seconds
+    backfill_night_seconds.run(start, end, recompute_counts=True)        # night + counts from corrected times
+    out["night_repair"] = repair(conn)                                    # then cap night over block span
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    marks = ",".join("?" * len(ids))
+    if "flight_metars" in tables:
+        out["metars_cleared"] = conn.execute(f"DELETE FROM flight_metars WHERE flight_id IN ({marks})", ids).rowcount
+    if "flight_runways" in tables:
+        out["wind_runways_cleared"] = conn.execute(
+            f"DELETE FROM flight_runways WHERE source='wind' AND flight_id IN ({marks})", ids).rowcount
+    conn.commit()
+    try:
+        from domains.health.flight_physio import compute_flight_physio
+        days = sorted({r[0] for r in conn.execute(f"SELECT date FROM flights WHERE id IN ({marks})", ids)})
+        out["physio_days"] = sum(1 for d in days if compute_flight_physio(conn, d))
+    except Exception as e:      # wellness data may not exist that far back — fine
+        out["physio_error"] = str(e)[:120]
+    return out
+
+
 def _fmt(s):
     s = int(s or 0)
     return f"{s // 3600}:{(s % 3600) // 60:02d}"
@@ -147,10 +226,17 @@ def main() -> None:
 
     p = argparse.ArgumentParser(description="Logbook integrity check / repair")
     p.add_argument("--fix", action="store_true")
-    p.add_argument("--dry-run", action="store_true", help="with --fix: show counts, write nothing")
+    p.add_argument("--dry-run", action="store_true", help="with --fix/--retime-csv: show counts, write nothing")
+    p.add_argument("--retime-csv", action="store_true",
+                   help="re-derive full-CSV flight times as UTC, then refresh night/counts/physio/METARs/runways")
     args = p.parse_args()
     conn = get_connection()
     try:
+        if args.retime_csv:
+            rt = retime_csv_utc(conn, dry_run=args.dry_run)
+            print(f"retime: {len(rt['ids'])} flights ({rt['start']} … {rt['end']})")
+            if rt["ids"] and not args.dry_run:
+                print("refresh:", refresh_dependents(conn, rt["ids"], rt["start"], rt["end"]))
         if args.fix:
             print("repair:", repair(conn, dry_run=args.dry_run))
         rep = check(conn)

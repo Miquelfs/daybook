@@ -52,3 +52,28 @@ class IntegrityTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetimeCsvTest(unittest.TestCase):
+    """Ryanair CSV times are UTC but were stored as local → span off by the tz difference."""
+
+    def test_retime_fixes_shifted_flights_only(self):
+        import json
+        c = sqlite3.connect(":memory:")
+        c.row_factory = sqlite3.Row
+        c.execute("""CREATE TABLE flights(id, date, source, raw_payload, block_seconds, off_block_utc, on_block_utc,
+                                          takeoff_utc, landing_utc, is_sim INTEGER DEFAULT 0)""")
+        raw = json.dumps({"Off Block": "05:00", "Airborne": "05:12", "Landed": "07:01", "On Block": "07:08"})
+        # stored as if Bergamo (UTC+2) / Bucharest (UTC+3) local → 03:00Z → 04:08Z, span 1:08 vs block 2:08
+        c.execute("INSERT INTO flights VALUES ('bad','2024-05-22','full_csv',?,7680,"
+                  "'2024-05-22T03:00:00+00:00','2024-05-22T04:08:00+00:00','2024-05-22T03:12:00+00:00','2024-05-22T04:01:00+00:00',0)", (raw,))
+        # late flight crossing midnight UTC, already correct → untouched
+        raw2 = json.dumps({"Off Block": "23:20", "Airborne": "23:35", "Landed": "01:30", "On Block": "01:40"})
+        c.execute("INSERT INTO flights VALUES ('ok','2024-05-23','full_csv',?,8400,"
+                  "'2024-05-23T23:20:00+00:00','2024-05-24T01:40:00+00:00',NULL,NULL,0)", (raw2,))
+        res = integrity.retime_csv_utc(c)
+        self.assertEqual(res["ids"], ["bad"])
+        r = c.execute("SELECT * FROM flights WHERE id='bad'").fetchone()
+        self.assertEqual((r["off_block_utc"][11:16], r["takeoff_utc"][11:16], r["landing_utc"][11:16], r["on_block_utc"][11:16]),
+                         ("05:00", "05:12", "07:01", "07:08"))
+        self.assertEqual(integrity.retime_csv_utc(c)["ids"], [])        # idempotent

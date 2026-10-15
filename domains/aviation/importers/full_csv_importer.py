@@ -206,12 +206,13 @@ def _parse_row(row: dict, date_iso: str, fleet: dict[str, str], captain_index: d
     flight_number = (row.get("FlightNumber") or "").strip() or None
     aircraft_reg = (row.get("Registration") or "").strip() or None
 
-    off_block_utc = _local_to_utc(date_iso, row.get("Off Block"), dep_tz)
-    on_block_utc = _local_to_utc(date_iso, row.get("On Block"), arr_tz)
-    # Airborne = actual takeoff time (HH:MM local dep)
-    takeoff_utc = _local_to_utc(date_iso, row.get("Airborne"), dep_tz)
-    # Landed = actual landing time (HH:MM local arr)
-    landing_utc = _local_to_utc(date_iso, row.get("Landed"), arr_tz)
+    # The CSV's Off Block / Airborne / Landed / On Block are already UTC. They used
+    # to be converted as if local, shifting every flight by its airports' UTC
+    # offsets (span ≠ Total Block by exactly the tz difference). Treat as UTC.
+    off_block_utc = _local_to_utc(date_iso, row.get("Off Block"), "UTC")
+    on_block_utc = _local_to_utc(date_iso, row.get("On Block"), "UTC")
+    takeoff_utc = _local_to_utc(date_iso, row.get("Airborne"), "UTC")
+    landing_utc = _local_to_utc(date_iso, row.get("Landed"), "UTC")
 
     # All times come from the same calendar date, so a flight crossing midnight
     # UTC ends up with landing/on-block *before* takeoff. Roll each event
