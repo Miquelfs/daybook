@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { api, type LifeEventType, type LifeEvent } from "@/lib/api";
+import { useVisualViewport, sheetViewportStyle } from "@/lib/useVisualViewport";
 
 const EVENT_TYPES: { value: LifeEventType; label: string; emoji: string }[] = [
   { value: "career",       label: "Career",       emoji: "💼" },
@@ -29,6 +30,14 @@ export function AddEventSheet({ isOpen, onClose, editing, prefillDate }: Props) 
   const [type, setType]         = useState<LifeEventType>("achievement");
   const [eventDate, setEventDate] = useState("");
   const [notes, setNotes]       = useState("");
+  const vv = useVisualViewport(isOpen);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -72,7 +81,10 @@ export function AddEventSheet({ isOpen, onClose, editing, prefillDate }: Props) 
     <>
       <div className="fixed inset-0 bg-black/60 z-40" onClick={onClose} />
 
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#09090B] border-t border-[#27272A] rounded-t-2xl max-h-[85vh] overflow-y-auto">
+      <div
+        className="fixed left-0 right-0 z-50 bg-[#09090B] border-t border-[#27272A] rounded-t-2xl overflow-y-auto overflow-x-hidden overscroll-contain"
+        style={sheetViewportStyle(vv, "85vh")}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-[#18181B]">
           <h2 className="text-base font-semibold text-[#FAFAFA]">

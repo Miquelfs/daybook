@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X, Check, Loader } from "lucide-react";
 import { moneyApi, type MoneyMeta, type MerchantSuggestion } from "@/lib/money-api";
 import { CATEGORY_EMOJI, accountBadgeClass } from "./CategoryPills";
+import { useVisualViewport, sheetViewportStyle } from "@/lib/useVisualViewport";
 
 const INCOME_CATS = new Set(["Income", "OMYRA", "Finance"]);
 
@@ -152,12 +153,8 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
       <div
         ref={sheetRef}
         onFocus={revealFocused}
-        className="fixed left-0 right-0 z-50 bg-[#09090B] border-t border-[#27272A] rounded-t-2xl overflow-y-auto overscroll-contain"
-        style={
-          vv
-            ? { top: "auto", bottom: vv.bottomInset, maxHeight: vv.height * 0.96 }
-            : { bottom: 0, maxHeight: "92vh" }
-        }
+        className="fixed left-0 right-0 z-50 bg-[#09090B] border-t border-[#27272A] rounded-t-2xl overflow-y-auto overflow-x-hidden overscroll-contain"
+        style={sheetViewportStyle(vv, "92vh")}
       >
         {/* Header */}
         <div className="sticky top-0 z-10 bg-[#09090B] flex items-center justify-between px-6 pt-5 pb-4 border-b border-[#18181B]">
@@ -194,7 +191,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
                 +
               </button>
             </div>
-            <div className="flex items-center gap-1 flex-1 bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-3">
+            <div className="flex items-center gap-1 flex-1 min-w-0 bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-3">
               <span className="text-2xl font-light text-[#71717A]">€</span>
               <input
                 ref={amountRef}
@@ -204,7 +201,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
                 onChange={(e) => setAmount(e.target.value.replace(",", "."))}
                 onKeyDown={(e) => e.key === "Enter" && canSave && save()}
                 placeholder="0.00"
-                className="flex-1 bg-transparent text-2xl font-semibold text-[#FAFAFA] outline-none placeholder:text-[#3F3F46]"
+                className="flex-1 min-w-0 w-full bg-transparent text-2xl font-semibold text-[#FAFAFA] outline-none placeholder:text-[#3F3F46]"
               />
             </div>
           </div>
@@ -384,31 +381,4 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
       </div>
     </>
   );
-}
-
-/**
- * Visible-viewport geometry while the sheet is open. On iOS the on-screen
- * keyboard shrinks window.visualViewport but not the layout viewport, so a
- * `bottom: 0` sheet ends up hidden behind the keyboard and Safari scrolls the
- * page to compensate — pushing the amount field off the top. bottomInset is
- * how much of the layout viewport the keyboard covers.
- */
-function useVisualViewport(active: boolean) {
-  const [state, setState] = useState<{ height: number; bottomInset: number } | null>(null);
-  useEffect(() => {
-    const v = typeof window !== "undefined" ? window.visualViewport : null;
-    if (!active || !v) return;
-    const update = () => {
-      const bottomInset = Math.max(0, window.innerHeight - (v.height + v.offsetTop));
-      setState({ height: v.height, bottomInset });
-    };
-    update();
-    v.addEventListener("resize", update);
-    v.addEventListener("scroll", update);
-    return () => {
-      v.removeEventListener("resize", update);
-      v.removeEventListener("scroll", update);
-    };
-  }, [active]);
-  return active ? state : null;
 }

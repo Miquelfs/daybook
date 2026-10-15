@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { X, Plus, UtensilsCrossed, BookOpen, Apple, Plane, Wallet, Sparkles, Pencil, Trash2 } from "lucide-react";
 import { api, type RestaurantIn, type Contact } from "@/lib/api";
@@ -15,6 +15,7 @@ import { ContactsPicker } from "@/components/ContactsPicker";
 import { AddExpenseSheet } from "@/components/money/AddExpenseSheet";
 import { AddEventSheet } from "@/components/life/AddEventSheet";
 import { CUISINE_EMOJI, CUISINE_LIST } from "@/lib/cuisines";
+import { useVisualViewport, sheetViewportStyle } from "@/lib/useVisualViewport";
 
 type Mode = "food" | "restaurant" | "book" | "flight";
 
@@ -195,6 +196,22 @@ export function DayAddFAB({ date }: { date: string }) {
   const { data: todaysFood = [] } = useQuery({
     queryKey: ["day-food-entries", date], queryFn: () => foodApi.listEntries({ date }), enabled: open,
   });
+  const vv = useVisualViewport(open);
+  const sheetStyle = sheetViewportStyle(vv, "90vh");
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
+  // Keep the focused field visible inside the (keyboard-sized) sheet.
+  function revealFocused(e: React.FocusEvent<HTMLDivElement>) {
+    const el = e.target as HTMLElement;
+    if (!["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
+    setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+  }
 
   function close() {
     setOpen(false);
@@ -238,8 +255,10 @@ export function DayAddFAB({ date }: { date: string }) {
       {open && (
         <>
           <div className="fixed inset-0 bg-black/60 z-40" onClick={close} />
-          <div className="fixed bottom-0 left-0 right-0 z-50 max-w-lg mx-auto">
-            <div className="bg-[#111113] rounded-t-2xl border border-[#27272A] border-b-0 px-5 pb-8 pt-4 max-h-[90vh] overflow-y-auto">
+          {/* Pinned to the visible viewport so the iOS keyboard never covers the form. */}
+          <div className="fixed left-0 right-0 z-50 max-w-lg mx-auto" style={{ top: sheetStyle.top, bottom: sheetStyle.bottom }}>
+            <div onFocus={revealFocused} style={{ maxHeight: sheetStyle.maxHeight }}
+              className="bg-[#111113] rounded-t-2xl border border-[#27272A] border-b-0 px-5 pb-8 pt-4 overflow-y-auto overflow-x-hidden overscroll-contain">
               {/* Handle */}
               <div className="flex justify-center mb-4">
                 <div className="w-10 h-1 rounded-full bg-[#3F3F46]" />

@@ -251,3 +251,19 @@ html[data-theme="light"] svg text[fill="#EF4444"] { fill: #B42318; }
   white-space: nowrap;
 }
 .leaflet-tooltip.db-place-label::before { display: none; }
+
+/* ─── Form controls on phones ────────────────────────────────────────────────
+   Inputs default to min-width:auto (their ~20-char intrinsic width), so in a
+   flex row or grid cell they overflow narrow screens and the sheet scrolls
+   sideways when iOS chases the caret. Layered as base so min-w-* still wins. */
+@layer base {
+  input, select, textarea { min-width: 0; }
+}
+
+/* iOS Safari zooms the page on focus when a field's font is under 16px, which
+   shifts the layout sideways. On touch screens, small-text fields get 16px. */
+@media (pointer: coarse) {
+  :is(input, select, textarea):is(.text-xs, .text-sm, .text-\[10px\], .text-\[11px\], .text-\[12px\], .text-\[13px\], .text-\[14px\], .text-\[15px\]) {
+    font-size: 16px;
+  }
+}
