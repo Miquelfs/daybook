@@ -1375,7 +1375,7 @@ def get_flight(flight_id: str, conn: DB):
 
 @router.post("", response_model=FlightSummary, status_code=201)
 def create_flight(flight: FlightIn, conn: DB):
-    from domains.aviation.compute import great_circle_nm, night_seconds as compute_night_seconds
+    from domains.aviation.compute import great_circle_nm, night_seconds as compute_night_seconds, iso_utc_times
 
     dep_icao = (flight.dep_icao or "").upper() or None
     arr_icao = (flight.arr_icao or "").upper() or None
@@ -1497,10 +1497,11 @@ def create_flight(flight: FlightIn, conn: DB):
         "arr_icao": arr_icao,
         "dep_iata": dep_iata,
         "arr_iata": arr_iata or (arr_row["iata"] if arr_row else None),
-        "off_block_utc": flight.off_block_utc,
-        "on_block_utc": flight.on_block_utc,
-        "takeoff_utc": flight.takeoff_utc,
-        "landing_utc": flight.landing_utc,
+        # Full ISO UTC (date + rollover past midnight), not the form's bare "HH:MM" —
+        # METARs, runways, night time and the logbook checks all need real timestamps.
+        **dict(zip(("off_block_utc", "takeoff_utc", "landing_utc", "on_block_utc"),
+                   iso_utc_times(flight.date, flight.off_block_utc, flight.takeoff_utc,
+                                 flight.landing_utc, flight.on_block_utc, block_s or None))),
         "block_seconds": block_s_explicit,
         "airborne_seconds": airborne_s_explicit,
         "flight_number": flight.flight_number,

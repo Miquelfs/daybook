@@ -86,6 +86,17 @@ def check(conn: sqlite3.Connection) -> dict:
             issues["airborne_gt_block"].append({**base, "airborne_s": r["airborne_seconds"]})
         if block and not (MIN_BLOCK_S <= block <= MAX_BLOCK_S):
             issues["absurd_block"].append(base)
+    # Times stored as bare "HH:MM" (manual entry): invisible to METARs, runways, night time, these checks
+    try:
+        for r in conn.execute(
+            """SELECT id, date, dep_icao, arr_icao, block_seconds, night_seconds FROM flights WHERE is_sim = 0 AND (
+                 (off_block_utc IS NOT NULL AND length(off_block_utc) <= 5) OR (on_block_utc IS NOT NULL AND length(on_block_utc) <= 5)
+              OR (takeoff_utc IS NOT NULL AND length(takeoff_utc) <= 5) OR (landing_utc IS NOT NULL AND length(landing_utc) <= 5))"""):
+            issues.setdefault("bare_times", []).append(
+                {"id": r["id"], "date": r["date"], "route": f"{r['dep_icao'] or '?'}→{r['arr_icao'] or '?'}",
+                 "block_s": r["block_seconds"] or 0, "night_s": r["night_seconds"] or 0})
+    except sqlite3.OperationalError:
+        pass
     # Flights stored with IATA codes only: METARs, runways and night time all key off ICAO.
     try:
         for r in conn.execute(
@@ -115,6 +126,20 @@ def repair(conn: sqlite3.Connection, dry_run: bool = False) -> dict:
             fixed["icao_filled"] += cur.rowcount if cur is not None else 0
     except sqlite3.OperationalError:
         pass
+    # Bare "HH:MM" times → ISO UTC on the flight date (with midnight rollover) first,
+    # so everything below (and METARs / runways) can use them.
+    from domains.aviation.compute import iso_utc_times
+    fixed["times_iso"] = 0
+    for r in conn.execute(
+        """SELECT id, date, off_block_utc, takeoff_utc, landing_utc, on_block_utc, block_seconds FROM flights
+           WHERE (off_block_utc IS NOT NULL AND length(off_block_utc) <= 5) OR (on_block_utc IS NOT NULL AND length(on_block_utc) <= 5)
+              OR (takeoff_utc IS NOT NULL AND length(takeoff_utc) <= 5) OR (landing_utc IS NOT NULL AND length(landing_utc) <= 5)""").fetchall():
+        iso = iso_utc_times(r["date"], r["off_block_utc"], r["takeoff_utc"], r["landing_utc"], r["on_block_utc"],
+                            r["block_seconds"])
+        if not dry_run:
+            conn.execute("UPDATE flights SET off_block_utc=?, takeoff_utc=?, landing_utc=?, on_block_utc=? WHERE id=?",
+                         (*iso, r["id"]))
+        fixed["times_iso"] += 1
     for r in _rows(conn):
         off, on = _dt(r["off_block_utc"]), _dt(r["on_block_utc"])
         block = r["block_seconds"] or 0

@@ -94,7 +94,7 @@ class FlightIn(BaseModel):
     takeoffs_night: int = 0
     landings_day: int = 0
     landings_night: int = 0
-    night_seconds: int = 0
+    night_seconds: int | None = None   # None → computed from times + airports (was 0 → never computed)
     notes: str | None = None
     remarks: str | None = None
     pax_total: int | None = None

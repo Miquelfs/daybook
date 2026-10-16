@@ -164,3 +164,41 @@ def block_night_seconds(dep_lat: float, dep_lon: float, off_utc: datetime, block
         return 0
     return min(night_seconds(dep_lat, dep_lon, off_utc, off_utc + timedelta(seconds=block_s),
                              arr_lat, arr_lon), int(block_s))
+
+
+def iso_utc_times(date_str: str, off: str | None, takeoff: str | None, landing: str | None,
+                  on: str | None, block_s: int | None = None) -> tuple:
+    """
+    Bare 'HH:MM' times (manual entry) → ISO UTC timestamps on the flight date, in
+    chronological order (off-block → takeoff → landing → on-block): any event
+    earlier than the previous one is rolled to the next day. Values that are
+    already ISO are kept. When block duration is known it settles an on-block
+    that would otherwise be a day off.
+    """
+    def one(v):
+        if not v:
+            return None
+        v = v.strip()
+        if len(v) > 5 and "T" in v:
+            try:
+                d = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+            except ValueError:
+                return None
+        try:
+            h, m = v.split(":")[:2]
+            d = datetime.fromisoformat(date_str)
+            return datetime(d.year, d.month, d.day, int(h), int(m), tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            return None
+
+    seq = [one(x) for x in (off, takeoff, landing, on)]
+    latest = None
+    for i, t in enumerate(seq):
+        if t is not None:
+            while latest is not None and t < latest:
+                t += timedelta(days=1)
+            seq[i] = latest = t
+    if block_s and seq[0] and seq[3]:
+        seq[3] = fix_on_block_rollover(seq[0], seq[3], block_s)
+    return tuple(t.isoformat() if t else None for t in seq)

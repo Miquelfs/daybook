@@ -17,8 +17,9 @@ const LABEL: Record<string, string> = {
   airborne_gt_block: "Airborne time longer than block",
   absurd_block: "Implausible block time",
   icao_missing: "Airport stored without ICAO code (no METAR / runway)",
+  bare_times: "Times saved without a date (no night time, METAR or runway)",
 };
-const FIXABLE = new Set(["night_gt_block", "rollover", "block_missing", "icao_missing"]);
+const FIXABLE = new Set(["night_gt_block", "rollover", "block_missing", "icao_missing", "bare_times"]);
 const hhmm = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}`;
 
 /** Shown only when the logbook has impossible / inconsistent times. */
@@ -37,7 +38,7 @@ export function LogbookChecks() {
     try {
       const r = await fetch(`${BASE}/flights/checks/integrity/fix`, { method: "POST" }).then((x) => x.json());
       const f = r.fixed ?? {};
-      setDone(`Fixed ${f.rollover ?? 0} wrong dates, filled ${f.icao_filled ?? 0} airport codes and ${f.block_filled ?? 0} block times, recomputed night on ${f.night_recomputed ?? 0} flights.`);
+      setDone(`Fixed ${f.rollover ?? 0} wrong dates, dated ${f.times_iso ?? 0} manual entries, filled ${f.icao_filled ?? 0} airport codes and ${f.block_filled ?? 0} block times, recomputed night on ${f.night_recomputed ?? 0} flights.`);
       await refetch();
       for (const k of ["flightAnalytics", "flightStats", "flights", "flightRoutes"]) qc.invalidateQueries({ queryKey: [k] });
     } finally { setFixing(false); }

@@ -96,3 +96,29 @@ class IcaoFillTest(unittest.TestCase):
         r = c.execute("SELECT dep_icao, arr_icao FROM flights").fetchone()
         self.assertEqual(tuple(r), ("LEPA", "EGKK"))
         self.assertFalse(integrity.check(c)["issues"].get("icao_missing"))
+
+
+class BareTimesTest(unittest.TestCase):
+    """Manual entries stored 'HH:MM' — invisible to METARs, runways and night time."""
+
+    def test_iso_helper_rolls_midnight(self):
+        from domains.aviation.compute import iso_utc_times
+        off, tko, ldg, on = iso_utc_times("2026-10-08", "22:50", None, None, "01:05", 8100)
+        self.assertEqual((off, on), ("2026-10-08T22:50:00+00:00", "2026-10-09T01:05:00+00:00"))
+        self.assertEqual(iso_utc_times("2026-10-08", "2026-10-08T14:23:00+00:00", None, None, None)[0],
+                         "2026-10-08T14:23:00+00:00")
+
+    def test_repair_dates_manual_times_and_computes_night(self):
+        c = db()
+        c.execute("""INSERT INTO flights VALUES ('m1','2026-10-08','EGKK','LEPA','18:26','21:39',NULL,NULL,
+                     11580,NULL,0,0)""")
+        self.assertEqual(len(integrity.check(c)["issues"]["bare_times"]), 1)
+        fixed = integrity.repair(c)
+        self.assertEqual(fixed["times_iso"], 1)
+        r = c.execute("SELECT off_block_utc, on_block_utc, night_seconds FROM flights WHERE id='m1'").fetchone()
+        self.assertEqual((r["off_block_utc"], r["on_block_utc"]),
+                         ("2026-10-08T18:26:00+00:00", "2026-10-08T21:39:00+00:00"))
+        from domains.aviation.compute import _ASTRAL_AVAILABLE
+        if _ASTRAL_AVAILABLE:
+            self.assertGreater(r["night_seconds"], 10000)          # October evening: nearly all night
+        self.assertFalse(integrity.check(c)["issues"].get("bare_times"))
