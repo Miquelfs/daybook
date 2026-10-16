@@ -8,7 +8,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -1538,6 +1538,11 @@ def create_flight(flight: FlightIn, conn: DB):
     conn.commit()
 
     row = conn.execute("SELECT * FROM flights WHERE id = ?", (flight_id,)).fetchone()
+    try:   # a loadsheet/FMC import saved earlier for this flight attaches now
+        from domains.aviation.flight_import import link_pending
+        link_pending(conn)
+    except Exception:
+        pass
     return _row_to_summary(row)
 
 
@@ -1674,3 +1679,61 @@ def runway_summary(conn: DB):
            FROM flight_runways fr JOIN flights f ON f.id = fr.flight_id
            GROUP BY f.arr_icao, fr.runway ORDER BY f.arr_icao, n DESC""").fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Import: loadsheet messages / FMC photos ─────────────────────────────────
+
+@router.post("/import/parse")
+async def import_parse(conn: DB, text: str | None = Form(None), file: UploadFile | None = File(None)):
+    """Paste a loadsheet / crew message or upload an FMC photo → parsed fields, stored as an
+    import, matched to a logged flight when there is one (no flight changes until /apply)."""
+    from domains.aviation import flight_import as fi
+    from infrastructure.api.image_utils import process_image_to_jpeg
+    image = None
+    if file is not None:
+        raw = await file.read()
+        if raw:
+            try:
+                image = process_image_to_jpeg(raw)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+    if not (text and text.strip()) and image is None:
+        raise HTTPException(status_code=422, detail="Paste the message or add a photo")
+    parsed = fi.parse(text, image)
+    if not parsed:
+        raise HTTPException(status_code=422, detail="Couldn't read flight data from that")
+    ls_id = fi.save(conn, parsed, text)
+    m = fi.match_flight(conn, parsed)
+
+    def icao(iata):
+        if not iata:
+            return None
+        r = conn.execute("SELECT icao FROM airports WHERE iata=? LIMIT 1", (iata,)).fetchone()
+        return r["icao"] if r else None
+    return {
+        "loadsheet_id": ls_id, "parsed": parsed,
+        "dep_icao": parsed.get("dep_icao") or icao(parsed.get("dep_iata")),
+        "arr_icao": parsed.get("arr_icao") or icao(parsed.get("arr_iata")),
+        "match": {"id": m["id"], "date": m["date"], "flight_number": m["flight_number"],
+                  "route": f"{m['dep_iata'] or m['dep_icao']}→{m['arr_iata'] or m['arr_icao']}"} if m else None,
+    }
+
+
+class ImportApply(BaseModel):
+    flight_id: str
+
+
+@router.post("/import/{loadsheet_id}/apply")
+def import_apply(loadsheet_id: int, body: ImportApply, conn: DB):
+    """Fill the flight's EMPTY fields from an import (never overwrites)."""
+    from domains.aviation import flight_import as fi
+    try:
+        return fi.apply(conn, loadsheet_id, body.flight_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{flight_id}/loadsheets")
+def flight_loadsheets(flight_id: str, conn: DB):
+    from domains.aviation import flight_import as fi
+    return fi.for_flight(conn, flight_id)

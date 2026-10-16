@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X, Loader, PlaneTakeoff, PlaneLanding, ChevronDown, ChevronRight, Moon } from "lucide-react";
 import { api, type FlightIn, type AirportInfo } from "@/lib/api";
+import { useVisualViewport, sheetViewportStyle } from "@/lib/useVisualViewport";
+import { FlightImportBox, type ImportedFlight } from "@/components/aviation/FlightImportBox";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -118,6 +120,14 @@ function formatPicDisplay(raw: string): string {
 }
 
 export function AddFlightSheet({ date, isOpen, onClose }: Props) {
+  // Keyboard-aware: the sheet sits above the iOS keyboard instead of being pushed off-screen.
+  const vv = useVisualViewport(isOpen);
+  useEffect(() => {
+    if (!isOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [isOpen]);
   const qc = useQueryClient();
 
   const [flightDate, setFlightDate] = useState(date);
@@ -153,6 +163,7 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
   const [ldgNight, setLdgNight] = useState(0);
   const [notes, setNotes] = useState("");
   const [landingRunway, setLandingRunway] = useState("");
+  const [importId, setImportId] = useState<number | null>(null);
   const [opDataOpen, setOpDataOpen] = useState(false);
 
   // Operational data
@@ -184,7 +195,7 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
   useEffect(() => {
     if (isOpen) {
       setFlightDate(date);
-      setDepIcao(""); setArrIcao(""); setLandingRunway("");
+      setDepIcao(""); setArrIcao(""); setLandingRunway(""); setImportId(null);
       setFlightNumber(""); setReg("");
       setOperatorPreset("Norwegian"); setOperatorCustom("");
       setRole("first_officer"); setPicName("");
@@ -306,6 +317,13 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
             body: JSON.stringify({ runway: landingRunway }),
           }).catch(() => {});
         }
+        // Link the imported loadsheet / FMC figures (holds, bags, zones…) to the new flight
+        if (importId && created?.id) {
+          await fetch(`${API_BASE}/flights/import/${importId}/apply`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ flight_id: created.id }),
+          }).catch(() => {});
+        }
         return created;
       });
     },
@@ -320,9 +338,18 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
+    <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-[#09090B] border-t border-[#27272A] rounded-t-2xl p-5 max-h-[90vh] overflow-y-auto">
+      <div
+        className="fixed left-0 right-0 mx-auto w-full max-w-lg bg-[#09090B] border-t border-[#27272A] rounded-t-2xl p-5 overflow-y-auto overflow-x-hidden overscroll-contain"
+        style={sheetViewportStyle(vv, "90vh")}
+        onFocus={(e) => {
+          const el = e.target as HTMLElement;
+          if (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) {
+            setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+          }
+        }}
+      >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-[#FAFAFA]">Add Flight</h2>
           <button onClick={onClose} className="text-[#52525B] hover:text-[#A1A1AA]">
@@ -331,6 +358,36 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
         </div>
 
         <div className="space-y-3">
+          <FlightImportBox
+            onApplied={onClose}
+            onPrefill={(p: ImportedFlight, icao, id) => {
+              const s = (v: number | undefined) => (v != null ? String(v) : "");
+              const hm = (m?: number) => (m ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}` : "");
+              if (p.date) setFlightDate(p.date);
+              if (icao.dep || p.dep_iata) setDepIcao(icao.dep ?? p.dep_iata ?? "");
+              if (icao.arr || p.arr_iata) setArrIcao(icao.arr ?? p.arr_iata ?? "");
+              if (p.flight_number) setFlightNumber(p.flight_number);
+              if (p.aircraft_reg) setReg(p.aircraft_reg);
+              if (p.off_block_utc) setOffBlock(p.off_block_utc);
+              if (p.on_block_utc) setOnBlock(p.on_block_utc);
+              if (p.takeoff_utc) setTakeoffUtc(p.takeoff_utc);
+              if (p.landing_utc) setLandingUtc(p.landing_utc);
+              if (p.block_minutes) setBlockTime(hm(p.block_minutes));
+              if (p.airborne_minutes) setFlightTime(hm(p.airborne_minutes));
+              if (p.pax_total != null) setPaxTotal(s(p.pax_total));
+              if (p.pax_adult != null) setPaxAdult(s(p.pax_adult));
+              if (p.pax_child != null) setPaxChild(s(p.pax_child));
+              if (p.pax_infant != null) setPaxInfant(s(p.pax_infant));
+              if (p.freight_kg != null) setFreightKg(s(p.freight_kg));
+              if (p.baggage_kg != null) setBaggageKg(s(p.baggage_kg));
+              if (p.fuel_uplift_kg) setFuelUplift(s(p.fuel_uplift_kg));
+              if (p.fuel_block_kg) setFuelBlock(s(p.fuel_block_kg));
+              if (p.fuel_remaining_kg) setFuelArrival(s(p.fuel_remaining_kg));
+              setOpDataOpen(true);
+              setImportId(id);
+            }}
+          />
+
           {/* Date */}
           <div>
             <label className={labelCls}>Date</label>

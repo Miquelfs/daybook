@@ -139,6 +139,8 @@ done
 # METARs for recent takeoffs/landings (Iowa Mesonet archive) → weather × stress.
 # Logbook: provable repairs only (missing ICAO from IATA, date rollovers, night ≤ block).
 step logbook_integrity python -m domains.aviation.integrity --fix
+# Loadsheet / FMC imports saved before their flight was logged → attach now.
+step loadsheets python -m domains.aviation.flight_import
 step metar python -m domains.aviation.metar --days 30
 # Landing runways: ADS-B track (OpenSky, last ~29 days) or METAR wind; crosswind at landing.
 step runways python -m domains.aviation.runways

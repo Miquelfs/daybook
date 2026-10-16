@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CloudSun, PlaneLanding } from "lucide-react";
+import { CloudSun, PlaneLanding, Package } from "lucide-react";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -53,7 +53,17 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
     queryFn: () => fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/metars`).then((r) => r.json()),
     enabled: !isSim,
   });
+  const { data: loads = [] } = useQuery<{
+    id: number; source: string; pax_total?: number; pax_adult?: number; pax_child?: number; pax_infant?: number;
+    zones?: Record<string, number>; holds_kg?: Record<string, number>; bags_pcs?: number; baggage_kg?: number;
+    freight_kg?: number; avg_bag_kg?: number; hold_total_kg?: number; remarks?: string; message_time_utc?: string;
+  }[]>({
+    queryKey: ["flight-loadsheets", flightId],
+    queryFn: () => fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/loadsheets`).then((r) => r.json()),
+    enabled: !isSim,
+  });
   if (isSim) return null;
+  const load = loads[loads.length - 1];
 
   async function pick(r: string) {
     await fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/runway`, {
@@ -126,6 +136,30 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
           </div>
         )}
       </Card>
+      {load && (
+        <Card title="Load (final figures)" icon={<Package size={14} />}>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg bg-[#09090B] py-2">
+              <p className="text-lg font-semibold tabular-nums text-[#FAFAFA]">{load.pax_total ?? "—"}</p>
+              <p className="text-[10px] text-[#71717A]">pax{load.pax_infant ? ` + ${load.pax_infant} inf` : ""}</p>
+            </div>
+            <div className="rounded-lg bg-[#09090B] py-2">
+              <p className="text-lg font-semibold tabular-nums text-[#FAFAFA]">{load.bags_pcs ?? "—"}</p>
+              <p className="text-[10px] text-[#71717A]">bags{load.avg_bag_kg ? ` · ${load.avg_bag_kg} kg avg` : ""}</p>
+            </div>
+            <div className="rounded-lg bg-[#09090B] py-2">
+              <p className="text-lg font-semibold tabular-nums text-[#FAFAFA]">{load.hold_total_kg ?? load.baggage_kg ?? "—"}</p>
+              <p className="text-[10px] text-[#71717A]">kg in holds{load.freight_kg ? ` · ${load.freight_kg} cargo` : ""}</p>
+            </div>
+          </div>
+          <p className="text-[11px] text-[#71717A] mt-2">
+            {load.pax_adult != null ? `${load.pax_adult} adults · ${load.pax_child ?? 0} children · ${load.pax_infant ?? 0} infants` : ""}
+            {load.zones ? ` · zones ${Object.entries(load.zones).map(([z, n]) => `${z}${n}`).join("/")}` : ""}
+            {load.holds_kg ? ` · holds ${Object.entries(load.holds_kg).map(([h, kg]) => `${h}:${kg}`).join(" ")}` : ""}
+          </p>
+          {load.remarks && <p className="text-[11px] text-[#A1A1AA] mt-1">{load.remarks}</p>}
+        </Card>
+      )}
     </>
   );
 }
