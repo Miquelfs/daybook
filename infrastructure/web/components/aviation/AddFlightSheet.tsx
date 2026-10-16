@@ -163,6 +163,7 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
   const [ldgNight, setLdgNight] = useState(0);
   const [notes, setNotes] = useState("");
   const [landingRunway, setLandingRunway] = useState("");
+  const [takeoffRunway, setTakeoffRunway] = useState("");
   const [importId, setImportId] = useState<number | null>(null);
   const [opDataOpen, setOpDataOpen] = useState(false);
 
@@ -195,7 +196,7 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
   useEffect(() => {
     if (isOpen) {
       setFlightDate(date);
-      setDepIcao(""); setArrIcao(""); setLandingRunway(""); setImportId(null);
+      setDepIcao(""); setArrIcao(""); setLandingRunway(""); setTakeoffRunway(""); setImportId(null);
       setFlightNumber(""); setReg("");
       setOperatorPreset("Norwegian"); setOperatorCustom("");
       setRole("first_officer"); setPicName("");
@@ -261,6 +262,12 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
     retry: false,
   });
 
+  const { data: depRunwayData } = useQuery<{ runways: string[] }>({
+    queryKey: ["airportRunways", depIcao.toUpperCase()],
+    queryFn: () => fetch(`${API_BASE}/flights/airports/${depIcao.toUpperCase()}/runways`).then((r) => r.json()),
+    enabled: !isSim && depIcao.length === 4,
+    staleTime: Infinity,
+  });
   const { data: runwayData } = useQuery<{ runways: string[] }>({
     queryKey: ["airportRunways", arrIcao.toUpperCase()],
     queryFn: () => fetch(`${API_BASE}/flights/airports/${arrIcao.toUpperCase()}/runways`).then((r) => r.json()),
@@ -311,11 +318,13 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
       };
       return api.createFlight(body).then(async (created) => {
         // Landing runway is stored alongside the flight (manual = exact, beats ADS-B/wind guesses)
-        if (landingRunway && created?.id) {
-          await fetch(`${API_BASE}/flights/${encodeURIComponent(created.id)}/runway`, {
-            method: "PUT", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ runway: landingRunway }),
-          }).catch(() => {});
+        for (const [rwy, phase] of [[takeoffRunway, "takeoff"], [landingRunway, "landing"]] as const) {
+          if (rwy && created?.id) {
+            await fetch(`${API_BASE}/flights/${encodeURIComponent(created.id)}/runway`, {
+              method: "PUT", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ runway: rwy, phase }),
+            }).catch(() => {});
+          }
         }
         // Link the imported loadsheet / FMC figures (holds, bags, zones…) to the new flight
         if (importId && created?.id) {
@@ -528,15 +537,18 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
             </div>
           </div>
 
-          {/* Landing runway — tap the one you landed on */}
-          {!isSim && arrIcao.length === 4 && (runwayData?.runways?.length ?? 0) > 0 && (
-            <div>
-              <p className={labelCls}>Landing runway at {arrIcao.toUpperCase()}</p>
+          {/* Runways — tap the ones you used */}
+          {!isSim && ([
+            ["Takeoff", depIcao, depRunwayData?.runways ?? [], takeoffRunway, setTakeoffRunway],
+            ["Landing", arrIcao, runwayData?.runways ?? [], landingRunway, setLandingRunway],
+          ] as const).map(([label, apt, opts, val, set]) => apt.length === 4 && opts.length > 0 ? (
+            <div key={label}>
+              <p className={labelCls}>{label} runway at {apt.toUpperCase()}</p>
               <div className="flex flex-wrap gap-1.5">
-                {runwayData!.runways.map((r) => (
-                  <button key={r} type="button" onClick={() => setLandingRunway(landingRunway === r ? "" : r)}
+                {opts.map((r) => (
+                  <button key={r} type="button" onClick={() => set(val === r ? "" : r)}
                     className={`px-3 py-1.5 rounded-lg text-sm font-mono border transition-colors ${
-                      landingRunway === r
+                      val === r
                         ? "bg-[#F59E0B] text-[#09090B] border-transparent font-semibold"
                         : "border-[#27272A] text-[#A1A1AA] hover:border-[#3F3F46]"}`}>
                     {r}
@@ -544,7 +556,7 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
                 ))}
               </div>
             </div>
-          )}
+          ) : null)}
 
           {/* Takeoff/Landing + Flight time */}
           <div>

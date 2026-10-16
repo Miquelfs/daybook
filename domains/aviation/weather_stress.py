@@ -64,6 +64,8 @@ def _rows(conn, phase: str) -> list[dict]:
                    fp.{p}_you_flew AS you_flew, fp.{p}_crew AS crew,
                    fm.raw, fm.obs_time, fm.wind_dir, fm.wind_kt, fm.gust_kt, fm.vis_m, fm.ceiling_ft, fm.wx, fm.cb,
                    fm.category, f.notes, a.latitude AS lat, a.longitude AS lon,
+                   {"COALESCE(f.landings_day,0) + COALESCE(f.landings_night,0)" if p == "landing"
+                    else "COALESCE(f.takeoffs_day,0) + COALESCE(f.takeoffs_night,0)"} AS logged_by_you,
                    {"fr.runway, fr.source AS runway_source, fr.crosswind_kt, fr.headwind_kt" if p == "landing" and "flight_runways" in t
                     else "NULL AS runway, NULL AS runway_source, NULL AS crosswind_kt, NULL AS headwind_kt"}
             FROM flight_physio fp
@@ -83,7 +85,8 @@ def _rows(conn, phase: str) -> list[dict]:
         n = _night(r["lat"], r["lon"], r["obs_time"])
         if n is not None:
             d["cond"]["night"] = n
-        d["cond"]["you_flew"] = bool(r["you_flew"])
+        # PF: the physio snapshot's own flag, or your logged T/O / landing (manual entries)
+        d["cond"]["you_flew"] = bool(r["you_flew"]) or (r["logged_by_you"] or 0) > 0
         if r["crosswind_kt"] is not None:
             d["cond"]["crosswind"] = r["crosswind_kt"] >= 15
         out.append(d)
@@ -137,7 +140,7 @@ def toughest(conn: sqlite3.Connection, phase: str = "landing", limit: int = 8) -
     rows = sorted(_rows(conn, phase), key=lambda r: -(r["stress_delta"] or 0))[:limit]
     return [{
         "flight_id": r["flight_id"], "date": r["date"], "route": f"{r['dep_iata'] or '?'}→{r['arr_iata'] or '?'}",
-        "stress_delta": r["stress_delta"], "hr_delta": r["hr_delta"], "you_flew": bool(r["you_flew"]),
+        "stress_delta": r["stress_delta"], "hr_delta": r["hr_delta"], "you_flew": r["cond"]["you_flew"],
         "crew": r["crew"], "weather": _metar_summary(r), "raw": r["raw"], "notes": r["notes"],
         "runway": r["runway"], "runway_source": r["runway_source"],
         "crosswind_kt": r["crosswind_kt"], "headwind_kt": r["headwind_kt"],

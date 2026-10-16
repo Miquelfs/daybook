@@ -16,6 +16,9 @@ type RunwayResp = {
              headwind_kt: number | null; crosswind_kt: number | null } | null;
   options: string[];
   airport?: string | null;
+  takeoff: { runway: string; source: string; headwind_kt: number | null; crosswind_kt: number | null } | null;
+  takeoff_options: string[];
+  takeoff_airport?: string | null;
 };
 
 const SOURCE: Record<string, string> = { manual: "set by you", adsb: "from ADS-B track", wind: "likely, from wind" };
@@ -42,7 +45,6 @@ function wind(m: Metar) {
 /** Landing runway (pick / correct it) + the METARs at takeoff and landing. */
 export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isSim?: boolean }) {
   const qc = useQueryClient();
-  const [typed, setTyped] = useState("");
   const { data: rw } = useQuery<RunwayResp>({
     queryKey: ["flight-runway", flightId],
     queryFn: () => fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/runway`).then((r) => r.json()),
@@ -65,9 +67,9 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
   if (isSim) return null;
   const load = loads[loads.length - 1];
 
-  async function pick(r: string) {
+  async function pick(r: string, phase: "takeoff" | "landing") {
     await fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/runway`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ runway: r }),
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ runway: r, phase }),
     });
     qc.invalidateQueries({ queryKey: ["flight-runway", flightId] });
   }
@@ -75,40 +77,15 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
   const cur = rw?.current;
   return (
     <>
-      <Card title="Landing runway" icon={<PlaneLanding size={14} />}>
-        {(rw?.options?.length ?? 0) > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
-            {rw!.options.map((r) => {
-              const on = cur?.runway === r || (cur?.source === "wind" && cur.runway.split("/").includes(r));
-              return (
-                <button key={r} onClick={() => pick(r)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-mono border transition-colors ${
-                    on && cur?.source !== "wind" ? "bg-[#F59E0B] text-[#09090B] border-transparent font-semibold"
-                      : on ? "border-[#F59E0B]/40 text-[#F59E0B]" : "border-[#27272A] text-[#A1A1AA] hover:border-[#3F3F46]"}`}>
-                  {r}
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          // No runway list for this airport (unknown code or no data) — type it instead
-          <div className="flex gap-2">
-            <input value={typed} onChange={(e) => setTyped(e.target.value.toUpperCase())} placeholder="e.g. 24L"
-              maxLength={4}
-              className="w-24 bg-[#09090B] border border-[#27272A] rounded-lg px-3 py-1.5 text-sm font-mono text-[#FAFAFA] outline-none focus:border-[#52525B]" />
-            <button onClick={() => typed && pick(typed)} disabled={!typed}
-              className="px-3 py-1.5 rounded-lg text-xs bg-[#27272A] text-[#A1A1AA] disabled:opacity-40">Save</button>
-          </div>
-        )}
-          <p className="text-[11px] text-[#71717A] mt-2">
-            {cur ? <>RWY {cur.runway} · {SOURCE[cur.source] ?? cur.source}
-              {cur.headwind_kt != null ? ` · ${cur.headwind_kt >= 0 ? "headwind" : "tailwind"} ${Math.abs(cur.headwind_kt)} kt` : ""}
-              {cur.crosswind_kt != null ? ` · crosswind ${cur.crosswind_kt} kt` : ""}</>
-              : "Not known yet. Tap the runway you landed on."}
-            {cur && cur.source !== "manual" && (rw?.options?.length ?? 0) > 0 ? " · tap to correct" : ""}
-            {(rw?.options?.length ?? 0) === 0 && !cur ? ` No runway list for ${rw?.airport ?? "this airport"}.` : ""}
-          </p>
-        </Card>
+      <Card title="Runways" icon={<PlaneLanding size={14} />}>
+        <div className="space-y-4">
+          <RunwayPicker label="Takeoff" airport={rw?.takeoff_airport} options={rw?.takeoff_options ?? []}
+            current={rw?.takeoff ? { ...rw.takeoff, source: rw.takeoff.source } : null}
+            onPick={(r) => pick(r, "takeoff")} />
+          <RunwayPicker label="Landing" airport={rw?.airport} options={rw?.options ?? []}
+            current={cur ?? null} onPick={(r) => pick(r, "landing")} />
+        </div>
+      </Card>
 
       <Card title="Weather (METAR)" icon={<CloudSun size={14} />}>
         {metars.length === 0 ? (
@@ -161,5 +138,48 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
         </Card>
       )}
     </>
+  );
+}
+
+
+function RunwayPicker({ label, airport, options, current, onPick }: {
+  label: string; airport?: string | null; options: string[];
+  current: { runway: string; source: string; headwind_kt: number | null; crosswind_kt: number | null } | null;
+  onPick: (r: string) => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const likely = current?.source === "wind";
+  return (
+    <div>
+      <p className="text-[11px] text-[#71717A] mb-1.5">{label}{airport ? ` · ${airport}` : ""}</p>
+      {options.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {options.map((r) => {
+            const on = current?.runway === r || (likely && current!.runway.split("/").includes(r));
+            return (
+              <button key={r} onClick={() => onPick(r)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-mono border transition-colors ${
+                  on && !likely ? "bg-[#F59E0B] text-[#09090B] border-transparent font-semibold"
+                    : on ? "border-[#F59E0B]/40 text-[#F59E0B]" : "border-[#27272A] text-[#A1A1AA] hover:border-[#3F3F46]"}`}>
+                {r}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <input value={typed} onChange={(e) => setTyped(e.target.value.toUpperCase())} placeholder="e.g. 24L" maxLength={4}
+            className="w-24 bg-[#09090B] border border-[#27272A] rounded-lg px-3 py-1.5 text-base sm:text-sm font-mono text-[#FAFAFA] outline-none focus:border-[#52525B]" />
+          <button onClick={() => typed && onPick(typed)} disabled={!typed}
+            className="px-3 py-1.5 rounded-lg text-xs bg-[#27272A] text-[#A1A1AA] disabled:opacity-40">Save</button>
+        </div>
+      )}
+      <p className="text-[11px] text-[#71717A] mt-1.5">
+        {current ? <>RWY {current.runway}{likely ? " · likely, from wind — tap to set" : ""}
+          {current.headwind_kt != null ? ` · ${current.headwind_kt >= 0 ? "headwind" : "tailwind"} ${Math.abs(current.headwind_kt)} kt` : ""}
+          {current.crosswind_kt != null ? ` · crosswind ${current.crosswind_kt} kt` : ""}</>
+          : "Tap the runway you used."}
+      </p>
+    </div>
   );
 }

@@ -1637,6 +1637,7 @@ def flight_metars(flight_id: str, conn: DB):
 
 class RunwaySet(BaseModel):
     runway: str
+    phase: str = "landing"     # landing | takeoff
 
 
 @router.get("/{flight_id}/runway")
@@ -1644,20 +1645,31 @@ def flight_runway(flight_id: str, conn: DB):
     """Landing runway (manual / ADS-B / wind) + the arrival airport's runways for the picker."""
     from domains.aviation import runways as rw
     rw.ensure_tables(conn)
-    f = conn.execute("SELECT COALESCE(arr_icao, (SELECT icao FROM airports WHERE iata = flights.arr_iata LIMIT 1)) "
-                     "AS arr_icao FROM flights WHERE id=?", (flight_id,)).fetchone()
+    f = conn.execute("SELECT COALESCE(arr_icao, (SELECT icao FROM airports WHERE iata = flights.arr_iata LIMIT 1)) AS arr_icao, "
+                     "COALESCE(dep_icao, (SELECT icao FROM airports WHERE iata = flights.dep_iata LIMIT 1)) AS dep_icao "
+                     "FROM flights WHERE id=?", (flight_id,)).fetchone()
     if not f:
         raise HTTPException(status_code=404, detail="flight not found")
     cur = conn.execute("SELECT * FROM flight_runways WHERE flight_id=?", (flight_id,)).fetchone()
-    return {"current": dict(cur) if cur else None, "airport": f["arr_icao"],
-            "options": rw.runways_for(conn, f["arr_icao"]) if f["arr_icao"] else []}
+    cur = dict(cur) if cur else None
+    return {
+        # landing (kept as before) …
+        "current": cur if cur and cur.get("runway") else None, "airport": f["arr_icao"],
+        "options": rw.runways_for(conn, f["arr_icao"]) if f["arr_icao"] else [],
+        # … and takeoff
+        "takeoff": ({"runway": cur["takeoff_runway"], "source": cur["takeoff_source"],
+                     "headwind_kt": cur["takeoff_headwind_kt"], "crosswind_kt": cur["takeoff_crosswind_kt"]}
+                    if cur and cur.get("takeoff_runway") else None),
+        "takeoff_airport": f["dep_icao"],
+        "takeoff_options": rw.runways_for(conn, f["dep_icao"]) if f["dep_icao"] else [],
+    }
 
 
 @router.put("/{flight_id}/runway")
 def set_flight_runway(flight_id: str, body: RunwaySet, conn: DB):
     from domains.aviation import runways as rw
     try:
-        return rw.set_manual(conn, flight_id, body.runway)
+        return rw.set_manual(conn, flight_id, body.runway, "takeoff" if body.phase == "takeoff" else "landing")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

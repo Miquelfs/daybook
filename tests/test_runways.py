@@ -65,7 +65,8 @@ class SyncTest(unittest.TestCase):
             "\n".join(f"LEPA,{a['ident']},{a['lat']},{a['lon']},{a['heading']},{b['ident']},{b['lat']},{b['lon']},{b['heading']},{a['length_ft']},0"
                       for a, b in ((ENDS[0], ENDS[1]), (ENDS[2], ENDS[3])))
 
-        def fake(url, timeout=60):
+        rw.opensky_headers = lambda: {"Authorization": "Bearer test"}
+        def fake(url, timeout=60, headers=None):
             if "runways.csv" in url:
                 return csv_text
             if "hexdb" in url:
@@ -86,3 +87,22 @@ class SyncTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TakeoffRunwayTest(unittest.TestCase):
+    def test_takeoff_and_landing_are_independent(self):
+        c = sqlite3.connect(":memory:")
+        c.row_factory = sqlite3.Row
+        c.executescript("""CREATE TABLE flights(id, dep_icao, arr_icao, dep_iata, arr_iata, is_sim INTEGER DEFAULT 0);
+                           CREATE TABLE airports(icao, iata);
+                           CREATE TABLE flight_metars(flight_id, phase, wind_dir, wind_kt);
+                           INSERT INTO flights VALUES ('f','LEPA','ESSA','PMI','ARN',0);
+                           INSERT INTO flight_metars VALUES ('f','takeoff',240,20);""")
+        rw.ensure_tables(c)
+        c.executemany("INSERT INTO airport_runways (icao, ident, lat, lon, heading) VALUES ('LEPA',?,?,?,?)",
+                      [(e["ident"], e["lat"], e["lon"], e["heading"]) for e in ENDS])
+        rw.set_manual(c, "f", "24L", "takeoff")
+        rw.set_manual(c, "f", "19R", "landing")
+        r = c.execute("SELECT * FROM flight_runways WHERE flight_id='f'").fetchone()
+        self.assertEqual((r["takeoff_runway"], r["runway"]), ("24L", "19R"))
+        self.assertGreater(r["takeoff_headwind_kt"], 15)

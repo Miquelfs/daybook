@@ -31,6 +31,8 @@ import sqlite3
 import statistics
 import sys
 import time
+import os
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -41,9 +43,39 @@ UA = {"User-Agent": "daybook-logbook/1.0 (personal logbook)"}
 SOURCE_RANK = {"manual": 3, "adsb": 2, "wind": 1}
 
 
-def _get(url: str, timeout: int = 60) -> str:
-    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=timeout) as r:
+def _get(url: str, timeout: int = 60, headers: dict | None = None) -> str:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={**UA, **(headers or {})}), timeout=timeout) as r:
         return r.read().decode("utf-8", "replace")
+
+
+OPENSKY_TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
+_token_cache: dict = {}
+
+
+def opensky_headers() -> dict | None:
+    """
+    OpenSky serves historical tracks only to registered users. Free account →
+    Account → API client → put OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET in .env
+    (OAuth2 client credentials). Legacy OPENSKY_USERNAME / OPENSKY_PASSWORD also
+    work for older accounts. None → ADS-B is skipped (wind inference + manual still work).
+    """
+    cid, secret = os.getenv("OPENSKY_CLIENT_ID"), os.getenv("OPENSKY_CLIENT_SECRET")
+    if cid and secret:
+        if _token_cache.get("exp", 0) > time.time() + 60:
+            return {"Authorization": f"Bearer {_token_cache['tok']}"}
+        body = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": cid,
+                                       "client_secret": secret}).encode()
+        req = urllib.request.Request(OPENSKY_TOKEN_URL, data=body, headers={**UA,
+                                     "Content-Type": "application/x-www-form-urlencoded"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.loads(r.read())
+        _token_cache.update(tok=d["access_token"], exp=time.time() + int(d.get("expires_in", 1800)))
+        return {"Authorization": f"Bearer {d['access_token']}"}
+    user, pw = os.getenv("OPENSKY_USERNAME"), os.getenv("OPENSKY_PASSWORD")
+    if user and pw:
+        import base64
+        return {"Authorization": "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()}
+    return None
 
 
 def ensure_tables(conn) -> None:
@@ -57,6 +89,11 @@ def ensure_tables(conn) -> None:
             crosswind_kt REAL, headwind_kt REAL, details TEXT,
             updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')));
         CREATE TABLE IF NOT EXISTS aircraft_hex (reg TEXT PRIMARY KEY, hex TEXT);""")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(flight_runways)")}
+    for col, ddl in (("takeoff_runway", "TEXT"), ("takeoff_source", "TEXT"),
+                     ("takeoff_headwind_kt", "REAL"), ("takeoff_crosswind_kt", "REAL")):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE flight_runways ADD COLUMN {col} {ddl}")
     conn.commit()
 
 
@@ -213,11 +250,12 @@ def _store(conn, fid, res, source, wind) -> None:
     if cur and SOURCE_RANK.get(cur[0], 0) > SOURCE_RANK[source]:
         return
     comps = wind_components(wind[0], wind[1], res["heading"]) if wind else None
+    conn.execute("INSERT OR IGNORE INTO flight_runways (flight_id) VALUES (?)", (fid,))
     conn.execute(
-        """INSERT OR REPLACE INTO flight_runways (flight_id, runway, source, confidence, headwind_kt, crosswind_kt, details)
-           VALUES (?,?,?,?,?,?,?)""",
-        (fid, res["runway"], source, res["confidence"], comps[0] if comps else None, comps[1] if comps else None,
-         json.dumps({k: v for k, v in res.items() if k not in ("runway", "confidence")})))
+        """UPDATE flight_runways SET runway=?, source=?, confidence=?, headwind_kt=?, crosswind_kt=?, details=?,
+                  updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE flight_id=?""",
+        (res["runway"], source, res["confidence"], comps[0] if comps else None, comps[1] if comps else None,
+         json.dumps({k: v for k, v in res.items() if k not in ("runway", "confidence")}), fid))
 
 
 def sync(conn: sqlite3.Connection, adsb_days: int = 29, fetcher=None, verbose: bool = True) -> dict:
@@ -229,6 +267,13 @@ def sync(conn: sqlite3.Connection, adsb_days: int = 29, fetcher=None, verbose: b
         if verbose:
             print(f"  runway data: {e}", file=sys.stderr)
     stats = {"adsb": 0, "wind": 0, "no_track": 0, "errors": 0}
+    try:
+        auth = opensky_headers()
+    except Exception as e:
+        auth = None
+        stats["adsb_auth_error"] = str(e)[:120]
+    if auth is None:
+        stats["adsb_skipped"] = "no OpenSky credentials (OPENSKY_CLIENT_ID/SECRET)"
     has_metars = bool(conn.execute("SELECT 1 FROM sqlite_master WHERE name='flight_metars'").fetchone())
     rows = conn.execute(
         f"""SELECT f.id, COALESCE(f.arr_icao, (SELECT icao FROM airports WHERE iata = f.arr_iata LIMIT 1)) AS arr_icao,
@@ -247,12 +292,12 @@ def sync(conn: sqlite3.Connection, adsb_days: int = 29, fetcher=None, verbose: b
             continue
         wind = (r["wind_dir"], r["wind_kt"]) if r["wind_dir"] is not None else None
         landed = _dt(r["landing_utc"]) or _dt(r["on_block_utc"])
-        if r["have"] != "adsb" and landed and landed >= cutoff and r["aircraft_reg"]:
+        if auth and r["have"] != "adsb" and landed and landed >= cutoff and r["aircraft_reg"]:
             hexid = _hex_for(conn, r["aircraft_reg"].replace(" ", ""), lambda u, timeout=20: fetcher(u))
             if hexid:
                 try:
                     t = int((landed - timedelta(minutes=20)).timestamp())
-                    data = json.loads(fetcher(OPENSKY_TRACK.format(hex=hexid, t=t)))
+                    data = json.loads(fetcher(OPENSKY_TRACK.format(hex=hexid, t=t), headers=auth))
                     res = from_track(data.get("path") or [], ends)
                     if res:
                         _store(conn, r["id"], res, "adsb", wind)
@@ -273,27 +318,34 @@ def sync(conn: sqlite3.Connection, adsb_days: int = 29, fetcher=None, verbose: b
     return stats
 
 
-def set_manual(conn, flight_id: str, runway: str) -> dict:
+def set_manual(conn, flight_id: str, runway: str, phase: str = "landing") -> dict:
+    """You picked the runway (landing or takeoff) — exact; head/crosswind from that phase's METAR."""
     ensure_tables(conn)
-    f = conn.execute("SELECT COALESCE(arr_icao, (SELECT icao FROM airports WHERE iata = flights.arr_iata LIMIT 1)) "
-                     "AS arr_icao FROM flights WHERE id=?", (flight_id,)).fetchone()
+    apt_col = "arr" if phase == "landing" else "dep"
+    f = conn.execute(f"SELECT COALESCE({apt_col}_icao, (SELECT icao FROM airports WHERE iata = flights.{apt_col}_iata LIMIT 1)) "
+                     "AS icao FROM flights WHERE id=?", (flight_id,)).fetchone()
     if not f:
         raise ValueError("flight not found")
-    rw = runway.strip().upper()
-    end = next((e for e in runway_ends(conn, f["arr_icao"]) if e["ident"].upper() == rw), None)
+    rw_id = runway.strip().upper()
+    end = next((e for e in runway_ends(conn, f["icao"]) if e["ident"].upper() == rw_id), None) if f["icao"] else None
     wind = None
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name='flight_metars'").fetchone():
-        m = conn.execute("SELECT wind_dir, wind_kt FROM flight_metars WHERE flight_id=? AND phase='landing'",
-                         (flight_id,)).fetchone()
+        m = conn.execute("SELECT wind_dir, wind_kt FROM flight_metars WHERE flight_id=? AND phase=?",
+                         (flight_id, phase)).fetchone()
         wind = (m["wind_dir"], m["wind_kt"]) if m and m["wind_dir"] is not None else None
-    res = {"runway": rw, "confidence": "exact", "heading": end["heading"] if end else None}
     comps = wind_components(wind[0], wind[1], end["heading"]) if (wind and end) else None
-    conn.execute(
-        """INSERT OR REPLACE INTO flight_runways (flight_id, runway, source, confidence, headwind_kt, crosswind_kt, details)
-           VALUES (?,?,?,?,?,?,?)""",
-        (flight_id, rw, "manual", "exact", comps[0] if comps else None, comps[1] if comps else None, None))
+    conn.execute("INSERT OR IGNORE INTO flight_runways (flight_id) VALUES (?)", (flight_id,))
+    if phase == "takeoff":
+        conn.execute("""UPDATE flight_runways SET takeoff_runway=?, takeoff_source='manual', takeoff_headwind_kt=?,
+                        takeoff_crosswind_kt=? WHERE flight_id=?""",
+                     (rw_id, comps[0] if comps else None, comps[1] if comps else None, flight_id))
+    else:
+        conn.execute("""UPDATE flight_runways SET runway=?, source='manual', confidence='exact', headwind_kt=?,
+                        crosswind_kt=?, details=NULL WHERE flight_id=?""",
+                     (rw_id, comps[0] if comps else None, comps[1] if comps else None, flight_id))
     conn.commit()
-    return {**res, "headwind_kt": comps[0] if comps else None, "crosswind_kt": comps[1] if comps else None}
+    return {"phase": phase, "runway": rw_id, "headwind_kt": comps[0] if comps else None,
+            "crosswind_kt": comps[1] if comps else None}
 
 
 def main() -> None:
