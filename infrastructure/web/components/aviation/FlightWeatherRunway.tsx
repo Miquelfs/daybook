@@ -68,9 +68,10 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
   const load = loads[loads.length - 1];
 
   async function pick(r: string, phase: "takeoff" | "landing") {
-    await fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/runway`, {
+    const r2 = await fetch(`/api/flights/${encodeURIComponent(flightId)}/runway`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ runway: r, phase }),
     });
+    if (!r2.ok) window.alert("Couldn't save the runway — check the connection and try again.");
     qc.invalidateQueries({ queryKey: ["flight-runway", flightId] });
   }
 

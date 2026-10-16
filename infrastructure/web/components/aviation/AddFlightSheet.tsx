@@ -320,7 +320,7 @@ export function AddFlightSheet({ date, isOpen, onClose }: Props) {
         // Landing runway is stored alongside the flight (manual = exact, beats ADS-B/wind guesses)
         for (const [rwy, phase] of [[takeoffRunway, "takeoff"], [landingRunway, "landing"]] as const) {
           if (rwy && created?.id) {
-            await fetch(`${API_BASE}/flights/${encodeURIComponent(created.id)}/runway`, {
+            await fetch(`/api/flights/${encodeURIComponent(created.id)}/runway`, {
               method: "PUT", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ runway: rwy, phase }),
             }).catch(() => {});
