@@ -10,7 +10,7 @@ import {
 import { format, parseISO, subDays } from "date-fns";
 import { activityIcon, fmtDuration, fmtDistance } from "@/lib/api";
 import { injuriesApi, type Injury, ZONE_LABELS } from "@/lib/injuries-api";
-import { Activity, Zap, List, TrendingUp, Target, Map, Droplet } from "lucide-react";
+import { Activity, Zap, List, TrendingUp, Map } from "lucide-react";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -232,8 +232,6 @@ function AddActivitySheet({ onClose, onSaved }: { onClose: () => void; onSaved: 
 import FitnessFreshnessChart from "@/components/training/FitnessFreshnessChart";
 import TrainingLogCalendar from "@/components/training/TrainingLogCalendar";
 import { VolumeChart, ProgressComparisonChart } from "@/components/training/ProgressChart";
-import OmyraTab from "@/components/training/OmyraTab";
-import FuelTab from "@/components/training/FuelTab";
 import { TrainingRouteMap } from "@/components/training/TrainingRouteMap";
 import RelativeEffortChart from "@/components/training/RelativeEffortChart";
 import { GoalRings } from "@/components/training/GoalRings";
@@ -241,8 +239,6 @@ import { localISODate } from "@/lib/dates";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: <Activity size={13} /> },
-  { key: "omyra", label: "Omyra", icon: <Target size={13} /> },
-  { key: "fuel", label: "Fuel", icon: <Droplet size={13} /> },
   { key: "load", label: "Load", icon: <Zap size={13} /> },
   { key: "log", label: "Log", icon: <List size={13} /> },
   { key: "progress", label: "Progress", icon: <TrendingUp size={13} /> },
@@ -304,10 +300,11 @@ type Records = {
 
 export default function TrainingPage() {
   const [tab, setTab] = useState<Tab>("overview");
-  // Deep link (e.g. the weekend "plan next week" nudge → ?tab=omyra&plan=next)
+  // The plan (Omyra) and fuel moved to /omyra — keep old deep links working
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t === "omyra") setTab("omyra" as Tab);
+    if (t === "omyra") window.location.replace("/omyra?tab=plan");
+    else if (t === "fuel") window.location.replace("/omyra?tab=fuel");
   }, []);
   const [weeks, setWeeks] = useState(12);
   const [sportFilter, setSportFilter] = useState<string | null>(null);
@@ -406,8 +403,8 @@ export default function TrainingPage() {
             <Link href="/health" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Health</Link>
             <h1 className="text-2xl font-semibold tracking-tight">Training</h1>
             <p className="text-sm text-[#71717A] mt-0.5">Load, fitness & race readiness</p>
-            <Link href="/race" className="inline-flex items-center gap-1 mt-2 text-xs text-[#F59E0B] hover:text-[#FBBF24]">
-              Mallorca 312 cockpit →
+            <Link href="/omyra" className="inline-flex items-center gap-1 mt-2 text-xs text-[#F59E0B] hover:text-[#FBBF24]">
+              Omyra · Mallorca 312 →
             </Link>
           </div>
           <button onClick={() => setShowAdd(true)}
@@ -475,11 +472,6 @@ export default function TrainingPage() {
         </section>
       )}
 
-      {/* ── OMYRA tab ─────────────────────────────────────────────────────── */}
-      {tab === "omyra" && <OmyraTab />}
-
-      {/* ── FUEL tab ──────────────────────────────────────────────────────── */}
-      {tab === "fuel" && <FuelTab />}
 
       {/* ── MAP tab ──────────────────────────────────────────────────────── */}
       {tab === "map" && (

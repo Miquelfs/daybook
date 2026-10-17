@@ -10,7 +10,7 @@ const tabs = [
   { href: "/timeline",     label: "Timeline", icon: List },
   { href: "/moments",      label: "Moments",  icon: Camera },
   { href: "/money",        label: "Finance",  icon: Wallet },
-  { href: "/race",         label: "Mallorca 312", icon: Mountain },
+  { href: "/omyra",        label: "Omyra",    icon: Mountain },
   { href: "/health",       label: "Health",   icon: HeartPulse },
   { href: "/food",         label: "Food",     icon: Apple },
   { href: "/aviation",     label: "Logbook",  icon: PlaneTakeoff },
@@ -29,6 +29,7 @@ export function BottomNav() {
     if (href === "/food") return pathname.startsWith("/food");
     if (href === "/aviation") return pathname.startsWith("/aviation");
     if (href === "/correlations") return pathname.startsWith("/correlations");
+    if (href === "/omyra") return pathname.startsWith("/omyra") || pathname.startsWith("/race");
     return pathname.startsWith(href);
   }
 

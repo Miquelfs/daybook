@@ -1040,6 +1040,8 @@ export const api = {
   activity: (id: string) => get<ActivityDetail>(`/activities/${id}`),
   activityAnalysis: (id: string) =>
     get<{ analysis: ActivityAnalysis | null }>(`/activities/${id}/analysis`).then((r) => r.analysis),
+  activityImpact: (id: string) =>
+    get<{ impact: ActivityImpact | null }>(`/activities/${id}/impact`).then((r) => r.impact),
   activities: (start: string, end: string) =>
     get<Activity[]>(`/activities?start=${start}&end=${end}`),
   syncStatus: () => get<SyncStatus[]>("/activities/sync-status"),
@@ -1534,4 +1536,25 @@ export interface ActivityAnalysis {
     x_unit: "km" | "min";
     points: { x: number; hr?: number; spd?: number; alt?: number; pw?: number; cad?: number; grade?: number }[];
   };
+}
+
+// ── Activity training impact (GET /activities/{id}/impact) ───────────────────
+export interface ActivityImpact {
+  tss: number | null;
+  tss_source: "power" | "device" | "heart rate" | null;
+  load: {
+    fitness?: number; fitness_delta?: number; fatigue?: number; fatigue_delta?: number;
+    form_before?: number | null; form_next?: number; form_label?: string;
+    week_tss: number | null; week_share_pct: number | null;
+  } | null;
+  efficiency: {
+    ef: number; n: number; baseline?: number; pct?: number; trend?: null;
+    history?: { date: string; ef: number; this?: boolean }[]; verdict?: string;
+  } | null;
+  race: {
+    goal: string; race_km: number; race_climb_m: number; km: number; climb_m: number; km_pct: number;
+    climb_pct: number; longest_before_km: number | null; is_longest: boolean; weeks_to_race: number;
+    durability: { decoupling_pct: number; ok: boolean; note: string } | null;
+    fuel: { carbs_g: number; carbs_g_h: number | null; target_g_h: number | null; items: string[]; ok: boolean } | null;
+  } | null;
 }

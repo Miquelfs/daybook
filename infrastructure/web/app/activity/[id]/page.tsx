@@ -1,10 +1,11 @@
 import { api, fmtDuration, fmtDistance, fmtPace, activityIcon } from "@/lib/api";
-import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis } from "@/lib/api";
+import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis, ActivityImpact } from "@/lib/api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ActivityMap } from "@/components/ActivityMap";
 import { ActivityWind } from "@/components/ActivityWind";
 import { ActivityAnalysisCards } from "@/components/activity/ActivityAnalysisCards";
+import { TrainingImpactCard } from "@/components/activity/TrainingImpactCard";
 import { ActivityCharts } from "@/components/ActivityCharts";
 import { ActivityNotes } from "@/components/ActivityNotes";
 import { TennisSessionPanel } from "@/components/TennisSessionPanel";
@@ -157,12 +158,10 @@ export default async function ActivityPage({ params }: Props) {
     notFound();
   }
 
-  let analysis: ActivityAnalysis | null = null;
-  try {
-    analysis = await api.activityAnalysis(decodedId);
-  } catch {
-    analysis = null;
-  }
+  const [analysis, impact] = await Promise.all([
+    api.activityAnalysis(decodedId).catch((): ActivityAnalysis | null => null),
+    api.activityImpact(decodedId).catch((): ActivityImpact | null => null),
+  ]);
 
   const date = activity.date;
   const sport = sportOf(activity.activity_type);
@@ -250,14 +249,6 @@ export default async function ActivityPage({ params }: Props) {
         </section>
       )}
 
-      {/* Wind over the completed route — head/tail/crosswind share */}
-      {activity.polyline && (
-        <ActivityWind
-          activityId={decodedId}
-          isOutdoor={!/indoor|virtual|trainer|treadmill|swim|strength/i.test(activity.activity_type ?? "")}
-        />
-      )}
-
       {/* Planned vs actual — when this activity completed a scheduled session */}
       {activity.plan_session && (
         <PlannedVsActual
@@ -273,12 +264,24 @@ export default async function ActivityPage({ params }: Props) {
         />
       )}
 
-      {/* Analysis cards (elevation, pace, HR, power, cadence) — falls back to plain charts without streams */}
+      {/* Training impact — load, fitness/fatigue/form, efficiency trend, race readiness */}
+      {impact && <TrainingImpactCard impact={impact} sport={sport} />}
+
+      {/* Metrics: heart rate → speed → power → elevation → cadence (falls back to plain charts without streams) */}
       {analysis ? (
         <ActivityAnalysisCards analysis={analysis} />
       ) : (
         <ActivityCharts activityId={decodedId} activityType={activity.activity_type} />
       )}
+
+      {/* Wind over the completed route — head/tail/crosswind share, the last metric */}
+      {activity.polyline && (
+        <ActivityWind
+          activityId={decodedId}
+          isOutdoor={!/indoor|virtual|trainer|treadmill|swim|strength/i.test(activity.activity_type ?? "")}
+        />
+      )}
+
 
       {/* Splits */}
       {activity.splits && activity.splits.length > 0 && (

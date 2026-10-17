@@ -605,7 +605,8 @@ export function RaceCockpit() {
     queryKey: ["omyra-goals-active"],
     queryFn: () => fetch(`${BASE}/race-plans/goals?status=active`, { cache: "no-store" }).then((r) => r.json()),
   });
-  const goal = (goals ?? []).find((g) => g.race_type === "mallorca_312") ?? (goals ?? [])[0];
+  const list = Array.isArray(goals) ? goals : [];   // an API hiccup returns an error object, not a list
+  const goal = list.find((g) => g.race_type === "mallorca_312") ?? list[0];
 
   const { data: ov } = useQuery<Overview>({
     queryKey: ["race-overview", goal?.id],
@@ -613,7 +614,7 @@ export function RaceCockpit() {
     enabled: !!goal,
   });
 
-  // Weekend nudge deep link: /race?plan=next
+  // Weekend nudge deep link: /omyra?plan=next (old /race?plan=next redirects here)
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("plan") === "next") {
       const d = new Date(); d.setDate(d.getDate() + 7);
@@ -626,8 +627,8 @@ export function RaceCockpit() {
     return (
       <Card className="p-6 text-center space-y-3">
         <p className="text-lg font-semibold text-[#FAFAFA]">No race plan yet</p>
-        <p className="text-sm text-[#71717A]">Create the Mallorca 312 goal (24 Apr 2027, all days available) in Training → Omyra.</p>
-        <Link href="/training?tab=omyra" className="inline-block text-xs px-4 py-2 rounded-xl bg-[#F59E0B] text-[#09090B] font-semibold">Create goal</Link>
+        <p className="text-sm text-[#71717A]">Create the Mallorca 312 goal (24 Apr 2027, all days available) in Omyra → Plan.</p>
+        <Link href="/omyra?tab=plan" className="inline-block text-xs px-4 py-2 rounded-xl bg-[#F59E0B] text-[#09090B] font-semibold">Create goal</Link>
       </Card>
     );
   }
@@ -659,7 +660,7 @@ export function RaceCockpit() {
         </Card>
       )}
       <div className="flex justify-center gap-4 text-xs text-[#71717A] pt-2">
-        <Link href="/training?tab=omyra" className="hover:text-[#F59E0B]">Full plan & settings</Link>
+        <Link href="/omyra?tab=plan" className="hover:text-[#F59E0B]">Full plan & settings</Link>
         <span>·</span>
         <Link href="/training" className="hover:text-[#F59E0B]">Training analytics</Link>
       </div>

@@ -26,11 +26,14 @@ function verdict(w: Wind): string {
   return "Mostly balanced — out into it, back with it";
 }
 
+// themed tokens (globals.css): headwind on the intensity ramp, tailwind green, cross neutral
+const HEAD = "var(--viz-i4)", HEAD_STRONG = "var(--viz-i6)", TAIL = "var(--viz-cad)", CROSS = "var(--viz-alt)";
+
 function barColor(h: number): string {
-  if (h > 15) return "#E11D48";
-  if (h > 5) return "#F59E0B";
-  if (h < -5) return "#10B981";
-  return "#3F3F46";
+  if (h > 15) return HEAD_STRONG;
+  if (h > 5) return HEAD;
+  if (h < -5) return TAIL;
+  return CROSS;
 }
 
 export function ActivityWind({ activityId, isOutdoor }: { activityId: string; isOutdoor: boolean }) {
@@ -67,10 +70,10 @@ export function ActivityWind({ activityId, isOutdoor }: { activityId: string; is
         </div>
         <p className="text-sm text-[#A1A1AA] mb-4">{verdict(w)}</p>
 
-        <div className="flex h-2.5 rounded-full overflow-hidden mb-2">
-          <div style={{ width: `${w.pct.head}%`, background: "#F59E0B" }} />
-          <div style={{ width: `${w.pct.cross}%`, background: "#3F3F46" }} />
-          <div style={{ width: `${w.pct.tail}%`, background: "#10B981" }} />
+        <div className="flex h-2.5 rounded-full overflow-hidden gap-[2px] mb-2">
+          <div style={{ width: `${w.pct.head}%`, background: HEAD }} />
+          <div style={{ width: `${w.pct.cross}%`, background: CROSS }} />
+          <div style={{ width: `${w.pct.tail}%`, background: TAIL }} />
         </div>
         <div className="flex justify-between text-xs text-[#71717A] tabular-nums mb-4">
           <span><span className="text-amber-400">Headwind</span> {w.pct.head}%</span>

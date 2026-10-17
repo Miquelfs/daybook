@@ -1,13 +1,10 @@
-import { RaceCockpit } from "@/components/race/RaceCockpit";
+import { redirect } from "next/navigation";
 
-export const metadata = { title: "Mallorca 312 · Daybook" };
-
-// The race cockpit: everything about the A-race on one screen — countdown and
-// phase map, today's session, this week, the AI coach, engine and milestones.
-export default function RacePage() {
-  return (
-    <main className="max-w-3xl mx-auto px-4 pb-20 pt-8">
-      <RaceCockpit />
-    </main>
-  );
+// The race cockpit now lives inside Omyra (first tab). Keep old links working,
+// including the weekend nudge (/race?plan=next).
+export default async function RacePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const sp = await searchParams;
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) if (typeof v === "string") q.set(k, v);
+  redirect(`/omyra${q.size ? `?${q}` : ""}`);
 }

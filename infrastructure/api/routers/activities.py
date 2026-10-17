@@ -425,6 +425,33 @@ def get_activity_analysis(
     return {"analysis": analyze(conn, activity_id, use_cache=not refresh)}
 
 
+@router.get("/{activity_id}/impact")
+def get_activity_impact(
+    activity_id: str,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+):
+    """Training impact: load + fitness/fatigue/form change, efficiency vs similar sessions, race readiness."""
+    from domains.health.activity_analysis import analyze
+    from domains.training.activity_impact import impact
+    if conn.execute("SELECT 1 FROM activities WHERE id=?", (activity_id,)).fetchone() is None:
+        raise HTTPException(status_code=404, detail=f"Activity {activity_id!r} not found")
+
+    def fuel_target(mins, zone, disc):
+        try:
+            from infrastructure.api.routers.race_plans import _session_fuel
+            g = conn.execute("SELECT race_date FROM race_goals WHERE status='active' ORDER BY race_date LIMIT 1").fetchone()
+            wtr = max(0, (date.fromisoformat(g[0]) - date.today()).days // 7) if g else 0
+            return ((_session_fuel(conn, mins, zone, disc, wtr) or {}).get("during") or {}).get("carbs_g_h")
+        except Exception:
+            return None
+
+    try:
+        analysis = analyze(conn, activity_id)
+    except Exception:
+        analysis = None
+    return {"impact": impact(conn, activity_id, analysis=analysis, fuel_target_fn=fuel_target)}
+
+
 @router.get("/{activity_id}/wind")
 def get_activity_wind(
     activity_id: str,

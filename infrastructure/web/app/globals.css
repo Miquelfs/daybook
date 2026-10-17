@@ -147,6 +147,12 @@ html[data-theme="light"] .bg-\[\#3F3F46\]        { background-color: #C9BC9F; }
 html[data-theme="light"] .bg-\[\#FAFAFA\]        { background-color: #FFFDF7; }
 html[data-theme="light"] .bg-\[\#D4D4D8\]        { background-color: var(--ink-soft); }
 
+/* — Status ink: the -400 steps are tuned for the dark cockpit; on paper they need depth — */
+html[data-theme="light"] .text-emerald-400 { color: #047857; }
+html[data-theme="light"] .text-amber-400   { color: #B45309; }
+html[data-theme="light"] .text-rose-400    { color: #BE123C; }
+html[data-theme="light"] .text-blue-400    { color: #1D4ED8; }
+
 /* — Borders / dividers — */
 html[data-theme="light"] .border-\[\#18181B\]     { border-color: var(--paper-line-soft); }
 html[data-theme="light"] .border-\[\#1C1C1F\]     { border-color: var(--paper-line-soft); }

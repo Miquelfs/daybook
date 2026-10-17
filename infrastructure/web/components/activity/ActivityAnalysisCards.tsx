@@ -476,10 +476,10 @@ export function ActivityAnalysisCards({ analysis }: { analysis: ActivityAnalysis
   const a = analysis;
   return (
     <>
-      {a.elevation && <ElevationCard a={a} />}
-      {a.pace && <PaceCard a={a} />}
       {a.hr && <HeartRateCard a={a} />}
+      {a.pace && <PaceCard a={a} />}
       {a.power && <PowerCard a={a} />}
+      {a.elevation && <ElevationCard a={a} />}
       {a.cadence && <CadenceCard a={a} />}
     </>
   );
