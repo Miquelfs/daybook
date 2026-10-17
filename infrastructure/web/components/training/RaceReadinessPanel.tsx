@@ -105,8 +105,8 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
     const params = rd ? `?race_date=${rd}` : "";
     setLoading(true);
     fetch(`${API}/training/readiness${params}`)
-      .then((r) => r.json())
-      .then((d) => { setData(d); setLoading(false); })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { setData(d && Array.isArray(d.ef_sparkline) ? d : null); setLoading(false); })
       .catch(() => setLoading(false));
   }
 

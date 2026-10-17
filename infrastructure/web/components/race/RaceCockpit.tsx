@@ -36,6 +36,8 @@ type Overview = {
             zones_from: string | null; compliance_4w: number | null; longest_ride_min: number };
 };
 
+// An API error (Pi hiccup, 404) must not crash the cockpit: treat it as "no data".
+const okJson = (r: Response) => (r.ok ? r.json() : null);
 const iso = (d: Date) => localISODate(d);
 const todayIso = () => iso(new Date());
 const fmtH = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}h${min % 60 ? String(min % 60).padStart(2, "0") : ""}` : `${min}m`);
@@ -138,7 +140,7 @@ function TodayCard() {
   const today = todayIso();
   const { data } = useQuery<{ sessions: DaySession[]; readiness_context: { day_label?: string; ride_window_min?: number; sleep_h?: number | null } }>({
     queryKey: ["race-today", today],
-    queryFn: () => fetch(`/api/race-plans/day/${today}`, { cache: "no-store" }).then((r) => r.json()),
+    queryFn: () => fetch(`/api/race-plans/day/${today}`, { cache: "no-store" }).then(okJson),
   });
   const sessions = (data?.sessions ?? []).filter((s) => s.status !== "skipped");
   const ctx = data?.readiness_context;
@@ -234,7 +236,7 @@ function WeekStrip({ goalId, onPlan }: { goalId: number; onPlan: (d: string) => 
   }
   const { data } = useQuery<{ week_start: string; days: WeekDayT[]; confirmed_at: string | null }>({
     queryKey: ["omyra-week", goalId, today],
-    queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/week?date=${today}`, { cache: "no-store" }).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/week?date=${today}`, { cache: "no-store" }).then(okJson),
   });
   const days = data?.days ?? [];
   const live = days.flatMap((d) => d.sessions).filter((s) => s.status !== "skipped" && s.status !== "displaced");
@@ -325,7 +327,7 @@ function CoachCard({ goalId }: { goalId: number }) {
   const [err, setErr] = useState<string | null>(null);
   const { data, refetch } = useQuery<{ week_start: string; review: Review | null }>({
     queryKey: ["coach", goalId],
-    queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/coach`, { cache: "no-store" }).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/coach`, { cache: "no-store" }).then(okJson),
   });
   const review = data?.review;
 
@@ -495,7 +497,7 @@ function driftClass(p: number | null) {
 function RideQualityCard({ goalId }: { goalId: number }) {
   const { data } = useQuery<RideQ>({
     queryKey: ["ride-quality", goalId],
-    queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/ride-quality`, { cache: "no-store" }).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/ride-quality`, { cache: "no-store" }).then(okJson),
   });
   if (!data) return null;
   const climbs = [...data.climbs].reverse();
@@ -603,14 +605,14 @@ export function RaceCockpit() {
   const [planner, setPlanner] = useState<string | null>(null);
   const { data: goals, isLoading } = useQuery<{ id: number; race_type: string; status: string }[]>({
     queryKey: ["omyra-goals-active"],
-    queryFn: () => fetch(`${BASE}/race-plans/goals?status=active`, { cache: "no-store" }).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/race-plans/goals?status=active`, { cache: "no-store" }).then(okJson),
   });
   const list = Array.isArray(goals) ? goals : [];   // an API hiccup returns an error object, not a list
   const goal = list.find((g) => g.race_type === "mallorca_312") ?? list[0];
 
   const { data: ov } = useQuery<Overview>({
     queryKey: ["race-overview", goal?.id],
-    queryFn: () => fetch(`${BASE}/race-plans/goals/${goal!.id}/overview`, { cache: "no-store" }).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/race-plans/goals/${goal!.id}/overview`, { cache: "no-store" }).then(okJson),
     enabled: !!goal,
   });
 
@@ -662,7 +664,7 @@ export function RaceCockpit() {
       <div className="flex justify-center gap-4 text-xs text-[#71717A] pt-2">
         <Link href="/omyra?tab=plan" className="hover:text-[#F59E0B]">Full plan & settings</Link>
         <span>·</span>
-        <Link href="/training" className="hover:text-[#F59E0B]">Training analytics</Link>
+        <Link href="/omyra" className="hover:text-[#F59E0B]">Training overview</Link>
       </div>
       {planner && (
         <WeekPlanner goalId={goal.id} initialDate={planner} onClose={() => {

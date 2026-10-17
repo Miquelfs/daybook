@@ -134,7 +134,7 @@ export default function StatsHub() {
             { href: "/stats/fitness-curve", label: "Fitness curve", sub: "CTL · ATL · TSB — form & fatigue" },
             { href: "/stats/performance-trend", label: "Performance trend", sub: "Are you getting faster?" },
             { href: "/health/correlation", label: "Recovery & performance", sub: "HRV and sleep vs running pace" },
-            { href: "/training", label: "Training dashboard", sub: "Load, segments, activity log" },
+            { href: "/omyra", label: "Omyra · Training", sub: "Load, plan, Mallorca 312, activity log" },
             { href: "/explore", label: "Route map", sub: "All GPS tracks on a map" },
           ].map(({ href, label, sub }) => (
             <Link key={href} href={href} className="flex items-center justify-between py-3 hover:bg-[#0D0D0F] rounded-lg px-2 -mx-2 transition-colors">

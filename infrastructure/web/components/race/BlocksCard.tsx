@@ -33,7 +33,9 @@ export function BlocksCard({ goalId }: { goalId: number }) {
   const [adding, setAdding] = useState(false);
   const { data: blocks = [] } = useQuery<Block[]>({
     queryKey: ["training-blocks", goalId],
-    queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/blocks`).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/blocks`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => (Array.isArray(d) ? d : [])),
   });
   function refresh() {
     for (const k of ["training-blocks", "race-overview", "omyra-week", "race-today", "coach"]) qc.invalidateQueries({ queryKey: [k] });

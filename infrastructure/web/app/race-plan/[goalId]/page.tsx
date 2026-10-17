@@ -104,7 +104,7 @@ export default function RacePlanPage() {
       {/* Header (hidden in print except title) */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <Link href="/training" className="text-xs text-[#F59E0B] print:hidden">← Training</Link>
+          <Link href="/omyra?tab=plan" className="text-xs text-[#F59E0B] print:hidden">← Omyra</Link>
           <h1 className="text-lg font-bold text-[#FAFAFA] print:text-black">Race-day nutrition — {goal?.name ?? "Race"}</h1>
           <p className="text-xs text-[#52525B] print:text-gray-600">{goal?.race_date}{plan ? ` · target ${plan.target_time ?? "—"} · projected ${plan.projected_finish}` : ""}</p>
         </div>

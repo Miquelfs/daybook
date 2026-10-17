@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, List, Wallet, Globe, Camera, HeartPulse, TrendingUp, PlaneTakeoff, Apple, Mountain } from "lucide-react";
+import { CalendarDays, List, Wallet, Globe, Camera, HeartPulse, TrendingUp, PlaneTakeoff, Apple, Bike } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const tabs = [
@@ -10,7 +10,7 @@ const tabs = [
   { href: "/timeline",     label: "Timeline", icon: List },
   { href: "/moments",      label: "Moments",  icon: Camera },
   { href: "/money",        label: "Finance",  icon: Wallet },
-  { href: "/omyra",        label: "Omyra",    icon: Mountain },
+  { href: "/omyra",        label: "Omyra · Training", icon: Bike },
   { href: "/health",       label: "Health",   icon: HeartPulse },
   { href: "/food",         label: "Food",     icon: Apple },
   { href: "/aviation",     label: "Logbook",  icon: PlaneTakeoff },
@@ -29,7 +29,7 @@ export function BottomNav() {
     if (href === "/food") return pathname.startsWith("/food");
     if (href === "/aviation") return pathname.startsWith("/aviation");
     if (href === "/correlations") return pathname.startsWith("/correlations");
-    if (href === "/omyra") return pathname.startsWith("/omyra") || pathname.startsWith("/race");
+    if (href === "/omyra") return pathname.startsWith("/omyra") || pathname.startsWith("/race") || pathname.startsWith("/training");
     return pathname.startsWith(href);
   }
 
