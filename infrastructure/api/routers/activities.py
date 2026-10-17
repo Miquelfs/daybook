@@ -412,6 +412,19 @@ def get_sync_status(conn: Annotated[sqlite3.Connection, Depends(get_db)]):
     ]
 
 
+@router.get("/{activity_id}/wind")
+def get_activity_wind(
+    activity_id: str,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+    refresh: bool = Query(False),
+):
+    """Head/tail/crosswind over the completed route (Open-Meteo hourly wind; cached)."""
+    from domains.health.ride_wind import compute
+    if conn.execute("SELECT 1 FROM activities WHERE id=?", (activity_id,)).fetchone() is None:
+        raise HTTPException(status_code=404, detail=f"Activity {activity_id!r} not found")
+    return {"wind": compute(conn, activity_id, force=refresh)}
+
+
 @router.get("/{activity_id}/streams")
 def get_activity_streams(
     activity_id: str,

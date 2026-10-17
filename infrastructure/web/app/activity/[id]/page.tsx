@@ -3,6 +3,7 @@ import type { ActivityDetail, ActivityComputedMetrics } from "@/lib/api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ActivityMap } from "@/components/ActivityMap";
+import { ActivityWind } from "@/components/ActivityWind";
 import { ActivityCharts } from "@/components/ActivityCharts";
 import { ActivityNotes } from "@/components/ActivityNotes";
 import { TennisSessionPanel } from "@/components/TennisSessionPanel";
@@ -218,6 +219,14 @@ export default async function ActivityPage({ params }: Props) {
           <SectionLabel>Route</SectionLabel>
           <ActivityMap polyline={activity.polyline} />
         </section>
+      )}
+
+      {/* Wind over the completed route — head/tail/crosswind share */}
+      {activity.polyline && (
+        <ActivityWind
+          activityId={decodedId}
+          isOutdoor={!/indoor|virtual|trainer|treadmill|swim|strength/i.test(activity.activity_type ?? "")}
+        />
       )}
 
       {/* Planned vs actual — when this activity completed a scheduled session */}
