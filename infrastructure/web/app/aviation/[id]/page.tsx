@@ -5,11 +5,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FlightWeatherRunway } from "@/components/aviation/FlightWeatherRunway";
 import { useParams, useRouter } from "next/navigation";
 import { FlightPhysioCard } from "@/components/FlightPhysioCard";
+import { FlightHero } from "@/components/aviation/FlightHero";
 import Link from "next/link";
 import {
-  ArrowLeft, PlaneTakeoff, PlaneLanding, Clock, Users,
+  ArrowLeft, Users,
   Fuel, AlertTriangle, FileText, Loader, Pencil, X, Check, Trash2,
-  Moon, Sun,
 } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -20,14 +20,10 @@ function hhmm(seconds: number | null | undefined): string {
   return `${h}h ${m > 0 ? `${m}m` : ""}`.trim();
 }
 
-function utcTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return iso.length >= 16 ? iso.slice(11, 16) + " UTC" : iso;
-}
 
 function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="bg-[#18181B] rounded-lg p-4 mb-3">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 mb-4">
       <div className="flex items-center gap-2 mb-3">
         {icon && <span className="text-[#52525B]">{icon}</span>}
         <p className="text-xs font-medium text-[#71717A] uppercase tracking-wider">{title}</p>
@@ -303,107 +299,16 @@ export default function FlightDetailPage() {
         )}
       </div>
 
-      {/* Route header */}
-      <div className="mb-6">
-        <div className="flex items-baseline gap-3 flex-wrap">
-          <h1 className="text-2xl font-bold text-[#FAFAFA] font-mono tracking-tight">
-            {depLabel} → {arrLabel}
-          </h1>
-          {f.flight_number && (
-            <span className="text-[#71717A] text-sm font-mono">{f.flight_number}</span>
-          )}
-        </div>
-        {(depCity || arrCity) && (
-          <p className="text-xs text-[#52525B] mt-1">
-            {depCity}{depCity && arrCity ? " → " : ""}{arrCity}
-          </p>
-        )}
-        <div className="flex items-center gap-3 mt-2 flex-wrap">
-          <span className="text-sm text-[#71717A]">{f.date}</span>
-          <span className={`text-xs font-mono px-2 py-0.5 rounded ${f.crew_role === "pic" ? "bg-violet-900/50 text-violet-300" : "bg-[#27272A] text-[#71717A]"}`}>
-            {role}
-          </span>
-          {f.is_sim && <span className="text-xs px-2 py-0.5 rounded bg-amber-900/40 text-amber-400">FSTD</span>}
-        </div>
-      </div>
+      <FlightHero f={f} />
 
-      {/* Times */}
-      <Section title="Times" icon={<Clock size={14} />}>
-        <div className="grid grid-cols-4 gap-2 text-center mb-3">
-          {[
-            { label: "Off Block", value: utcTime(f.off_block_utc), icon: <PlaneTakeoff size={10} /> },
-            { label: "Takeoff", value: utcTime(f.takeoff_utc), icon: <PlaneTakeoff size={10} /> },
-            { label: "Landing", value: utcTime(f.landing_utc), icon: <PlaneLanding size={10} /> },
-            { label: "On Block", value: utcTime(f.on_block_utc), icon: <PlaneLanding size={10} /> },
-          ].map(({ label, value, icon }) => (
-            <div key={label} className="bg-[#09090B] rounded-lg p-2">
-              <div className="flex justify-center text-[#52525B] mb-1">{icon}</div>
-              <p className="text-sm font-mono text-[#FAFAFA] tabular-nums">{value}</p>
-              <p className="text-xs text-[#52525B] mt-0.5">{label}</p>
-            </div>
-          ))}
-        </div>
-        <Row label="Block time" value={hhmm(f.block_seconds)} highlight />
-        <Row label="Airborne time" value={hhmm(f.airborne_seconds)} />
-        {f.distance_nm && <Row label="Distance" value={`${f.distance_nm.toLocaleString()} NM`} />}
-        <Row label="Night" value={hhmm(f.night_seconds)} />
-        <Row label="IFR" value={hhmm(f.ifr_seconds)} />
-        {/* Day / night split of the flight */}
-        {(() => {
-          const base = f.airborne_seconds || f.block_seconds || 0;
-          if (!base || f.is_sim) return null;
-          const nightPct = Math.min(100, ((f.night_seconds || 0) / base) * 100);
-          const dayPct = 100 - nightPct;
-          return (
-            <div className="mt-3">
-              <div className="h-2 rounded-full overflow-hidden flex bg-[#09090B]">
-                <div className="bg-sky-500" style={{ width: `${dayPct}%` }} />
-                <div className="bg-indigo-600" style={{ width: `${nightPct}%` }} />
-              </div>
-              <div className="flex items-center justify-between mt-1.5 text-xs text-[#52525B]">
-                <span className="flex items-center gap-1">
-                  <Sun size={10} className="text-sky-500" />Day {dayPct.toFixed(0)}%
-                </span>
-                <span className="flex items-center gap-1">
-                  <Moon size={10} className="text-indigo-400" />Night {nightPct.toFixed(0)}%
-                </span>
-              </div>
-            </div>
-          );
-        })()}
-      </Section>
-
-      {/* Crew & Aircraft */}
-      <Section title="Crew & Aircraft">
+      {/* Crew & aircraft details */}
+      <Section title="Crew & aircraft">
         <Row label="Role" value={role} />
-        {f.takeoff_crew && <Row label="Takeoff crew" value={f.takeoff_crew} />}
-        {f.landing_crew && <Row label="Landing crew" value={f.landing_crew} />}
+        {f.pic_name && <Row label="Captain" value={f.pic_name} />}
         <Row label="Registration" value={f.aircraft_reg} />
         <Row label="Aircraft type" value={f.aircraft_type} />
         <Row label="Operator" value={f.operator} />
-      </Section>
-
-      {/* Personal T/O & Landings */}
-      <Section title="Takeoffs & Landings" icon={<PlaneTakeoff size={14} />}>
-        <div className="grid grid-cols-4 gap-2 text-center">
-          {[
-            { label: "T/O Day", value: f.takeoffs_day },
-            { label: "T/O Night", value: f.takeoffs_night },
-            { label: "Ldg Day", value: f.landings_day },
-            { label: "Ldg Night", value: f.landings_night },
-          ].map(({ label, value }) => (
-            <div key={label} className="bg-[#09090B] rounded-lg p-3">
-              <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">{value}</p>
-              <p className="text-xs text-[#52525B] mt-0.5">{label}</p>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      {/* PIC / SIC hours */}
-      <Section title="Flight Time">
-        <Row label="PIC" value={hhmm(f.pic_seconds)} />
-        <Row label="First Officer (SIC)" value={hhmm(f.sic_seconds)} />
+        {(depCity || arrCity) && <Row label="Airports" value={<span className="font-sans text-xs">{depLabel} → {arrLabel}</span>} />}
       </Section>
 
       {/* Cirqa physiological load — computed live, never part of the logbook export */}

@@ -4,17 +4,17 @@ import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
 import {
-  PlaneTakeoff, PlaneLanding, Moon, Clock, Globe, Plus,
-  Shield, TrendingUp, Award, ChevronRight, Download,
+  PlaneTakeoff, PlaneLanding, Moon, Clock, Plus,
+  TrendingUp, Award, ChevronRight, Download,
   Flag, Compass, Plane, Fuel, Users, Layers, AlertTriangle,
-  List, BarChart2, MapPin, CalendarDays, X, User, Gauge,
+  List, BarChart2, MapPin, CalendarDays, X, User, Gauge, Search,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { api, type FlightSummary, type LimitWindow } from "@/lib/api";
+import { api, type FlightSummary } from "@/lib/api";
 import { AddFlightSheet } from "@/components/aviation/AddFlightSheet";
 
 const FlightRouteMap = dynamic(
@@ -22,6 +22,7 @@ const FlightRouteMap = dynamic(
   { ssr: false, loading: () => <div className="h-96 bg-[#18181B] rounded-lg animate-pulse" /> }
 );
 import type { MapStyle } from "@/components/aviation/FlightRouteMap";
+import { LogbookHero, LegalCard, HoursCard } from "@/components/aviation/LogbookOverview";
 import { LicensesCard } from "@/components/aviation/LicensesCard";
 import { PunctualityTab } from "@/components/aviation/PunctualityTab";
 import { FlightLoadRollup } from "@/components/StressLifeInsights";
@@ -90,18 +91,6 @@ function fmt(n: number | null | undefined, unit = ""): string {
   return n.toLocaleString() + (unit ? " " + unit : "");
 }
 
-function StatCard({ label, value, sub, icon }: { label: string; value: string | number; sub?: string; icon?: React.ReactNode }) {
-  return (
-    <div className="bg-[#18181B] rounded-lg p-4">
-      <div className="flex items-center justify-between mb-1">
-        <p className="text-xs text-[#71717A]">{label}</p>
-        {icon && <span className="text-[#52525B]">{icon}</span>}
-      </div>
-      <p className="text-2xl font-semibold text-[#FAFAFA] tabular-nums">{value}</p>
-      {sub && <p className="text-xs text-[#52525B] mt-0.5">{sub}</p>}
-    </div>
-  );
-}
 
 function AnalyticCard({ label, value, sub, accent }: { label: string; value: string | number; sub?: string; accent?: string }) {
   return (
@@ -113,24 +102,6 @@ function AnalyticCard({ label, value, sub, accent }: { label: string; value: str
   );
 }
 
-function LimitBar({ window: w }: { window: LimitWindow }) {
-  const pct = Math.min(100, (w.hours / w.limit_hours) * 100);
-  const barColor = pct >= 90 ? "#EF4444" : pct >= 75 ? "#F59E0B" : "#38BDF8";
-  return (
-    <div>
-      <div className="flex items-baseline justify-between mb-1">
-        <span className="text-xs text-[#71717A]">{w.label}</span>
-        <span className="text-xs tabular-nums">
-          <span className="text-[#FAFAFA] font-medium">{w.hours.toFixed(0)}h</span>
-          <span className="text-[#52525B]"> / {w.limit_hours.toFixed(0)}h</span>
-        </span>
-      </div>
-      <div className="h-1.5 bg-[#27272A] rounded-full overflow-hidden">
-        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: barColor }} />
-      </div>
-    </div>
-  );
-}
 
 function SectionTitle({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -183,9 +154,7 @@ export default function AviationPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [regSearch, setRegSearch] = useState("");
   const regInputRef = useRef<HTMLInputElement>(null);
-  const [airportSearch, setAirportSearch] = useState("");
-  const [captainSearch, setCaptainSearch] = useState("");
-  const [selectedYear, setSelectedYear] = useState<string | null>(null);
+  const [lookupKind, setLookupKind] = useState<"aircraft" | "airport" | "captain">("aircraft");
   const [tab, setTab] = useState<Tab>("overview");
   const [easaPage, setEasaPage] = useState(0);
   const [roleFilter, setRoleFilter] = useState<string>("");
@@ -268,7 +237,6 @@ export default function AviationPage() {
     enabled: lookup?.kind === "captain" && !!lookup.query,
   });
 
-  const tot = stats?.totals;
 
   // Fill missing years with 0 for chart
   const yearMap = new globalThis.Map((stats?.by_year ?? []).map(y => [y.year, y]));
@@ -276,13 +244,7 @@ export default function AviationPage() {
     year: yr, sectors: 0, block_hours: 0, pic_hours: 0, sic_hours: 0, night_hours: 0, takeoffs: 0, landings: 0,
   });
 
-  const monthData = selectedYear
-    ? stats?.by_month.filter(m => m.month.startsWith(selectedYear)) ?? []
-    : [];
 
-  const isExpiringSoon = currency?.next_expiry_date
-    ? new Date(currency.next_expiry_date) <= new Date(Date.now() + 30 * 86400000)
-    : false;
 
   const filteredFlights = allFlights.filter(f => {
     if (roleFilter && f.crew_role !== roleFilter) return false;
@@ -344,220 +306,43 @@ export default function AviationPage() {
       {/* ── OVERVIEW ── */}
       {tab === "overview" && (
         <>
-          {tot && (
-            <div className="grid grid-cols-2 gap-3 mb-3 sm:grid-cols-4">
-              <StatCard label="Total Block" value={hToHHMM(tot.block_hours)} sub={`${tot.sectors} sectors`} icon={<Clock size={14} />} />
-              <StatCard label="PIC" value={hToHHMM(tot.pic_hours)} sub={`SIC ${hToHHMM(tot.sic_hours)}`} icon={<Award size={14} />} />
-              <StatCard label="Night" value={hToHHMM(tot.night_hours)} sub={`${((tot.night_hours / (tot.block_hours || 1)) * 100).toFixed(0)}% of total`} icon={<Moon size={14} />} />
-              <StatCard label="Airports" value={stats.airports_visited} sub={`${stats.countries_visited} countries`} icon={<Globe size={14} />} />
-            </div>
-          )}
-
-          {tot && tot.sim_sessions > 0 && (
-            <div className="flex items-center gap-3 bg-[#18181B] border border-[#27272A] rounded-lg px-4 py-3 mb-6">
-              <Layers size={16} className="text-violet-400 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-[#71717A]">FSTD / Simulator</p>
-                <p className="text-base font-semibold text-violet-300 tabular-nums">{hToHHMM(tot.sim_hours)}</p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className="text-xs text-[#52525B]">{tot.sim_sessions} session{tot.sim_sessions !== 1 ? "s" : ""}</p>
-                <p className="text-xs text-[#3F3F46]">not counted in block</p>
-              </div>
-            </div>
-          )}
-
-          {tot && (
-            <div className="grid grid-cols-4 gap-2 mb-6">
-              {[
-                { label: "T/O Day", value: tot.takeoffs_day, icon: <PlaneTakeoff size={12} /> },
-                { label: "T/O Night", value: tot.takeoffs_night, icon: <PlaneTakeoff size={12} /> },
-                { label: "Ldg Day", value: tot.landings_day, icon: <PlaneLanding size={12} /> },
-                { label: "Ldg Night", value: tot.landings_night, icon: <PlaneLanding size={12} /> },
-              ].map(({ label, value, icon }) => (
-                <div key={label} className="bg-[#18181B] rounded-lg p-3 text-center">
-                  <div className="flex items-center justify-center gap-1 text-[#52525B] mb-1">{icon}</div>
-                  <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">{value}</p>
-                  <p className="text-xs text-[#71717A]">{label}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {currency && (
-            <div className={`rounded-lg p-4 mb-6 border ${isExpiringSoon ? "bg-amber-950/30 border-amber-700" : "bg-[#18181B] border-[#27272A]"}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <Shield size={14} className={isExpiringSoon ? "text-amber-400" : "text-sky-400"} />
-                <p className="text-sm font-medium text-[#FAFAFA]">90-Day Currency</p>
-                {currency.next_expiry_date && (
-                  <span className={`ml-auto text-xs ${isExpiringSoon ? "text-amber-400" : "text-[#52525B]"}`}>
-                    Expires {format(parseISO(currency.next_expiry_date), "dd MMM yyyy")}
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">{currency.takeoffs_landings_90d}</p>
-                  <p className="text-xs text-[#71717A]">T/O + Ldg</p>
-                </div>
-                <div>
-                  <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">{currency.night_takeoffs_90d + currency.night_landings_90d}</p>
-                  <p className="text-xs text-[#71717A]">Night ops</p>
-                </div>
-                <div>
-                  <p className={`text-xl font-semibold tabular-nums ${currency.takeoffs_landings_90d >= 3 ? "text-green-400" : "text-red-400"}`}>
-                    {currency.takeoffs_landings_90d >= 3 ? "Current" : "NOT current"}
-                  </p>
-                  <p className="text-xs text-[#71717A]">Status</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 mt-3 pt-3 border-t border-[#27272A]">
-                <Moon size={12} className={currency.night_current ? "text-indigo-400" : "text-[#52525B]"} />
-                {currency.night_current ? (
-                  <p className="text-xs text-[#A1A1AA]">
-                    Night pax currency <span className="text-green-400 font-medium">current</span>
-                    {currency.night_expiry_date && (
-                      <span className="text-[#52525B]"> · expires {format(parseISO(currency.night_expiry_date), "dd MMM yyyy")}</span>
-                    )}
-                  </p>
-                ) : (
-                  <p className="text-xs text-[#71717A]">
-                    Night pax currency <span className="text-amber-400 font-medium">not held</span>
-                    <span className="text-[#52525B]"> · needs 1 night T/O + 1 night ldg in 90 days</span>
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Flight time limitations (EASA ORO.FTL.210) */}
-          {limits && (
-            <div className="bg-[#18181B] border border-[#27272A] rounded-lg p-4 mb-6">
-              <div className="flex items-center gap-2 mb-3">
-                <Gauge size={14} className="text-sky-400" />
-                <p className="text-sm font-medium text-[#FAFAFA]">Flight Time Limits</p>
-                <span className="ml-auto text-xs text-[#52525B]">EASA ORO.FTL.210</span>
-              </div>
-              <div className="space-y-3">
-                {[limits.days_28, limits.calendar_year, limits.months_12].map(w => (
-                  <LimitBar key={w.label} window={w} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Licenses & ratings expiry tracker */}
+          {stats && <LogbookHero stats={stats} flights={allFlights} />}
+          <LegalCard currency={currency} limits={limits} />
           <LicensesCard />
-
-          {/* Annual chart */}
-          {yearsWithGaps.length > 0 && (
-            <div className="bg-[#18181B] rounded-lg p-4 mb-6">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-[#FAFAFA]">Hours by Year</p>
-                <TrendingUp size={14} className="text-[#52525B]" />
-              </div>
-              <ResponsiveContainer width="100%" height={160}>
-                <BarChart data={yearsWithGaps} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="year" tick={{ fill: "#71717A", fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "#71717A", fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <Tooltip
-                    contentStyle={{ background: "#18181B", border: "1px solid #27272A", borderRadius: 8 }}
-                    labelStyle={{ color: "#FAFAFA" }}
-                    formatter={(v, name) => [hToHHMM(Number(v ?? 0)), name === "block_hours" ? "Block" : name === "pic_hours" ? "PIC" : "SIC"]}
-                  />
-                  <Bar dataKey="block_hours" fill="#38BDF8" radius={[3, 3, 0, 0]} name="block_hours">
-                    {yearsWithGaps.map((y) => (
-                      <Cell key={y.year} fill={selectedYear === y.year ? "#0EA5E9" : "#38BDF8"}
-                        className="cursor-pointer"
-                        onClick={() => setSelectedYear(selectedYear === y.year ? null : y.year)}
-                      />
-                    ))}
-                  </Bar>
-                  <Bar dataKey="pic_hours" fill="#A78BFA" radius={[3, 3, 0, 0]} name="pic_hours" />
-                </BarChart>
-              </ResponsiveContainer>
-              {selectedYear && <p className="text-xs text-sky-400 mt-1 text-center">Showing {selectedYear} · click bar to deselect</p>}
-            </div>
-          )}
-
-          {selectedYear && monthData.length > 0 && (
-            <div className="bg-[#18181B] rounded-lg p-4 mb-6">
-              <p className="text-sm font-medium text-[#FAFAFA] mb-3">Monthly — {selectedYear}</p>
-              <ResponsiveContainer width="100%" height={130}>
-                <BarChart data={monthData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="month" tickFormatter={m => m.slice(5)} tick={{ fill: "#71717A", fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "#71717A", fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ background: "#18181B", border: "1px solid #27272A", borderRadius: 8 }} formatter={(v) => [hToHHMM(Number(v ?? 0)), "Block"]} />
-                  <Bar dataKey="block_hours" fill="#38BDF8" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
+          <HoursCard flights={allFlights} />
 
           {/* Flights list */}
           <div className="mb-6">
-            <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <p className="text-sm font-medium text-[#FAFAFA] mr-auto">Flights</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-[#52525B] uppercase tracking-widest">Flights</p>
               <CodeToggle />
-              {/* Aircraft registration lookup */}
+            </div>
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              {/* One lookup: aircraft registration, airport ICAO or captain */}
               <form
                 onSubmit={e => {
                   e.preventDefault();
-                  const q = regSearch.trim().toUpperCase();
-                  if (q) setLookup({ kind: "aircraft", query: q });
+                  const raw = regSearch.trim();
+                  if (!raw) return;
+                  setLookup({ kind: lookupKind, query: lookupKind === "captain" ? raw : raw.toUpperCase() });
                 }}
-                className="flex items-center gap-1"
-                title="Look up an aircraft by registration"
+                className="flex items-center gap-1 bg-[#18181B] border border-[#27272A] rounded-lg pl-1 pr-1 py-0.5"
               >
+                <select value={lookupKind} onChange={e => setLookupKind(e.target.value as "aircraft" | "airport" | "captain")}
+                        className="bg-transparent text-xs text-[#71717A] focus:outline-none">
+                  <option value="aircraft">Aircraft</option>
+                  <option value="airport">Airport</option>
+                  <option value="captain">Captain</option>
+                </select>
                 <input
                   ref={regInputRef}
-                  className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA] placeholder-[#52525B] focus:outline-none focus:border-violet-500 w-24 font-mono uppercase"
-                  placeholder="9H-QAE…"
+                  className="bg-transparent px-1 py-0.5 text-xs text-[#A1A1AA] placeholder-[#52525B] focus:outline-none w-24 font-mono"
+                  placeholder={lookupKind === "aircraft" ? "9H-QAE" : lookupKind === "airport" ? "LEPA" : "Name"}
                   value={regSearch}
-                  onChange={e => setRegSearch(e.target.value.toUpperCase())}
+                  onChange={e => setRegSearch(lookupKind === "captain" ? e.target.value : e.target.value.toUpperCase())}
                 />
-                <button type="submit" className="px-2 py-1 bg-[#27272A] hover:bg-[#3F3F46] rounded-lg text-xs text-[#A1A1AA] transition-colors">
-                  <Plane size={11} />
-                </button>
-              </form>
-              {/* Airport ICAO lookup */}
-              <form
-                onSubmit={e => {
-                  e.preventDefault();
-                  const q = airportSearch.trim().toUpperCase();
-                  if (q) setLookup({ kind: "airport", query: q });
-                }}
-                className="flex items-center gap-1"
-                title="Look up an airport by ICAO"
-              >
-                <input
-                  className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA] placeholder-[#52525B] focus:outline-none focus:border-sky-500 w-20 font-mono uppercase"
-                  placeholder="LEPA…"
-                  value={airportSearch}
-                  onChange={e => setAirportSearch(e.target.value.toUpperCase())}
-                />
-                <button type="submit" className="px-2 py-1 bg-[#27272A] hover:bg-[#3F3F46] rounded-lg text-xs text-[#A1A1AA] transition-colors">
-                  <MapPin size={11} />
-                </button>
-              </form>
-              {/* Captain lookup */}
-              <form
-                onSubmit={e => {
-                  e.preventDefault();
-                  const q = captainSearch.trim();
-                  if (q) setLookup({ kind: "captain", query: q });
-                }}
-                className="flex items-center gap-1"
-                title="Look up a captain"
-              >
-                <input
-                  className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA] placeholder-[#52525B] focus:outline-none focus:border-amber-500 w-24 font-mono"
-                  placeholder="ALEOLU…"
-                  value={captainSearch}
-                  onChange={e => setCaptainSearch(e.target.value)}
-                />
-                <button type="submit" className="px-2 py-1 bg-[#27272A] hover:bg-[#3F3F46] rounded-lg text-xs text-[#A1A1AA] transition-colors">
-                  <User size={11} />
+                <button type="submit" className="p-1 rounded-md text-[#71717A] hover:text-[#FAFAFA]" aria-label="Look up">
+                  <Search size={12} />
                 </button>
               </form>
               <select className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]"
@@ -581,10 +366,23 @@ export default function AviationPage() {
               <OpPill label="Manual" color="#71717A" />
             </div>
 
-            <div className="space-y-1">
-              {shownFlights.map((f: FlightSummary) => (
-                <FlightRow key={f.id} flight={f} codeMode={codeMode} />
-              ))}
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
+              {shownFlights.map((f: FlightSummary, i: number) => {
+                const m = f.date.slice(0, 7);
+                const newMonth = i === 0 || shownFlights[i - 1].date.slice(0, 7) !== m;
+                const monthH = newMonth ? filteredFlights.filter(x => x.date.startsWith(m)).reduce((a, x) => a + (x.block_seconds ?? 0), 0) : 0;
+                return (
+                  <div key={f.id}>
+                    {newMonth && (
+                      <div className="flex items-baseline justify-between px-4 pt-3 pb-1 border-t border-[#27272A] first:border-t-0">
+                        <span className="text-[10px] text-[#52525B] uppercase tracking-widest">{format(parseISO(m + "-01"), "MMMM yyyy")}</span>
+                        <span className="text-[10px] text-[#71717A] tabular-nums">{secToHHMM(monthH)} · {filteredFlights.filter(x => x.date.startsWith(m)).length} sectors</span>
+                      </div>
+                    )}
+                    <FlightRow flight={f} codeMode={codeMode} />
+                  </div>
+                );
+              })}
               {filteredFlights.length === 0 && (
                 <p className="text-sm text-[#52525B] text-center py-4">No flights match the filter.</p>
               )}
@@ -1287,30 +1085,29 @@ export default function AviationPage() {
 }
 
 function FlightRow({ flight: f, codeMode }: { flight: FlightSummary; codeMode: CodeMode }) {
-  const blockH = f.block_seconds ? (f.block_seconds / 3600).toFixed(1) : "—";
-  const role = f.crew_role === "pic" ? "PIC" : f.crew_role === "first_officer" ? "SIC" : f.crew_role || "—";
+  const role = f.crew_role === "pic" ? "PIC" : f.crew_role === "first_officer" ? "SIC" : f.is_sim ? "SIM" : f.crew_role || "—";
   const dep = routeCode(f.dep_icao, f.dep_iata, codeMode);
   const arr = routeCode(f.arr_icao, f.arr_iata, codeMode);
-  const { dot, badge } = operatorColor(f);
+  const { dot, label } = operatorColor(f);
 
   return (
     <Link href={`/aviation/${f.id}`}
-      className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#18181B] transition-colors text-sm group">
-      {/* Operator color dot */}
-      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: dot }} />
-      <span className="text-[#52525B] text-xs w-20 shrink-0 tabular-nums">{f.date}</span>
-      <span className="text-[#FAFAFA] font-mono text-xs">{dep} → {arr}</span>
-      {f.night_seconds > 0 && (
-        <span className="flex items-center gap-0.5 text-indigo-400 text-xs tabular-nums" title={`${secToHHMM(f.night_seconds)} night`}>
-          <Moon size={9} />{(f.night_seconds / 3600).toFixed(1)}
-        </span>
-      )}
-      <span className="text-[#71717A] text-xs ml-auto hidden sm:block">{f.flight_number || ""}</span>
-      <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${f.crew_role === "pic" ? "bg-violet-900/50 text-violet-300" : "bg-[#27272A] text-[#71717A]"}`}>
-        {role}
-      </span>
-      <span className="text-[#A1A1AA] tabular-nums w-10 text-right text-xs">{blockH}h</span>
-      <ChevronRight size={11} className="text-[#52525B] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+      className="flex items-center gap-3 pl-0 pr-3 py-2.5 hover:bg-[#18181B] transition-colors group">
+      <span className="self-stretch w-1 rounded-r-full shrink-0" style={{ background: dot }} title={label} />
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-2">
+          <span className="font-mono text-sm font-semibold tracking-wide">{dep} <span className="text-[#71717A] font-normal">→</span> {arr}</span>
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${f.crew_role === "pic" ? "bg-[#F59E0B]/15 text-amber-400" : "bg-[#27272A] text-[#71717A]"}`}>{role}</span>
+        </p>
+        <p className="text-[11px] text-[#71717A] tabular-nums truncate mt-0.5">
+          {format(parseISO(f.date), "EEE d MMM")}
+          {f.flight_number ? ` · ${f.flight_number}` : ""}
+          {f.aircraft_reg ? ` · ${f.aircraft_reg}` : ""}
+          {f.night_seconds > 0 && <span className="text-[#A1A1AA]"> · <Moon size={9} className="inline -mt-0.5" /> {secToHHMM(f.night_seconds)}</span>}
+        </p>
+      </div>
+      <span className="text-sm font-semibold tabular-nums">{secToHHMM(f.block_seconds)}</span>
+      <ChevronRight size={13} className="text-[#3F3F46] group-hover:text-[#A1A1AA] transition-colors shrink-0" />
     </Link>
   );
 }

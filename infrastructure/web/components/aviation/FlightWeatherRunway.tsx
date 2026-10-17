@@ -47,12 +47,12 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
   const qc = useQueryClient();
   const { data: rw } = useQuery<RunwayResp>({
     queryKey: ["flight-runway", flightId],
-    queryFn: () => fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/runway`).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/runway`).then((r) => (r.ok ? r.json() : null)),
     enabled: !isSim,
   });
   const { data: metars = [] } = useQuery<Metar[]>({
     queryKey: ["flight-metars", flightId],
-    queryFn: () => fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/metars`).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/metars`).then((r) => (r.ok ? r.json() : [])).then((d) => (Array.isArray(d) ? d : [])),
     enabled: !isSim,
   });
   const { data: loads = [] } = useQuery<{
@@ -61,7 +61,7 @@ export function FlightWeatherRunway({ flightId, isSim }: { flightId: string; isS
     freight_kg?: number; avg_bag_kg?: number; hold_total_kg?: number; remarks?: string; message_time_utc?: string;
   }[]>({
     queryKey: ["flight-loadsheets", flightId],
-    queryFn: () => fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/loadsheets`).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/flights/${encodeURIComponent(flightId)}/loadsheets`).then((r) => (r.ok ? r.json() : [])).then((d) => (Array.isArray(d) ? d : [])),
     enabled: !isSim,
   });
   if (isSim) return null;
