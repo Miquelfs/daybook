@@ -30,6 +30,12 @@ function hms(s: number | null | undefined): string {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.round(s % 60);
   return h ? `${h}h ${m.toString().padStart(2, "0")}m` : m >= 10 ? `${m} min` : `${m}:${sec.toString().padStart(2, "0")}`;
 }
+/** Race-clock time: 4:09, 23:12, 1:02:10. */
+function clock(s: number): string {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.round(s % 60);
+  const ss = sec.toString().padStart(2, "0");
+  return h ? `${h}:${m.toString().padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
 const xLabel = (unit: "km" | "min") => (v: number) => (unit === "km" ? `${v.toFixed(1)} km` : `${Math.round(v)} min`);
 
 // ── building blocks ──────────────────────────────────────────────────────────
@@ -94,7 +100,7 @@ function ZoneBar({ zones, ramp, unit }: { zones: ZoneShare[]; ramp: string[]; un
             <div className="flex-1 h-1.5 bg-[#18181B] rounded-full overflow-hidden">
               <div className="h-full rounded-full" style={{ width: `${z.pct}%`, background: ramp[i] }} />
             </div>
-            <span className="text-[#A1A1AA] tabular-nums w-20 text-right">
+            <span className="text-[#A1A1AA] tabular-nums w-[6.5rem] text-right whitespace-nowrap">
               {z.secs > 0 ? `${hms(z.secs)} · ${z.pct}%` : "—"}
             </span>
           </div>
@@ -136,19 +142,21 @@ function ChartTip({ active, payload, label, unit, fmt, name }: {
 }
 
 /** One measure over distance/time. Crosshair is synced across every chart on the page. */
-function SeriesChart({ data, k, color, unit, name, fmt, domain, height = 130, children, area = false, yTick }: {
-  data: ActivityAnalysis["series"]["points"]; k: "hr" | "spd" | "pw" | "cad"; color: string;
-  unit: "km" | "min"; name: string; fmt: (v: number) => string; domain?: [number | string, number | string];
-  height?: number; children?: React.ReactNode; area?: boolean; yTick?: (v: number) => string;
+function SeriesChart({ data, k, color, unit, name, fmt, domain, height = 130, children, area = false, yTick, reversed }: {
+  data: (ActivityAnalysis["series"]["points"][number] & { pace?: number })[]; k: "hr" | "spd" | "pw" | "cad" | "pace";
+  color: string; unit: "km" | "min"; name: string; fmt: (v: number) => string;
+  domain?: [number | string, number | string]; height?: number; children?: React.ReactNode; area?: boolean;
+  yTick?: (v: number) => string; reversed?: boolean;
 }) {
   const Chart = area ? AreaChart : LineChart;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <Chart data={data} syncId={SYNC} margin={{ top: 4, right: 4, bottom: 0, left: -18 }}>
+      <Chart data={data} syncId={SYNC} margin={{ top: 4, right: 4, bottom: 0, left: -8 }}>
         <CartesianGrid vertical={false} stroke={C.grid} strokeDasharray="2 4" />
         <XAxis dataKey="x" type="number" domain={["dataMin", "dataMax"]} tickFormatter={xLabel(unit)} {...AXIS}
                minTickGap={40} />
-        <YAxis domain={domain ?? ["auto", "auto"]} tickFormatter={yTick} width={44} {...AXIS} />
+        <YAxis domain={domain ?? ["auto", "auto"]} tickFormatter={yTick ?? ((v: number) => `${Math.round(v)}`)}
+               width={44} reversed={reversed} allowDecimals={false} {...AXIS} />
         {children}
         <Tooltip cursor={{ stroke: C.ref, strokeWidth: 1 }}
                  content={<ChartTip unit={unit} fmt={fmt} name={name} />} />
@@ -220,21 +228,38 @@ function PaceCard({ a }: { a: ActivityAnalysis }) {
     { label: "Descending", v: p.descent_mps, pct: p.terrain_pct.descent },
   ].filter((t) => t.v != null);
   const maxV = Math.max(...terrain.map((t) => t.v as number), 0.1);
+  // run pace chart: s/km, walk breaks (< 3 km/h) dropped, clipped at 1.6× avg; axis on 15 s steps
+  const pacePts = run
+    ? pts.map((x) => ({ ...x, pace: x.spd && x.spd > 3 ? Math.min(3600 / x.spd, (3600 / avgKmh) * 1.6) : undefined }))
+    : [];
+  const paces = pacePts.map((x) => x.pace).filter((v): v is number => v != null);
+  const paceDomain: [number, number] = paces.length
+    ? [Math.floor((Math.min(...paces) - 5) / 15) * 15, Math.ceil((Math.max(...paces) + 5) / 15) * 15]
+    : [0, 600];
   return (
     <Card title={run ? "Pace" : "Speed"}
           headline={run ? paceFromKmh(avgKmh) : avgKmh.toFixed(1)} unit={run ? "/km avg" : "km/h avg"}
           aside={<>moving {hms(p.moving_s)}{p.stopped_s > 60 && <><br />stopped {hms(p.stopped_s)}</>}</>}
           verdict={p.verdict}>
-      {pts.some((x) => x.spd) && (
+      {pts.some((x) => x.spd) && (run ? (
         <div className="mb-4">
-          <SeriesChart data={pts} k="spd" color={C.spd} unit={a.series.x_unit} name={run ? "Pace" : "Speed"}
-                       fmt={(v) => (run ? `${paceFromKmh(v)} /km` : `${v.toFixed(1)} km/h`)}
-                       yTick={(v) => (run ? paceFromKmh(v) : `${Math.round(v)}`)} domain={[0, "dataMax + 2"]}>
+          {/* pace on a reversed axis: faster = higher */}
+          <SeriesChart data={pacePts}
+                       k="pace" color={C.spd} unit={a.series.x_unit} name="Pace" reversed
+                       fmt={(v) => `${clock(v)} /km`} yTick={(v) => clock(v)} domain={paceDomain}>
+            <ReferenceLine y={3600 / avgKmh} stroke={C.ref} strokeDasharray="4 4"
+                           label={{ value: "avg", fill: C.axis, fontSize: 10, position: "insideTopRight" }} />
+          </SeriesChart>
+        </div>
+      ) : (
+        <div className="mb-4">
+          <SeriesChart data={pts} k="spd" color={C.spd} unit={a.series.x_unit} name="Speed"
+                       fmt={(v) => `${v.toFixed(1)} km/h`} domain={[0, "dataMax + 2"]}>
             <ReferenceLine y={avgKmh} stroke={C.ref} strokeDasharray="4 4"
                            label={{ value: "avg", fill: C.axis, fontSize: 10, position: "insideTopRight" }} />
           </SeriesChart>
         </div>
-      )}
+      ))}
       {terrain.length > 1 && (
         <div className="mb-4 space-y-1.5">
           <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">By terrain</p>
@@ -262,7 +287,7 @@ function PaceCard({ a }: { a: ActivityAnalysis }) {
                 sub={`±${p.consistency_cv}% on flat ground`} />
         )}
         {Object.entries(p.best).map(([label, v]) => (
-          <Tile key={label} label={`Best ${label}`} value={run ? hms(v) : `${v.toFixed(1)} km/h`}
+          <Tile key={label} label={`Best ${label}`} value={run ? clock(v) : `${v.toFixed(1)} km/h`}
                 sub={run ? `${paceFromKmh((Number(label.split(" ")[0]) * 3600) / v)} /km` : undefined} />
         ))}
       </Tiles>
@@ -275,7 +300,7 @@ function PowerCard({ a }: { a: ActivityAnalysis }) {
   const pts = a.series.points;
   const maxBest = Math.max(...p.bests.map((b) => b.watts), 1);
   return (
-    <Card title={p.indoor ? "Power · trainer" : "Power"} headline={p.np ?? p.avg} unit={p.np ? "W normalized" : "W avg"}
+    <Card title={a.sport === "run" ? "Running power" : p.indoor ? "Power · trainer" : "Power"} headline={p.np ?? p.avg} unit={p.np ? "W normalized" : "W avg"}
           aside={<>avg {p.avg} W · max {p.max} W{p.ftp && <><br />FTP {p.ftp} W</>}</>} verdict={p.verdict}>
       {pts.some((x) => x.pw) && (
         <div className="mb-4">
@@ -298,7 +323,7 @@ function PowerCard({ a }: { a: ActivityAnalysis }) {
       </Tiles>
       {p.bests.length > 0 && (
         <div className="mb-4">
-          <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-2">Best efforts this ride</p>
+          <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-2">Best efforts this {a.sport === "run" ? "run" : "ride"}</p>
           <div className="flex items-end gap-2 h-24">
             {p.bests.map((b) => (
               <div key={b.secs} className="flex-1 flex flex-col items-center justify-end h-full"
@@ -312,7 +337,7 @@ function PowerCard({ a }: { a: ActivityAnalysis }) {
         </div>
       )}
       {p.zones ? <ZoneBar zones={p.zones} ramp={PW_RAMP} unit="W" />
-        : <p className="text-xs text-[#71717A]">Set your FTP (Training → zones) to see power zones and intensity.</p>}
+        : a.sport === "ride" && <p className="text-xs text-[#71717A]">Set your FTP (Training → zones) to see power zones and intensity.</p>}
     </Card>
   );
 }
@@ -347,7 +372,7 @@ function ElevationCard({ a }: { a: ActivityAnalysis }) {
           aside={<>↓ {e.loss_m} m<br />{e.min_m}–{e.max_m} m</>} verdict={e.verdict}>
       <div className="mb-2">
         <ResponsiveContainer width="100%" height={150}>
-          <AreaChart data={pts} syncId={SYNC} margin={{ top: 4, right: 4, bottom: 0, left: -18 }}>
+          <AreaChart data={pts} syncId={SYNC} margin={{ top: 4, right: 4, bottom: 0, left: -8 }}>
             <defs>
               <linearGradient id={gid} x1="0" y1="0" x2="1" y2="0">
                 {stops.map((s, i) => <stop key={i} offset={`${s.o}%`} stopColor={s.c} />)}
@@ -355,7 +380,8 @@ function ElevationCard({ a }: { a: ActivityAnalysis }) {
             </defs>
             <CartesianGrid vertical={false} stroke={C.grid} strokeDasharray="2 4" />
             <XAxis dataKey="x" type="number" domain={["dataMin", "dataMax"]} tickFormatter={xLabel("km")} minTickGap={40} {...AXIS} />
-            <YAxis domain={["dataMin - 20", "dataMax + 20"]} width={44} {...AXIS} />
+            <YAxis domain={[(m: number) => Math.max(0, Math.floor((m - 15) / 10) * 10), (m: number) => Math.ceil((m + 15) / 10) * 10]}
+                   tickFormatter={(v: number) => `${Math.round(v)}`} allowDecimals={false} width={44} {...AXIS} />
             {climbs.map((c) => (
               <ReferenceArea key={c.from_km} x1={c.from_km} x2={c.to_km} fill={C.ref} fillOpacity={0.06} ifOverflow="hidden" />
             ))}

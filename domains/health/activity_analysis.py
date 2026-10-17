@@ -25,7 +25,7 @@ import math
 import sqlite3
 from bisect import bisect_right
 
-VERSION = 1
+VERSION = 2
 MAX_GAP_S = 30
 MAX_SERIES = 600
 
@@ -342,7 +342,7 @@ def _fastest_distance(dist, moving, meters) -> int | None:
     return best
 
 
-def _power_card(pw, moving, ftp, weight, indoor) -> dict | None:
+def _power_card(pw, moving, ftp, weight, indoor, sport="ride") -> dict | None:
     vals = [p if (m and p is not None and p >= 0) else 0 for p, m in zip(pw, moving)]
     mv = [p for p, m in zip(pw, moving) if m and p is not None]
     if len(mv) < 120 or not any(p > 0 for p in mv):
@@ -369,7 +369,8 @@ def _power_card(pw, moving, ftp, weight, indoor) -> dict | None:
                           "pct_ftp": round(b / ftp * 100) if ftp else None})
     vi = np_ / avg if np_ and avg else None
     if if_ is None:
-        verdict = "Set your FTP to see intensity" if not ftp else "—"
+        verdict = ("Running power — steadier than pace on hills" if sport == "run"
+                   else "Set your FTP to see intensity")
     elif if_ < 0.65:
         verdict = f"Recovery-level (IF {if_:.2f})"
     elif if_ < 0.76:
@@ -651,7 +652,7 @@ def _analyze(conn, act, sport) -> dict | None:
     pace = (_pace_card(sport, s1["spd"], s1.get("d"), grade_1hz, moving, s1.get("gap"))
             if s1.get("spd") and has_dist and sport != "swim" else None)
     ftp = zrow["ftp_w"] if zrow is not None and sport == "ride" else None
-    power = _power_card(s1["pw"], moving, ftp, _weight(conn, act["date"]), indoor) if s1.get("pw") else None
+    power = _power_card(s1["pw"], moving, ftp, _weight(conn, act["date"]), indoor, sport) if s1.get("pw") else None
     cadence = _cad_card(sport, s1["cad"], moving) if s1.get("cad") else None
     temp = [t for t, m in zip(s1.get("temp") or [], moving) if m and t is not None]
 

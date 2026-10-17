@@ -33,7 +33,7 @@
   --viz-grid: #27272A; --viz-axis: #52525B; --viz-ref: #71717A; --viz-gap: #0D0D0F;
 }
 html[data-theme="light"] {
-  --viz-i1: #D6CFC0; --viz-i2: #FDBA74; --viz-i3: #FB923C; --viz-i4: #F97316;
+  --viz-i1: #B5AB95; --viz-i2: #FDBA74; --viz-i3: #FB923C; --viz-i4: #F97316;
   --viz-i5: #EA580C; --viz-i6: #C2410C; --viz-i7: #7C2D12;
   --viz-hr: #BE123C; --viz-spd: #0369A1; --viz-pw: #6D28D9; --viz-alt: #78716C; --viz-cad: #047857;
   --viz-grid: #E6DECC; --viz-axis: #7A7161; --viz-ref: #A99E86; --viz-gap: #FBF9F3;
