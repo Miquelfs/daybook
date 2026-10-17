@@ -7,6 +7,7 @@ import { ArrowRight, Sparkles, RefreshCw, Check, Plane, BedDouble, Ban, Dumbbell
 import { SectionLabel } from "@/components/MorningBrief";
 import { WeekPlanner } from "@/components/training/WeekPlanner";
 import RaceReadinessPanel from "@/components/training/RaceReadinessPanel";
+import { BlocksCard } from "@/components/race/BlocksCard";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -23,6 +24,7 @@ type Week = {
   week: number; start: string; end: string; phase: string; phase_label: string; recovery: boolean;
   planned_min: number; done_min: number; sessions: number; done: number; missed: number;
   longest_min: number; has_test: boolean; has_b2b: boolean; gym: number; is_current: boolean; is_past: boolean;
+  block?: string | null;
 };
 type Overview = {
   goal: { id: number; name: string; race_type: string; race_date: string; plan_start_date: string };
@@ -55,7 +57,8 @@ function Hero({ ov, onWeek }: { ov: Overview; onWeek: (start: string) => void })
   }, []);
   const msByWeek = new Map<number, string>();
   for (const w of ov.weeks) {
-    if (w.has_b2b) msByWeek.set(w.week, "★");
+    if (w.block) msByWeek.set(w.week, "🚲");
+    else if (w.has_b2b) msByWeek.set(w.week, "★");
     else if (w.has_test) msByWeek.set(w.week, "◆");
   }
   const max = Math.max(...ov.weeks.map((w) => w.planned_min), 60);
@@ -116,7 +119,7 @@ function Hero({ ov, onWeek }: { ov: Overview; onWeek: (start: string) => void })
             </div>
           ))}
         </div>
-        <p className="text-[10px] text-[#52525B] mt-1">◆ FTP test · ★ back-to-back weekend · faded = recovery week · tap a week to plan it</p>
+        <p className="text-[10px] text-[#52525B] mt-1">◆ FTP test · ★ back-to-back weekend · 🚲 tour · faded = recovery week · tap a week to plan it</p>
       </div>
     </Card>
   );
@@ -636,6 +639,7 @@ export function RaceCockpit() {
         <WeekStrip goalId={goal.id} onPlan={(d) => setPlanner(d)} />
       </div>
       <CoachCard goalId={goal.id} />
+      <BlocksCard goalId={goal.id} />
       {ov && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 [&>*]:min-w-0">
           <EngineCard ov={ov} />

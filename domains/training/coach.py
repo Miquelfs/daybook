@@ -200,7 +200,14 @@ def gather(conn: sqlite3.Connection, goal_id: int, week_start: str) -> dict:
     except Exception:
         pass
 
+    try:
+        from domains.training.blocks import context_for_coach
+        blocks = context_for_coach(conn, ws.isoformat(), we.isoformat())
+    except Exception:
+        blocks = []
+
     return {
+        "blocks": blocks,
         "ride_quality": quality,
         "goal": {"name": goal["name"], "race_date": goal["race_date"], "race_type": goal["race_type"],
                  "days_to_race": (date.fromisoformat(goal["race_date"]) - today).days},
@@ -226,6 +233,10 @@ Principles:
   or trim easy volume before touching the long ride.
 - Consistent misses on a weekday pattern → move sessions to days that actually work.
 - Good adherence + good recovery → keep the plan; don't add volume (> 10% jumps are not allowed).
+- blocks: deliberate camp/tour blocks (e.g. a bike tour). Plan sessions set aside for a block are
+  NOT missed — never call them missed or suggest making them up. The week after a block is a
+  planned recovery week: keep it easy even if the athlete feels good; only suggest more if
+  HRV/RHR/sleep are clearly back to normal.
 - ride_quality: decoupling > 5 % on long rides = durability still building (keep them aerobic);
   carbs_g_h well under ~80 = fuelling must be practised; climb VAM trend = climbing progress.
 - Never schedule hard work the morning after a duty that ended after 23:00, or on a day with

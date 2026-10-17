@@ -840,6 +840,12 @@ def goal_overview(goal_id: int, conn: DB):
         w["phase_label"] = _PHASE_LABEL.get(phase, phase.title())
         w["recovery"] = bool(tmeta.get("recovery"))
         w["is_current"] = wn == current_week
+        try:
+            blk = conn.execute("SELECT name FROM training_blocks WHERE goal_id=? AND start_date <= ? AND end_date >= ?",
+                               (goal_id, w.get("end") or "", w.get("start") or "")).fetchone()
+        except sqlite3.OperationalError:
+            blk = None
+        w["block"] = blk["name"] if blk else None
         w["is_past"] = bool(w.get("end") and w["end"] < today)
         week_list.append(w)
 
@@ -1004,6 +1010,53 @@ def garmin_push(conn: DB, days: int = Query(9, ge=1, le=21)):
         raise HTTPException(status_code=502, detail=f"Garmin push failed: {e}")
 
 
+# ── Camp / tour blocks ───────────────────────────────────────────────────────
+
+class BlockDay(BaseModel):
+    date: str
+    km: float = 0
+    climb_m: float = 0
+    note: Optional[str] = None
+    optional: bool = False
+
+
+class BlockCreate(BaseModel):
+    name: str
+    start_date: str
+    end_date: str
+    kind: str = "tour"
+    days: list[BlockDay] = []
+
+
+@router.get("/goals/{goal_id}/blocks")
+def list_training_blocks(goal_id: int, conn: DB):
+    from domains.training import blocks
+    return blocks.list_blocks(conn, goal_id)
+
+
+@router.post("/goals/{goal_id}/blocks", status_code=201)
+def create_training_block(goal_id: int, body: BlockCreate, conn: DB):
+    """Mark a tour/camp: plan set aside inside it, a Tour day per riding day, recovery week after."""
+    from domains.training import blocks
+    _row(conn, "race_goals", goal_id)
+    try:
+        return blocks.create(conn, goal_id, body.name.strip() or "Tour", body.start_date, body.end_date,
+                             [d.model_dump() for d in body.days], "camp" if body.kind == "camp" else "tour")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.delete("/blocks/{block_id}", status_code=200)
+def delete_training_block(block_id: int, conn: DB):
+    """Undo a block — the plan comes back exactly as it was."""
+    from domains.training import blocks
+    try:
+        blocks.delete(conn, block_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"deleted": block_id}
+
+
 # ── Week planner: day blocks + weekly confirmation ──────────────────────────
 
 class DayBlock(BaseModel):
@@ -1077,6 +1130,16 @@ def planning_status(conn: DB):
             "SELECT confirmed_at FROM training_week_plans WHERE goal_id=? AND week_start=?",
             (g["id"], next_mon),
         ).fetchone()
+        # A week fully inside a camp/tour block needs no planning
+        nm_end = (date.fromisoformat(next_mon) + timedelta(days=6)).isoformat()
+        try:
+            in_block = conn.execute(
+                "SELECT 1 FROM training_blocks WHERE goal_id=? AND start_date <= ? AND end_date >= ?",
+                (g["id"], next_mon, nm_end)).fetchone()
+        except sqlite3.OperationalError:
+            in_block = None
+        if in_block:
+            done = {"confirmed_at": "block"}
         out.append({"goal_id": g["id"], "goal_name": g["name"], "next_week_start": next_mon,
                     "confirmed_at": done["confirmed_at"] if done else None})
     return {"next_week_start": next_mon, "goals": out,

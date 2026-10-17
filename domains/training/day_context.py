@@ -162,6 +162,15 @@ class DayContextReader:
             "blocked": False,
         }
 
+        # Camp / tour block: the day belongs to the block's own "Tour day" session
+        tb = None
+        if "training_blocks" in self.tables:
+            tb = self.conn.execute(
+                "SELECT name, kind FROM training_blocks WHERE start_date <= ? AND end_date >= ? LIMIT 1", (d, d)).fetchone()
+        if tb is not None:
+            ctx["tour_block"] = tb[0]
+            ctx["label"] = f"{(tb[1] or 'tour').title()}: {tb[0]}"
+            return ctx                                   # window 0 → re-plan places nothing else here
         blk = self.block(d)
         if blk is not None:
             ctx["blocked"] = True
@@ -226,6 +235,10 @@ def today_advice(ctx: dict, session: dict) -> dict:
     hard = zone in ("Z3", "Z4", "Z5")
     is_long = dur >= 150
     new_dur, new_zone = None, None
+
+    if ctx.get("tour_block"):
+        return {"notes": [f"{ctx['label']} — ride by feel, Z2, eat early; split the day if the legs say so."],
+                "duration_min": None, "zone": None}
 
     if ctx.get("woke_away"):
         notes.append("You're away today — rest, or a short hotel-gym spin. The week re-plans around it.")

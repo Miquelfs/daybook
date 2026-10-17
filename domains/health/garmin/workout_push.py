@@ -86,7 +86,8 @@ def _target(zone: str, indoor: bool, tg: dict) -> dict:
 def build_workout(session: dict, tg: dict) -> dict | None:
     """Garmin workout JSON for one plan session, or None if it shouldn't be pushed."""
     stype = session["session_type"] or ""
-    if stype.lower().startswith("strength") or stype.lower() == "race day" or session["discipline"] != "cycling":
+    if (stype.lower().startswith("strength") or stype.lower() == "race day" or session["discipline"] != "cycling"
+            or stype.lower() in ("cycling - tour day", "cycling - camp day")):   # tours: just ride, no workout
         return None
     indoor = is_indoor(stype)
     structure = json.loads(session["structure_json"]) if session.get("structure_json") else None
