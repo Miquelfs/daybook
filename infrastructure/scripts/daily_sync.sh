@@ -176,7 +176,7 @@ step garmin_workout_push python -m domains.health.garmin.workout_push
 
 # Activity detail sync: fetch splits, Garmin TE, physio metrics for new activities.
 log "Syncing Garmin activity details + physio (last 7 days)..."
-step garmin_activity_detail_sync python -m domains.health.garmin.garmin_activity_detail_sync --days 7
+step garmin_activity_detail_sync python -m domains.health.garmin.garmin_activity_detail_sync --days 7 --fetch-streams
 
 # Compute per-activity metrics: NP, IF, EF, decoupling, MMP curves.
 log "Computing per-activity metrics (last 7 days)..."

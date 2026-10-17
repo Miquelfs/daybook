@@ -19,6 +19,9 @@ Options:
     --recompute       Re-fetch even if activity_detail row exists
     --skip-physio     Skip daily physio metrics
     --skip-splits     Skip splits ingestion
+    --fetch-streams   Also store per-second streams (from the cached detail JSON when present)
+    --cached-streams  Only unpack streams from detail JSON already stored — no Garmin calls,
+                      no login; covers all history in one go
 """
 
 import argparse
@@ -409,6 +412,24 @@ def sync_physio(client, conn, d: str, recompute: bool = False) -> bool:
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
+def streams_from_cache(conn) -> tuple[int, int]:
+    """Unpack streams for every activity whose detail JSON is cached but has no streams yet."""
+    rows = conn.execute(
+        """SELECT ad.activity_id, ad.raw_detail_json FROM activity_detail ad
+           WHERE ad.raw_detail_json IS NOT NULL AND ad.raw_detail_json != ''
+             AND NOT EXISTS (SELECT 1 FROM activity_streams s WHERE s.activity_id = ad.activity_id)"""
+    ).fetchall()
+    done = 0
+    for activity_id, raw in rows:
+        try:
+            if _parse_streams_from_raw(conn, activity_id, json.loads(raw)):
+                done += 1
+        except Exception as e:
+            print(f"  WARN {activity_id}: {e}", file=sys.stderr)
+    conn.commit()
+    return done, len(rows)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync Garmin activity details + physio")
     parser.add_argument("--days", type=int, default=7)
@@ -419,7 +440,16 @@ def main() -> None:
     parser.add_argument("--skip-splits", action="store_true")
     parser.add_argument("--fetch-streams", action="store_true",
                         help="Also fetch per-second HR/speed/distance streams")
+    parser.add_argument("--cached-streams", action="store_true",
+                        help="Only unpack streams from cached detail JSON (no API calls)")
     args = parser.parse_args()
+
+    if args.cached_streams:
+        conn = get_connection()
+        done, total = streams_from_cache(conn)
+        conn.close()
+        print(f"Streams unpacked from cache: {done}/{total} activities", file=sys.stderr)
+        return
 
     lookback = args.backfill_days or args.days
     cutoff = (date.today() - timedelta(days=lookback)).isoformat()
