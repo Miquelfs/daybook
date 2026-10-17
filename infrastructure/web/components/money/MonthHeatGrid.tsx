@@ -1,6 +1,7 @@
 "use client";
 
 import { fmtAmount, type DailyTotal } from "@/lib/money-api";
+import { localISODate } from "@/lib/dates";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -10,7 +11,7 @@ export function MonthHeatGrid({ days, month }: { days: DailyTotal[]; month: stri
   if (days.length === 0) {
     return <p className="text-xs text-[#52525B]">No data.</p>;
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localISODate();
   const max = Math.max(...days.map((d) => d.total_spend), 1);
 
   // Pad to a Monday start so weekday columns align.

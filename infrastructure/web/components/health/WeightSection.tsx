@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
+import { localISODate } from "@/lib/dates";
 
 type WeightEntry = { date: string; weight_kg: number; note: string | null };
 type WeightData = {
@@ -12,7 +13,7 @@ type WeightData = {
   stats: { latest: number; latest_date: string; change: number | null; min: number; max: number; count: number } | null;
 };
 
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = localISODate();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function WeightTooltip({ active, payload }: any) {

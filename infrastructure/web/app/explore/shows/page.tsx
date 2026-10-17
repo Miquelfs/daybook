@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { showsApi, type Show, type ShowIn } from "@/lib/shows-api";
+import { localISODate } from "@/lib/dates";
 
 const TYPE_EMOJI: Record<string, string> = {
   movie: "🎬",
@@ -375,7 +376,7 @@ export default function ShowsPage() {
         <AddShowSheet
           onClose={() => setShowAdd(false)}
           onSave={(body) => createMutation.mutate(body)}
-          defaultDate={new Date().toISOString().slice(0, 10)}
+          defaultDate={localISODate()}
         />
       )}
     </main>

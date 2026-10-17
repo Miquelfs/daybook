@@ -13,6 +13,7 @@ import {
   StructureStep,
   WorkoutPhase,
 } from "@/lib/workout-description";
+import { localISODate } from "@/lib/dates";
 
 // Zone badge colours
 const ZONE_STYLE: Record<string, { bg: string; text: string; label: string }> = {
@@ -729,7 +730,7 @@ function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
 // week planner, nudge to lay it out around the new roster.
 function PlanNextWeekNudge({ date }: { date: string }) {
   const [needs, setNeeds] = useState(false);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localISODate();
   const dow = new Date(date + "T12:00:00").getDay();
   const weekend = date === today && (dow === 0 || dow === 6);
   useEffect(() => {

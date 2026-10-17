@@ -613,8 +613,9 @@ def add_manual_sleep(body: ManualSleepIn, conn: DB):
     only overwrites a previous manual entry or an empty/stub row."""
     from datetime import datetime, timedelta as _timedelta
     from zoneinfo import ZoneInfo
+    from infrastructure.db.usertime import current_tz as _current_tz
 
-    today = datetime.now(ZoneInfo("Europe/Madrid")).date().isoformat()
+    today = datetime.now(ZoneInfo(_current_tz())).date().isoformat()
     if body.date > today:
         raise HTTPException(status_code=422, detail="Can't log sleep for a future date.")
 

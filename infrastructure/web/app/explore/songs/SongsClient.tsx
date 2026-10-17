@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Play, Download, X, Trash2, Music } from "lucide-react";
 import { songsApi, type Song, type SongsStats, type SongIn } from "@/lib/songs-api";
+import { localISODate } from "@/lib/dates";
 
 // Pull a YouTube video id out of a music.youtube.com / youtube.com / youtu.be URL
 // so we can build a single "play all" playlist link.
@@ -22,7 +23,7 @@ function youtubeId(url: string | null): string | null {
 }
 
 function AddSongSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localISODate();
   const [date, setDate] = useState(today);
   const [title, setTitle] = useState("");
   const [artist, setArtist] = useState("");

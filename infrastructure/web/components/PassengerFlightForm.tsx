@@ -9,6 +9,7 @@ import {
   type PassengerFlightIn,
 } from "@/lib/passenger-flights-api";
 import { AIRLINE_IATA, airlineIataCode } from "@/lib/airline-logos";
+import { localISODate } from "@/lib/dates";
 
 const inputCls =
   "w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] placeholder-[#52525B] focus:outline-none focus:border-[#3F3F46]";
@@ -86,7 +87,7 @@ interface Props {
 
 export function PassengerFlightForm({ date, initial, onSaved, submitLabel }: Props) {
   const qc = useQueryClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localISODate();
 
   const [flightDate, setFlightDate] = useState(initial?.date ?? date ?? today);
   const [flightNumber, setFlightNumber] = useState(initial?.flight_number ?? "");

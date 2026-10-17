@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { moneyApi, type Cadence, type Holding } from "@/lib/money-api";
+import { localISODate } from "@/lib/dates";
 
 const DEFAULT_LIQUID_ACCOUNTS = [
   "BBVA Diaria", "Revolut", "Sabadell", "BBVA Estalvis", "Trade Republic Cash", "Cash",
@@ -30,7 +31,7 @@ export function AddPlanDrawer({ holdings, accounts }: Props) {
   const router = useRouter();
 
   const sourceAccounts = accounts?.length ? accounts : DEFAULT_LIQUID_ACCOUNTS;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localISODate();
 
   const [form, setForm] = useState({
     holding_id: holdings[0]?.id ?? "",

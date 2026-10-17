@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Loader, Trash2 } from "lucide-react";
 import { booksApi, type Book, type BookIn } from "@/lib/books-api";
+import { localISODate } from "@/lib/dates";
 
 const GENRES = [
   "Policíaca", "Acció", "Misteri", "Fantasia", "Humor",
@@ -47,7 +48,7 @@ export function BookForm({ initial, defaultDate, onSaved, onDeleted }: Props) {
   const [title, setTitle]       = useState(initial?.title ?? "");
   const [author, setAuthor]     = useState(initial?.author ?? "");
   const [dateFinished, setDateFinished] = useState(
-    initial?.date_finished ?? defaultDate ?? new Date().toISOString().slice(0, 10),
+    initial?.date_finished ?? defaultDate ?? localISODate(),
   );
   const [genre, setGenre]         = useState(initial?.genre ?? GENRES[0]);
   const [language, setLanguage]   = useState(initial?.language ?? LANGUAGES[1]);

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { api, type Restaurant, type RestaurantIn, type Contact } from "@/lib/api";
 import { ContactsPicker } from "@/components/ContactsPicker";
 import { CUISINE_EMOJI, CUISINE_LIST } from "@/lib/cuisines";
+import { localISODate } from "@/lib/dates";
 
 const FLAG: Record<string, string> = {
   Spain: "🇪🇸", France: "🇫🇷", Germany: "🇩🇪", Italy: "🇮🇹",
@@ -638,7 +639,7 @@ function RestaurantsPageInner() {
           mode="add"
           onClose={() => setShowAdd(false)}
           onSave={(body) => createMutation.mutate(body)}
-          defaultDate={new Date().toISOString().slice(0, 10)}
+          defaultDate={localISODate()}
         />
       )}
 
@@ -647,7 +648,7 @@ function RestaurantsPageInner() {
           mode="visit"
           onClose={() => setAddVisitFrom(null)}
           onSave={(body) => createMutation.mutate(body)}
-          defaultDate={new Date().toISOString().slice(0, 10)}
+          defaultDate={localISODate()}
           initial={{
             name: addVisitFrom.name,
             cuisine: addVisitFrom.cuisine,

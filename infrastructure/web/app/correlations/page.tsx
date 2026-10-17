@@ -18,6 +18,7 @@ import { TagStatsDrawer } from "@/components/TagStatsDrawer";
 import { HabitCalendar } from "@/components/HabitCalendar";
 import { StressLifeInsights } from "@/components/StressLifeInsights";
 import { tagsApi, type Tag as TagType } from "@/lib/tags-api";
+import { localISODate } from "@/lib/dates";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -82,7 +83,7 @@ function MiniHeatmap({ dates }: { dates: string[] }) {
       {weeks.map(({ week, key }) => (
         <div key={key} className="flex flex-col gap-0.5">
           {week.map((d) => {
-            const ds = d.toISOString().slice(0, 10);
+            const ds = localISODate(d);
             const active = dateSet.has(ds);
             const isFuture = d > today;
             return (
@@ -1110,7 +1111,7 @@ export default function CorrelationsPage() {
 }
 
 
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = localISODate();
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXPERIMENTS TAB

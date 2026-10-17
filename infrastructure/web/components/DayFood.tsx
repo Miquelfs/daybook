@@ -9,8 +9,9 @@ import { groupByMeal } from "@/lib/food-meals";
 import { SectionLabel } from "@/components/MorningBrief";
 import { WaterTracker } from "@/components/WaterTracker";
 import { HeartDot } from "@/components/HeartRatingBadge";
+import { localISODate } from "@/lib/dates";
 
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = localISODate();
 
 // The day's food log — a collapsible summary card + always-visible water nudge.
 // Collapsed by default; expand to see and delete individual entries.

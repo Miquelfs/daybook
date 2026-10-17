@@ -27,13 +27,14 @@ import { PunctualityTab } from "@/components/aviation/PunctualityTab";
 import { FlightLoadRollup } from "@/components/StressLifeInsights";
 import { WeatherStress } from "@/components/aviation/WeatherStress";
 import { LogbookChecks } from "@/components/aviation/LogbookChecks";
+import { localISODate } from "@/lib/dates";
 
 const MAP_STYLE_KEY = "daybook_aviation_map_style";
 
 type Tab = "overview" | "logbook" | "map" | "stats" | "punctuality" | "stress";
 type CodeMode = "icao" | "iata";
 
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = localISODate();
 const PAGE_SIZE = 30;
 
 const EASA_COLS = [

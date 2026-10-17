@@ -14,6 +14,7 @@ import {
   DisciplineZones,
   StructureStep,
 } from "@/lib/workout-description";
+import { localISODate } from "@/lib/dates";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -119,7 +120,7 @@ const RPE_LABELS: Record<number, string> = {
   5: "Somewhat hard", 6: "Hard", 7: "Very hard", 8: "Very very hard", 9: "Max effort", 10: "All out",
 };
 
-function todayStr() { return new Date().toISOString().slice(0, 10); }
+function todayStr() { return localISODate(); }
 function discIcon(d: string) { return DISC_ICON[d] ?? DISC_ICON.other; }
 
 // ── Inline session detail sheet ────────────────────────────────────────────
@@ -652,7 +653,7 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
     if (new URLSearchParams(window.location.search).get("plan") === "next") {
       const d = new Date();
       d.setDate(d.getDate() + 7);
-      setPlannerDate(d.toISOString().slice(0, 10));
+      setPlannerDate(localISODate(d));
     }
   }, []);
   const queryClient = useQueryClient();
@@ -829,7 +830,7 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
                       className="text-[10px] text-[#71717A] hover:text-[#FAFAFA]">Edit week</button>
                     <button onClick={() => {
                         const d = new Date(); d.setDate(d.getDate() + 7);
-                        setPlannerDate(d.toISOString().slice(0, 10));
+                        setPlannerDate(localISODate(d));
                       }}
                       className="text-[10px] text-[#F59E0B] hover:text-[#FBBF24]">Plan next week →</button>
                   </div>
@@ -1197,7 +1198,7 @@ export default function OmyraTab() {
   });
 
   // Fetch today's ramp_rate for injury risk banner
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localISODate();
   const { data: todayPrescription } = useQuery({
     queryKey: ["omyra-day-ctx", today],
     queryFn: () =>

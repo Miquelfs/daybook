@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { TripJourney } from "@/components/TripJourney";
 import { TripExpenses } from "@/components/TripExpenses";
 import { SectionLabel } from "@/components/MorningBrief";
+import { localISODate } from "@/lib/dates";
 
 interface Props {
   params: Promise<{ start: string; end: string }>;
@@ -43,7 +44,7 @@ export default async function TripDetailPage({ params }: Props) {
   // Every date in the trip window (inclusive of the home-coming day), for the scrubber.
   const tripDates: string[] = [];
   for (let t = new Date(start + "T12:00:00"); t <= new Date(rangeEnd + "T12:00:00"); t.setDate(t.getDate() + 1)) {
-    tripDates.push(t.toISOString().slice(0, 10));
+    tripDates.push(localISODate(t));
   }
 
   const withPhotos = days.filter((d) => d.photo_path);

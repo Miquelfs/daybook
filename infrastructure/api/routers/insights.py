@@ -16,7 +16,7 @@ from infrastructure.api.db import get_db
 
 router = APIRouter(prefix="/insights", tags=["insights"])
 
-TIMEZONE = "Europe/Madrid"
+from infrastructure.db.usertime import current_tz as _current_tz  # where you are, not Spain
 
 DB = Annotated[sqlite3.Connection, Depends(get_db)]
 

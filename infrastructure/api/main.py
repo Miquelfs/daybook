@@ -74,6 +74,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Your timezone, process-wide ──────────────────────────────────────────────
+# Every date.today()/datetime.now() in the API follows where you are (set by
+# the phone/browser via /settings/timezone), re-read at most every 30 s.
+import time as _time
+from infrastructure.db import usertime as _usertime
+
+_tz_checked = {"at": 0.0}
+_usertime.apply_tz(_usertime.read_tz())
+
+
+@app.middleware("http")
+async def _user_timezone(request, call_next):
+    if _time.time() - _tz_checked["at"] > 30:
+        _usertime.apply_tz(_usertime.read_tz())
+        _tz_checked["at"] = _time.time()
+    return await call_next(request)
+
+
+class TimezoneIn(BaseModel):
+    timezone: str
+
+
+@app.get("/settings/timezone")
+def get_timezone():
+    return {"timezone": _usertime.current_tz(), "home": _usertime.HOME_TZ}
+
+
+@app.post("/settings/timezone")
+def set_timezone(body: TimezoneIn):
+    from fastapi import HTTPException as _HTTPException
+    try:
+        tz = _usertime.write_tz(body.timezone)
+    except ValueError as e:
+        raise _HTTPException(status_code=422, detail=str(e))
+    _tz_checked["at"] = _time.time()
+    return {"timezone": tz}
+
+
 app.include_router(days.router)
 app.include_router(system_module.router)
 app.include_router(insights.router)

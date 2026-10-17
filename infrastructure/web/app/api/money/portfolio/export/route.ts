@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { localISODate } from "@/lib/dates";
 
 const API =
   process.env.API_INTERNAL_URL ??
@@ -15,7 +16,7 @@ export async function GET() {
   }
 
   const csv = await upstream.text();
-  const date = new Date().toISOString().slice(0, 10);
+  const date = localISODate();
 
   return new NextResponse(csv, {
     status: 200,

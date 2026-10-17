@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Banknote, PencilLine, Settings2, ShoppingCart, Trash2, X, Check } from "lucide-react";
 import { moneyApi, fmtAmount, type Holding, type HoldingPatch } from "@/lib/money-api";
+import { localISODate } from "@/lib/dates";
 
 // Per-holding actions: buy more (DCA — updates avg cost basis), sell (books
 // proceeds into a liquid account), update value (manual assets), edit the
@@ -46,13 +47,13 @@ export function HoldingActions({ holding, accounts }: { holding: Holding; accoun
   );
   const [sellFee, setSellFee] = useState("");
   const [account, setAccount] = useState(accounts[0] ?? "");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(localISODate());
 
   const [buyQty, setBuyQty] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
   const [buyFee, setBuyFee] = useState("");
   const [buyAccount, setBuyAccount] = useState(accounts[0] ?? "");
-  const [buyDate, setBuyDate] = useState(new Date().toISOString().slice(0, 10));
+  const [buyDate, setBuyDate] = useState(localISODate());
 
   const qtyNum = parseFloat(qty);
   const priceNum = parseFloat(price);

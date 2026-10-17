@@ -4,6 +4,7 @@ import { useState, Suspense } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { Plus, X, FlaskConical, CheckCircle, Archive, Trash2 } from "lucide-react";
+import { localISODate } from "@/lib/dates";
 
 interface Experiment {
   id: string;
@@ -27,7 +28,7 @@ interface Experiment {
   updated_at: string;
 }
 
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = localISODate();
 
 // Outcome metrics available for experiments (mirrors backend _METRIC_MAP).
 const METRIC_OPTIONS = [

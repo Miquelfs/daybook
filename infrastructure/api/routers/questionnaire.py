@@ -7,12 +7,12 @@ from infrastructure.api.questionnaire.questions import get_questionnaire
 
 router = APIRouter(prefix="/questionnaire", tags=["questionnaire"])
 
-TIMEZONE = "Europe/Madrid"
+from infrastructure.db.usertime import current_tz as _current_tz  # where you are, not Spain
 
 
 @router.get("/today")
 def questionnaire_today():
-    today = datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
+    today = datetime.now(ZoneInfo(_current_tz())).date().isoformat()
     return get_questionnaire(today)
 
 

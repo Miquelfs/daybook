@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { X, ChevronLeft, ChevronRight, Wand2, Check, Ban } from "lucide-react";
+import { localISODate } from "@/lib/dates";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -47,7 +48,7 @@ interface PlannerWeek {
 function addDays(iso: string, n: number) {
   const d = new Date(iso + "T12:00:00");
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return localISODate(d);
 }
 
 function fmtWindow(min: number) {
@@ -128,7 +129,7 @@ export function WeekPlanner({ goalId, initialDate, onClose }: {
     );
 
   const days = data?.days ?? [];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localISODate();
   const totalMin = days.flatMap((d) => d.sessions)
     .filter((s) => s.status === "pending" || s.status === "completed")
     .reduce((n, s) => n + (s.effective_duration_min || 0), 0);

@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { BottomNav } from "@/components/BottomNav";
+import { TimezoneSync } from "@/components/TimezoneSync";
 
 const API =
   process.env.API_INTERNAL_URL ??
@@ -69,6 +70,7 @@ export default async function RootLayout({
       </head>
       <body className="min-h-full bg-[#09090B] text-[#FAFAFA] antialiased">
         <Providers>
+          <TimezoneSync />
           <BottomNav />
           <div className="pt-11">{children}</div>
         </Providers>

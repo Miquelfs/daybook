@@ -4,6 +4,7 @@ import { useState, Suspense } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO, isPast } from "date-fns";
 import { Plus, CheckCircle, Clock, ChevronRight, X, AlertTriangle } from "lucide-react";
+import { localISODate } from "@/lib/dates";
 
 interface Decision {
   id: string;
@@ -18,7 +19,7 @@ interface Decision {
   resolved_at: string | null;
 }
 
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = localISODate();
 
 function confidenceLabel(c: number | null) {
   if (c == null) return null;

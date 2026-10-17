@@ -24,7 +24,7 @@ from domains.locations.locations_query import (
 
 router = APIRouter(prefix="/days", tags=["days"])
 
-TIMEZONE = "Europe/Madrid"   # TODO: move to .env / config
+from infrastructure.db.usertime import current_tz as _current_tz  # where you are, not Spain
 PHOTOS_DIR = Path(__file__).parents[3] / "data" / "photos"
 PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -32,7 +32,7 @@ PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _today() -> str:
-    return datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
+    return datetime.now(ZoneInfo(_current_tz())).date().isoformat()
 
 
 def _require_day(conn: sqlite3.Connection, date_str: str) -> sqlite3.Row:

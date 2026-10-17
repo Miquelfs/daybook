@@ -7,6 +7,7 @@ import { ChevronDown } from "lucide-react";
 import { moneyApi, fmtAmount, type InvestmentPlan, type Holding } from "@/lib/money-api";
 import { AddPlanDrawer } from "./AddPlanDrawer";
 import { useCollapsible } from "./useCollapsible";
+import { localISODate } from "@/lib/dates";
 
 const CADENCE_LABEL: Record<string, string> = {
   weekly: "Weekly", biweekly: "Every 2 weeks",
@@ -102,7 +103,7 @@ export function RecurringPlansSection({ plans, holdings, liquidAccounts }: Props
           ) : (
             <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl divide-y divide-[#18181B]">
               {plans.map(p => {
-                const dueSoon = p.is_active && p.next_execution_date <= new Date(Date.now() + 3*86400_000).toISOString().slice(0, 10);
+                const dueSoon = p.is_active && p.next_execution_date <= localISODate(new Date(Date.now() + 3*86400_000));
                 return (
                   <div key={p.id} className="px-4 py-3">
                     <div className="flex items-baseline gap-2 flex-wrap">

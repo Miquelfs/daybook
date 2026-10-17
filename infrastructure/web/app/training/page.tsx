@@ -135,7 +135,7 @@ type ActivityForm = {
 
 function AddActivitySheet({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<ActivityForm>({
-    date: new Date().toISOString().slice(0, 10),
+    date: localISODate(),
     activity_type: "running",
     name: "",
     duration_minutes: "",
@@ -237,6 +237,7 @@ import FuelTab from "@/components/training/FuelTab";
 import { TrainingRouteMap } from "@/components/training/TrainingRouteMap";
 import RelativeEffortChart from "@/components/training/RelativeEffortChart";
 import { GoalRings } from "@/components/training/GoalRings";
+import { localISODate } from "@/lib/dates";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: <Activity size={13} /> },

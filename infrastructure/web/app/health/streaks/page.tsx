@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Activity, Moon, Dumbbell, Flame, AlertTriangle } from "lucide-react";
 import { format, parseISO } from "date-fns";
+import { localISODate } from "@/lib/dates";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -49,7 +50,7 @@ export default function ActivityStreaksPage() {
         .then(r => r.json())
         .then((d: StreakData) =>
           // We need the actual dates list — fetch activities for this type
-          fetch(`${BASE}/activities?start=2020-01-01&end=${new Date().toISOString().slice(0, 10)}&activity_type=${encodeURIComponent(selectedSport!)}`)
+          fetch(`${BASE}/activities?start=2020-01-01&end=${localISODate()}&activity_type=${encodeURIComponent(selectedSport!)}`)
             .then(r => r.json())
             .then((activities: { date: string }[]) => ({
               type: selectedSport!,

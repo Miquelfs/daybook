@@ -60,6 +60,15 @@ source "$VENV/bin/activate"
 
 cd "$ROOT"
 
+# Run on YOUR clock (where you are — reported by your phone/browser), not the
+# Pi's Spanish one: DATE / HOUR / YESTERDAY, the morning-brief window, day
+# finalisation and every python job below (date.today()) follow it.
+export TZ="$(python3 "$ROOT/infrastructure/db/usertime.py" 2>/dev/null || echo Europe/Madrid)"
+DATE="$(date +%Y-%m-%d)"
+HOUR="$(date +%H)"
+YESTERDAY="$(date -d 'yesterday' +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d)"
+log "Timezone: $TZ (local $DATE ${HOUR}h)"
+
 # Load .env so STRAVA_CLIENT_ID and other vars are available in cron environment
 if [[ -f "$ROOT/.env" ]]; then
   set -a

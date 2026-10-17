@@ -8,6 +8,7 @@ import { SectionLabel } from "@/components/MorningBrief";
 import { WeekPlanner } from "@/components/training/WeekPlanner";
 import RaceReadinessPanel from "@/components/training/RaceReadinessPanel";
 import { BlocksCard } from "@/components/race/BlocksCard";
+import { localISODate } from "@/lib/dates";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -35,7 +36,7 @@ type Overview = {
             zones_from: string | null; compliance_4w: number | null; longest_ride_min: number };
 };
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+const iso = (d: Date) => localISODate(d);
 const todayIso = () => iso(new Date());
 const fmtH = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}h${min % 60 ? String(min % 60).padStart(2, "0") : ""}` : `${min}m`);
 const fmtDay = (d: string, opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" }) =>

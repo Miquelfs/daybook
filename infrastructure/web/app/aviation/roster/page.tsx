@@ -6,6 +6,7 @@ import { format, parseISO, getDaysInMonth, getDay, addMonths, subMonths } from "
 import { Upload, ChevronLeft, ChevronRight, Loader2, X, ExternalLink, List, BarChart2, MapPin, TrendingUp, CalendarDays } from "lucide-react";
 import Link from "next/link";
 import { RosterPayEstimate } from "@/components/RosterPayEstimate";
+import { localISODate } from "@/lib/dates";
 
 interface RosterDay {
   date: string;
@@ -39,7 +40,7 @@ const DUTY_STYLE: Record<string, { bg: string; text: string; label: string; dot:
   unknown:     { bg: "bg-[#1a1a1a]", text: "text-[#71717A]", label: "?",             dot: "bg-[#71717A]", sheetBg: "bg-[#1a1a1a]" },
 };
 
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = localISODate();
 
 function toYYYYMM(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
