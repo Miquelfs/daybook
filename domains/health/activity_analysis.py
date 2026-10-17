@@ -691,6 +691,7 @@ def main() -> None:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=7)
+    ap.add_argument("--no-wind", action="store_true", help="skip the wind fetch (history backfills)")
     args = ap.parse_args()
     conn = get_connection()
     conn.row_factory = sqlite3.Row
@@ -702,7 +703,7 @@ def main() -> None:
             done += 1
     try:
         from domains.health.ride_wind import compute as wind
-        for aid in ids:
+        for aid in ([] if args.no_wind else ids):
             wind(conn, aid)
     except Exception as e:                                   # wind is best-effort (network)
         print(f"[activity_analysis] wind skipped: {e}")
