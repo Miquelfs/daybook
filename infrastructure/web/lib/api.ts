@@ -1038,6 +1038,8 @@ export const api = {
     get<CurveBucket[]>(`/training/curve?sport=${sport}&channel=pace`),
 
   activity: (id: string) => get<ActivityDetail>(`/activities/${id}`),
+  activityAnalysis: (id: string) =>
+    get<{ analysis: ActivityAnalysis | null }>(`/activities/${id}/analysis`).then((r) => r.analysis),
   activities: (start: string, end: string) =>
     get<Activity[]>(`/activities?start=${start}&end=${end}`),
   syncStatus: () => get<SyncStatus[]>("/activities/sync-status"),
@@ -1469,7 +1471,7 @@ export function moodEmoji(mood: number | null): string {
 export function activityIcon(type: string | null): string {
   const t = type?.toLowerCase() ?? "";
   if (t.includes("run")) return "🏃";
-  if (t.includes("cycl") || t.includes("bike") || t.includes("ride")) return "🚴";
+  if (t.includes("cycl") || t.includes("bik") || t.includes("ride")) return "🚴";
   if (t.includes("swim")) return "🏊";
   if (t.includes("walk") || t.includes("hike")) return "🚶";
   if (t.includes("strength") || t.includes("gym") || t.includes("weight")) return "🏋";
@@ -1481,7 +1483,7 @@ export function activityIcon(type: string | null): string {
 export function fmtPace(speed_mps: number | null, activity_type: string | null): string {
   if (!speed_mps || speed_mps === 0) return "—";
   const t = activity_type?.toLowerCase() ?? "";
-  if (t.includes("cycl") || t.includes("bike") || t.includes("ride")) {
+  if (t.includes("cycl") || t.includes("bik") || t.includes("ride")) {
     // km/h for cycling
     return `${(speed_mps * 3.6).toFixed(1)} km/h`;
   }
@@ -1490,4 +1492,46 @@ export function fmtPace(speed_mps: number | null, activity_type: string | null):
   const m = Math.floor(secPerKm / 60);
   const s = Math.round(secPerKm % 60);
   return `${m}:${s.toString().padStart(2, "0")} /km`;
+}
+
+// ── Activity analysis (GET /activities/{id}/analysis) ────────────────────────
+export interface ZoneShare { zone: string; label: string; lo: number; hi: number | null; secs: number; pct: number }
+export interface Climb {
+  from_km: number; to_km: number; length_km: number; gain_m: number; avg_grade: number; max_grade: number;
+  duration_s: number | null; vam: number | null; avg_hr: number | null; avg_w: number | null; category: string | null;
+}
+export interface ActivityAnalysis {
+  sport: "ride" | "run" | "swim" | "hike" | "other";
+  indoor: boolean;
+  moving_s: number;
+  elapsed_s: number;
+  temp_c: { avg: number; min: number; max: number } | null;
+  hr: {
+    avg: number; max: number; zones: ZoneShare[]; max_hr: number | null; threshold_hr: number | null;
+    above_threshold_min: number | null; peak_5min: number | null; peak_20min: number | null;
+    drift_bpm: number | null; decoupling_pct: number | null; durability: "durable" | "borderline" | "fading" | null;
+    verdict: string; plan: { zone: string; pct_at_or_below: number; ok: boolean } | null;
+  } | null;
+  pace: {
+    avg_mps: number; max_mps: number; moving_s: number; stopped_s: number;
+    flat_mps: number | null; climb_mps: number | null; descent_mps: number | null;
+    terrain_pct: { climb: number; flat: number; descent: number };
+    split: { first_mps: number; second_mps: number; pct: number } | null;
+    consistency_cv: number | null; best: Record<string, number>; gap_mps: number | null; verdict: string;
+  } | null;
+  power: {
+    avg: number; np: number | null; max: number; ftp: number | null; if: number | null; vi: number | null;
+    tss: number | null; kj: number; wkg: number | null; zones: ZoneShare[] | null;
+    bests: { secs: number; label: string; watts: number; wkg: number | null; pct_ftp: number | null }[];
+    indoor: boolean; verdict: string;
+  } | null;
+  elevation: {
+    gain_m: number; loss_m: number; min_m: number; max_m: number; m_per_km: number; max_grade: number;
+    terrain_pct: { climb: number; flat: number; descent: number }; climbs: Climb[]; verdict: string;
+  } | null;
+  cadence: { avg: number; max: number; unit: string; bands: { band: string; pct: number }[]; verdict: string } | null;
+  series: {
+    x_unit: "km" | "min";
+    points: { x: number; hr?: number; spd?: number; alt?: number; pw?: number; cad?: number; grade?: number }[];
+  };
 }

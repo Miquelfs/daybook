@@ -412,6 +412,19 @@ def get_sync_status(conn: Annotated[sqlite3.Connection, Depends(get_db)]):
     ]
 
 
+@router.get("/{activity_id}/analysis")
+def get_activity_analysis(
+    activity_id: str,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+    refresh: bool = Query(False),
+):
+    """Heart rate / pace / power / elevation / cadence cards + a chart series (cached per activity)."""
+    from domains.health.activity_analysis import analyze
+    if conn.execute("SELECT 1 FROM activities WHERE id=?", (activity_id,)).fetchone() is None:
+        raise HTTPException(status_code=404, detail=f"Activity {activity_id!r} not found")
+    return {"analysis": analyze(conn, activity_id, use_cache=not refresh)}
+
+
 @router.get("/{activity_id}/wind")
 def get_activity_wind(
     activity_id: str,

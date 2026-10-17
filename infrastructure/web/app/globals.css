@@ -22,6 +22,23 @@
   --amber-deep: #B45309;
 }
 
+/* ─── Data-viz tokens (activity analysis) ──────────────────────────────────
+   Intensity ramp (HR / power zones, grade): one hue, ordered by lightness —
+   dim→bright on the dark cockpit, light→dark on paper, so Z5 is always the
+   loudest mark. Series hues are one per measure (each chart has one series). */
+:root {
+  --viz-i1: #57534E; --viz-i2: #9A3412; --viz-i3: #C2410C; --viz-i4: #EA580C;
+  --viz-i5: #FB923C; --viz-i6: #FDBA74; --viz-i7: #FED7AA;
+  --viz-hr: #F43F5E; --viz-spd: #38BDF8; --viz-pw: #A78BFA; --viz-alt: #A1A1AA; --viz-cad: #34D399;
+  --viz-grid: #27272A; --viz-axis: #52525B; --viz-ref: #71717A; --viz-gap: #0D0D0F;
+}
+html[data-theme="light"] {
+  --viz-i1: #D6CFC0; --viz-i2: #FDBA74; --viz-i3: #FB923C; --viz-i4: #F97316;
+  --viz-i5: #EA580C; --viz-i6: #C2410C; --viz-i7: #7C2D12;
+  --viz-hr: #BE123C; --viz-spd: #0369A1; --viz-pw: #6D28D9; --viz-alt: #78716C; --viz-cad: #047857;
+  --viz-grid: #E6DECC; --viz-axis: #7A7161; --viz-ref: #A99E86; --viz-gap: #FBF9F3;
+}
+
 html {
   color-scheme: dark;
   background-color: #09090B;

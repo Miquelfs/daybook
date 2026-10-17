@@ -1,9 +1,10 @@
 import { api, fmtDuration, fmtDistance, fmtPace, activityIcon } from "@/lib/api";
-import type { ActivityDetail, ActivityComputedMetrics } from "@/lib/api";
+import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis } from "@/lib/api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ActivityMap } from "@/components/ActivityMap";
 import { ActivityWind } from "@/components/ActivityWind";
+import { ActivityAnalysisCards } from "@/components/activity/ActivityAnalysisCards";
 import { ActivityCharts } from "@/components/ActivityCharts";
 import { ActivityNotes } from "@/components/ActivityNotes";
 import { TennisSessionPanel } from "@/components/TennisSessionPanel";
@@ -156,6 +157,13 @@ export default async function ActivityPage({ params }: Props) {
     notFound();
   }
 
+  let analysis: ActivityAnalysis | null = null;
+  try {
+    analysis = await api.activityAnalysis(decodedId);
+  } catch {
+    analysis = null;
+  }
+
   const date = activity.date;
   const sport = sportOf(activity.activity_type);
   const sportColor = SPORT_COLORS[sport];
@@ -213,6 +221,27 @@ export default async function ActivityPage({ params }: Props) {
         </div>
       </div>
 
+      {/* Summary — the four numbers that describe the outing */}
+      <section className="mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <StatBlock label="Distance" value={fmtDistance(activity.distance_meters)} />
+          <StatBlock label="Moving time" value={fmtDuration(analysis?.moving_s ?? activity.moving_time_seconds ?? activity.duration_seconds)} />
+          <StatBlock label={sport === "ride" ? "Avg speed" : "Avg pace"} value={fmtPace(analysis?.pace?.avg_mps ?? activity.avg_speed_mps ?? null, activity.activity_type)} />
+          <StatBlock label="Climbing" value={activity.elevation_gain_meters ? `↑ ${Math.round(activity.elevation_gain_meters)} m` : null} />
+        </div>
+        <p className="text-xs text-[#71717A] mt-3 tabular-nums">
+          {[
+            activity.calories ? `${activity.calories} kcal` : null,
+            activity.training_stress_score ? `${Math.round(activity.training_stress_score)} TSS` : null,
+            activity.computed?.garmin_aerobic_te != null
+              ? `Training effect ${activity.computed.garmin_aerobic_te.toFixed(1)} aerobic${activity.computed.garmin_anaerobic_te != null ? ` · ${activity.computed.garmin_anaerobic_te.toFixed(1)} anaerobic` : ""}`
+              : null,
+            analysis?.temp_c ? `${analysis.temp_c.avg}°C (${analysis.temp_c.min}–${analysis.temp_c.max})` : null,
+            analysis && analysis.elapsed_s - analysis.moving_s > 120 ? `${fmtDuration(analysis.elapsed_s)} elapsed` : null,
+          ].filter(Boolean).join(" · ")}
+        </p>
+      </section>
+
       {/* Map */}
       {activity.polyline && (
         <section className="mb-8">
@@ -244,8 +273,12 @@ export default async function ActivityPage({ params }: Props) {
         />
       )}
 
-      {/* Activity stream charts */}
-      <ActivityCharts activityId={decodedId} activityType={activity.activity_type} />
+      {/* Analysis cards (elevation, pace, HR, power, cadence) — falls back to plain charts without streams */}
+      {analysis ? (
+        <ActivityAnalysisCards analysis={analysis} />
+      ) : (
+        <ActivityCharts activityId={decodedId} activityType={activity.activity_type} />
+      )}
 
       {/* Splits */}
       {activity.splits && activity.splits.length > 0 && (
@@ -264,24 +297,29 @@ export default async function ActivityPage({ params }: Props) {
         />
       )}
 
-      {/* Key stats */}
-      <section className="mb-8">
-        <SectionLabel>Stats</SectionLabel>
-        <div className="grid grid-cols-3 gap-4">
-          <StatBlock label="Duration" value={fmtDuration(activity.duration_seconds)} />
-          <StatBlock label="Distance" value={fmtDistance(activity.distance_meters)} />
-          <StatBlock label="Pace / Speed" value={fmtPace(activity.avg_speed_mps ?? null, activity.activity_type)} />
-          <StatBlock label="Avg HR" value={activity.avg_heart_rate ? `${activity.avg_heart_rate} bpm` : null} />
-          <StatBlock label="Max HR" value={activity.max_heart_rate ? `${activity.max_heart_rate} bpm` : null} />
-          <StatBlock label="Elevation" value={activity.elevation_gain_meters ? `↑ ${Math.round(activity.elevation_gain_meters)} m` : null} />
-          <StatBlock label="Calories" value={activity.calories ? `${activity.calories} kcal` : null} />
-          <StatBlock label="TSS" value={activity.training_stress_score ? `${Math.round(activity.training_stress_score)}` : null} />
-          <StatBlock label="Power" value={activity.avg_power_watts ? `${activity.avg_power_watts} W` : null} />
-        </div>
-      </section>
+      {/* Key stats + performance — only when there are no streams to analyse */}
+      {!analysis && (
+        <>
+        {/* Key stats */}
+        <section className="mb-8">
+          <SectionLabel>Stats</SectionLabel>
+          <div className="grid grid-cols-3 gap-4">
+            <StatBlock label="Duration" value={fmtDuration(activity.duration_seconds)} />
+            <StatBlock label="Distance" value={fmtDistance(activity.distance_meters)} />
+            <StatBlock label="Pace / Speed" value={fmtPace(activity.avg_speed_mps ?? null, activity.activity_type)} />
+            <StatBlock label="Avg HR" value={activity.avg_heart_rate ? `${activity.avg_heart_rate} bpm` : null} />
+            <StatBlock label="Max HR" value={activity.max_heart_rate ? `${activity.max_heart_rate} bpm` : null} />
+            <StatBlock label="Elevation" value={activity.elevation_gain_meters ? `↑ ${Math.round(activity.elevation_gain_meters)} m` : null} />
+            <StatBlock label="Calories" value={activity.calories ? `${activity.calories} kcal` : null} />
+            <StatBlock label="TSS" value={activity.training_stress_score ? `${Math.round(activity.training_stress_score)}` : null} />
+            <StatBlock label="Power" value={activity.avg_power_watts ? `${activity.avg_power_watts} W` : null} />
+          </div>
+        </section>
 
-      {/* Performance metrics (EF, decoupling, NP/IF/VI) */}
-      {activity.computed && <PerformanceSection computed={activity.computed} />}
+        {/* Performance metrics (EF, decoupling, NP/IF/VI) */}
+        {activity.computed && <PerformanceSection computed={activity.computed} />}
+        </>
+      )}
 
       {/* Segment efforts */}
       {activity.segment_efforts.length > 0 && (
