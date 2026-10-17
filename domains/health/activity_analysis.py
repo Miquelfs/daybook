@@ -25,7 +25,7 @@ import math
 import sqlite3
 from bisect import bisect_right
 
-VERSION = 2
+VERSION = 3
 MAX_GAP_S = 30
 MAX_SERIES = 600
 
@@ -39,6 +39,7 @@ POWER_BESTS = [(5, "5 s"), (60, "1 min"), (300, "5 min"), (1200, "20 min"), (360
 
 ALIASES = {
     "t": ("sumduration", "sumelapsedduration", "time"),
+    "ts": ("directtimestamp",),          # epoch ms — timeline fallback
     "d": ("sumdistance", "distance"),
     "hr": ("directheartrate", "heartrate", "heart_rate"),
     "spd": ("directspeed", "velocity_smooth", "velocity"),
@@ -593,6 +594,9 @@ def analyze(conn: sqlite3.Connection, activity_id: str, use_cache: bool = True) 
 
 def _analyze(conn, act, sport) -> dict | None:
     st = _load(conn, act["id"])
+    if "t" not in st and st.get("ts"):
+        t0 = next((x for x in st["ts"] if x is not None), None)
+        st["t"] = [(x - t0) / 1000 if x is not None and t0 is not None else None for x in st["ts"]]
     if "t" not in st:
         return None
     cad = None
@@ -655,6 +659,16 @@ def _analyze(conn, act, sport) -> dict | None:
     power = _power_card(s1["pw"], moving, ftp, _weight(conn, act["date"]), indoor, sport) if s1.get("pw") else None
     cadence = _cad_card(sport, s1["cad"], moving) if s1.get("cad") else None
     temp = [t for t, m in zip(s1.get("temp") or [], moving) if m and t is not None]
+
+    try:
+        from domains.training import efforts as eff
+        found = eff.compute(sport if not indoor else "indoor", s1.get("d") if has_dist else None,
+                            (power or {}).get("bests") if sport == "ride" else None)
+        if indoor and sport == "ride" and power:          # trainer rides still count for power bests
+            found = eff.compute("ride", None, power.get("bests"))
+        eff.store(conn, act["id"], act["date"], sport, found)
+    except Exception:
+        pass
 
     if not any((hr, pace, power, elev, cadence)):
         return None

@@ -1,5 +1,5 @@
 import { api, fmtDuration, fmtDistance, fmtPace, activityIcon } from "@/lib/api";
-import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis, ActivityImpact } from "@/lib/api";
+import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis, ActivityImpact, ActivityEffort } from "@/lib/api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ActivityMap } from "@/components/ActivityMap";
@@ -10,7 +10,7 @@ import { ActivityCharts } from "@/components/ActivityCharts";
 import { ActivityNotes } from "@/components/ActivityNotes";
 import { TennisSessionPanel } from "@/components/TennisSessionPanel";
 import { ActivitySplitsChart } from "@/components/ActivitySplitsChart";
-import { SportCurveSection } from "@/components/training/SportCurveSection";
+import { BestEffortsCard, SameRouteCard } from "@/components/activity/EffortsCards";
 import { PlannedVsActual } from "@/components/PlannedVsActual";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
 
@@ -158,9 +158,10 @@ export default async function ActivityPage({ params }: Props) {
     notFound();
   }
 
-  const [analysis, impact] = await Promise.all([
+  const [analysis, impact, efforts] = await Promise.all([
     api.activityAnalysis(decodedId).catch((): ActivityAnalysis | null => null),
     api.activityImpact(decodedId).catch((): ActivityImpact | null => null),
+    api.activityEfforts(decodedId).catch((): ActivityEffort[] => []),
   ]);
 
   const date = activity.date;
@@ -267,6 +268,10 @@ export default async function ActivityPage({ params }: Props) {
       {/* Training impact — load, fitness/fatigue/form, efficiency trend, race readiness */}
       {impact && <TrainingImpactCard impact={impact} sport={sport} />}
 
+      {/* Best efforts inside this activity (🥇 PR / 🥈 / 🥉) and every time you've done this route */}
+      {efforts.length > 0 && <BestEffortsCard efforts={efforts} sport={sport} />}
+      {impact?.matched && <SameRouteCard m={impact.matched} sport={sport} />}
+
       {/* Metrics: heart rate → speed → power → elevation → cadence (falls back to plain charts without streams) */}
       {analysis ? (
         <ActivityAnalysisCards analysis={analysis} />
@@ -291,37 +296,26 @@ export default async function ActivityPage({ params }: Props) {
         </section>
       )}
 
-      {/* Where this effort sits on your own curve (runs, rides & swims) */}
-      {(sport === "run" || sport === "ride" || sport === "swim") && (
-        <SportCurveSection
-          sport={sport}
-          distanceM={activity.distance_meters ?? null}
-          avgSpeedMps={activity.avg_speed_mps ?? null}
-        />
-      )}
-
-      {/* Key stats + performance — only when there are no streams to analyse */}
+      {/* No detailed data (streams) for this activity: the essentials, plus why the charts are missing */}
       {!analysis && (
-        <>
-        {/* Key stats */}
         <section className="mb-8">
-          <SectionLabel>Stats</SectionLabel>
-          <div className="grid grid-cols-3 gap-4">
-            <StatBlock label="Duration" value={fmtDuration(activity.duration_seconds)} />
-            <StatBlock label="Distance" value={fmtDistance(activity.distance_meters)} />
-            <StatBlock label="Pace / Speed" value={fmtPace(activity.avg_speed_mps ?? null, activity.activity_type)} />
-            <StatBlock label="Avg HR" value={activity.avg_heart_rate ? `${activity.avg_heart_rate} bpm` : null} />
-            <StatBlock label="Max HR" value={activity.max_heart_rate ? `${activity.max_heart_rate} bpm` : null} />
-            <StatBlock label="Elevation" value={activity.elevation_gain_meters ? `↑ ${Math.round(activity.elevation_gain_meters)} m` : null} />
-            <StatBlock label="Calories" value={activity.calories ? `${activity.calories} kcal` : null} />
-            <StatBlock label="TSS" value={activity.training_stress_score ? `${Math.round(activity.training_stress_score)}` : null} />
-            <StatBlock label="Power" value={activity.avg_power_watts ? `${activity.avg_power_watts} W` : null} />
+          <SectionLabel>Details</SectionLabel>
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <StatBlock label="Avg HR" value={activity.avg_heart_rate ? `${activity.avg_heart_rate} bpm` : null} />
+              <StatBlock label="Max HR" value={activity.max_heart_rate ? `${activity.max_heart_rate} bpm` : null} />
+              <StatBlock label="Power" value={activity.avg_power_watts ? `${activity.avg_power_watts} W` : null} />
+              <StatBlock label="Calories" value={activity.calories ? `${activity.calories} kcal` : null} />
+              <StatBlock label="Load" value={activity.training_stress_score ? `${Math.round(activity.training_stress_score)} TSS` : null} />
+              <StatBlock label="Elapsed" value={activity.duration_seconds && activity.moving_time_seconds && activity.duration_seconds - activity.moving_time_seconds > 120 ? fmtDuration(activity.duration_seconds) : null} />
+            </div>
+            <p className="text-xs text-[#71717A] mt-4">
+              Heart-rate zones, pace, power and elevation charts appear once this activity&apos;s second-by-second
+              data has been synced from Garmin (done nightly for the last week).
+            </p>
           </div>
+          {activity.computed && <div className="mt-6"><PerformanceSection computed={activity.computed} /></div>}
         </section>
-
-        {/* Performance metrics (EF, decoupling, NP/IF/VI) */}
-        {activity.computed && <PerformanceSection computed={activity.computed} />}
-        </>
       )}
 
       {/* Segment efforts */}

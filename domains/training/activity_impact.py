@@ -16,6 +16,7 @@ Cheap queries only; not cached (the week and the load model keep moving).
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from datetime import date, timedelta
 from statistics import median
@@ -149,6 +150,36 @@ def _race(conn, act, sport, t, analysis, fuel_target_fn) -> dict | None:
     return out
 
 
+def _matched(conn, act, sport) -> dict | None:
+    """Same route: same sport, start within ~300 m, distance within 7 % — how this one compares."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(activities)")}
+    if not {"start_lat", "start_lng"} <= cols or act["start_lat"] is None or not act["distance_meters"]:
+        return None
+    if is_indoor(act["activity_type"]):
+        return None
+    d = act["distance_meters"]
+    dlat = 0.0027                                    # ~300 m
+    dlng = dlat / max(0.2, math.cos(math.radians(act["start_lat"])))
+    rows = conn.execute(
+        """SELECT id, date, name, activity_type, distance_meters, COALESCE(moving_time_seconds, duration_seconds) AS t,
+                  avg_heart_rate FROM activities
+           WHERE start_lat BETWEEN ? AND ? AND start_lng BETWEEN ? AND ? AND distance_meters BETWEEN ? AND ?
+             AND date >= ? ORDER BY date""",
+        (act["start_lat"] - dlat, act["start_lat"] + dlat, act["start_lng"] - dlng, act["start_lng"] + dlng,
+         d * 0.93, d * 1.07, (date.fromisoformat(act["date"]) - timedelta(days=730)).isoformat())).fetchall()
+    rows = [r for r in rows if sport_of(r["activity_type"]) == sport and not is_indoor(r["activity_type"]) and r["t"]]
+    if len(rows) < 2 or not any(r["id"] == act["id"] for r in rows):
+        return None
+    items = [{"id": r["id"], "date": r["date"], "name": r["name"], "secs": r["t"], "km": round(r["distance_meters"] / 1000, 2),
+              "mps": r["distance_meters"] / r["t"], "hr": r["avg_heart_rate"], "this": r["id"] == act["id"]} for r in rows]
+    mine = next(i for i in items if i["this"])
+    ranked = sorted(items, key=lambda i: -i["mps"])
+    prev = [i for i in items if i["date"] < mine["date"]]
+    return {"n": len(items), "rank": ranked.index(mine) + 1, "best": ranked[0],
+            "vs_last_pct": round((mine["mps"] / prev[-1]["mps"] - 1) * 100, 1) if prev else None,
+            "items": items[-12:]}
+
+
 def impact(conn: sqlite3.Connection, activity_id: str, analysis: dict | None = None,
            fuel_target_fn=None) -> dict | None:
     act = conn.execute("SELECT * FROM activities WHERE id=?", (activity_id,)).fetchone()
@@ -162,7 +193,8 @@ def impact(conn: sqlite3.Connection, activity_id: str, analysis: dict | None = N
         "load": _load(conn, act["date"], tss, t),
         "efficiency": _efficiency(conn, act, sport, t),
         "race": _race(conn, act, sport, t, analysis, fuel_target_fn),
+        "matched": _matched(conn, act, sport),
     }
-    if not any((out["tss"], out["load"], out["efficiency"], out["race"])):
+    if not any((out["tss"], out["load"], out["efficiency"], out["race"], out["matched"])):
         return None
     return out

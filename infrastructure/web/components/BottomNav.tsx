@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, List, Wallet, Globe, Camera, HeartPulse, TrendingUp, PlaneTakeoff, Apple, Bike } from "lucide-react";
+import { CalendarDays, List, Wallet, Globe, Camera, HeartPulse, TrendingUp, PlaneTakeoff, Apple, Hammer } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const tabs = [
@@ -10,7 +10,7 @@ const tabs = [
   { href: "/timeline",     label: "Timeline", icon: List },
   { href: "/moments",      label: "Moments",  icon: Camera },
   { href: "/money",        label: "Finance",  icon: Wallet },
-  { href: "/omyra",        label: "Omyra · Training", icon: Bike },
+  { href: "/omyra",        label: "Omyra · Training", icon: Hammer },
   { href: "/health",       label: "Health",   icon: HeartPulse },
   { href: "/food",         label: "Food",     icon: Apple },
   { href: "/aviation",     label: "Logbook",  icon: PlaneTakeoff },

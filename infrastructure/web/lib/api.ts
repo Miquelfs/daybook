@@ -1040,6 +1040,8 @@ export const api = {
   activity: (id: string) => get<ActivityDetail>(`/activities/${id}`),
   activityAnalysis: (id: string) =>
     get<{ analysis: ActivityAnalysis | null }>(`/activities/${id}/analysis`).then((r) => r.analysis),
+  activityEfforts: (id: string) =>
+    get<{ efforts: ActivityEffort[] }>(`/activities/${id}/efforts`).then((r) => r.efforts),
   activityImpact: (id: string) =>
     get<{ impact: ActivityImpact | null }>(`/activities/${id}/impact`).then((r) => r.impact),
   activities: (start: string, end: string) =>
@@ -1557,4 +1559,15 @@ export interface ActivityImpact {
     durability: { decoupling_pct: number; ok: boolean; note: string } | null;
     fuel: { carbs_g: number; carbs_g_h: number | null; target_g_h: number | null; items: string[]; ok: boolean } | null;
   } | null;
+  matched: {
+    n: number; rank: number; vs_last_pct: number | null;
+    best: { id: string; date: string; secs: number; mps: number };
+    items: { id: string; date: string; name: string | null; secs: number; km: number; mps: number; hr: number | null; this: boolean }[];
+  } | null;
+}
+
+export interface ActivityEffort {
+  kind: "dist" | "power"; key: number; label: string; value: number;
+  rank_all: number; rank_year: number; n: number; year: number;
+  pr: { activity_id: string; date: string; value: number } | null;
 }

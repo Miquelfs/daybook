@@ -176,11 +176,28 @@ def personal_records(conn: DB, limit: int = Query(20)):
     return [dict(r) for r in rows]
 
 
+@router.get("/years")
+def training_years(conn: DB):
+    """Years that have activities, newest first (for the year pickers)."""
+    rows = conn.execute(
+        f"SELECT DISTINCT substr(date, 1, 4) AS y FROM activities WHERE date IS NOT NULL {_DEDUP} ORDER BY y DESC"
+    ).fetchall()
+    return [int(r["y"]) for r in rows if r["y"] and r["y"].isdigit()]
+
+
 @router.get("/summary")
-def training_summary(conn: DB, days: int = Query(30)):
-    """KPI cards: total distance, hours, activities, elevation this period."""
-    end = date.today()
-    start = end - timedelta(days=days - 1)
+def training_summary(conn: DB, days: int = Query(30), start: Optional[str] = Query(None),
+                     end: Optional[str] = Query(None)):
+    """KPI cards: total distance, hours, activities, elevation this period.
+    Either the last `days` days, or an explicit start/end (e.g. a calendar year) —
+    the comparison is the same-length period right before."""
+    if start and end:
+        start_d, end_d = date.fromisoformat(start), date.fromisoformat(end)
+        days = (end_d - start_d).days + 1
+        start, end = start_d, end_d
+    else:
+        end = date.today()
+        start = end - timedelta(days=days - 1)
 
     tss = _tss_expr(conn)
     row = conn.execute(
@@ -199,9 +216,14 @@ def training_summary(conn: DB, days: int = Query(30)):
         (start.isoformat(), end.isoformat()),
     ).fetchone()
 
-    # Previous period for comparison
-    prev_end = start - timedelta(days=1)
-    prev_start = prev_end - timedelta(days=days - 1)
+    # Previous period for comparison: a year view (starts 1 Jan) compares with the same
+    # dates last year; anything else with the same-length period right before.
+    if start.month == 1 and start.day == 1 and end.year == start.year:
+        prev_start = start.replace(year=start.year - 1)
+        prev_end = end.replace(year=end.year - 1) if not (end.month == 2 and end.day == 29) else end.replace(year=end.year - 1, day=28)
+    else:
+        prev_end = start - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=days - 1)
 
     prev = conn.execute(
         f"""
@@ -219,6 +241,8 @@ def training_summary(conn: DB, days: int = Query(30)):
         **dict(row),
         "prev_activity_count": prev["activity_count"],
         "prev_total_km": prev["total_km"],
+        "prev_label": "same dates last year" if prev_start.year == start.year - 1 and start.month == 1 and start.day == 1
+                      else "previous period",
         "period_days": days,
     }
 
@@ -686,6 +710,13 @@ def best_effort_curve(
         return _fallback_curve(conn, sport, cutoff_90d)
 
     return result
+
+
+@router.get("/efforts")
+def training_efforts(conn: DB, sport: str = Query("run")):
+    """Best efforts per distance (and power duration for rides): all-time, this year, last 90 days."""
+    from domains.training.efforts import bests
+    return bests(conn, sport)
 
 
 @router.get("/best-effort")

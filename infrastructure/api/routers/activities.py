@@ -425,6 +425,18 @@ def get_activity_analysis(
     return {"analysis": analyze(conn, activity_id, use_cache=not refresh)}
 
 
+@router.get("/{activity_id}/efforts")
+def get_activity_efforts(activity_id: str, conn: Annotated[sqlite3.Connection, Depends(get_db)]):
+    """Best efforts inside this activity, ranked vs all-time / this year (Strava-style trophies)."""
+    from domains.health.activity_analysis import analyze
+    from domains.training.efforts import for_activity
+    try:
+        analyze(conn, activity_id)            # makes sure efforts exist (cached afterwards)
+    except Exception:
+        pass
+    return {"efforts": for_activity(conn, activity_id)}
+
+
 @router.get("/{activity_id}/impact")
 def get_activity_impact(
     activity_id: str,

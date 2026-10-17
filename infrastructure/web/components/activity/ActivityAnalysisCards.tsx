@@ -286,7 +286,7 @@ function PaceCard({ a }: { a: ActivityAnalysis }) {
           <Tile label="Steadiness" value={p.consistency_cv <= 8 ? "Steady" : p.consistency_cv <= 15 ? "Variable" : "Choppy"}
                 sub={`±${p.consistency_cv}% on flat ground`} />
         )}
-        {Object.entries(p.best).map(([label, v]) => (
+        {!run && Object.entries(p.best).map(([label, v]) => (
           <Tile key={label} label={`Best ${label}`} value={run ? clock(v) : `${v.toFixed(1)} km/h`}
                 sub={run ? `${paceFromKmh((Number(label.split(" ")[0]) * 3600) / v)} /km` : undefined} />
         ))}

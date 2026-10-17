@@ -19,6 +19,7 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 type Summary = {
   activity_count: number; total_km: number | null; total_hours: number | null; total_elevation_m: number | null;
   avg_hr: number | null; total_tss: number | null; prev_activity_count: number; prev_total_km: number | null;
+  prev_label?: string;
 };
 type WeeklyRow = { week: string; week_start: string; activity_type: string; count: number; km: number; hours: number };
 type SportRow = { sport: string; sport_label: string; count: number; km: number; hours: number };
@@ -29,6 +30,8 @@ type Act = {
   training_stress_score: number | null;
 };
 type LoadRow = { date: string; ctl: number | null; atl: number | null; tsb: number | null; daily_tss: number };
+type EffortRef = { activity_id: string; date: string; value: number } | null;
+type EffortBest = { kind: "dist" | "power"; key: number; label: string; all_time: EffortRef; this_year: EffortRef; last_90d: EffortRef };
 type Curve = { bucket: number; all_time_best: number | null; last_90d_best: number | null }[];
 type Rec = { id: string; date: string; name: string | null; distance_meters: number | null; elevation_gain_meters: number | null } | null;
 type Week = { week: number; start: string; end: string; phase_label: string; planned_min: number; done_min: number;
@@ -39,7 +42,8 @@ type Overview = {
 };
 type DaySession = { id: number; session_type: string; effective_duration_min: number; intensity_zone: string; status: string };
 
-const PERIODS = [{ label: "4 weeks", weeks: 4 }, { label: "3 months", weeks: 12 }, { label: "6 months", weeks: 24 }];
+type Period = { kind: "rolling"; weeks: number } | { kind: "year"; year: number };
+const ROLLING = [{ label: "4 weeks", weeks: 4 }, { label: "3 months", weeks: 12 }, { label: "6 months", weeks: 26 }];
 const SPORTS = ["ride", "run", "swim", "other"] as const;
 const SPORT_LABEL: Record<string, string> = { ride: "Ride", run: "Run", swim: "Swim", other: "Gym & other" };
 const TIP = {
@@ -289,13 +293,19 @@ function ActivityRow({ a }: { a: Act }) {
 
 // ── main ─────────────────────────────────────────────────────────────────────
 export function TrainingOverview({ onOpenRace }: { onOpenRace: () => void }) {
-  const [weeks, setWeeks] = useState(12);
+  const [period, setPeriod] = useState<Period>({ kind: "rolling", weeks: 12 });
   const [filter, setFilter] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const end = format(new Date(), "yyyy-MM-dd");
-  const start = format(subDays(new Date(), weeks * 7), "yyyy-MM-dd");
+  const thisYear = new Date().getFullYear();
+  const { data: yearsRaw } = useQuery<number[]>({ queryKey: ["training-years"], queryFn: () => json(`${BASE}/training/years`) });
+  const years = (Array.isArray(yearsRaw) ? yearsRaw : []).filter((y) => y < thisYear).slice(0, 6);
 
-  const { data: summary } = useQuery<Summary>({ queryKey: ["training-summary", weeks * 7], queryFn: () => json(`${BASE}/training/summary?days=${weeks * 7}`) });
+  const isYear = period.kind === "year";
+  const start = isYear ? `${period.year}-01-01` : format(subDays(new Date(), period.weeks * 7), "yyyy-MM-dd");
+  const end = isYear && period.year < thisYear ? `${period.year}-12-31` : format(new Date(), "yyyy-MM-dd");
+  const summaryUrl = isYear ? `${BASE}/training/summary?start=${start}&end=${end}` : `${BASE}/training/summary?days=${period.weeks * 7}`;
+
+  const { data: summary } = useQuery<Summary>({ queryKey: ["training-summary", start, end], queryFn: () => json(summaryUrl) });
   const { data: weeklyRaw } = useQuery<WeeklyRow[]>({ queryKey: ["training-weekly", start, end], queryFn: () => json(`${BASE}/training/weekly?start=${start}&end=${end}`) });
   const { data: sportsRaw } = useQuery<SportRow[]>({ queryKey: ["training-sports", start, end], queryFn: () => json(`${BASE}/training/sport-breakdown?start=${start}&end=${end}`) });
   const { data: actsRaw } = useQuery<Act[]>({
@@ -304,6 +314,8 @@ export function TrainingOverview({ onOpenRace }: { onOpenRace: () => void }) {
   });
   const { data: records } = useQuery<{ longest_ride: Rec; longest_run: Rec; highest_elevation_ride: Rec }>({ queryKey: ["training-records"], queryFn: () => json(`${BASE}/training/records`) });
   const { data: runCurve } = useQuery<Curve>({ queryKey: ["training-curve-run"], queryFn: () => json(`${BASE}/training/curve?sport=run&channel=pace`) });
+  const { data: runEfforts } = useQuery<EffortBest[]>({ queryKey: ["training-efforts", "run"], queryFn: () => json(`${BASE}/training/efforts?sport=run`) });
+  const { data: rideEfforts } = useQuery<EffortBest[]>({ queryKey: ["training-efforts", "ride"], queryFn: () => json(`${BASE}/training/efforts?sport=ride`) });
   const { data: bikeCurve } = useQuery<Curve>({ queryKey: ["training-curve-bike"], queryFn: () => json(`${BASE}/training/curve?sport=ride&channel=pace`) });
 
   const weekly = Array.isArray(weeklyRaw) ? weeklyRaw : [];
@@ -318,7 +330,18 @@ export function TrainingOverview({ onOpenRace }: { onOpenRace: () => void }) {
     row[sportOf(r.activity_type)] += r.hours;
     byWeek.set(r.week, row);
   }
-  const weeklyAgg = [...byWeek.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+  let weeklyAgg = [...byWeek.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+  const monthly = isYear || weeklyAgg.length > 30;
+  if (monthly) {
+    const byMonth = new Map<string, WeekAgg>();
+    for (const w of weeklyAgg) {
+      const m = w.week_start.slice(0, 7) + "-01";
+      const row = byMonth.get(m) ?? { week_start: m, ride: 0, run: 0, swim: 0, other: 0 };
+      for (const k of SPORTS) row[k] += w[k];
+      byMonth.set(m, row);
+    }
+    weeklyAgg = [...byMonth.values()].sort((a, b) => a.week_start.localeCompare(b.week_start));
+  }
   const present = SPORTS.filter((s) => weeklyAgg.some((w) => w[s] > 0));
 
   // sport mix (by time)
@@ -337,7 +360,7 @@ export function TrainingOverview({ onOpenRace }: { onOpenRace: () => void }) {
       <FormCard />
       <ThisWeek />
 
-      <Section title="Recent" action={
+      <Section title={isYear ? `Activities · ${period.year}` : "Recent"} action={
         <div className="flex gap-1">
           {[null, "cycling", "running", "swimming"].map((s) => (
             <button key={s ?? "all"} onClick={() => setFilter(s)}
@@ -357,13 +380,18 @@ export function TrainingOverview({ onOpenRace }: { onOpenRace: () => void }) {
         </Panel>
       </Section>
 
-      <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 w-fit mb-4">
-        {PERIODS.map((p) => (
-          <button key={p.weeks} onClick={() => setWeeks(p.weeks)}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors ${weeks === p.weeks ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
-            {p.label}
-          </button>
-        ))}
+      <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mb-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {[...ROLLING.map((r) => ({ key: `r${r.weeks}`, label: r.label, p: { kind: "rolling", weeks: r.weeks } as Period })),
+          { key: `y${thisYear}`, label: "This year", p: { kind: "year", year: thisYear } as Period },
+          ...years.map((y) => ({ key: `y${y}`, label: String(y), p: { kind: "year", year: y } as Period }))].map(({ key, label, p }) => {
+          const active = p.kind === period.kind && (p.kind === "year" ? p.year === (period as { year: number }).year : p.weeks === (period as { weeks: number }).weeks);
+          return (
+            <button key={key} onClick={() => setPeriod(p)}
+                    className={`shrink-0 px-3 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors ${active ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       <Panel className="p-4 mb-8">
@@ -371,7 +399,7 @@ export function TrainingOverview({ onOpenRace }: { onOpenRace: () => void }) {
           {[
             { label: "Time", value: summary?.total_hours != null ? `${summary.total_hours}h` : "—" },
             { label: "Distance", value: summary?.total_km != null ? `${Math.round(summary.total_km)} km` : "—",
-              sub: kmDelta != null ? `${kmDelta >= 0 ? "↑" : "↓"} ${Math.abs(Math.round(kmDelta))} km vs prev` : null },
+              sub: kmDelta != null ? `${kmDelta >= 0 ? "↑" : "↓"} ${Math.abs(Math.round(kmDelta))} km vs ${summary?.prev_label === "same dates last year" ? "last year" : "prev"}` : null },
             { label: "Climbing", value: summary?.total_elevation_m ? `${summary.total_elevation_m.toLocaleString()} m` : "—" },
           ].map((k) => (
             <div key={k.label}>
@@ -388,19 +416,19 @@ export function TrainingOverview({ onOpenRace }: { onOpenRace: () => void }) {
         </p>
       </Panel>
 
-      <Section title="Weekly hours">
+      <Section title={monthly ? "Monthly hours" : "Weekly hours"}>
         <Panel className="p-4">
           <ResponsiveContainer width="100%" height={170}>
             <BarChart data={weeklyAgg} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
               <CartesianGrid stroke="var(--viz-grid)" vertical={false} strokeDasharray="2 4" />
-              <XAxis dataKey="week_start" tickFormatter={(d) => format(parseISO(d), "d MMM")} tick={{ fill: "var(--viz-axis)", fontSize: 11 }}
+              <XAxis dataKey="week_start" tickFormatter={(d) => format(parseISO(d), monthly ? "MMM" : "d MMM")} tick={{ fill: "var(--viz-axis)", fontSize: 11 }}
                      tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={24} />
               <YAxis tick={{ fill: "var(--viz-axis)", fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} />
               <Tooltip {...TIP} cursor={{ fill: "var(--viz-grid)", opacity: 0.4 }}
                        formatter={(v, n) => [`${Number(v).toFixed(1)} h`, SPORT_LABEL[String(n)] ?? n]}
-                       labelFormatter={(d) => `Week of ${format(parseISO(String(d)), "d MMM")}`} />
+                       labelFormatter={(d) => monthly ? format(parseISO(String(d)), "MMMM yyyy") : `Week of ${format(parseISO(String(d)), "d MMM")}`} />
               {present.map((s, i) => (
-                <Bar key={s} dataKey={s} stackId="h" fill={SPORT_COLORS[s]} maxBarSize={26} isAnimationActive={false}
+                <Bar key={s} dataKey={s} stackId="h" fill={SPORT_COLORS[s]} maxBarSize={monthly ? 34 : 26} isAnimationActive={false}
                      radius={i === present.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]} stroke="var(--viz-gap)" strokeWidth={1} />
               ))}
             </BarChart>
@@ -439,12 +467,19 @@ export function TrainingOverview({ onOpenRace }: { onOpenRace: () => void }) {
       <section className="mb-8"><GoalRings /></section>
 
       <Section title="Best efforts">
+        {(Array.isArray(rideEfforts) && rideEfforts.length > 0) || (Array.isArray(runEfforts) && runEfforts.length > 0) ? (
+          <div className="grid sm:grid-cols-2 gap-3">
+            {Array.isArray(rideEfforts) && rideEfforts.length > 0 && <EffortTable title="Cycling" sport="ride" rows={rideEfforts} />}
+            {Array.isArray(runEfforts) && runEfforts.length > 0 && <EffortTable title="Running" sport="run" rows={runEfforts} />}
+          </div>
+        ) : (
         <div className="grid sm:grid-cols-2 gap-3">
           <BestTable title="Cycling" curve={bikeCurve} rows={[[10000, "10K"], [20000, "20K"], [40000, "40K"], [50000, "50K"], [100000, "100K"], [160000, "100 mi"], [200000, "200K"]]}
                      fmt={(s) => `${(3600 / s).toFixed(1)} km/h`} />
           <BestTable title="Running" curve={runCurve} rows={[[1000, "1K"], [5000, "5K"], [10000, "10K"], [21097, "Half"], [42195, "Marathon"]]}
                      fmt={(s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")} /km`} />
         </div>
+        )}
       </Section>
 
       <Section title="Records">
@@ -490,6 +525,44 @@ function BestTable({ title, curve, rows, fmt }: { title: string; curve: Curve | 
           </div>
         );
       })}
+    </Panel>
+  );
+}
+
+function clockS(s: number): string {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.round(s % 60);
+  const ss = String(sec).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
+function EffortTable({ title, sport, rows }: { title: string; sport: "run" | "ride"; rows: EffortBest[] }) {
+  const fmt = (r: EffortBest, v: number) =>
+    r.kind === "power" ? `${Math.round(v)} W` : clockS(v);
+  const sub = (r: EffortBest, v: number) =>
+    r.kind === "power" ? "" : sport === "run" ? `${clockS(v / (r.key / 1000))} /km` : `${(r.key / 1000 / (v / 3600)).toFixed(1)} km/h`;
+  const dist = rows.filter((r) => r.kind === "dist"), power = rows.filter((r) => r.kind === "power");
+  const Line = ({ r }: { r: EffortBest }) => (
+    <div className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-2 px-4 py-2 border-t border-[#18181B] text-xs">
+      <span className="text-[#A1A1AA]">{r.label}</span>
+      {r.all_time ? (
+        <Link href={`/activity/${encodeURIComponent(r.all_time.activity_id)}`} className="min-w-0 hover:text-[#F59E0B]">
+          <span className="tabular-nums text-[#FAFAFA] font-semibold">{fmt(r, r.all_time.value)}</span>
+          <span className="text-[#71717A] tabular-nums"> {sub(r, r.all_time.value)}</span>
+          <span className="block text-[10px] text-[#52525B]">{r.all_time.date}</span>
+        </Link>
+      ) : <span>—</span>}
+      <span className="text-right text-[10px] text-[#71717A] tabular-nums leading-tight">
+        {r.this_year && r.this_year.activity_id !== r.all_time?.activity_id ? <>this year {fmt(r, r.this_year.value)}</> : r.this_year ? <span className="text-amber-400">PR this year</span> : null}
+        {r.last_90d && r.last_90d.activity_id !== r.this_year?.activity_id && <><br />90d {fmt(r, r.last_90d.value)}</>}
+      </span>
+    </div>
+  );
+  return (
+    <Panel className="overflow-hidden">
+      <p className="text-xs text-[#A1A1AA] px-4 pt-3 pb-2">{title}</p>
+      {dist.map((r) => <Line key={`d${r.key}`} r={r} />)}
+      {power.length > 0 && <p className="px-4 pt-3 pb-1 text-[10px] text-[#52525B] uppercase tracking-widest border-t border-[#27272A]">Power</p>}
+      {power.map((r) => <Line key={`p${r.key}`} r={r} />)}
     </Panel>
   );
 }
