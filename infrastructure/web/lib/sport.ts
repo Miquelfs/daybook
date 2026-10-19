@@ -15,3 +15,20 @@ export function sportOf(activityType: string | null): "run" | "ride" | "swim" | 
   if (t.includes("swim")) return "swim";
   return "other";
 }
+
+/** Icon for a plan session — by discipline, refined by the session type (gym, mobility, test…). */
+export function sessionIcon(discipline: string | null | undefined, sessionType?: string | null): string {
+  const d = (discipline ?? "").toLowerCase();
+  const t = (sessionType ?? "").toLowerCase();
+  if (t.includes("race day")) return "🏁";
+  if (t.startsWith("test") && /bike|ftp|climb|ride|cycl/.test(t)) return "🚴";
+  if (t.startsWith("test") && /run/.test(t)) return "🏃";
+  if (t.startsWith("strength") || t.includes("gym")) return "🏋️";
+  if (t.includes("mobility") || t.includes("yoga") || t.includes("stretch")) return "🧘";
+  if (t.includes("rest")) return "😴";
+  if (d === "brick") return "⚡";
+  if (d === "cycling" || d === "ride" || d === "bike" || t.startsWith("cycling") || t.includes("ride")) return "🚴";
+  if (d === "running" || d === "run" || t.startsWith("run")) return "🏃";
+  if (d === "swimming" || d === "swim" || t.startsWith("swim")) return "🏊";
+  return "🏋️";
+}

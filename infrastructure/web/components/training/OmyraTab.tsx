@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { sessionIcon } from "@/lib/sport";
 import { WeekPlanner } from "@/components/training/WeekPlanner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import RaceReadinessPanel from "@/components/training/RaceReadinessPanel";
@@ -103,9 +104,6 @@ const ZONE_DESC: Record<string, string> = {
   Z4: "Threshold — 91–105% HR / RPE 8–9",
   Z5: "VO2max / all out — >105% HR / RPE 10",
 };
-const DISC_ICON: Record<string, string> = {
-  running: "🏃", ride: "🚴", swimming: "🏊", brick: "⚡", other: "🏋️",
-};
 const PHASE_LABEL: Record<string, string> = {
   base_building: "Base", build: "Build", peak: "Peak", taper: "Taper", recovery: "Recovery",
 };
@@ -121,7 +119,6 @@ const RPE_LABELS: Record<number, string> = {
 };
 
 function todayStr() { return localISODate(); }
-function discIcon(d: string) { return DISC_ICON[d] ?? DISC_ICON.other; }
 
 // ── Inline session detail sheet ────────────────────────────────────────────
 
@@ -198,7 +195,7 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
 
         {/* Header */}
         <div className="flex items-center gap-3">
-          <span className="text-3xl">{discIcon(session.discipline)}</span>
+          <span className="text-3xl">{sessionIcon(session.discipline, session.session_type)}</span>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-[#FAFAFA]">{session.session_type}</p>
             <p className="text-xs text-[#52525B]">{session.session_date} · Week {session.week_number}</p>
@@ -282,7 +279,7 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
           </div>
           <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex-1">
             <p className="text-[10px] text-[#52525B] uppercase tracking-wider mb-1">Discipline</p>
-            <p className="text-xl">{discIcon(session.discipline)}</p>
+            <p className="text-xl">{sessionIcon(session.discipline, session.session_type)}</p>
             <p className="text-xs text-[#A1A1AA] capitalize mt-0.5">{session.discipline}</p>
           </div>
         </div>
@@ -532,7 +529,7 @@ function FullSchedule({ goal, onSelectSession, onClose }: {
                           : "bg-[#0D0D0F] border-[#27272A] hover:border-[#3F3F46]"
                       }`}
                     >
-                      <span className="text-base">{discIcon(s.discipline)}</span>
+                      <span className="text-base">{sessionIcon(s.discipline, s.session_type)}</span>
                       <div className="flex-1 min-w-0">
                         <p className={`text-xs font-medium truncate ${isMissed ? "line-through text-[#52525B]" : "text-[#FAFAFA]"}`}>{s.session_type}</p>
                         <p className="text-[10px] text-[#52525B] truncate">
@@ -865,7 +862,7 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
                           onClick={() => setSelectedSession(s)}
                           className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg bg-[#18181B] hover:bg-[#27272A] transition-colors"
                         >
-                          <span className="text-sm">{discIcon(s.discipline)}</span>
+                          <span className="text-sm">{sessionIcon(s.discipline, s.session_type)}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs text-[#A1A1AA] truncate">{s.session_type}</p>
                             <p className="text-[10px] text-[#3F3F46]">{s.session_date}</p>

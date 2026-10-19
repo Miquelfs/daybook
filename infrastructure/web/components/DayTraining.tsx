@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { sessionIcon } from "@/lib/sport";
 import Link from "next/link";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
 import { SectionLabel } from "@/components/MorningBrief";
@@ -32,9 +33,6 @@ const PHASE_LABEL: Record<string, string> = {
   base_building: "Base", build: "Build", peak: "Peak", taper: "Taper", recovery: "Recovery",
 };
 
-const DISC_ICON: Record<string, string> = {
-  running: "🏃", ride: "🚴", swimming: "🏊", brick: "⚡", other: "🏋️",
-};
 
 const RPE_LABELS: Record<number, string> = {
   1: "Very easy", 2: "Easy", 3: "Moderate easy", 4: "Moderate",
@@ -42,7 +40,6 @@ const RPE_LABELS: Record<number, string> = {
   9: "Max effort", 10: "All out",
 };
 
-function disciplineIcon(disc: string) { return DISC_ICON[disc] ?? DISC_ICON.other; }
 
 interface FuelDuring { carbs_g_h: number; fluid_ml_h: number; sodium_mg_h: number; note: string; }
 interface FuelPrePost { carbs_g: number; protein_g?: number; timing?: string; window?: string; note: string; }
@@ -556,7 +553,7 @@ function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="text-3xl">{disciplineIcon(session.discipline)}</span>
+            <span className="text-3xl">{sessionIcon(session.discipline, session.session_type)}</span>
             <div>
               <p className="text-sm font-semibold text-[#FAFAFA]">{session.session_type}</p>
               <p className="text-xs text-[#52525B] mt-0.5">{session.goal_name}</p>
@@ -958,7 +955,7 @@ export function DayTraining({ initialPrescription, date }: {
                       isCompleted ? "bg-[#052E16]/40" : "hover:bg-[#131316]"
                     }`}
                   >
-                    <span className="text-xl">{disciplineIcon(s.discipline)}</span>
+                    <span className="text-xl">{sessionIcon(s.discipline, s.session_type)}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-[#FAFAFA] truncate">{s.session_type}</p>
                       <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
