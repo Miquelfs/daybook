@@ -691,6 +691,7 @@ def _linked_plan_session(conn: sqlite3.Connection, activity_id: str):
         "discipline": ps["discipline"], "intensity_zone": ps["intensity_zone"],
         "duration_min": ps["duration_min"], "effective_duration_min": ps["effective_duration_min"],
         "week_number": ps["week_number"], "structure": structure, "fueling": fueling,
+        "rpe_actual": ps["rpe_actual"] if "rpe_actual" in ps.keys() else None,
     }
 
     flog = None

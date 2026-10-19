@@ -60,7 +60,7 @@ export function TrainingImpactCard({ impact, sport }: { impact: ActivityImpact; 
           </span>
           {load?.week_share_pct != null && (
             <span className="text-xs text-[#71717A] tabular-nums text-right">
-              {load.week_share_pct}% of this week<br />({load.week_tss} TSS so far)
+              {load.week_share_pct >= 100 ? <>first session this week</> : <>{load.week_share_pct}% of this week<br />({load.week_tss} TSS so far)</>}
             </span>
           )}
         </div>

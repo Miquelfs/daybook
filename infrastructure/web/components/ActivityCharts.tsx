@@ -60,7 +60,7 @@ export function ActivityCharts({ activityId, activityType }: Props) {
     staleTime: 86_400_000,
   });
 
-  if (isLoading || !data || data.available.length === 0) return null;
+  if (isLoading || !data || !Array.isArray(data.available) || data.available.length === 0 || !Array.isArray(data.distance)) return null;
 
   const at = (activityType ?? "").toLowerCase();
   const isCycling = at.includes("cycl") || at.includes("ride");

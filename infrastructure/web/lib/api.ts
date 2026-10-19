@@ -154,6 +154,7 @@ export type LinkedPlanSession = {
   week_number: number;
   structure: PlanSessionStep[] | null;
   fueling: Record<string, unknown> | null;
+  rpe_actual?: number | null;
 };
 
 // Real activity stats merged onto a plan session that was completed by (auto- or

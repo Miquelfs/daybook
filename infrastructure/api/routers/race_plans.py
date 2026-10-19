@@ -375,6 +375,12 @@ from infrastructure.api.routers.training import (
     _SWIM_TYPES as _SWIM_ACT_TYPES,
 )
 
+# Gym sessions get recorded on the watch as strength, a stopwatch "timed activity", cardio…
+_STRENGTH_ACT_TYPES: tuple[str, ...] = (
+    "strength_training", "stop_watch", "fitness_equipment", "indoor_cardio", "hiit", "training",
+    "other", "cardio", "functional_strength", "pilates", "yoga",
+)
+
 _DISCIPLINE_ACT_FAMILY: dict[str, tuple[str, ...]] = {
     "running": _RUN_ACT_TYPES,
     "cycling": _RIDE_ACT_TYPES,
@@ -421,7 +427,7 @@ def autolink_sessions(
         params.append(on_date)
 
     sessions = conn.execute(
-        f"""SELECT ps.id, ps.session_date, ps.discipline
+        f"""SELECT ps.id, ps.session_date, ps.discipline, ps.session_type
             FROM plan_sessions ps JOIN race_goals rg ON rg.id = ps.goal_id
             WHERE {' AND '.join(clauses)}
             ORDER BY ps.session_date, ps.discipline""",
@@ -441,13 +447,17 @@ def autolink_sessions(
     linked = 0
     for s in sessions:
         family = _DISCIPLINE_ACT_FAMILY.get(s["discipline"])
+        min_dur = 0
+        if not family and (s["session_type"] or "").lower().startswith(("strength", "gym")):
+            family, min_dur = _STRENGTH_ACT_TYPES, 15 * 60     # a real gym session, not a 2-min timer
         if not family:
-            continue  # 'other' (strength/yoga) — skip auto-match
+            continue  # other 'other' sessions (mobility, rest…) — skip auto-match
         placeholders = ",".join("?" for _ in family)
         candidates = conn.execute(
             f"""SELECT id FROM activities
                 WHERE date = ?
-                  AND activity_type IN ({placeholders})
+                  AND lower(activity_type) IN ({placeholders})
+                  AND COALESCE(moving_time_seconds, duration_seconds, 0) >= {min_dur}
                   {_ACT_DEDUP}
                 ORDER BY COALESCE(moving_time_seconds, duration_seconds, 0) DESC""",
             [s["session_date"], *family],

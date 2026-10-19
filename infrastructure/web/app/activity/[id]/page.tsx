@@ -6,6 +6,7 @@ import { ActivityMap } from "@/components/ActivityMap";
 import { ActivityWind } from "@/components/ActivityWind";
 import { ActivityAnalysisCards } from "@/components/activity/ActivityAnalysisCards";
 import { TrainingImpactCard } from "@/components/activity/TrainingImpactCard";
+import { GymSessionCard } from "@/components/activity/GymSessionCard";
 import { ActivityCharts } from "@/components/ActivityCharts";
 import { ActivityNotes } from "@/components/ActivityNotes";
 import { TennisSessionPanel } from "@/components/TennisSessionPanel";
@@ -168,6 +169,18 @@ export default async function ActivityPage({ params }: Props) {
   const sport = sportOf(activity.activity_type);
   const sportColor = SPORT_COLORS[sport];
   const isTennis = (activity.activity_type ?? "").toLowerCase().includes("tennis");
+  // Gym work: logged as strength, a stopwatch "timed activity", cardio… or linked to a gym session
+  const at = (activity.activity_type ?? "").toLowerCase();
+  const isGym = !isTennis && (/strength|stop_watch|fitness_equipment|indoor_cardio|hiit|pilates|yoga|^training$/.test(at)
+    || activity.plan_session?.discipline === "other");
+  const genericName = !activity.name || /^(timed activity|stopwatch|activity|other)$/i.test(activity.name);
+  const title = isGym && activity.plan_session && genericName
+    ? activity.plan_session.session_type.replace(/^Strength - /, "")
+    : activity.name ?? activity.activity_type ?? "Activity";
+  const typeLabel = isGym && /stop_watch|^training$|^other$/.test(at) ? "gym" : (activity.activity_type ?? "").replace(/_/g, " ");
+  const hasDistance = (activity.distance_meters ?? 0) > 50;
+  const time = analysis?.moving_s || activity.moving_time_seconds || activity.duration_seconds;
+  const splitsWithDistance = (activity.splits ?? []).filter((x) => (x.distance_m ?? 0) > 0);
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20">
@@ -184,10 +197,8 @@ export default async function ActivityPage({ params }: Props) {
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-1">
-          <span className="text-3xl">{activityIcon(activity.activity_type)}</span>
-          <h1 className="text-2xl font-semibold">
-            {activity.name ?? activity.activity_type ?? "Activity"}
-          </h1>
+          <span className="text-3xl">{activityIcon(isGym ? "strength_training" : activity.activity_type)}</span>
+          <h1 className="text-2xl font-semibold">{title}</h1>
         </div>
         <div className="flex gap-2 items-center mt-1">
           {activity.activity_type && (
@@ -195,7 +206,7 @@ export default async function ActivityPage({ params }: Props) {
               className="text-[10px] px-1.5 py-0.5 rounded font-medium capitalize"
               style={{ backgroundColor: `${sportColor}1A`, color: sportColor }}
             >
-              {activity.activity_type.replace(/_/g, " ")}
+              {typeLabel}
             </span>
           )}
           <span className="text-xs text-[#52525B]">
@@ -223,15 +234,25 @@ export default async function ActivityPage({ params }: Props) {
 
       {/* Summary — the four numbers that describe the outing */}
       <section className="mb-8">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <StatBlock label="Distance" value={fmtDistance(activity.distance_meters)} />
-          <StatBlock label="Moving time" value={fmtDuration(analysis?.moving_s ?? activity.moving_time_seconds ?? activity.duration_seconds)} />
-          <StatBlock label={sport === "ride" ? "Avg speed" : "Avg pace"} value={fmtPace(analysis?.pace?.avg_mps ?? activity.avg_speed_mps ?? null, activity.activity_type)} />
-          <StatBlock label="Climbing" value={activity.elevation_gain_meters ? `↑ ${Math.round(activity.elevation_gain_meters)} m` : null} />
-        </div>
+        {hasDistance ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <StatBlock label="Distance" value={fmtDistance(activity.distance_meters)} />
+            <StatBlock label="Moving time" value={fmtDuration(time ?? null)} />
+            <StatBlock label={sport === "ride" ? "Avg speed" : "Avg pace"} value={fmtPace(analysis?.pace?.avg_mps ?? activity.avg_speed_mps ?? null, activity.activity_type)} />
+            <StatBlock label="Climbing" value={activity.elevation_gain_meters ? `↑ ${Math.round(activity.elevation_gain_meters)} m` : null} />
+          </div>
+        ) : (
+          /* no distance (gym, timed activity…): time, heart rate, energy */
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <StatBlock label="Duration" value={fmtDuration(time ?? null)} />
+            <StatBlock label="Avg HR" value={activity.avg_heart_rate ? `${activity.avg_heart_rate} bpm` : null} />
+            <StatBlock label="Max HR" value={activity.max_heart_rate ? `${activity.max_heart_rate} bpm` : null} />
+            <StatBlock label="Calories" value={activity.calories ? `${activity.calories} kcal` : null} />
+          </div>
+        )}
         <p className="text-xs text-[#71717A] mt-3 tabular-nums">
           {[
-            activity.calories ? `${activity.calories} kcal` : null,
+            hasDistance && activity.calories ? `${activity.calories} kcal` : null,
             activity.training_stress_score ? `${Math.round(activity.training_stress_score)} TSS` : null,
             activity.computed?.garmin_aerobic_te != null
               ? `Training effect ${activity.computed.garmin_aerobic_te.toFixed(1)} aerobic${activity.computed.garmin_anaerobic_te != null ? ` · ${activity.computed.garmin_anaerobic_te.toFixed(1)} anaerobic` : ""}`
@@ -250,8 +271,15 @@ export default async function ActivityPage({ params }: Props) {
         </section>
       )}
 
+      {/* Gym: the workout as planned, how hard it felt, where HR landed */}
+      {isGym && (
+        <GymSessionCard plan={activity.plan_session}
+                        activity={{ duration_seconds: activity.duration_seconds, moving_time_seconds: activity.moving_time_seconds,
+                                    avg_heart_rate: activity.avg_heart_rate, max_heart_rate: activity.max_heart_rate, calories: activity.calories }} />
+      )}
+
       {/* Planned vs actual — when this activity completed a scheduled session */}
-      {activity.plan_session && (
+      {activity.plan_session && !isGym && (
         <PlannedVsActual
           planSession={activity.plan_session}
           splits={activity.splits ?? []}
@@ -275,7 +303,7 @@ export default async function ActivityPage({ params }: Props) {
       {/* Metrics: heart rate → speed → power → elevation → cadence (falls back to plain charts without streams) */}
       {analysis ? (
         <ActivityAnalysisCards analysis={analysis} />
-      ) : (
+      ) : !isGym && (
         <ActivityCharts activityId={decodedId} activityType={activity.activity_type} />
       )}
 
@@ -288,8 +316,8 @@ export default async function ActivityPage({ params }: Props) {
       )}
 
 
-      {/* Splits */}
-      {activity.splits && activity.splits.length > 0 && (
+      {/* Splits (only when they carry distance — gym laps don't) */}
+      {splitsWithDistance.length > 0 && (
         <section className="mb-8">
           <SectionLabel>Splits</SectionLabel>
           <ActivitySplitsChart splits={activity.splits} activityType={activity.activity_type} />
@@ -297,7 +325,7 @@ export default async function ActivityPage({ params }: Props) {
       )}
 
       {/* No detailed data (streams) for this activity: the essentials, plus why the charts are missing */}
-      {!analysis && (
+      {!analysis && !isGym && (
         <section className="mb-8">
           <SectionLabel>Details</SectionLabel>
           <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
