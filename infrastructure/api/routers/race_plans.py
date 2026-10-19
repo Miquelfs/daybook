@@ -1799,8 +1799,17 @@ def patch_session(session_id: int, body: SessionPatch, conn: DB):
         params.append(body.rpe_actual)
 
     if body.completed_activity_id is not None:
+        # one activity counts for one session: release it from any other session first
+        has_auto = "auto_matched" in {r["name"] for r in conn.execute("PRAGMA table_info(plan_sessions)")}
+        conn.execute(
+            f"""UPDATE plan_sessions SET completed_activity_id=NULL, status='pending'{", auto_matched=0" if has_auto else ""}
+                WHERE completed_activity_id=? AND id != ?""",
+            (body.completed_activity_id, session_id),
+        )
         updates.append("completed_activity_id=?")
         params.append(body.completed_activity_id)
+        if has_auto:
+            updates.append("auto_matched=0")          # a manual link — don't let the matcher undo it
 
     if body.notes is not None:
         updates.append("notes=?")
