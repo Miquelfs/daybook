@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
 import { SectionLabel } from "@/components/MorningBrief";
@@ -419,6 +419,8 @@ const DISC_KEY: Record<string, "run" | "ride" | "swim"> = {
   running: "run", cycling: "ride", ride: "ride", swimming: "swim", swim: "swim",
 };
 
+let pendingBack: number | null = null;
+
 function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
   session: PlanSession; date: string; onClose: () => void; onUpdate: () => void; disciplineZones?: DisciplineZones;
 }) {
@@ -430,14 +432,42 @@ function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
+  const [dragY, setDragY] = useState(0);
+  const [touchY, setTouchY] = useState<number | null>(null);
+
+  // Close with Esc, and with the phone's back gesture (the sheet pushes a history entry).
+  // onClose is an inline prop (new every render) → read it through a ref so this runs once.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";                 // the page behind doesn't scroll
+    if (pendingBack != null) { clearTimeout(pendingBack); pendingBack = null; }   // quick remount: keep the entry
+    else window.history.pushState({ ...(window.history.state ?? {}), sessionSheet: true }, "");
+    const onPop = () => closeRef.current();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeRef.current(); };
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("keydown", onKey);
+      // drop our history entry (deferred, so a dev-mode remount can cancel it)
+      pendingBack = window.setTimeout(() => {
+        pendingBack = null;
+        if (window.history.state?.sessionSheet) window.history.back();
+      }, 0);
+    };
+  }, []);
+
   const zone = ZONE_STYLE[session.intensity_zone] ?? ZONE_STYLE.Z2;
   // Prefer the template's own structured workout; fall back to the heuristic.
   const phases: WorkoutPhase[] = session.structure
     ? resolveStructure(session.structure, disciplineZones, session.discipline)
     : buildWorkoutDescription(session, runZonesAsPaceZones(disciplineZones));
 
-  const discKey = DISC_KEY[session.discipline] ?? "run";
-  const sessionZone = disciplineZones?.[discKey]?.zones?.[session.intensity_zone];
+  const discKey = DISC_KEY[session.discipline] ?? null;     // gym / strength / other: no pace target
+  const sessionZone = discKey ? disciplineZones?.[discKey]?.zones?.[session.intensity_zone] : undefined;
   const isTest = session.session_type.startsWith("Test -");
 
   async function markDone() {
@@ -504,11 +534,24 @@ function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
       <div
-        className="w-full max-w-2xl bg-[#09090B] border border-[#27272A] rounded-t-2xl px-5 py-6 pb-10 space-y-5 max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-2xl bg-[#09090B] border border-[#27272A] rounded-t-2xl px-5 pb-[max(2.5rem,env(safe-area-inset-bottom))] space-y-5 max-h-[85dvh] overflow-y-auto overscroll-contain"
+        style={{ transform: dragY ? `translateY(${dragY}px)` : undefined, transition: touchY == null ? "transform 0.2s" : undefined }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Handle */}
-        <div className="w-10 h-1 bg-[#3F3F46] rounded-full mx-auto -mt-2 mb-1" />
+        {/* Sticky top bar: drag handle (swipe down to close) + close button — always reachable */}
+        <div
+          className="sticky top-0 z-10 -mx-5 px-5 pt-3 pb-2 bg-[#09090B] flex items-center justify-between touch-none"
+          onTouchStart={(e) => setTouchY(e.touches[0].clientY)}
+          onTouchMove={(e) => { if (touchY != null) setDragY(Math.max(0, e.touches[0].clientY - touchY)); }}
+          onTouchEnd={() => { if (dragY > 90) onClose(); setDragY(0); setTouchY(null); }}
+        >
+          <span className="w-9" />
+          <div className="w-10 h-1 bg-[#3F3F46] rounded-full" />
+          <button onClick={onClose} aria-label="Close"
+                  className="w-9 h-9 -mr-1 rounded-full flex items-center justify-center bg-[#18181B] text-[#A1A1AA] hover:text-[#FAFAFA] text-lg leading-none">
+            ×
+          </button>
+        </div>
 
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
