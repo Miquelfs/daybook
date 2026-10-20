@@ -3,9 +3,14 @@
 import { useState, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO, getDaysInMonth, getDay, addMonths, subMonths } from "date-fns";
-import { Upload, ChevronLeft, ChevronRight, Loader2, X, ExternalLink, List, BarChart2, MapPin, TrendingUp, CalendarDays } from "lucide-react";
+import { Upload, ChevronLeft, ChevronRight, Loader2, X, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { RosterPayEstimate } from "@/components/RosterPayEstimate";
+import { AviationTabs } from "@/components/aviation/AviationTabs";
+import {
+  usePayEstimate, useSavePayOverride, dayBadge, PER_DIEM_LABEL,
+  type PayDay, type PerDiemType, type PayOverrideIn,
+} from "@/lib/roster-pay";
 import { localISODate } from "@/lib/dates";
 
 interface RosterDay {
@@ -32,12 +37,13 @@ interface RosterDayDetail extends RosterDay {
   legs: RosterLeg[];
 }
 
-const DUTY_STYLE: Record<string, { bg: string; text: string; label: string; dot: string; sheetBg: string }> = {
-  flying_duty: { bg: "bg-[#1a3a2a]", text: "text-[#4ADE80]", label: "Flying Duty",  dot: "bg-[#4ADE80]", sheetBg: "bg-[#1a3a2a]" },
-  standby:     { bg: "bg-[#2a2a1a]", text: "text-[#FACC15]", label: "Standby",       dot: "bg-[#FACC15]", sheetBg: "bg-[#2a2a1a]" },
-  day_off:     { bg: "bg-[#111113]", text: "text-[#52525B]", label: "Day Off",        dot: "bg-[#3F3F46]", sheetBg: "bg-[#111113]" },
-  ground_duty: { bg: "bg-[#1a1a2e]", text: "text-[#818CF8]", label: "Ground Duty",   dot: "bg-[#818CF8]", sheetBg: "bg-[#1a1a2e]" },
-  unknown:     { bg: "bg-[#1a1a1a]", text: "text-[#71717A]", label: "?",             dot: "bg-[#71717A]", sheetBg: "bg-[#1a1a1a]" },
+// Tile classes (duty-*) are defined in globals.css with a tuned pair per theme.
+const DUTY_STYLE: Record<string, { cls: string; label: string; dot: string }> = {
+  flying_duty: { cls: "duty-fly", label: "Flying Duty", dot: "bg-[#4ADE80]" },
+  standby:     { cls: "duty-sby", label: "Standby",     dot: "bg-[#FACC15]" },
+  day_off:     { cls: "duty-off", label: "Day Off",     dot: "bg-[#3F3F46]" },
+  ground_duty: { cls: "duty-gnd", label: "Ground Duty", dot: "bg-[#818CF8]" },
+  unknown:     { cls: "duty-unk", label: "?",           dot: "bg-[#71717A]" },
 };
 
 const TODAY = localISODate();
@@ -48,11 +54,110 @@ function toYYYYMM(d: Date) {
 
 // ── Day Detail Sheet ───────────────────────────────────────────────────────────
 
+// ── Pay corrections for one day ───────────────────────────────────────────────
+
+const STATUS_TEXT: Record<string, string> = {
+  activated: "Called out from standby — paid as flying, not as SBY.",
+  not_flown: "Planned flying but nothing logged — swapped or cancelled?",
+  extra_duty: "Flew on a day that wasn't planned as duty — swap, or a BDO?",
+  changed: "Flew on a planned ground duty.",
+};
+
+function Choice<T extends string | number | null>({ label, value, auto, options, onChange }: {
+  label: string;
+  value: T | undefined;          // undefined = auto
+  auto: string;
+  options: { v: T; label: string }[];
+  onChange: (v: T | undefined) => void;
+}) {
+  const btn = (active: boolean) =>
+    `px-2.5 py-1 rounded text-xs font-medium transition-colors ${active ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] text-[#71717A]">{label}</p>
+      <div className="flex flex-wrap gap-1 bg-[#111113] border border-[#27272A] rounded-lg p-1">
+        <button className={btn(value === undefined)} onClick={() => onChange(undefined)}>Auto · {auto}</button>
+        {options.map(o => (
+          <button key={String(o.v)} className={btn(value === o.v)} onClick={() => onChange(o.v)}>{o.label}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PaySection({ day }: { day: PayDay }) {
+  const save = useSavePayOverride();
+  const o = day.override;
+  const current: PayOverrideIn = {
+    standby_paid: o.standby_paid == null ? null : !!o.standby_paid,
+    per_diem: o.per_diem ?? null,
+    positioning: o.positioning ?? null,
+    bdo: o.bdo ?? null,
+    note: o.note ?? null,
+  };
+  const [note, setNote] = useState(current.note ?? "");
+  const put = (patch: Partial<PayOverrideIn>) => save.mutate({ date: day.date, body: { ...current, note: note || null, ...patch } });
+  const und = <T,>(v: T | null): T | undefined => (v === null ? undefined : v);
+  const badge = dayBadge(day);
+  const showStandby = day.planned === "standby" || day.activated || day.auto_standby_paid;
+  const autoPd = day.auto_per_diem ? PER_DIEM_LABEL[day.auto_per_diem] : "none";
+
+  return (
+    <div className="space-y-3 pt-4">
+      <div className="flex items-center gap-2">
+        <p className="text-xs font-semibold text-[#52525B] uppercase tracking-wider">Pay</p>
+        {badge && <span className={`pay-badge pay-badge-${badge.tone} text-[10px] px-1.5 py-0.5`}>{badge.label}</span>}
+        {day.projected && <span className="pay-badge pay-badge-mute text-[10px] px-1.5 py-0.5">Projected</span>}
+        {save.isPending && <Loader2 size={12} className="animate-spin text-[#52525B]" />}
+      </div>
+
+      <div className="bg-[#18181B] rounded-xl px-4 py-3 space-y-1 text-xs">
+        <p className="text-[#A1A1AA]">
+          <span className="text-[#52525B]">Planned</span> {day.planned_code ?? "nothing"}
+          <span className="text-[#52525B] mx-2">·</span>
+          <span className="text-[#52525B]">{day.projected ? "Roster legs" : "Logged"}</span>{" "}
+          {day.route ? `${day.route} (${day.block_hours.toFixed(2)} h)` : "no flights"}
+        </p>
+        {STATUS_TEXT[day.status] && <p className="text-[#71717A]">{STATUS_TEXT[day.status]}</p>}
+        {day.sleeps_at && <p className="text-[#71717A]">Night away at {day.sleeps_at}.</p>}
+      </div>
+
+      {showStandby && (
+        <Choice label="Standby (Guardia en base)" auto={day.auto_standby_paid ? "paid" : "not paid"}
+          value={und(current.standby_paid === null ? null : current.standby_paid ? 1 : 0)}
+          options={[{ v: 1, label: "Paid" }, { v: 0, label: "Not paid" }]}
+          onChange={v => put({ standby_paid: v === undefined ? null : v === 1 })} />
+      )}
+      <Choice label="Dieta" auto={autoPd}
+        value={und(current.per_diem)}
+        options={[
+          { v: "none" as const, label: "None" },
+          ...(Object.keys(PER_DIEM_LABEL) as PerDiemType[]).map(k => ({ v: k, label: PER_DIEM_LABEL[k] })),
+        ]}
+        onChange={v => put({ per_diem: v ?? null })} />
+      <Choice label="Positioning (Posicionamiento vuelo)" auto={String(day.auto_positioning)}
+        value={und(current.positioning)}
+        options={[{ v: 0, label: "0" }, { v: 1, label: "1" }, { v: 2, label: "2" }]}
+        onChange={v => put({ positioning: v ?? null })} />
+      <Choice label={`Bought day off${day.bdo_candidate ? " — worked a planned day off" : ""}`} auto="none"
+        value={und(current.bdo)}
+        options={[{ v: 1, label: "BDO" }, { v: 0.5, label: "½ BDO" }]}
+        onChange={v => put({ bdo: v ?? null })} />
+
+      <input value={note} onChange={e => setNote(e.target.value)} onBlur={() => note !== (current.note ?? "") && put({ note: note || null })}
+        placeholder="Note (e.g. swapped with …)"
+        className="w-full bg-[#111113] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#E4E4E7] placeholder-[#52525B] focus:outline-none focus:border-[#F59E0B]" />
+    </div>
+  );
+}
+
 function DayDetailSheet({
   date,
+  payDay,
   onClose,
 }: {
   date: string;
+  payDay?: PayDay;
   onClose: () => void;
 }) {
   const { data: detail, isLoading } = useQuery<RosterDayDetail | null>({
@@ -86,15 +191,15 @@ function DayDetailSheet({
           </div>
 
           {/* Header */}
-          <div className={`px-5 py-4 ${style.sheetBg} border-b border-[#27272A]`}>
+          <div className={`px-5 py-4 ${style.cls} border-b border-[#27272A]`}>
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-xs text-[#71717A] mb-0.5">{dateLabel}</p>
-                <p className={`text-lg font-semibold ${style.text}`}>{style.label}</p>
+                <p className="text-xs duty-sub mb-0.5">{dateLabel}</p>
+                <p className="text-lg font-semibold">{detail ? style.label : "Not on the roster"}</p>
                 {detail && (detail.report_time || detail.end_time) && (
-                  <p className="text-sm text-[#A1A1AA] mt-1 tabular-nums">
+                  <p className="text-sm duty-sub mt-1 tabular-nums">
                     {detail.report_time && <>C/I {detail.report_time}</>}
-                    {detail.report_time && detail.end_time && <span className="mx-2 text-[#52525B]">·</span>}
+                    {detail.report_time && detail.end_time && <span className="mx-2">·</span>}
                     {detail.end_time && <>C/O {detail.end_time}</>}
                   </p>
                 )}
@@ -103,7 +208,7 @@ function DayDetailSheet({
                 onClick={onClose}
                 className="p-1.5 rounded-lg hover:bg-black/20 transition-colors"
               >
-                <X size={16} className="text-[#71717A]" />
+                <X size={16} className="duty-sub" />
               </button>
             </div>
           </div>
@@ -128,7 +233,7 @@ function DayDetailSheet({
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <span className="text-xs font-mono text-[#52525B]">{leg.flight_number}</span>
-                          <span className={`text-sm font-semibold ${style.text} tabular-nums`}>
+                          <span className="text-sm font-semibold text-[#E4E4E7] tabular-nums">
                             {leg.dep_iata} → {leg.arr_iata}
                           </span>
                         </div>
@@ -180,6 +285,8 @@ function DayDetailSheet({
               </>
             )}
 
+            {payDay && <PaySection key={JSON.stringify(payDay.override)} day={payDay} />}
+
             {/* View in day journal link */}
             <div className="pt-2">
               <Link
@@ -204,10 +311,12 @@ function DayDetailSheet({
 function RosterCalendar({
   month,
   days,
+  payDays,
   onSelectDate,
 }: {
   month: string;
   days: RosterDay[];
+  payDays: Record<string, PayDay>;
   onSelectDate: (date: string) => void;
 }) {
   const byDate = Object.fromEntries(days.map((d) => [d.date, d]));
@@ -235,37 +344,41 @@ function RosterCalendar({
           if (day === null) return <div key={`e-${i}`} />;
           const dateStr = `${month}-${String(day).padStart(2, "0")}`;
           const row = byDate[dateStr];
-          const style = row ? DUTY_STYLE[row.duty_type] ?? DUTY_STYLE.unknown : null;
+          const style = row ? DUTY_STYLE[row.duty_type] ?? DUTY_STYLE.unknown : DUTY_STYLE.day_off;
           const isToday = dateStr === TODAY;
+          const pd = payDays[dateStr];
+          const badge = pd ? dayBadge(pd) : null;
 
           return (
             <button
               key={dateStr}
               onClick={() => onSelectDate(dateStr)}
               className={`
-                relative rounded-lg p-1.5 min-h-[60px] flex flex-col gap-0.5 transition-colors text-left
-                ${style ? style.bg : "bg-[#111113]"}
-                ${isToday ? "ring-1 ring-[#F59E0B]" : ""}
-                hover:brightness-125 active:scale-95
+                relative rounded-lg p-1.5 min-h-[64px] flex flex-col gap-0.5 transition-[filter,transform] text-left
+                ${style.cls}
+                ${isToday ? "ring-2 ring-[#F59E0B]" : ""}
+                ${pd?.status === "not_flown" ? "opacity-60" : ""}
+                hover:brightness-110 active:scale-95
               `}
             >
-              <span className={`text-xs font-medium tabular-nums ${style ? style.text : "text-[#3F3F46]"}`}>
-                {day}
-              </span>
-              {row && (
+              <span className="text-xs font-medium tabular-nums">{day}</span>
+              {row ? (
                 <>
-                  <span className={`text-[10px] font-semibold ${style!.text} leading-tight`}>
+                  <span className={`text-[10px] font-semibold leading-tight ${pd?.status === "not_flown" ? "line-through" : ""}`}>
                     {row.raw_code}
                   </span>
                   {row.report_time && (
-                    <span className="text-[9px] text-[#71717A] leading-tight tabular-nums">
-                      {row.report_time}
-                    </span>
+                    <span className="text-[9px] duty-sub leading-tight tabular-nums">{row.report_time}</span>
                   )}
                 </>
+              ) : (
+                <span className="text-[10px] duty-sub">—</span>
               )}
-              {!row && (
-                <span className="text-[10px] text-[#27272A]">—</span>
+              {badge && (
+                <span className={`pay-badge pay-badge-${badge.tone} text-[9px] px-1 py-px mt-auto self-start`}>{badge.label}</span>
+              )}
+              {pd && Object.keys(pd.override).length > 0 && (
+                <span className="absolute top-1 right-1.5 text-[9px] text-[#F59E0B]" title="Pay edited">✎</span>
               )}
             </button>
           );
@@ -303,9 +416,9 @@ function RosterStats({ days }: { days: RosterDay[] }) {
       {(["flying_duty", "standby", "day_off", "ground_duty"] as const).map((dt) => {
         const s = DUTY_STYLE[dt];
         return (
-          <div key={dt} className={`${s.bg} rounded-xl p-3 text-center`}>
-            <p className={`text-2xl font-bold tabular-nums ${s.text}`}>{counts[dt] ?? 0}</p>
-            <p className="text-xs text-[#71717A] mt-0.5">{s.label}</p>
+          <div key={dt} className={`${s.cls} rounded-xl p-3 text-center`}>
+            <p className="text-2xl font-bold tabular-nums">{counts[dt] ?? 0}</p>
+            <p className="text-xs duty-sub mt-0.5">{s.label}</p>
           </div>
         );
       })}
@@ -371,6 +484,9 @@ export default function RosterPage() {
   const monthLabel = format(new Date(currentMonth + "-01"), "MMMM yyyy");
   const hasData = rosterDays.length > 0;
 
+  const payQuery = usePayEstimate(currentMonth, { enabled: hasData });
+  const payDays = Object.fromEntries((payQuery.data?.days ?? []).map((d) => [d.date, d]));
+
   return (
     <div className="min-h-screen bg-[#09090B] text-[#FAFAFA]">
       <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
@@ -406,23 +522,7 @@ export default function RosterPage() {
         </div>
 
         {/* Aviation sub-nav */}
-        <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 overflow-x-auto">
-          <Link href="/aviation" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <List size={13} />Overview
-          </Link>
-          <Link href="/aviation" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <BarChart2 size={13} />Logbook
-          </Link>
-          <Link href="/aviation" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <MapPin size={13} />Routes
-          </Link>
-          <Link href="/aviation" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <TrendingUp size={13} />Analytics
-          </Link>
-          <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#27272A] text-[#FAFAFA] whitespace-nowrap">
-            <CalendarDays size={13} />Roster
-          </span>
-        </div>
+        <AviationTabs active="roster" />
 
         {/* Upload toast */}
         {uploadMsg && (
@@ -465,6 +565,7 @@ export default function RosterPage() {
           <RosterCalendar
             month={currentMonth}
             days={rosterDays}
+            payDays={payDays}
             onSelectDate={setSelectedDate}
           />
         )}
@@ -488,8 +589,10 @@ export default function RosterPage() {
         {/* Pay estimate */}
         {hasData && (
           <RosterPayEstimate
-            month={currentMonth}
-            billedMonth={format(addMonths(new Date(currentMonth + "-01"), 1), "MMMM yyyy")}
+            data={payQuery.data}
+            isLoading={payQuery.isLoading}
+            error={payQuery.error}
+            onSelectDate={setSelectedDate}
           />
         )}
 
@@ -519,7 +622,7 @@ export default function RosterPage() {
 
       {/* Day detail sheet */}
       {selectedDate && (
-        <DayDetailSheet date={selectedDate} onClose={closeSheet} />
+        <DayDetailSheet date={selectedDate} payDay={payDays[selectedDate]} onClose={closeSheet} />
       )}
     </div>
   );

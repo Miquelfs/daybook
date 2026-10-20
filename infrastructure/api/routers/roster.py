@@ -6,7 +6,9 @@ GET  /roster                 ?month=YYYY-MM → list of RosterDay rows
 GET  /roster/months          → list of distinct YYYY-MM periods available
 GET  /roster/day/{date}      → full day detail (roster row + legs with crew)
 GET  /roster/day/{date}/brief → lightweight duty summary (or null)
-GET  /roster/pay-estimate    ?month=YYYY-MM&category=FO&level=4 → CLA pay breakdown
+GET  /roster/pay-estimate    ?month=YYYY-MM → payslip of month+1 (CLA II ESP), day-by-day reconciled
+GET/PUT /roster/pay-settings → category, level, IRPF %, jornada %
+PUT  /roster/pay-overrides/{date} → per-day pay corrections (BDO, standby paid, dieta, positioning)
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 
 from typing import Literal, Optional
@@ -37,6 +40,7 @@ class RosterEntryPatch(BaseModel):
     raw_code: Optional[str] = None
 
 from infrastructure.db.connection import DB_PATH, get_connection
+from domains.aviation import pay
 
 router = APIRouter(prefix="/roster", tags=["roster"])
 
@@ -250,345 +254,100 @@ def delete_roster_entry(date: str):
         conn.close()
 
 
-# ── CLA pay tables (Norwegian Spain, 2025) ────────────────────────────────────
-# Source: Appendix C, Table C.1
+# ── Pay estimate (CLA II ESP) — model lives in domains/aviation/pay.py ───────
 
-_BASE_SALARY_2025 = {
-    # (category, level) → monthly gross base salary (€)
-    ("CPT", 10): 11529.58, ("CPT", 9): 11195.75, ("CPT", 8): 10845.45,
-    ("CPT", 7): 10530.78,  ("CPT", 6): 10225.28,  ("CPT", 5): 9928.67,
-    ("CPT", 4): 9640.71,   ("CPT", 3): 9319.31,   ("CPT", 2): 9047.87,
-    ("CPT", 1): 8784.34,
-    ("FO",  10): 5631.08,  ("FO",  9): 5522.00,  ("FO",  8): 5388.88,
-    ("FO",  7): 5284.04,   ("FO",  6): 5181.25,  ("FO",  5): 5080.48,
-    ("FO",  4): 4981.68,   ("FO",  3): 3716.31,  ("FO",  2): 3642.44,
-    ("FO",  1): 3570.65,
-}
-
-_FIXED_2025 = {
-    "FO":  {"phone": 21.42, "connectivity": 21.42, "uniform": 17.00, "parking": 0.0},
-    "CPT": {"phone": 42.84, "connectivity": 42.84, "uniform": 17.00, "parking": 0.0},
-}
-
-_VAR_2025 = {
-    "FO": {
-        "blh": 9.91,        # per block hour
-        "blhp": 14.87,      # per block hour over 60h threshold
-        "sby": 39.66,       # per standby day
-        "bdo": 510.00,      # bought day off (OVT landing after midnight)
-        "hdb": 255.00,      # half day bought (HDB — Art.2.09)
-        # Positioning / deadhead per diems (carried as pax, not operating)
-        "dh_int": 39.66,    # DH international positioning
-        "dh_dom": 19.83,    # DH domestic positioning
-        # Worked per diems (operating crew) — CLA "dietas" table
-        "int_no_overnight": 66.11,   # international WITHOUT overnight stay
-        "int_int_overnight": 91.35,  # international WITH international overnight
-        "int_nat_overnight": 66.11,  # international WITH national (Spain) overnight
-        "nat_no_overnight": 50.00,   # national without overnight stay
-        "nat_nat_overnight": 60.00,  # national with national overnight stay
-        "simulator": 39.66, # per sim day
-        "var_soc": 39.66,   # SOC/VAC supplement per vacation/leave day
-    },
-    "CPT": {
-        "blh": 21.05,       # per block hour  (was mistakenly 82.56 — the STBY/DH rate)
-        "blhp": 31.58,
-        "sby": 84.21,
-        "bdo": 1021.00,
-        "hdb": 510.00,
-        "dh_int": 84.21,    # DH international positioning (was 39.66 — the FO rate)
-        "dh_dom": 42.11,    # DH domestic positioning (was 19.83 — the FO rate)
-        "int_no_overnight": 66.11,   # same dieta for CPT & FO
-        "int_int_overnight": 91.35,
-        "int_nat_overnight": 66.11,
-        "nat_no_overnight": 50.00,
-        "nat_nat_overnight": 60.00,
-        "simulator": 84.21,
-        "var_soc": 84.21,
-    },
-}
-
-# Home base — PMI / LEPA
-_HOME_BASE_ICAO = "LEPA"
-_SPAIN_ICAO_PREFIX = "LE"
+class PaySettingsIn(BaseModel):
+    category: Optional[Literal["FO", "CPT"]] = None
+    level: Optional[int] = Field(None, ge=1, le=10)
+    irpf_pct: Optional[float] = Field(None, ge=0, le=50)
+    jornada_pct: Optional[int] = Field(None, ge=50, le=100)
 
 
-def _is_spain(icao: str | None) -> bool:
-    return bool(icao and icao.upper().startswith(_SPAIN_ICAO_PREFIX))
+class PayOverrideIn(BaseModel):
+    standby_paid: Optional[bool] = None
+    per_diem: Optional[Literal["none", "int_no_overnight", "int_int_overnight", "int_nat_overnight",
+                              "nat_no_overnight", "nat_nat_overnight"]] = None
+    positioning: Optional[int] = Field(None, ge=0, le=4)
+    bdo: Optional[float] = Field(None, ge=0, le=1)
+    note: Optional[str] = None
 
 
-def _net_estimate(gross: float, irpf_rate: float = 0.24) -> float:
-    """Net estimate applying a fixed IRPF withholding rate + 6.35% SS employee contribution."""
-    ss = gross * 0.0635   # Spanish employee SS contribution (contingencias comunes)
-    return round((gross - ss) * (1 - irpf_rate), 2)
-
-
-def _analyse_per_diems(conn: sqlite3.Connection, month: str) -> dict:
-    """
-    Infer per diems from logged flights for the given month.
-
-    Logic:
-    - Base = LEPA. Norwegian Spain does not operate domestic Spain flights,
-      so every flight counts as international.
-    - Per diem type per duty day:
-        * If the crew starts the day at home (dep_icao == LEPA) and
-          the last flight of the day returns to LEPA → international without overnight.
-        * If the last flight of the day does NOT return to LEPA, OR
-          the first flight of the next duty day departs from non-LEPA →
-          international overnight.
-    - OVT/BDO: any day where the last on_block_utc is after 00:01 UTC of the
-      following calendar day → count as a BDO (bought day off per Art.2.07/2.08).
-      If the excess is only minor (landing 00:01–04:00) → count as HDB (Art.2.09).
-    """
+@router.get("/pay-settings")
+def get_pay_settings():
+    conn = _get_conn()
     try:
-        # All non-sim flights for the month, ordered by date and off_block time
-        rows = conn.execute(
-            """SELECT date, dep_icao, arr_icao, off_block_utc, on_block_utc
-               FROM flights
-               WHERE strftime('%Y-%m', date) = ?
-                 AND is_sim = 0
-                 AND dep_icao IS NOT NULL
-               ORDER BY date, off_block_utc""",
-            (month,),
-        ).fetchall()
-    except Exception:
-        rows = []
+        return pay.get_settings(conn)
+    finally:
+        conn.close()
 
-    if not rows:
-        return {
-            "int_no_overnight": 0, "int_overnight": 0, "int_nat_overnight": 0,
-            "nat_overnight": 0, "bdo_days": 0, "hdb_days": 0,
-            "detail": [],
-        }
 
-    # Group by calendar date
-    from collections import defaultdict
-    days: dict[str, list] = defaultdict(list)
-    for r in rows:
-        days[r["date"]].append(r)
+@router.put("/pay-settings")
+def put_pay_settings(body: PaySettingsIn):
+    conn = _get_conn()
+    try:
+        pay.ensure_tables(conn)
+        fields = body.model_dump(exclude_none=True)
+        if fields:
+            conn.execute(
+                f"UPDATE pay_settings SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = 1",
+                list(fields.values()),
+            )
+            conn.commit()
+        return pay.get_settings(conn)
+    finally:
+        conn.close()
 
-    sorted_dates = sorted(days.keys())
 
-    int_no_overnight = 0
-    int_overnight = 0       # overnight abroad (non-Spain) → 91.35
-    int_nat_overnight = 0   # overnight in Spain away from base → 66.11
-    nat_overnight = 0
-    bdo_days = 0
-    hdb_days = 0
-    detail = []
-
-    for i, d in enumerate(sorted_dates):
-        legs = days[d]
-        first_leg = legs[0]
-        last_leg = legs[-1]
-
-        first_dep = first_leg["dep_icao"] or ""
-        last_arr = last_leg["arr_icao"] or ""
-        last_on_block = last_leg["on_block_utc"] or ""
-
-        # Overnight detection: did we end the day away from base?
-        away_from_base = last_arr.upper() != _HOME_BASE_ICAO
-
-        # Cross-midnight check: on_block_utc date > flight date
-        cross_midnight = False
-        if last_on_block and len(last_on_block) >= 10:
-            on_block_date = last_on_block[:10]
-            if on_block_date > d:
-                cross_midnight = True
-                # Determine BDO vs HDB by time
-                try:
-                    hour = int(last_on_block[11:13])
-                    minute = int(last_on_block[14:16])
-                    # HDB: landing before 04:00 UTC next day (Art.2.09 — minor invasion)
-                    if hour < 4 or (hour == 4 and minute == 0):
-                        hdb_days += 1
-                    else:
-                        bdo_days += 1
-                except (ValueError, IndexError):
-                    bdo_days += 1
-
-        # Per diem classification. Every NAS Spain flight is international, but the
-        # overnight per diem differs by where you stop: abroad (non-Spain) pays the
-        # full international overnight (91.35), while an overnight still inside Spain
-        # away from base pays the "international with national overnight" rate (66.11).
-        if away_from_base:
-            if _is_spain(last_arr):
-                int_nat_overnight += 1
-                perd_type = "int_nat_overnight"
-            else:
-                int_overnight += 1
-                perd_type = "int_overnight"
+@router.put("/pay-overrides/{date}")
+def put_pay_override(date: str, body: PayOverrideIn):
+    """Replace the day's overrides; fields left null fall back to the automatic value."""
+    conn = _get_conn()
+    try:
+        pay.ensure_tables(conn)
+        o = body.model_dump()
+        if all(v is None for v in o.values()):
+            conn.execute("DELETE FROM roster_pay_overrides WHERE date = ?", (date,))
         else:
-            # Returned to base — international day trip, no overnight (66.11)
-            int_no_overnight += 1
-            perd_type = "int_no_overnight"
-
-        detail.append({
-            "date": d,
-            "first_dep": first_dep,
-            "last_arr": last_arr,
-            "perd_type": perd_type,
-            "cross_midnight": cross_midnight,
-        })
-
-    return {
-        "int_no_overnight": int_no_overnight,
-        "int_overnight": int_overnight,
-        "int_nat_overnight": int_nat_overnight,
-        "nat_overnight": nat_overnight,  # not applicable for NAS Spain
-        "bdo_days": bdo_days,
-        "hdb_days": hdb_days,
-        "detail": detail,
-    }
+            conn.execute(
+                """INSERT INTO roster_pay_overrides (date, standby_paid, per_diem, positioning, bdo, note, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                   ON CONFLICT(date) DO UPDATE SET
+                     standby_paid = excluded.standby_paid, per_diem = excluded.per_diem,
+                     positioning = excluded.positioning, bdo = excluded.bdo,
+                     note = excluded.note, updated_at = excluded.updated_at""",
+                (date, None if o["standby_paid"] is None else int(o["standby_paid"]),
+                 o["per_diem"], o["positioning"], o["bdo"], o["note"]),
+            )
+        conn.commit()
+        day = next((d for d in pay.reconcile_month(conn, date[:7]) if d.date == date), None)
+        return asdict(day) if day else None
+    finally:
+        conn.close()
 
 
 @router.get("/pay-estimate")
 def get_pay_estimate(
-    month: str = Query(..., description="YYYY-MM"),
-    category: str = Query("FO", description="FO or CPT"),
-    level: int = Query(4, ge=1, le=10, description="Salary level 1–10"),
-    irpf: float = Query(0.24, description="IRPF withholding rate (0–1), e.g. 0.24 for 24%"),
+    month: str = Query(..., pattern=r"^\d{4}-\d{2}$", description="Activity (roster) month YYYY-MM"),
+    category: Optional[str] = Query(None, description="FO or CPT (default: saved settings)"),
+    level: Optional[int] = Query(None, ge=1, le=10),
+    irpf_pct: Optional[float] = Query(None, ge=0, le=50),
+    jornada: Optional[int] = Query(None, ge=50, le=100, description="Jornada % of the payslip month"),
+    jornada_prev: Optional[int] = Query(None, ge=50, le=100, description="Jornada % of the activity month"),
 ):
     """
-    Estimate gross monthly pay from roster + logged flights.
-    Uses Norwegian Spain CLA 2025 (Appendix C, Table C.1).
-    Per diems derived from flight dep/arr ICAO and on-block UTC times.
+    Payslip paid in month+1: fixed pay of month+1 plus the variable pay earned in
+    `month`, reconciled day by day (roster plan vs logged flights + overrides).
     """
-    category = category.upper()
-    if category not in ("FO", "CPT"):
-        category = "FO"
-
     conn = _get_conn()
     try:
-        # ── 1. Roster counts ──────────────────────────────────────────────────
-        roster_rows = conn.execute(
-            "SELECT duty_type, COUNT(*) AS cnt FROM roster "
-            "WHERE strftime('%Y-%m', date) = ? GROUP BY duty_type",
-            (month,),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        roster_rows = []
-
-    try:
-        # ── 2. Block hours + sim count ────────────────────────────────────────
-        flt_totals = conn.execute(
-            """SELECT COALESCE(SUM(CASE WHEN is_sim=0 THEN block_seconds ELSE 0 END), 0) AS bs,
-                      COALESCE(SUM(CASE WHEN is_sim=0 THEN 1 ELSE 0 END), 0) AS sectors,
-                      COALESCE(COUNT(DISTINCT CASE WHEN is_sim=1 THEN date END), 0) AS sim_days
-               FROM flights
-               WHERE strftime('%Y-%m', date) = ?""",
-            (month,),
-        ).fetchone()
-        block_seconds = flt_totals["bs"] if flt_totals else 0
-        sectors = flt_totals["sectors"] if flt_totals else 0
-        sim_count = flt_totals["sim_days"] if flt_totals else 0
-    except Exception:
-        block_seconds = 0
-        sectors = 0
-        sim_count = 0
-
-    # ── 3. Per diem analysis from flight data ─────────────────────────────────
-    per_diems = _analyse_per_diems(conn, month)
-    conn.close()
-
-    duty_counts: dict[str, int] = {r["duty_type"]: r["cnt"] for r in roster_rows}
-    block_hours = round(block_seconds / 3600.0, 2)
-
-    # ── 4. Salary components ──────────────────────────────────────────────────
-    base = _BASE_SALARY_2025.get((category, level), 0.0)
-    fixed = _FIXED_2025.get(category, _FIXED_2025["FO"])
-    var = _VAR_2025.get(category, _VAR_2025["FO"])
-
-    fixed_total = base + sum(fixed.values())
-
-    blh_threshold = 60.0
-    blh_base_hours = min(block_hours, blh_threshold)
-    blh_prod_hours = max(0.0, block_hours - blh_threshold)
-    blh_pay  = round(blh_base_hours * var["blh"], 2)
-    blhp_pay = round(blh_prod_hours * var["blhp"], 2)
-
-    sby_days = duty_counts.get("SBY", 0) + duty_counts.get("standby", 0)
-    sby_pay  = round(sby_days * var["sby"], 2)
-
-    sim_pay  = round(sim_count * var["simulator"], 2)
-
-    vac_days = duty_counts.get("VAC", 0)
-    soc_pay  = round(vac_days * var["var_soc"], 2)
-
-    # LVO in roster = deadhead/positioning day → DH international per diem
-    lvo_days = duty_counts.get("LVO", 0)
-    lvo_pay  = round(lvo_days * var["dh_int"], 2)
-
-    # Per diems from flight analysis. A worked international day trip (returned to
-    # base same day) pays the "international without overnight" dieta (66.11), NOT
-    # the DH positioning rate (39.66). Overnights split abroad vs Spain.
-    dh_int_pay      = round(per_diems["int_no_overnight"] * var["int_no_overnight"], 2)
-    dh_int_ovn_pay  = round(per_diems["int_overnight"] * var["int_int_overnight"], 2)
-    dh_nat_ovn_pay  = round(per_diems["int_nat_overnight"] * var["int_nat_overnight"], 2)
-    bdo_pay         = round(per_diems["bdo_days"] * var["bdo"], 2)
-    hdb_pay         = round(per_diems["hdb_days"] * var["hdb"], 2)
-
-    variable_total = (
-        blh_pay + blhp_pay + sby_pay + sim_pay + soc_pay + lvo_pay
-        + dh_int_pay + dh_int_ovn_pay + dh_nat_ovn_pay + bdo_pay + hdb_pay
-    )
-
-    gross_monthly = round(fixed_total + variable_total, 2)
-    net_monthly   = _net_estimate(gross_monthly, irpf)
-
-    return {
-        "month": month,
-        "category": category,
-        "level": level,
-        "irpf_rate": irpf,
-        # Inputs
-        "block_hours": block_hours,
-        "sectors": sectors,
-        "duty_counts": duty_counts,
-        "sim_days": sim_count,
-        # Components
-        "base_salary": base,
-        "fixed_supplements": {
-            "phone": fixed["phone"],
-            "connectivity": fixed["connectivity"],
-            "uniform": fixed["uniform"],
-            "parking": fixed["parking"],
-            "total": round(sum(fixed.values()), 2),
-        },
-        "variable_pay": {
-            "blh_hours": blh_base_hours,
-            "blh_pay": blh_pay,
-            "blhp_hours": blh_prod_hours,
-            "blhp_pay": blhp_pay,
-            "sby_days": sby_days,
-            "sby_pay": sby_pay,
-            "sim_days": sim_count,
-            "sim_pay": sim_pay,
-            "vac_days": vac_days,
-            "soc_pay": soc_pay,
-            "lvo_days": lvo_days,
-            "lvo_pay": lvo_pay,
-            # Per diems (from flight analysis)
-            "dh_int_days": per_diems["int_no_overnight"],
-            "dh_int_pay": dh_int_pay,
-            "dh_int_overnight_days": per_diems["int_overnight"],
-            "dh_int_overnight_pay": dh_int_ovn_pay,
-            "dh_nat_overnight_days": per_diems["int_nat_overnight"],
-            "dh_nat_overnight_pay": dh_nat_ovn_pay,
-            "bdo_days": per_diems["bdo_days"],
-            "bdo_pay": bdo_pay,
-            "hdb_days": per_diems["hdb_days"],
-            "hdb_pay": hdb_pay,
-            "total": round(variable_total, 2),
-        },
-        "per_diem_detail": per_diems["detail"],
-        "gross_monthly": gross_monthly,
-        "net_monthly_estimate": net_monthly,
-        "notes": [
-            "Base salary includes 2 prorated extraordinary payments per Art.1.02",
-            "BLHp applies above 60h/month threshold (Art.2.02)",
-            "Per diems inferred from flight ICAO codes — all NAS Spain flights counted as international",
-            "BDO triggered when last on_block UTC crosses midnight (Art.2.07/2.08)",
-            "HDB triggered for landings 00:01–04:00 UTC next day (Art.2.09)",
-            f"Net uses {int(irpf*100)}% IRPF withholding + 6.35% SS employee contribution",
-        ],
-    }
+        s = pay.get_settings(conn)
+        return pay.payslip(
+            conn, month,
+            category=category or s["category"],
+            level=level or s["level"],
+            irpf_pct=s["irpf_pct"] if irpf_pct is None else irpf_pct,
+            jornada_pct=jornada or s["jornada_pct"],
+            jornada_prev_pct=jornada_prev or jornada or s["jornada_pct"],
+        )
+    finally:
+        conn.close()

@@ -2,16 +2,12 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { moneyApi, fmtAmount } from "@/lib/money-api";
-import { usePayEstimate } from "@/components/RosterPayEstimate";
+import { usePayEstimate } from "@/lib/roster-pay";
 import { format, addMonths } from "date-fns";
 
 // Next month's roster month (variables from current month's roster are billed next month)
 function currentRosterMonth() {
   return format(new Date(), "yyyy-MM");
-}
-
-function nextCalendarMonth() {
-  return format(addMonths(new Date(), 1), "yyyy-MM");
 }
 
 export function ForecastCard() {
@@ -20,19 +16,19 @@ export function ForecastCard() {
     queryFn: () => moneyApi.forecast(),
   });
 
-  // Pay estimate: variable pay from current month's roster → billed next month
-  // Fixed salary from next month (same every month, so current is fine)
+  // Next month's payslip: its fixed pay + the variable pay earned this month
+  // (category/level/IRPF/jornada come from the pay settings saved on the roster page)
   const rosterMonth = currentRosterMonth();
-  const { data: payEst, isLoading: pLoading } = usePayEstimate(rosterMonth, "FO", 4, 0.24);
+  const { data: payEst, isLoading: pLoading } = usePayEstimate(rosterMonth);
 
   const isLoading = fLoading || pLoading;
   if (isLoading) return <div className="h-36 bg-[#0D0D0F] rounded-xl animate-pulse" />;
   if (!forecast) return null;
 
   // Use pilot net estimate as predicted income if available; else fall back to transaction avg
-  const pilotNetAvailable = payEst && payEst.net_monthly_estimate > 0;
+  const pilotNetAvailable = payEst && payEst.net > 0;
   const predictedIncome = pilotNetAvailable
-    ? payEst!.net_monthly_estimate
+    ? payEst!.net
     : forecast.predicted_income;
 
   const predictedSavings = predictedIncome - forecast.predicted_spent;
@@ -72,7 +68,7 @@ export function ForecastCard() {
           <div className="grid grid-cols-2 gap-x-6 gap-y-1">
             <div className="flex justify-between text-xs">
               <span className="text-[#71717A]">Gross</span>
-              <span className="tabular-nums text-[#A1A1AA]">{fmtAmount(payEst.gross_monthly)}</span>
+              <span className="tabular-nums text-[#A1A1AA]">{fmtAmount(payEst.gross)}</span>
             </div>
             <div className="flex justify-between text-xs">
               <span className="text-[#71717A]">Block hours</span>
@@ -81,15 +77,15 @@ export function ForecastCard() {
             <div className="flex justify-between text-xs">
               <span className="text-[#71717A]">Per diems</span>
               <span className="tabular-nums text-[#A1A1AA]">
-                {fmtAmount(payEst.variable_pay.dh_int_pay + payEst.variable_pay.dh_int_overnight_pay)}
+                {fmtAmount(payEst.dietas)}
               </span>
             </div>
             <div className="flex justify-between text-xs">
               <span className="text-[#71717A]">STBY</span>
-              <span className="tabular-nums text-[#A1A1AA]">{fmtAmount(payEst.variable_pay.sby_pay)}</span>
+              <span className="tabular-nums text-[#A1A1AA]">{fmtAmount(payEst.variable.find(v => v.key === "standby")?.amount ?? 0)}</span>
             </div>
           </div>
-          <p className="text-[10px] text-[#3F3F46] pt-0.5">Variable from {rosterMonth} roster · 24% IRPF · FO L{payEst.level}</p>
+          <p className="text-[10px] text-[#3F3F46] pt-0.5">Variable from {rosterMonth} roster · {payEst.irpf_pct}% IRPF · {payEst.category} L{payEst.level}</p>
         </div>
       )}
 

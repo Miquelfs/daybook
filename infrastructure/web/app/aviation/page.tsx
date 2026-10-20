@@ -7,10 +7,10 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
 import {
-  PlaneTakeoff, PlaneLanding, Moon, Clock, Plus,
-  TrendingUp, Award, ChevronRight, Download,
+  PlaneTakeoff, PlaneLanding, Moon, Plus,
+  Award, ChevronRight, Download,
   Flag, Compass, Plane, Fuel, Users, Layers, AlertTriangle,
-  List, BarChart2, MapPin, CalendarDays, X, User, Gauge, Search,
+  MapPin, X, User, Search,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -29,10 +29,11 @@ import { FlightLoadRollup } from "@/components/StressLifeInsights";
 import { WeatherStress } from "@/components/aviation/WeatherStress";
 import { LogbookChecks } from "@/components/aviation/LogbookChecks";
 import { localISODate } from "@/lib/dates";
+import { AviationTabs, isAviationTab, type AviationTab } from "@/components/aviation/AviationTabs";
 
 const MAP_STYLE_KEY = "daybook_aviation_map_style";
 
-type Tab = "overview" | "logbook" | "map" | "stats" | "punctuality" | "stress";
+type Tab = Exclude<AviationTab, "roster">;
 type CodeMode = "icao" | "iata";
 
 const TODAY = localISODate();
@@ -156,6 +157,19 @@ export default function AviationPage() {
   const regInputRef = useRef<HTMLInputElement>(null);
   const [lookupKind, setLookupKind] = useState<"aircraft" | "airport" | "captain">("aircraft");
   const [tab, setTab] = useState<Tab>("overview");
+
+  // ?tab=… deep links (the roster page links back into a specific tab)
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (isAviationTab(t) && t !== "roster") setTab(t);
+  }, []);
+
+  function selectTab(t: AviationTab) {
+    if (t === "roster") return;
+    setTab(t);
+    const url = t === "overview" ? window.location.pathname : `${window.location.pathname}?tab=${t}`;
+    window.history.replaceState(null, "", url);
+  }
   const [easaPage, setEasaPage] = useState(0);
   const [roleFilter, setRoleFilter] = useState<string>("");
   const [yearFilter, setYearFilter] = useState<string>("");
@@ -259,11 +273,6 @@ export default function AviationPage() {
   const easaTotalPages = Math.ceil(allFlights.length / easaPageSize);
   const easaSlice = allFlights.slice(easaPage * easaPageSize, (easaPage + 1) * easaPageSize);
 
-  const tabCls = (t: Tab) =>
-    `flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-colors ${tab === t
-      ? "bg-[#27272A] text-[#FAFAFA]"
-      : "text-[#52525B] hover:text-[#A1A1AA]"}`;
-
   const uniqueYears = Array.from(new Set(allFlights.map(f => f.date.slice(0, 4)))).sort().reverse();
 
   const CodeToggle = () => (
@@ -293,15 +302,7 @@ export default function AviationPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mb-6 overflow-x-auto">
-        <button className={tabCls("overview")} onClick={() => setTab("overview")}><List size={13} />Overview</button>
-        <button className={tabCls("logbook")} onClick={() => setTab("logbook")}><BarChart2 size={13} />EASA</button>
-        <button className={tabCls("map")} onClick={() => setTab("map")}><MapPin size={13} />Routes</button>
-        <button className={tabCls("stats")} onClick={() => setTab("stats")}><TrendingUp size={13} />Analytics</button>
-        <button className={tabCls("punctuality")} onClick={() => setTab("punctuality")}><Clock size={13} />Punctuality</button>
-        <button className={tabCls("stress")} onClick={() => setTab("stress")}><Gauge size={13} />Stress</button>
-        <Link href="/aviation/roster" className={tabCls("roster" as Tab)}><CalendarDays size={13} />Roster</Link>
-      </div>
+      <AviationTabs active={tab} onSelect={selectTab} className="mb-6" />
 
       {/* ── OVERVIEW ── */}
       {tab === "overview" && (

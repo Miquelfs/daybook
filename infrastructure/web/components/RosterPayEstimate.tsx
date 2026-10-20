@@ -1,133 +1,149 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronUp, Info, Plane, Calendar } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { ChevronDown, ChevronUp, Info, AlertTriangle } from "lucide-react";
+import {
+  usePaySettings, useSavePaySettings, fmtEur, dayBadge,
+  PER_DIEM_LABEL, type PayEstimate, type PayLine, type PayDay,
+} from "@/lib/roster-pay";
 
-interface PerDiemDetail {
-  date: string;
-  first_dep: string;
-  last_arr: string;
-  perd_type: string;
-  cross_midnight: boolean;
-}
+const monthName = (m: string) => format(parseISO(m + "-01"), "MMMM yyyy");
+const shortDay = (d: string) => format(parseISO(d), "EEE d");
 
-interface PayEstimate {
-  month: string;
-  category: string;
-  level: number;
-  irpf_rate: number;
-  block_hours: number;
-  sectors: number;
-  sim_days: number;
-  duty_counts: Record<string, number>;
-  base_salary: number;
-  fixed_supplements: {
-    phone: number;
-    connectivity: number;
-    uniform: number;
-    parking: number;
-    total: number;
-  };
-  variable_pay: {
-    blh_hours: number;
-    blh_pay: number;
-    blhp_hours: number;
-    blhp_pay: number;
-    sby_days: number;
-    sby_pay: number;
-    sim_days: number;
-    sim_pay: number;
-    vac_days: number;
-    soc_pay: number;
-    lvo_days: number;
-    lvo_pay: number;
-    dh_int_days: number;
-    dh_int_pay: number;
-    dh_int_overnight_days: number;
-    dh_int_overnight_pay: number;
-    dh_nat_overnight_days: number;
-    dh_nat_overnight_pay: number;
-    bdo_days: number;
-    bdo_pay: number;
-    hdb_days: number;
-    hdb_pay: number;
-    total: number;
-  };
-  per_diem_detail: PerDiemDetail[];
-  gross_monthly: number;
-  net_monthly_estimate: number;
-  notes: string[];
-}
-
-function fmt(n: number) {
-  return n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
-}
-
-function Row({
-  label, value, sub, highlight, zero
-}: {
-  label: string; value: string; sub?: string; highlight?: boolean; zero?: boolean;
-}) {
-  if (zero) return null;
+function Line({ l }: { l: PayLine }) {
+  const hasUnits = l.units != null && l.rate != null;
   return (
-    <div className={`flex items-start justify-between py-2 ${highlight ? "border-t border-[#27272A] mt-1" : ""}`}>
-      <div className="flex-1 min-w-0 pr-4">
-        <p className={`text-sm ${highlight ? "font-semibold text-[#FAFAFA]" : "text-[#A1A1AA]"}`}>{label}</p>
-        {sub && <p className="text-xs text-[#52525B] mt-0.5">{sub}</p>}
-      </div>
-      <p className={`text-sm tabular-nums shrink-0 ${highlight ? "font-bold text-[#F59E0B]" : "text-[#E4E4E7]"}`}>{value}</p>
+    <div className="flex items-baseline gap-3 py-1.5">
+      <span className="text-[10px] font-mono text-[#3F3F46] w-9 shrink-0">{l.code}</span>
+      <span className="flex-1 min-w-0 text-sm text-[#A1A1AA] truncate">
+        {l.label}
+        {l.in_kind && <span className="text-[10px] text-[#52525B] ml-1.5">in kind</span>}
+      </span>
+      {hasUnits && (
+        <span className="text-xs text-[#52525B] tabular-nums shrink-0 hidden sm:inline">
+          {Number.isInteger(l.units) ? l.units : l.units!.toFixed(2)} × {l.rate!.toFixed(2)}
+        </span>
+      )}
+      <span className="text-sm tabular-nums text-[#E4E4E7] w-24 text-right shrink-0">{fmtEur(l.amount)}</span>
     </div>
   );
 }
 
-function SectionHeader({ title }: { title: string }) {
+function Total({ label, value, sub, tone = "plain" }: { label: string; value: string; sub?: string; tone?: "plain" | "gross" | "net" | "minus" }) {
+  const color = tone === "gross" ? "text-[#F59E0B] font-bold" : tone === "net" ? "text-emerald-400 font-bold" : tone === "minus" ? "text-[#A1A1AA]" : "text-[#E4E4E7]";
+  return (
+    <div className="flex items-baseline justify-between gap-3 py-1.5">
+      <div className="min-w-0">
+        <p className={`text-sm ${tone === "gross" || tone === "net" ? "font-semibold text-[#FAFAFA]" : "text-[#A1A1AA]"}`}>{label}</p>
+        {sub && <p className="text-[11px] text-[#52525B] mt-0.5">{sub}</p>}
+      </div>
+      <p className={`text-sm tabular-nums shrink-0 ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function Section({ title }: { title: string }) {
   return <p className="text-xs text-[#52525B] uppercase tracking-widest pt-4 pb-1">{title}</p>;
 }
 
-export function RosterPayEstimate({ month, billedMonth }: { month: string; billedMonth: string }) {
-  const [category, setCategory] = useState<"FO" | "CPT">("FO");
-  const [level, setLevel] = useState(4);
-  const [irpf, setIrpf] = useState(24); // percentage
+function Stepper({ label, value, onDec, onInc }: { label: string; value: string; onDec: () => void; onInc: () => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-[#52525B]">{label}</span>
+      <div className="flex items-center gap-1 bg-[#111113] border border-[#27272A] rounded-lg p-1">
+        <button onClick={onDec} aria-label={`Decrease ${label}`} className="w-6 h-6 flex items-center justify-center text-[#A1A1AA] hover:text-[#FAFAFA] text-xs">−</button>
+        <span className="min-w-[2.75rem] text-center text-sm font-semibold text-[#FAFAFA] tabular-nums">{value}</span>
+        <button onClick={onInc} aria-label={`Increase ${label}`} className="w-6 h-6 flex items-center justify-center text-[#A1A1AA] hover:text-[#FAFAFA] text-xs">+</button>
+      </div>
+    </div>
+  );
+}
+
+function Settings() {
+  const { data: s } = usePaySettings();
+  const save = useSavePaySettings();
+  if (!s) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-3 pt-4">
+      <div className="flex gap-1 bg-[#111113] border border-[#27272A] rounded-lg p-1">
+        {(["FO", "CPT"] as const).map(c => (
+          <button key={c} onClick={() => save.mutate({ category: c })}
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${s.category === c ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
+            {c}
+          </button>
+        ))}
+      </div>
+      <Stepper label="Lvl" value={String(s.level)}
+        onDec={() => save.mutate({ level: Math.max(1, s.level - 1) })}
+        onInc={() => save.mutate({ level: Math.min(10, s.level + 1) })} />
+      <Stepper label="IRPF" value={`${s.irpf_pct.toFixed(2)}%`}
+        onDec={() => save.mutate({ irpf_pct: Math.max(0, +(s.irpf_pct - 0.25).toFixed(2)) })}
+        onInc={() => save.mutate({ irpf_pct: Math.min(50, +(s.irpf_pct + 0.25).toFixed(2)) })} />
+      <Stepper label="Jornada" value={`${s.jornada_pct}%`}
+        onDec={() => save.mutate({ jornada_pct: Math.max(50, s.jornada_pct - 10) })}
+        onInc={() => save.mutate({ jornada_pct: Math.min(100, s.jornada_pct + 10) })} />
+    </div>
+  );
+}
+
+function DayRow({ d, onSelect }: { d: PayDay; onSelect?: (date: string) => void }) {
+  const badge = dayBadge(d);
+  const bits = [
+    d.route || null,
+    d.per_diem ? PER_DIEM_LABEL[d.per_diem] : null,
+    d.positioning ? `${d.positioning}× positioning` : null,
+    d.standby_paid ? "SBY paid" : null,
+    d.sim ? "Sim" : null,
+  ].filter(Boolean);
+  return (
+    <button onClick={() => onSelect?.(d.date)}
+      className="w-full flex items-center gap-3 px-3 py-2 bg-[#111113] hover:bg-[#18181B] rounded-lg text-left transition-colors">
+      <span className="text-xs text-[#71717A] tabular-nums w-12 shrink-0">{shortDay(d.date)}</span>
+      <span className="text-[11px] text-[#52525B] w-9 shrink-0">{d.planned_code ?? "—"}</span>
+      <span className="flex-1 min-w-0 text-xs text-[#A1A1AA] truncate">{bits.join(" · ") || "—"}</span>
+      {d.projected && <span className="pay-badge pay-badge-mute text-[10px] px-1.5 py-0.5">Plan</span>}
+      {badge && <span className={`pay-badge pay-badge-${badge.tone} text-[10px] px-1.5 py-0.5`}>{badge.label}</span>}
+      {Object.keys(d.override).length > 0 && <span className="text-[10px] text-[#F59E0B]" title="Edited">✎</span>}
+    </button>
+  );
+}
+
+export function RosterPayEstimate({ data, isLoading, error, onSelectDate }: {
+  data: PayEstimate | undefined;
+  isLoading: boolean;
+  error: unknown;
+  onSelectDate?: (date: string) => void;
+}) {
   const [expanded, setExpanded] = useState(true);
-  const [showPerDiemDetail, setShowPerDiemDetail] = useState(false);
+  const [showDays, setShowDays] = useState(false);
 
-  const { data, isLoading, error } = useQuery<PayEstimate>({
-    queryKey: ["pay-estimate", month, category, level, irpf],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/roster/pay-estimate?month=${month}&category=${category}&level=${level}&irpf=${irpf / 100}`
-      );
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json();
-    },
-    staleTime: 60_000,
-  });
-
-  const hasFlightData = data && data.block_hours > 0;
-  const hasPerDiems = data && (data.variable_pay.dh_int_days + data.variable_pay.dh_int_overnight_days + data.variable_pay.dh_nat_overnight_days) > 0;
+  const fixed = data?.fixed ?? [];
+  const work = data?.variable.filter(v => !v.per_diem) ?? [];
+  const dietas = data?.variable.filter(v => v.per_diem) ?? [];
+  const flagged = data ? data.flags.activated.length + data.flags.not_flown.length + data.flags.extra_duty.length : 0;
+  const payDays = data?.days.filter(d => d.route || d.per_diem || d.standby_paid || d.sim || d.positioning || d.bdo || d.planned === "standby" || d.status !== "as_planned") ?? [];
 
   return (
     <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
-      {/* Header */}
-      <button
-        onClick={() => setExpanded(e => !e)}
-        className="w-full flex items-center justify-between px-5 py-4 hover:bg-[#111113] transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/20 flex items-center justify-center text-sm">
-            💰
-          </div>
-          <div className="text-left">
-            <p className="text-sm font-semibold text-[#FAFAFA]">Pay estimate</p>
-            <p className="text-xs text-[#52525B]">Billed in {billedMonth} · CLA 2025</p>
+      <button onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-[#111113] transition-colors">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/20 flex items-center justify-center text-sm shrink-0">💰</div>
+          <div className="text-left min-w-0">
+            <p className="text-sm font-semibold text-[#FAFAFA] truncate">
+              {data ? `${monthName(data.payslip_month)} payslip` : "Payslip estimate"}
+            </p>
+            <p className="text-xs text-[#52525B] truncate">
+              {data ? `Variable pay from ${format(parseISO(data.activity_month + "-01"), "MMMM")}` : "CLA II ESP"}
+            </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           {data && !isLoading && (
             <div className="text-right">
-              <p className="text-sm font-bold text-[#F59E0B] tabular-nums">{fmt(data.gross_monthly)}</p>
-              <p className="text-xs text-[#52525B]">gross</p>
+              <p className="text-sm font-bold text-emerald-400 tabular-nums">{fmtEur(data.net)}</p>
+              <p className="text-xs text-[#52525B] tabular-nums">{fmtEur(data.gross)} gross</p>
             </div>
           )}
           {expanded ? <ChevronUp size={16} className="text-[#52525B]" /> : <ChevronDown size={16} className="text-[#52525B]" />}
@@ -135,208 +151,91 @@ export function RosterPayEstimate({ month, billedMonth }: { month: string; bille
       </button>
 
       {expanded && (
-        <div className="px-5 pb-5 border-t border-[#18181B] space-y-1">
-
-          {/* Config row */}
-          <div className="flex flex-wrap items-center gap-3 pt-4">
-            {/* Category */}
-            <div className="flex gap-1 bg-[#111113] border border-[#27272A] rounded-lg p-1">
-              {(["FO", "CPT"] as const).map(c => (
-                <button key={c} onClick={() => setCategory(c)}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors ${category === c ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
-                  {c}
-                </button>
-              ))}
-            </div>
-
-            {/* Level */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-[#52525B]">Lvl</span>
-              <div className="flex gap-1 bg-[#111113] border border-[#27272A] rounded-lg p-1">
-                <button onClick={() => setLevel(l => Math.max(1, l - 1))}
-                  className="w-6 h-6 flex items-center justify-center text-[#A1A1AA] hover:text-[#FAFAFA] transition-colors text-xs">−</button>
-                <span className="w-5 text-center text-sm font-semibold text-[#FAFAFA]">{level}</span>
-                <button onClick={() => setLevel(l => Math.min(10, l + 1))}
-                  className="w-6 h-6 flex items-center justify-center text-[#A1A1AA] hover:text-[#FAFAFA] transition-colors text-xs">+</button>
-              </div>
-            </div>
-
-            {/* IRPF */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-[#52525B]">IRPF</span>
-              <div className="flex gap-1 bg-[#111113] border border-[#27272A] rounded-lg p-1">
-                <button onClick={() => setIrpf(i => Math.max(15, i - 1))}
-                  className="w-6 h-6 flex items-center justify-center text-[#A1A1AA] hover:text-[#FAFAFA] transition-colors text-xs">−</button>
-                <span className="w-8 text-center text-sm font-semibold text-[#FAFAFA]">{irpf}%</span>
-                <button onClick={() => setIrpf(i => Math.min(47, i + 1))}
-                  className="w-6 h-6 flex items-center justify-center text-[#A1A1AA] hover:text-[#FAFAFA] transition-colors text-xs">+</button>
-              </div>
-            </div>
-          </div>
+        <div className="px-5 pb-5 border-t border-[#18181B]">
+          <Settings />
 
           {isLoading && (
-            <div className="h-20 flex items-center justify-center py-4">
+            <div className="h-20 flex items-center justify-center">
               <div className="w-4 h-4 border-2 border-[#F59E0B] border-t-transparent rounded-full animate-spin" />
             </div>
           )}
-
-          {error && (
-            <p className="text-xs text-red-400 py-3">Failed to load estimate — is the Pi reachable?</p>
-          )}
+          {!!error && <p className="text-xs text-rose-400 py-3">Failed to load estimate — is the Pi reachable?</p>}
 
           {data && !isLoading && (
             <>
-              {!hasFlightData && (
-                <div className="flex items-start gap-2 bg-[#1a1a0a] border border-[#F59E0B]/20 rounded-xl px-4 py-3 mt-3">
+              {data.projected_days > 0 && (
+                <div className="flex items-start gap-2 bg-[#18181B] rounded-xl px-4 py-3 mt-4">
                   <Info size={14} className="text-[#F59E0B] mt-0.5 shrink-0" />
-                  <p className="text-xs text-[#A1A1AA]">
-                    No flights logged for {month} yet. Block hours and per diems will populate once flights are synced from Norwegian.
+                  <p className="text-xs text-[#A1A1AA] leading-relaxed">
+                    {data.projected_days} upcoming flying day{data.projected_days !== 1 ? "s" : ""} projected from the roster
+                    ({data.block_hours_actual.toFixed(1)} h logged + {(data.block_hours - data.block_hours_actual).toFixed(1)} h planned).
                   </p>
                 </div>
               )}
 
-              {/* ── Fixed ─────────────────────────────────────────────── */}
-              <SectionHeader title="Fixed remuneration" />
-              <div className="divide-y divide-[#111113]">
-                <Row label="Base salary" value={fmt(data.base_salary)}
-                  sub={`${category} Level ${level} · 2025 table`} />
-                <Row label="Phone + connectivity" value={fmt(data.fixed_supplements.phone + data.fixed_supplements.connectivity)} />
-                <Row label="Uniform supplement" value={fmt(data.fixed_supplements.uniform)} />
-              </div>
-
-              {/* ── Variable ──────────────────────────────────────────── */}
-              <SectionHeader title="Variable pay (billed next month)" />
-              <div className="divide-y divide-[#111113]">
-                <Row
-                  label={`BLH — ${data.variable_pay.blh_hours.toFixed(1)}h`}
-                  value={fmt(data.variable_pay.blh_pay)}
-                  sub={hasFlightData ? `${data.sectors} sectors · €${(data.variable_pay.blh_pay / Math.max(data.variable_pay.blh_hours, 0.01)).toFixed(2)}/h` : "No flights yet"}
-                  zero={data.variable_pay.blh_pay === 0 && !hasFlightData}
-                />
-                {data.variable_pay.blhp_hours > 0 && (
-                  <Row
-                    label={`BLHp — ${data.variable_pay.blhp_hours.toFixed(1)}h over 60h`}
-                    value={fmt(data.variable_pay.blhp_pay)}
-                    sub="Productivity supplement (Art.2.02)"
-                  />
-                )}
-                <Row label={`STBY — ${data.variable_pay.sby_days} day${data.variable_pay.sby_days !== 1 ? "s" : ""}`}
-                  value={fmt(data.variable_pay.sby_pay)}
-                  zero={data.variable_pay.sby_days === 0} />
-                <Row label={`Simulator — ${data.variable_pay.sim_days} day${data.variable_pay.sim_days !== 1 ? "s" : ""}`}
-                  value={fmt(data.variable_pay.sim_pay)}
-                  zero={data.variable_pay.sim_days === 0} />
-                <Row label={`VAC/SOC — ${data.variable_pay.vac_days} day${data.variable_pay.vac_days !== 1 ? "s" : ""}`}
-                  value={fmt(data.variable_pay.soc_pay)}
-                  sub="Variable supplement on vacation days"
-                  zero={data.variable_pay.vac_days === 0} />
-                <Row label={`DH positioning — ${data.variable_pay.lvo_days} day${data.variable_pay.lvo_days !== 1 ? "s" : ""}`}
-                  value={fmt(data.variable_pay.lvo_pay)}
-                  sub="LVO days from roster"
-                  zero={data.variable_pay.lvo_days === 0} />
-              </div>
-
-              {/* ── Per diems ─────────────────────────────────────────── */}
-              {hasFlightData && (
-                <>
-                  <SectionHeader title="Per diems (from flight data)" />
-                  <div className="divide-y divide-[#111113]">
-                    <Row
-                      label={`Intl day trip — ${data.variable_pay.dh_int_days} day${data.variable_pay.dh_int_days !== 1 ? "s" : ""}`}
-                      value={fmt(data.variable_pay.dh_int_pay)}
-                      sub="Departed & returned to PMI same day (66.11 €/day)"
-                      zero={data.variable_pay.dh_int_days === 0}
-                    />
-                    <Row
-                      label={`Intl overnight — ${data.variable_pay.dh_int_overnight_days} night${data.variable_pay.dh_int_overnight_days !== 1 ? "s" : ""}`}
-                      value={fmt(data.variable_pay.dh_int_overnight_pay)}
-                      sub="Overnight abroad (91.35 €/night)"
-                      zero={data.variable_pay.dh_int_overnight_days === 0}
-                    />
-                    <Row
-                      label={`Spain overnight — ${data.variable_pay.dh_nat_overnight_days} night${data.variable_pay.dh_nat_overnight_days !== 1 ? "s" : ""}`}
-                      value={fmt(data.variable_pay.dh_nat_overnight_pay)}
-                      sub="Overnight in Spain away from base (66.11 €/night)"
-                      zero={data.variable_pay.dh_nat_overnight_days === 0}
-                    />
-                    <Row
-                      label={`BDO — ${data.variable_pay.bdo_days} day${data.variable_pay.bdo_days !== 1 ? "s" : ""}`}
-                      value={fmt(data.variable_pay.bdo_pay)}
-                      sub="Landing after 00:01 UTC on day off (Art.2.07)"
-                      zero={data.variable_pay.bdo_days === 0}
-                    />
-                    <Row
-                      label={`HDB — ${data.variable_pay.hdb_days} half-day${data.variable_pay.hdb_days !== 1 ? "s" : ""}`}
-                      value={fmt(data.variable_pay.hdb_pay)}
-                      sub="Landing 00:01–04:00 UTC next day (Art.2.09)"
-                      zero={data.variable_pay.hdb_days === 0}
-                    />
+              {flagged > 0 && (
+                <div className="flex items-start gap-2 bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-xl px-4 py-3 mt-3">
+                  <AlertTriangle size={14} className="text-[#F59E0B] mt-0.5 shrink-0" />
+                  <div className="text-xs text-[#A1A1AA] leading-relaxed space-y-0.5">
+                    {data.flags.activated.length > 0 && (
+                      <p><strong className="text-[#E4E4E7]">Called out from standby:</strong> {data.flags.activated.map(shortDay).join(", ")}. Paid as flying, not as SBY.</p>
+                    )}
+                    {data.flags.not_flown.length > 0 && (
+                      <p><strong className="text-[#E4E4E7]">Planned flying, nothing logged:</strong> {data.flags.not_flown.map(shortDay).join(", ")}. Swap or cancellation?</p>
+                    )}
+                    {data.flags.extra_duty.length > 0 && (
+                      <p><strong className="text-[#E4E4E7]">Flew on a day off:</strong> {data.flags.extra_duty.map(shortDay).join(", ")}
+                        {data.flags.bdo_unconfirmed.length > 0 ? ". If it was a BDO, mark it on the day." : "."}</p>
+                    )}
+                    <p className="text-[#52525B]">Tap a day to correct what&apos;s paid.</p>
                   </div>
+                </div>
+              )}
 
-                  {/* Per diem day detail toggle */}
-                  {data.per_diem_detail.length > 0 && (
-                    <button
-                      onClick={() => setShowPerDiemDetail(s => !s)}
-                      className="flex items-center gap-1.5 text-xs text-[#52525B] hover:text-[#A1A1AA] transition-colors mt-2"
-                    >
-                      <Plane size={11} />
-                      {showPerDiemDetail ? "Hide" : "Show"} per-day breakdown
-                      {showPerDiemDetail ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                    </button>
-                  )}
+              <Section title={`Fixed · ${monthName(data.payslip_month)}${data.jornada_pct < 100 ? ` · ${data.jornada_pct}%` : ""}`} />
+              <div className="divide-y divide-[#18181B]">{fixed.map(l => <Line key={l.key} l={l} />)}</div>
 
-                  {showPerDiemDetail && (
-                    <div className="mt-2 space-y-1">
-                      {data.per_diem_detail.map((d) => (
-                        <div key={d.date} className="flex items-center gap-3 px-3 py-2 bg-[#111113] rounded-lg">
-                          <Calendar size={11} className="text-[#52525B] shrink-0" />
-                          <span className="text-xs text-[#71717A] tabular-nums w-20 shrink-0">
-                            {new Date(d.date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                          </span>
-                          <span className="text-xs text-[#A1A1AA] font-mono">{d.first_dep} → {d.last_arr}</span>
-                          <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                            d.perd_type === "int_overnight"
-                              ? "bg-indigo-900/40 text-indigo-300"
-                              : d.perd_type === "int_nat_overnight"
-                              ? "bg-sky-900/40 text-sky-300"
-                              : "bg-emerald-900/30 text-emerald-400"
-                          }`}>
-                            {d.perd_type === "int_overnight" ? "Overnight" : d.perd_type === "int_nat_overnight" ? "Spain o/n" : "Day trip"}
-                          </span>
-                          {d.cross_midnight && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400 font-medium">
-                              00:xx
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+              <Section title={`Variable · ${monthName(data.activity_month)} · ${data.block_hours.toFixed(2)} h`} />
+              <div className="divide-y divide-[#18181B]">
+                {work.length ? work.map(l => <Line key={l.key} l={l} />) : <p className="text-xs text-[#52525B] py-2">Nothing logged yet.</p>}
+              </div>
+              {data.jornada_prev_pct < 100 && (
+                <p className="text-[11px] text-[#52525B] pt-1">Reduced band from {data.blh_threshold} h at {data.jornada_prev_pct}% jornada.</p>
+              )}
+
+              {dietas.length > 0 && (
+                <>
+                  <Section title="Dietas (exempt)" />
+                  <div className="divide-y divide-[#18181B]">{dietas.map(l => <Line key={l.key} l={l} />)}</div>
                 </>
               )}
 
-              {/* ── Totals ────────────────────────────────────────────── */}
-              <div className="bg-[#111113] rounded-xl px-4 py-3 mt-4 space-y-0">
-                <Row label="Gross monthly" value={fmt(data.gross_monthly)} highlight />
-                <div className="flex items-center justify-between pt-2 mt-1 border-t border-[#1a1a1a]">
-                  <div>
-                    <p className="text-sm text-[#A1A1AA]">Net estimate</p>
-                    <p className="text-xs text-[#52525B] mt-0.5">After {irpf}% IRPF + 6.35% SS</p>
-                  </div>
-                  <p className="text-sm font-semibold text-emerald-400 tabular-nums">{fmt(data.net_monthly_estimate)}</p>
+              <div className="bg-[#111113] rounded-xl px-4 py-2 mt-4 divide-y divide-[#18181B]">
+                <Total label="Total devengado" value={fmtEur(data.gross)} tone="gross" />
+                <Total label="In-kind (insurance + pension)" value={`− ${fmtEur(data.in_kind)}`} tone="minus" sub="Accrued and deducted — no effect on net" />
+                <Total label="Social Security" value={`− ${fmtEur(data.social_security.total)}`} tone="minus"
+                  sub={`Base ${fmtEur(data.social_security.base)}${data.social_security.excess > 0 ? " (capped)" : ""} · CC ${fmtEur(data.social_security.common)} · desempleo ${fmtEur(data.social_security.unemployment)} · FP ${fmtEur(data.social_security.training)}${data.social_security.solidarity ? ` · solidaria ${fmtEur(data.social_security.solidarity)}` : ""}`} />
+                <Total label={`IRPF ${data.irpf_pct.toFixed(2)}%`} value={`− ${fmtEur(data.irpf)}`} tone="minus"
+                  sub={`On ${fmtEur(data.irpf_base)} — pay minus in-kind and exempt dietas`} />
+                <Total label="IRPF in kind" value={`− ${fmtEur(data.irpf_in_kind)}`} tone="minus" sub="Licence-loss insurance" />
+                <Total label="Líquido a percibir" value={fmtEur(data.net)} tone="net" />
+              </div>
+
+              {payDays.length > 0 && (
+                <button onClick={() => setShowDays(s => !s)}
+                  className="flex items-center gap-1.5 text-xs text-[#52525B] hover:text-[#A1A1AA] transition-colors mt-3">
+                  {showDays ? "Hide" : "Show"} day-by-day ({payDays.length} days)
+                  {showDays ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                </button>
+              )}
+              {showDays && (
+                <div className="mt-2 space-y-1">
+                  {payDays.map(d => <DayRow key={d.date} d={d} onSelect={onSelectDate} />)}
                 </div>
-              </div>
+              )}
 
-              {/* Billing note */}
-              <div className="flex items-start gap-2 bg-[#18181B] rounded-xl px-4 py-3 mt-3">
-                <Info size={13} className="text-[#52525B] mt-0.5 shrink-0" />
-                <p className="text-[11px] text-[#52525B] leading-relaxed">
-                  Variable pay + per diems from <strong className="text-[#71717A]">{month}</strong> are billed in <strong className="text-[#71717A]">{billedMonth}</strong>. Fixed salary is always current month. Per diems inferred from ICAO codes — every NAS Spain flight counted as international.
-                </p>
-              </div>
-
-              <p className="text-[10px] text-[#3F3F46] leading-relaxed pt-1">
-                Estimate only. Actual payslip may differ due to per diem caps, corrections, or unreported items. Consult your payslip for exact figures.
+              <p className="text-[10px] text-[#3F3F46] leading-relaxed pt-3">
+                Calibrated to the Sep 2026 payslip. Not modelled: travel expense refunds (gastos de viaje), arrears and one-off corrections.
               </p>
             </>
           )}
@@ -344,20 +243,4 @@ export function RosterPayEstimate({ month, billedMonth }: { month: string; bille
       )}
     </div>
   );
-}
-
-// ── Standalone hook + card for finance forecast integration ───────────────────
-
-export function usePayEstimate(month: string, category = "FO", level = 4, irpf = 0.24) {
-  return useQuery<PayEstimate>({
-    queryKey: ["pay-estimate", month, category, level, irpf],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/roster/pay-estimate?month=${month}&category=${category}&level=${level}&irpf=${irpf}`
-      );
-      if (!res.ok) throw new Error("no estimate");
-      return res.json();
-    },
-    staleTime: 120_000,
-  });
 }

@@ -292,3 +292,32 @@ html[data-theme="light"] svg text[fill="#EF4444"] { fill: #B42318; }
     font-size: 16px;
   }
 }
+
+/* ─── Roster duty tiles + pay badges ─────────────────────────────────────────
+   Semantic classes (not color utilities) so both themes get a tuned pair:
+   tinted tile + ink that passes contrast on it. `.duty-sub` is secondary text
+   inside a tile (report time, badges) — the tile's ink, dimmed. */
+.duty-fly { background-color: #1A3A2A; color: #4ADE80; }
+.duty-sby { background-color: #2A2A1A; color: #FACC15; }
+.duty-gnd { background-color: #1A1A2E; color: #818CF8; }
+.duty-off { background-color: #111113; color: #71717A; }
+.duty-unk { background-color: #1A1A1A; color: #A1A1AA; }
+.duty-sub { color: inherit; opacity: 0.72; }
+html[data-theme="light"] .duty-fly { background-color: #DCEDD5; color: #14532D; }
+html[data-theme="light"] .duty-sby { background-color: #F5E7B8; color: #713F12; }
+html[data-theme="light"] .duty-gnd { background-color: #E0E1F5; color: #3730A3; }
+html[data-theme="light"] .duty-off { background-color: var(--paper-raised); color: #5F5745; }
+html[data-theme="light"] .duty-unk { background-color: var(--paper-inset); color: #4E4737; }
+html[data-theme="light"] .duty-sub { opacity: 0.85; }
+
+.pay-badge      { display: inline-flex; align-items: center; gap: 2px; border-radius: 4px; font-weight: 600; line-height: 1.1; }
+.pay-badge-warn { background-color: rgba(245, 158, 11, 0.16); color: #FBBF24; }
+.pay-badge-info { background-color: rgba(129, 140, 248, 0.18); color: #A5B4FC; }
+.pay-badge-ok   { background-color: rgba(74, 222, 128, 0.14); color: #4ADE80; }
+.pay-badge-bad  { background-color: rgba(248, 113, 113, 0.16); color: #FCA5A5; }
+.pay-badge-mute { background-color: rgba(161, 161, 170, 0.14); color: #A1A1AA; }
+html[data-theme="light"] .pay-badge-warn { background-color: #FBEBC5; color: #854D0E; }
+html[data-theme="light"] .pay-badge-info { background-color: #E0E1F5; color: #3730A3; }
+html[data-theme="light"] .pay-badge-ok   { background-color: #D7ECD0; color: #14532D; }
+html[data-theme="light"] .pay-badge-bad  { background-color: #F8DAD5; color: #991B1B; }
+html[data-theme="light"] .pay-badge-mute { background-color: var(--paper-inset); color: #4E4737; }
