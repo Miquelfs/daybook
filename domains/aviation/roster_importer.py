@@ -11,6 +11,8 @@ Duty type mapping from NetLine codes:
   Sby / SBM / SBS → standby
   Off / DO (+)    → day_off
   Dty / CBT / GRD → ground_duty   (training, admin, simulator)
+  VAC / AL / HOL… → vacation      (paid "VAR on SOC/VAC")
+  anything else   → unknown       (kept with its raw code — never dropped)
 
 Run standalone:
     python -m domains.aviation.roster_importer path/to/duty-plan.pdf [--db PATH]
@@ -39,6 +41,7 @@ _FLYING  = {"fld", "flightduty", "flight duty"}
 _STANDBY = {"sby", "sbm", "sbs", "standby"}
 _OFF     = {"off", "do"}
 _GROUND  = {"dty", "cbt", "grd", "sim", "trg"}
+_VACATION = {"vac", "vc", "al", "hol", "soc", "lve", "lv", "ulv", "pl", "par", "mat", "ptv", "anl"}
 
 
 def _normalise_duty(raw: str) -> str:
@@ -47,6 +50,7 @@ def _normalise_duty(raw: str) -> str:
     if key in _STANDBY:  return "standby"
     if key in _OFF:       return "day_off"
     if key in _GROUND:   return "ground_duty"
+    if key in _VACATION: return "vacation"
     return "unknown"
 
 
@@ -85,6 +89,38 @@ class RosterLeg:
 
 # ── PDF parsing ────────────────────────────────────────────────────────────────
 
+# Summary calendar line: "Mon01 FlD 0635 1505". Known codes first; any other
+# short code (VAC, AL, ULV…) is still captured so a day is never silently dropped.
+_SUMMARY_RE = re.compile(
+    r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(\d{2})\s+"
+    r"(FlD|Sby|SBM|SBS|Off|Dty|CBT|GRD|Sim|DO|FLD|[A-Za-z][A-Za-z0-9]{1,5})(?![A-Za-z0-9/])\s*"
+    r"(\d{4})?\s*(\d{4})?",
+    re.IGNORECASE,
+)
+
+
+def parse_summary(text: str, year: int, month_num: int) -> dict[int, "RosterDay"]:
+    """Day number → RosterDay from the summary calendar (first match per day wins)."""
+    seen_days: dict[int, RosterDay] = {}
+    for m in _SUMMARY_RE.finditer(text):
+        d_num = int(m.group(1))
+        if d_num in seen_days:
+            continue
+        raw_code = m.group(2)
+        try:
+            full_date = date(year, month_num, d_num)
+        except ValueError:
+            continue
+        seen_days[d_num] = RosterDay(
+            date=full_date.isoformat(),
+            duty_type=_normalise_duty(raw_code),
+            report_time=_parse_time(m.group(3)) if m.group(3) else None,
+            end_time=_parse_time(m.group(4)) if m.group(4) else None,
+            raw_code=raw_code,
+        )
+    return seen_days
+
+
 def parse_pdf(pdf_path: str | Path) -> tuple[str, list[RosterDay], list[RosterLeg]]:
     """
     Returns (period_label, [RosterDay], [RosterLeg]).
@@ -112,34 +148,7 @@ def parse_pdf(pdf_path: str | Path) -> tuple[str, list[RosterDay], list[RosterLe
     period_label = f"{year}-{month_num:02d}"
 
     # ── 2. Summary calendar (page 0 only, may repeat on later pages) ──────────
-    line_re = re.compile(
-        r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(\d{2})\s+"
-        r"(FlD|Sby|SBM|SBS|Off|Dty|CBT|GRD|Sim|DO|FLD)\s*"
-        r"(\d{4})?\s*(\d{4})?",
-        re.IGNORECASE,
-    )
-
-    seen_days: dict[int, RosterDay] = {}
-
-    for m in line_re.finditer(page0_text):
-        d_num = int(m.group(1))
-        if d_num in seen_days:
-            continue
-        raw_code = m.group(2)
-        t_rep = _parse_time(m.group(3)) if m.group(3) else None
-        t_end = _parse_time(m.group(4)) if m.group(4) else None
-        try:
-            full_date = date(year, month_num, d_num)
-        except ValueError:
-            continue
-        seen_days[d_num] = RosterDay(
-            date=full_date.isoformat(),
-            duty_type=_normalise_duty(raw_code),
-            report_time=t_rep,
-            end_time=t_end,
-            raw_code=raw_code,
-        )
-
+    seen_days = parse_summary(page0_text, year, month_num)
     if not seen_days:
         raise ValueError("No roster days found in PDF — check format")
 

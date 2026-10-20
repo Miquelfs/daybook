@@ -27,16 +27,21 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 
 
+# Importer vocabulary first (what the roster table holds); the legacy short codes stay accepted.
+DutyType = Literal["flying_duty", "standby", "day_off", "ground_duty", "vacation", "unknown",
+                   "FLT", "SBY", "OFF", "LVO", "GRD", "TRN", "VAC", "SICK", "OTHER"]
+
+
 class RosterEntryIn(BaseModel):
     date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
-    duty_type: Literal["FLT", "SBY", "OFF", "LVO", "GRD", "TRN", "VAC", "SICK", "OTHER"]
+    duty_type: DutyType
     report_time: Optional[str] = None   # "HH:MM"
     end_time: Optional[str] = None      # "HH:MM"
     raw_code: Optional[str] = None
 
 
 class RosterEntryPatch(BaseModel):
-    duty_type: Optional[Literal["FLT", "SBY", "OFF", "LVO", "GRD", "TRN", "VAC", "SICK", "OTHER"]] = None
+    duty_type: Optional[DutyType] = None
     report_time: Optional[str] = None
     end_time: Optional[str] = None
     raw_code: Optional[str] = None

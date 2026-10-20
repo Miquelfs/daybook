@@ -121,7 +121,8 @@ _SS_SOLIDARITY = {2025: (0.0015, 0.0017, 0.0019), 2026: (0.0019, 0.0021, 0.0024)
 
 _STANDBY_CODES = {"sby", "sbm", "sbs", "standby"}
 _SIM_CODES = {"sim"}
-_VACATION_CODES = {"vac", "soc", "al", "hol", "lv", "lvo"}
+_VACATION_CODES = {"vac", "vc", "al", "hol", "soc", "lve", "lv", "ulv", "pl", "par", "mat", "ptv", "anl"}  # = roster_importer._VACATION
+_NOT_WORKING = (None, "day_off", "vacation")
 _WORK_TYPES = {"flying_duty", "standby", "ground_duty"}
 
 
@@ -278,7 +279,7 @@ def _status(planned: str | None, code: str, flew: bool, activated: bool, project
         return "activated"                       # standby → called out
     if planned == "flying_duty" and not flew and not projected:
         return "not_flown"                       # swap / cancellation
-    if flew and planned in (None, "day_off"):
+    if flew and planned in _NOT_WORKING:
         return "extra_duty"                      # worked a day off — BDO?
     if flew and planned == "ground_duty" and code not in _SIM_CODES:
         return "changed"
@@ -361,9 +362,9 @@ def reconcile_month(conn: sqlite3.Connection, month: str, today: str | None = No
             projected=projected, route=" → ".join(hops), block_hours=round(block, 4),
             sectors=max(0, len(hops) - 1),
             activated=activated,
-            bdo_candidate=flew and planned in (None, "day_off"),
+            bdo_candidate=flew and planned in _NOT_WORKING,
             sim=code_l in _SIM_CODES or ds in sim_flight_days,
-            vacation=code_l in _VACATION_CODES,
+            vacation=(planned == "vacation" or code_l in _VACATION_CODES) and not flew,
         )
         line.auto_standby_paid = is_sby and not flew
 
@@ -475,7 +476,7 @@ def payslip(conn: sqlite3.Connection, activity_month: str, *, category: str = "F
         {"code": "5285", "key": "sim", "label": "Plus por simulador", "units": sim_days, "rate": var_r["sim"]},
         {"code": "5284", "key": "positioning", "label": "Posicionamiento vuelo", "units": positionings, "rate": var_r["positioning"]},
         {"code": "BDO", "key": "bdo", "label": "Día libre comprado (BDO)", "units": bdo_units, "rate": var_r["bdo"]},
-        {"code": "SOC", "key": "var_soc", "label": "Variable SOC/VAC", "units": vac_days, "rate": var_r["var_soc"]},
+        {"code": "SOC", "key": "var_soc", "label": "VAR on SOC/VAC", "units": vac_days, "rate": var_r["var_soc"]},
     ]
     for t in PER_DIEM_TYPES:
         variable.append({"code": {"int_no_overnight": "8212", "int_int_overnight": "8214"}.get(t, "DIET"),

@@ -43,6 +43,7 @@ const DUTY_STYLE: Record<string, { cls: string; label: string; dot: string }> = 
   standby:     { cls: "duty-sby", label: "Standby",     dot: "bg-[#FACC15]" },
   day_off:     { cls: "duty-off", label: "Day Off",     dot: "bg-[#3F3F46]" },
   ground_duty: { cls: "duty-gnd", label: "Ground Duty", dot: "bg-[#818CF8]" },
+  vacation:    { cls: "duty-vac", label: "Vacation",    dot: "bg-[#2DD4BF]" },
   unknown:     { cls: "duty-unk", label: "?",           dot: "bg-[#71717A]" },
 };
 
@@ -147,6 +148,47 @@ function PaySection({ day }: { day: PayDay }) {
       <input value={note} onChange={e => setNote(e.target.value)} onBlur={() => note !== (current.note ?? "") && put({ note: note || null })}
         placeholder="Note (e.g. swapped with …)"
         className="w-full bg-[#111113] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#E4E4E7] placeholder-[#52525B] focus:outline-none focus:border-[#F59E0B]" />
+    </div>
+  );
+}
+
+/** For days the PDF import missed (or couldn't classify): set the duty by hand. */
+function SetDuty({ date, current }: { date: string; current?: string }) {
+  const qc = useQueryClient();
+  const [saving, setSaving] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const set = async (duty_type: string, raw_code: string) => {
+    setSaving(duty_type);
+    setErr(null);
+    try {
+      const res = await fetch("/api/roster/entry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, duty_type, raw_code }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      ["roster", "roster-day", "roster-months", "pay-estimate"].forEach(k => qc.invalidateQueries({ queryKey: [k] }));
+    } catch {
+      setErr("Couldn't save — is the Pi reachable?");
+    } finally {
+      setSaving(null);
+    }
+  };
+  const btn = "flex-1 flex items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-sm font-medium border border-[#27272A] transition-[filter] hover:brightness-110 disabled:opacity-50";
+  return (
+    <div className="space-y-2 pt-4">
+      <p className="text-xs text-[#71717A]">
+        {current ? <>Imported as <span className="font-mono">{current}</span> — not a code Daybook knows.</> : "Not on the imported roster."} Set it:
+      </p>
+      <div className="flex gap-2">
+        <button className={`${btn} duty-vac`} disabled={!!saving} onClick={() => set("vacation", "VAC")}>
+          {saving === "vacation" && <Loader2 size={13} className="animate-spin" />}Vacation
+        </button>
+        <button className={`${btn} duty-off`} disabled={!!saving} onClick={() => set("day_off", "Off")}>
+          {saving === "day_off" && <Loader2 size={13} className="animate-spin" />}Day off
+        </button>
+      </div>
+      {err && <p className="text-xs text-rose-400">{err}</p>}
     </div>
   );
 }
@@ -285,6 +327,8 @@ function DayDetailSheet({
               </>
             )}
 
+            {!isLoading && (!detail || detail.duty_type === "unknown") && <SetDuty date={date} current={detail?.raw_code} />}
+
             {payDay && <PaySection key={JSON.stringify(payDay.override)} day={payDay} />}
 
             {/* View in day journal link */}
@@ -412,8 +456,8 @@ function RosterStats({ days }: { days: RosterDay[] }) {
   if (days.length === 0) return null;
 
   return (
-    <div className="grid grid-cols-4 gap-2">
-      {(["flying_duty", "standby", "day_off", "ground_duty"] as const).map((dt) => {
+    <div className={`grid ${counts.vacation ? "grid-cols-5" : "grid-cols-4"} gap-2`}>
+      {(["flying_duty", "standby", "day_off", "ground_duty", "vacation"] as const).filter(dt => dt !== "vacation" || counts.vacation).map((dt) => {
         const s = DUTY_STYLE[dt];
         return (
           <div key={dt} className={`${s.cls} rounded-xl p-3 text-center`}>

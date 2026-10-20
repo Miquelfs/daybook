@@ -300,12 +300,14 @@ html[data-theme="light"] svg text[fill="#EF4444"] { fill: #B42318; }
 .duty-fly { background-color: #1A3A2A; color: #4ADE80; }
 .duty-sby { background-color: #2A2A1A; color: #FACC15; }
 .duty-gnd { background-color: #1A1A2E; color: #818CF8; }
+.duty-vac { background-color: #10302F; color: #2DD4BF; }
 .duty-off { background-color: #111113; color: #71717A; }
 .duty-unk { background-color: #1A1A1A; color: #A1A1AA; }
 .duty-sub { color: inherit; opacity: 0.72; }
 html[data-theme="light"] .duty-fly { background-color: #DCEDD5; color: #14532D; }
 html[data-theme="light"] .duty-sby { background-color: #F5E7B8; color: #713F12; }
 html[data-theme="light"] .duty-gnd { background-color: #E0E1F5; color: #3730A3; }
+html[data-theme="light"] .duty-vac { background-color: #D3ECE8; color: #115E59; }
 html[data-theme="light"] .duty-off { background-color: var(--paper-raised); color: #5F5745; }
 html[data-theme="light"] .duty-unk { background-color: var(--paper-inset); color: #4E4737; }
 html[data-theme="light"] .duty-sub { opacity: 0.85; }

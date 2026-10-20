@@ -163,3 +163,25 @@ class RulesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VacationTest(unittest.TestCase):
+    def test_vacation_days_pay_var_soc(self):
+        c = db()
+        for d in range(11, 16):
+            c.execute("INSERT INTO roster(date, duty_type, raw_code) VALUES (?, 'vacation', 'VAC')", (f"2026-09-{d:02d}",))
+        a = amounts(pay.payslip(c, "2026-09", today="2026-10-20"))
+        self.assertEqual(a["var_soc"]["units"], 5)
+        self.assertAlmostEqual(a["var_soc"]["amount"], 204.05, places=2)   # 5 × 40.81
+
+
+class SummaryParseTest(unittest.TestCase):
+    def test_vacation_and_unknown_codes_are_kept(self):
+        from domains.aviation.roster_importer import parse_summary
+        text = "Fri11 VAC\nSat12 AL\nSun13 FlD 0635 1505\nMon14 XYZ\nTue15 Off\nTue15\nC/I PMI 0615"
+        days = parse_summary(text, 2026, 9)
+        self.assertEqual({d: (r.duty_type, r.raw_code) for d, r in days.items()}, {
+            11: ("vacation", "VAC"), 12: ("vacation", "AL"), 13: ("flying_duty", "FlD"),
+            14: ("unknown", "XYZ"), 15: ("day_off", "Off"),
+        })
+        self.assertEqual((days[13].report_time, days[13].end_time), ("06:35", "15:05"))
