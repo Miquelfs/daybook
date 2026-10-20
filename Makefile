@@ -277,7 +277,8 @@ SSH      := ssh $(SSH_OPTS)
 RSYNC_EXCLUDES := --exclude='.git' --exclude='.next' --exclude='node_modules' --exclude='__pycache__' \
 	--exclude='*.pyc' --exclude='.venv' --exclude='data/' --exclude='infrastructure/db/*.db' \
 	--exclude='infrastructure/db/*.db-wal' --exclude='infrastructure/db/*.db-shm' \
-	--exclude='infrastructure/scripts/logs/' --exclude='nohup.out' --exclude='.env'
+	--exclude='infrastructure/scripts/logs/' --exclude='nohup.out' --exclude='.env' \
+	--exclude='infrastructure/docker/'
 
 deploy:
 	@echo "==> [1/5] Building frontend on the Mac (type-checked) ..."

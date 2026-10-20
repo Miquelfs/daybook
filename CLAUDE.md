@@ -33,7 +33,7 @@ cd infrastructure/web && npm run build && cd ../..
 
 2. Sync code to the Pi (excludes `.next` — shipped in step 4):
 ```bash
-rsync -av --delete --exclude='.git' --exclude='.next' --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' --exclude='data/' --exclude='infrastructure/db/*.db' --exclude='infrastructure/db/*.db-wal' --exclude='infrastructure/db/*.db-shm' --exclude='infrastructure/scripts/logs/' --exclude='nohup.out' --exclude='.env' . pi@daybook-pi:~/daybook/
+rsync -av --delete --exclude='.git' --exclude='.next' --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' --exclude='data/' --exclude='infrastructure/db/*.db' --exclude='infrastructure/db/*.db-wal' --exclude='infrastructure/db/*.db-shm' --exclude='infrastructure/scripts/logs/' --exclude='nohup.out' --exclude='.env' --exclude='infrastructure/docker/' . pi@daybook-pi:~/daybook/
 ```
 
 3. Copy the web env:
