@@ -140,6 +140,44 @@ export function useSavePaySettings() {
     onSuccess: (s) => {
       qc.setQueryData(["pay-settings"], s);
       qc.invalidateQueries({ queryKey: ["pay-estimate"] });
+      qc.invalidateQueries({ queryKey: ["pay-jornada"] });
+    },
+  });
+}
+
+export interface PayJornada {
+  default: number;
+  months: Record<string, number>;   // YYYY-MM → % (only months that differ from the default)
+}
+
+export function usePayJornada() {
+  return useQuery<PayJornada>({
+    queryKey: ["pay-jornada"],
+    queryFn: async () => {
+      const res = await fetch("/api/roster/pay-jornada");
+      if (!res.ok) throw new Error("no jornada");
+      return res.json();
+    },
+    staleTime: 300_000,
+  });
+}
+
+/** Set a month's working %; null resets it to the default. */
+export function useSaveJornada() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ month, pct }: { month: string; pct: number | null }) => {
+      const res = await fetch(`/api/roster/pay-jornada/${month}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jornada_pct: pct }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pay-jornada"] });
+      qc.invalidateQueries({ queryKey: ["pay-estimate"] });
     },
   });
 }

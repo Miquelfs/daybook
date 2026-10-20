@@ -183,6 +183,10 @@ def ensure_tables(conn: sqlite3.Connection) -> None:
             jornada_pct  INTEGER NOT NULL DEFAULT 100
         );
         INSERT OR IGNORE INTO pay_settings (id) VALUES (1);
+        CREATE TABLE IF NOT EXISTS pay_jornada (
+            month        TEXT PRIMARY KEY,   -- YYYY-MM
+            jornada_pct  INTEGER NOT NULL    -- 50–100; months without a row use pay_settings
+        );
     """)
     conn.commit()
 
@@ -191,6 +195,24 @@ def get_settings(conn: sqlite3.Connection) -> dict:
     ensure_tables(conn)
     r = conn.execute("SELECT category, level, irpf_pct, jornada_pct FROM pay_settings WHERE id = 1").fetchone()
     return {"category": r[0], "level": r[1], "irpf_pct": r[2], "jornada_pct": r[3]}
+
+
+def jornada_for(conn: sqlite3.Connection, month: str, default: int = 100) -> int:
+    """Working percentage for a month — its own row, else the settings default."""
+    ensure_tables(conn)
+    r = conn.execute("SELECT jornada_pct FROM pay_jornada WHERE month = ?", (month,)).fetchone()
+    return r[0] if r else default
+
+
+def set_jornada(conn: sqlite3.Connection, month: str, pct: int | None) -> None:
+    """Set a month's working percentage; None clears it back to the default."""
+    ensure_tables(conn)
+    if pct is None:
+        conn.execute("DELETE FROM pay_jornada WHERE month = ?", (month,))
+    else:
+        conn.execute("""INSERT INTO pay_jornada (month, jornada_pct) VALUES (?, ?)
+                        ON CONFLICT(month) DO UPDATE SET jornada_pct = excluded.jornada_pct""", (month, pct))
+    conn.commit()
 
 
 # ── Day reconciliation ────────────────────────────────────────────────────────
@@ -398,15 +420,20 @@ def social_security(cotizable: float, year: int) -> dict:
 
 
 def payslip(conn: sqlite3.Connection, activity_month: str, *, category: str = "FO", level: int = 4,
-            irpf_pct: float = 25.55, jornada_pct: int = 100, jornada_prev_pct: int | None = None,
-            today: str | None = None) -> dict:
+            irpf_pct: float = 25.55, jornada_pct: int | None = None, jornada_prev_pct: int | None = None,
+            default_jornada: int = 100, today: str | None = None) -> dict:
     """
     Estimate the payslip paid for `activity_month` + 1: fixed pay of that month
-    plus the variable pay earned during `activity_month`.
+    (prorated by its jornada) plus the variable pay earned during `activity_month`
+    (hour bands set by the activity month's jornada). Jornadas default to the
+    per-month values in pay_jornada.
     """
     category = category.upper() if category and category.upper() in ("FO", "CPT") else "FO"
-    jornada_prev_pct = jornada_pct if jornada_prev_pct is None else jornada_prev_pct
     pay_month = next_month(activity_month)
+    if jornada_pct is None:
+        jornada_pct = jornada_for(conn, pay_month, default_jornada)
+    if jornada_prev_pct is None:
+        jornada_prev_pct = jornada_for(conn, activity_month, default_jornada)
     fixed_r = rates(category, level, int(pay_month[:4]))
     var_r = rates(category, level, int(activity_month[:4]))
     j = jornada_pct / 100.0

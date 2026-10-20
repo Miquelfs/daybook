@@ -4,7 +4,7 @@ import { useState } from "react";
 import { format, parseISO } from "date-fns";
 import { ChevronDown, ChevronUp, Info, AlertTriangle } from "lucide-react";
 import {
-  usePaySettings, useSavePaySettings, fmtEur, dayBadge,
+  usePaySettings, useSavePaySettings, usePayJornada, useSaveJornada, fmtEur, dayBadge,
   PER_DIEM_LABEL, type PayEstimate, type PayLine, type PayDay,
 } from "@/lib/roster-pay";
 
@@ -80,9 +80,44 @@ function Settings() {
       <Stepper label="IRPF" value={`${s.irpf_pct.toFixed(2)}%`}
         onDec={() => save.mutate({ irpf_pct: Math.max(0, +(s.irpf_pct - 0.25).toFixed(2)) })}
         onInc={() => save.mutate({ irpf_pct: Math.min(50, +(s.irpf_pct + 0.25).toFixed(2)) })} />
-      <Stepper label="Jornada" value={`${s.jornada_pct}%`}
+      <Stepper label="Default jornada" value={`${s.jornada_pct}%`}
         onDec={() => save.mutate({ jornada_pct: Math.max(50, s.jornada_pct - 10) })}
         onInc={() => save.mutate({ jornada_pct: Math.min(100, s.jornada_pct + 10) })} />
+    </div>
+  );
+}
+
+/** Working % for the two months a payslip depends on. */
+function MonthJornada({ activityMonth, payslipMonth }: { activityMonth: string; payslipMonth: string }) {
+  const { data: j } = usePayJornada();
+  const save = useSaveJornada();
+  if (!j) return null;
+  const row = (month: string, role: string) => {
+    const custom = j.months[month];
+    const pct = custom ?? j.default;
+    const set = (v: number) => save.mutate({ month, pct: v === j.default ? null : v });
+    return (
+      <div key={month} className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm text-[#E4E4E7]">{format(parseISO(month + "-01"), "MMMM yyyy")}</p>
+          <p className="text-[11px] text-[#52525B]">{role}{custom == null ? " · default" : ""}</p>
+        </div>
+        <div className="flex gap-1 bg-[#111113] border border-[#27272A] rounded-lg p-1 shrink-0">
+          {[50, 60, 70, 80, 90, 100].map(v => (
+            <button key={v} onClick={() => set(v)} aria-pressed={pct === v}
+              className={`px-1.5 sm:px-2 py-1 rounded text-xs font-medium tabular-nums transition-colors ${pct === v ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+  return (
+    <div className="bg-[#18181B] rounded-xl px-4 py-3 mt-3 space-y-3">
+      <p className="text-xs text-[#52525B] uppercase tracking-widest">Jornada %</p>
+      {row(activityMonth, "Flown — sets the hour bands")}
+      {row(payslipMonth, "Paid — prorates the fixed pay")}
     </div>
   );
 }
@@ -163,6 +198,8 @@ export function RosterPayEstimate({ data, isLoading, error, onSelectDate }: {
 
           {data && !isLoading && (
             <>
+              <MonthJornada activityMonth={data.activity_month} payslipMonth={data.payslip_month} />
+
               {data.projected_days > 0 && (
                 <div className="flex items-start gap-2 bg-[#18181B] rounded-xl px-4 py-3 mt-4">
                   <Info size={14} className="text-[#F59E0B] mt-0.5 shrink-0" />

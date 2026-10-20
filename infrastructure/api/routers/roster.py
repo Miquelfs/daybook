@@ -7,13 +7,15 @@ GET  /roster/months          → list of distinct YYYY-MM periods available
 GET  /roster/day/{date}      → full day detail (roster row + legs with crew)
 GET  /roster/day/{date}/brief → lightweight duty summary (or null)
 GET  /roster/pay-estimate    ?month=YYYY-MM → payslip of month+1 (CLA II ESP), day-by-day reconciled
-GET/PUT /roster/pay-settings → category, level, IRPF %, jornada %
+GET/PUT /roster/pay-settings → category, level, IRPF %, default jornada %
+GET  /roster/pay-jornada · PUT /roster/pay-jornada/{month} → per-month working %
 PUT  /roster/pay-overrides/{date} → per-day pay corrections (BDO, standby paid, dieta, positioning)
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import tempfile
 from dataclasses import asdict
@@ -298,6 +300,34 @@ def put_pay_settings(body: PaySettingsIn):
         conn.close()
 
 
+class PayJornadaIn(BaseModel):
+    jornada_pct: Optional[int] = Field(None, ge=50, le=100)   # null = back to the default
+
+
+@router.get("/pay-jornada")
+def get_pay_jornada():
+    """Per-month working percentages (months not listed use the default)."""
+    conn = _get_conn()
+    try:
+        s = pay.get_settings(conn)
+        rows = conn.execute("SELECT month, jornada_pct FROM pay_jornada ORDER BY month").fetchall()
+        return {"default": s["jornada_pct"], "months": {r["month"]: r["jornada_pct"] for r in rows}}
+    finally:
+        conn.close()
+
+
+@router.put("/pay-jornada/{month}")
+def put_pay_jornada(month: str, body: PayJornadaIn):
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        raise HTTPException(422, "month must be YYYY-MM")
+    conn = _get_conn()
+    try:
+        pay.set_jornada(conn, month, body.jornada_pct)
+        return {"month": month, "jornada_pct": pay.jornada_for(conn, month, pay.get_settings(conn)["jornada_pct"])}
+    finally:
+        conn.close()
+
+
 @router.put("/pay-overrides/{date}")
 def put_pay_override(date: str, body: PayOverrideIn):
     """Replace the day's overrides; fields left null fall back to the automatic value."""
@@ -346,8 +376,9 @@ def get_pay_estimate(
             category=category or s["category"],
             level=level or s["level"],
             irpf_pct=s["irpf_pct"] if irpf_pct is None else irpf_pct,
-            jornada_pct=jornada or s["jornada_pct"],
-            jornada_prev_pct=jornada_prev or jornada or s["jornada_pct"],
+            jornada_pct=jornada,
+            jornada_prev_pct=jornada_prev,
+            default_jornada=s["jornada_pct"],
         )
     finally:
         conn.close()

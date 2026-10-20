@@ -123,6 +123,33 @@ class ProjectionTest(unittest.TestCase):
         self.assertEqual(day.per_diem, "int_no_overnight")
 
 
+class JornadaTest(unittest.TestCase):
+    def test_per_month_jornada(self):
+        """Activity month's % sets the hour bands; payslip month's % prorates the fixed pay."""
+        c = db()
+        pay.set_jornada(c, "2026-08", 80)     # August flown at 80 %
+        pay.set_jornada(c, "2026-09", 60)     # September payslip at 60 %
+        slip = pay.payslip(c, "2026-08", today="2026-10-20")
+        a = amounts(slip)
+        self.assertEqual((slip["jornada_prev_pct"], slip["jornada_pct"]), (80, 60))
+        # 62.28 h at 80 %: 50 h normal, 10 h reduced band, 2.28 h productivity
+        self.assertEqual((a["blh"]["units"], a["blhs"]["units"], a["blhp"]["units"]), (50, 10, 2.28))
+        self.assertAlmostEqual(a["blhs"]["amount"], 174.40, places=2)
+        # fixed pay at 60 %
+        self.assertAlmostEqual(a["base_salary"]["amount"] + a["extra_pay"]["amount"], 3075.69, places=2)
+        self.assertAlmostEqual(a["connectivity"]["amount"], 13.22, places=2)
+        # standby / dietas are not prorated
+        self.assertAlmostEqual(a["standby"]["amount"], 81.62, places=2)
+
+    def test_unset_months_use_default(self):
+        c = db()
+        self.assertEqual(pay.jornada_for(c, "2026-12", 90), 90)
+        pay.set_jornada(c, "2026-12", 70)
+        self.assertEqual(pay.jornada_for(c, "2026-12", 90), 70)
+        pay.set_jornada(c, "2026-12", None)
+        self.assertEqual(pay.jornada_for(c, "2026-12", 90), 90)
+
+
 class RulesTest(unittest.TestCase):
     def test_jornada_bands(self):
         self.assertEqual(pay.blh_threshold(100), 60)

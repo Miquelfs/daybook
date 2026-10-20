@@ -8,7 +8,7 @@ import Link from "next/link";
 import { RosterPayEstimate } from "@/components/RosterPayEstimate";
 import { AviationTabs } from "@/components/aviation/AviationTabs";
 import {
-  usePayEstimate, useSavePayOverride, dayBadge, PER_DIEM_LABEL,
+  usePayEstimate, usePayJornada, useSavePayOverride, dayBadge, PER_DIEM_LABEL,
   type PayDay, type PerDiemType, type PayOverrideIn,
 } from "@/lib/roster-pay";
 import { localISODate } from "@/lib/dates";
@@ -485,6 +485,8 @@ export default function RosterPage() {
   const hasData = rosterDays.length > 0;
 
   const payQuery = usePayEstimate(currentMonth, { enabled: hasData });
+  const { data: jornada } = usePayJornada();
+  const monthPct = jornada ? (jornada.months[currentMonth] ?? jornada.default) : null;
   const payDays = Object.fromEntries((payQuery.data?.days ?? []).map((d) => [d.date, d]));
 
   return (
@@ -542,7 +544,9 @@ export default function RosterPage() {
           <div className="text-center">
             <p className="font-semibold">{monthLabel}</p>
             {months.includes(currentMonth) && (
-              <p className="text-xs text-[#52525B]">{rosterDays.length} days</p>
+              <p className="text-xs text-[#52525B]">
+                {rosterDays.length} days{monthPct != null && monthPct < 100 ? ` · ${monthPct}% jornada` : ""}
+              </p>
             )}
           </div>
           <button
