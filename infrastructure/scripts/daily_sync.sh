@@ -216,4 +216,10 @@ else
   log "Skipping morning brief (outside 05-11h window)"
 fi
 
+# Plan ahead: one morning push (ntfy) with today's tasks, cutoffs, notes and
+# birthdays. Opt-in via NTFY_TOPIC in .env; self-gating — sends once per day.
+if [[ "$HOUR" -ge 8 && "$HOUR" -le 11 ]]; then
+  step agenda_notify python -m domains.plans.notify
+fi
+
 log "=== daily_sync done ==="

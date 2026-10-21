@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from domains.plans.agenda import normalize_birthday
 from infrastructure.api.db import get_db
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
@@ -17,18 +18,35 @@ class ContactOut(BaseModel):
     name: str
     emoji: str | None = None
     group_: str | None = None
+    birthday: str | None = None     # 'YYYY-MM-DD' or '--MM-DD' (year unknown)
 
 
 class ContactCreate(BaseModel):
     name: str
     emoji: str | None = None
     group_: str | None = None
+    birthday: str | None = None
 
 
 class ContactPatch(BaseModel):
     name: str | None = None
     emoji: str | None = None
     group_: str | None = None
+    birthday: str | None = None     # also accepts 'MM-DD'; null clears
+
+
+_COLS = "id, name, emoji, group_, birthday"
+
+
+def _out(row: sqlite3.Row) -> ContactOut:
+    return ContactOut(**dict(row))
+
+
+def _birthday(value: str | None) -> str | None:
+    try:
+        return normalize_birthday(value)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 def _streaks_from_dates(all_dates: list[str], today: date) -> tuple[int, int, str | None]:
@@ -103,34 +121,36 @@ def contacts_grid(conn: DB, days: int = 371):
 @router.get("", response_model=list[ContactOut])
 def list_contacts(conn: DB):
     rows = conn.execute(
-        "SELECT id, name, emoji, group_ FROM contacts ORDER BY group_, name"
+        f"SELECT {_COLS} FROM contacts ORDER BY group_, name"
     ).fetchall()
-    return [ContactOut(id=r["id"], name=r["name"], emoji=r["emoji"], group_=r["group_"]) for r in rows]
+    return [_out(r) for r in rows]
 
 
 @router.post("", response_model=ContactOut)
 def create_contact(body: ContactCreate, conn: DB):
     try:
         cur = conn.execute(
-            "INSERT INTO contacts (name, emoji, group_) VALUES (?,?,?)",
-            (body.name, body.emoji, body.group_),
+            "INSERT INTO contacts (name, emoji, group_, birthday) VALUES (?,?,?,?)",
+            (body.name, body.emoji, body.group_, _birthday(body.birthday)),
         )
         conn.commit()
-        row = conn.execute("SELECT id, name, emoji, group_ FROM contacts WHERE id=?", (cur.lastrowid,)).fetchone()
-        return ContactOut(id=row["id"], name=row["name"], emoji=row["emoji"], group_=row["group_"])
+        row = conn.execute(f"SELECT {_COLS} FROM contacts WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _out(row)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail=f"Contact '{body.name}' already exists")
 
 
 @router.patch("/{contact_id}", response_model=ContactOut)
 def update_contact(contact_id: int, body: ContactPatch, conn: DB):
-    row = conn.execute("SELECT id, name, emoji, group_ FROM contacts WHERE id=?", (contact_id,)).fetchone()
+    row = conn.execute(f"SELECT {_COLS} FROM contacts WHERE id=?", (contact_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"Contact {contact_id} not found")
 
     updates = body.model_dump(exclude_unset=True)
     if "name" in updates and not (updates["name"] or "").strip():
         raise HTTPException(status_code=422, detail="Name cannot be empty")
+    if "birthday" in updates:
+        updates["birthday"] = _birthday(updates["birthday"])
 
     if updates:
         set_clause = ", ".join(f"{k}=?" for k in updates)
@@ -142,9 +162,9 @@ def update_contact(contact_id: int, body: ContactPatch, conn: DB):
             conn.commit()
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail=f"Contact '{updates.get('name')}' already exists")
-        row = conn.execute("SELECT id, name, emoji, group_ FROM contacts WHERE id=?", (contact_id,)).fetchone()
+        row = conn.execute(f"SELECT {_COLS} FROM contacts WHERE id=?", (contact_id,)).fetchone()
 
-    return ContactOut(id=row["id"], name=row["name"], emoji=row["emoji"], group_=row["group_"])
+    return _out(row)
 
 
 @router.delete("/{contact_id}", status_code=204)

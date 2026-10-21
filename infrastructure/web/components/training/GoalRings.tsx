@@ -90,7 +90,7 @@ function AddGoalSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =
     if (!form.target || isNaN(Number(form.target))) return;
     setSaving(true);
     try {
-      const res = await fetch("/api/goals", {
+      const res = await fetch("/api/training-goals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sport: form.sport || null, metric: form.metric, period: form.period, target: Number(form.target) }),
@@ -177,12 +177,12 @@ export function GoalRings() {
 
   const { data: goals = [], isLoading } = useQuery<GoalProgress[]>({
     queryKey: ["goals-progress"],
-    queryFn: () => fetch("/api/goals").then((r) => r.json()),
+    queryFn: () => fetch("/api/training-goals").then((r) => r.json()),
     staleTime: 60_000,
   });
 
   async function deleteGoal(id: number) {
-    await fetch(`/api/goals/${id}`, { method: "DELETE" });
+    await fetch(`/api/training-goals/${id}`, { method: "DELETE" });
     qc.invalidateQueries({ queryKey: ["goals-progress"] });
   }
 

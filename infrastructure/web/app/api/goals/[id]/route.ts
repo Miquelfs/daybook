@@ -5,15 +5,28 @@ const API =
   process.env.NEXT_PUBLIC_API_URL ??
   "http://localhost:8000";
 
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const upstream = await fetch(`${API}/training/goals/${id}`, {
-    method: "DELETE",
+  const body = await req.json();
+  const upstream = await fetch(`${API}/goals/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
     cache: "no-store",
   });
+  const data = await upstream.json();
+  return NextResponse.json(data, { status: upstream.status });
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const upstream = await fetch(`${API}/goals/${id}`, { method: "DELETE", cache: "no-store" });
   if (upstream.status === 204) return new NextResponse(null, { status: 204 });
   const data = await upstream.json();
   return NextResponse.json(data, { status: upstream.status });

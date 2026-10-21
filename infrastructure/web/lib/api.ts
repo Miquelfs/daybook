@@ -298,6 +298,8 @@ export type Contact = {
   name: string;
   emoji: string | null;
   group_: string | null;
+  /** 'YYYY-MM-DD', or '--MM-DD' when the year is unknown. */
+  birthday?: string | null;
 };
 
 export type DaySummary = {
@@ -1089,7 +1091,7 @@ export const api = {
     return res.json();
   },
 
-  updateContact: async (id: number, body: { name?: string; emoji?: string | null; group_?: string | null }): Promise<Contact> => {
+  updateContact: async (id: number, body: { name?: string; emoji?: string | null; group_?: string | null; birthday?: string | null }): Promise<Contact> => {
     const res = await fetch(`${PROXY_BASE}/api/contacts/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

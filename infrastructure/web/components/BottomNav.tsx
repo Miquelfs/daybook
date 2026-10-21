@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, List, Wallet, Globe, Camera, HeartPulse, TrendingUp, PlaneTakeoff, Apple, Hammer } from "lucide-react";
+import { CalendarDays, Target, List, Wallet, Globe, Camera, HeartPulse, TrendingUp, PlaneTakeoff, Apple, Hammer } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const tabs = [
   { href: "/",             label: "Today",    icon: CalendarDays },
+  { href: "/plan",         label: "Plan",     icon: Target },
   { href: "/timeline",     label: "Timeline", icon: List },
   { href: "/moments",      label: "Moments",  icon: Camera },
   { href: "/money",        label: "Finance",  icon: Wallet },

@@ -42,6 +42,7 @@ from infrastructure.api.routers import nutrition as nutrition_module
 from infrastructure.api.routers import food as food_module
 from infrastructure.api.routers import wellness as wellness_module
 from infrastructure.api.routers import system as system_module
+from infrastructure.api.routers import plans as plans_module
 
 VERSION = "0.1.0"
 ROOT = Path(__file__).parents[2]
@@ -144,6 +145,7 @@ app.include_router(race_plans_module.router)
 app.include_router(nutrition_module.router)
 app.include_router(food_module.router)
 app.include_router(wellness_module.router)
+app.include_router(plans_module.router)
 
 _photos_dir = ROOT / "data" / "photos"
 _photos_dir.mkdir(parents=True, exist_ok=True)
@@ -214,6 +216,10 @@ def _run_migrations() -> None:
     _conn11 = _get_conn()
     _migrate_aerolink_op(_conn11)
     _conn11.close()
+    from infrastructure.db.migrate_plans import migrate as _migrate_plans
+    _conn12 = _get_conn()
+    _migrate_plans(_conn12)
+    _conn12.close()
 
 
 class ThemeIn(BaseModel):

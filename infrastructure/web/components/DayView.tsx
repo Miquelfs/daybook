@@ -21,7 +21,10 @@ import { ScreenTimeBlock } from "@/components/ScreenTimeBlock";
 import { ApiOffline } from "@/components/ApiOffline";
 import { DayAddFAB } from "@/components/DayAddFAB";
 import { DayTraining } from "@/components/DayTraining";
+import { AheadStrip } from "@/components/plan/AheadStrip";
 import { format } from "date-fns";
+import { cookies } from "next/headers";
+import { todayIn } from "@/lib/dates";
 
 /**
  * The full single-day view. Rendered identically by both the home ("today")
@@ -32,6 +35,8 @@ export async function DayView({ date }: { date: string }) {
   const today = format(new Date(), "yyyy-MM-dd");
   const yesterday = format(new Date(Date.now() - 86400000), "yyyy-MM-dd");
   const isEditable = date === today || date === yesterday;
+  // Your local date (device tz cookie) — the Pi's clock can be a day off abroad.
+  const localToday = todayIn((await cookies()).get("tz")?.value);
 
   const API_BASE =
     process.env.API_INTERNAL_URL ??
@@ -87,6 +92,9 @@ export async function DayView({ date }: { date: string }) {
       <DayHeader date={date} />
 
       <div className="flex flex-col gap-12 mt-10">
+        {/* Today: what's ahead (tasks, notes, birthdays, goals). Past day: what got done. */}
+        <AheadStrip date={date} isToday={date === localToday} />
+
         <MorningBrief
           sleep={day.sleep}
           stats={day.daily_stats}
