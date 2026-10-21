@@ -7,6 +7,8 @@ Training impact of one activity — the "so what" next to the raw metrics.
   efficiency  aerobic efficiency factor (output per heartbeat, from activity_detail)
               vs your recent similar sessions (same sport, indoor/outdoor, comparable
               duration) — the cleanest "am I getting fitter" signal.
+  strain      Whoop-style 0–21 cardiovascular strain: zone-weighted minutes (Edwards
+              TRIMP) on a saturating scale — every extra point is harder to earn.
   race        for rides while a Mallorca 312 goal is active: distance and climbing
               vs the race and vs your longest ride so far, durability (HR drift) on
               long rides and carbs/h vs the fuelling target.
@@ -16,6 +18,7 @@ Cheap queries only; not cached (the week and the load model keep moving).
 
 from __future__ import annotations
 
+import json
 import math
 import sqlite3
 from datetime import date, timedelta
@@ -42,6 +45,35 @@ def _tss(conn, act, t, analysis) -> tuple[float | None, str | None]:
         if r and r[0]:
             return float(r[0]), "heart rate"
     return None, None
+
+
+STRAIN_K = 165.0    # TRIMP that reaches ~63 % of the scale (≈ 2 h easy aerobic ride → ~14)
+
+
+def strain_from_trimp(trimp: float) -> float:
+    return round(21 * (1 - math.exp(-max(0.0, trimp) / STRAIN_K)), 1)
+
+
+def _strain(conn, act, t, analysis) -> dict | None:
+    """Zone-weighted minutes (Z1×1 … Z5×5) → 0–21. Prefers the 1 Hz analysis zones."""
+    secs: dict[int, float] = {}
+    for z in ((analysis or {}).get("hr") or {}).get("zones") or []:
+        name = str(z.get("zone", ""))
+        if name[1:].isdigit():
+            secs[int(name[1:])] = float(z.get("secs") or 0)
+    if not secs and "activity_detail" in t:
+        try:
+            r = conn.execute("SELECT zones_json FROM activity_detail WHERE activity_id=?", (act["id"],)).fetchone()
+            if r and r[0]:
+                secs = {int(k[1]): float(v or 0) for k, v in json.loads(r[0]).items() if k[1:2].isdigit()}
+        except (sqlite3.OperationalError, ValueError, TypeError):
+            secs = {}
+    if not sum(secs.values()):
+        return None
+    trimp = sum(s / 60 * z for z, s in secs.items())
+    v = strain_from_trimp(trimp)
+    return {"value": v, "trimp": round(trimp),
+            "label": "light" if v < 10 else "moderate" if v < 14 else "high" if v < 18 else "all out"}
 
 
 def _load(conn, d: str, tss: float | None, t) -> dict | None:
@@ -191,10 +223,11 @@ def impact(conn: sqlite3.Connection, activity_id: str, analysis: dict | None = N
     out = {
         "tss": round(tss) if tss else None, "tss_source": tss_source,
         "load": _load(conn, act["date"], tss, t),
+        "strain": _strain(conn, act, t, analysis),
         "efficiency": _efficiency(conn, act, sport, t),
         "race": _race(conn, act, sport, t, analysis, fuel_target_fn),
         "matched": _matched(conn, act, sport),
     }
-    if not any((out["tss"], out["load"], out["efficiency"], out["race"], out["matched"])):
+    if not any((out["tss"], out["load"], out["strain"], out["efficiency"], out["race"], out["matched"])):
         return None
     return out

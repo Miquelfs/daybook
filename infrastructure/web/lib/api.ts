@@ -1542,6 +1542,19 @@ export interface ActivityAnalysis {
 }
 
 // ── Activity training impact (GET /activities/{id}/impact) ───────────────────
+/** GET /training/fitness-summary — fitness/fatigue/form vs the race-day target, and fitness age. */
+export interface FitnessSummary {
+  load: { fitness: number; fatigue: number; form: number; ramp_per_week: number } | null;
+  goal: {
+    name: string; race_date: string; weeks_to_race: number; target_fitness: number; pct: number;
+    needed_ramp_per_week: number; projected_fitness: number; safe_ramp: number;
+    status: "there" | "on track" | "behind" | "too steep";
+  } | null;
+  fitness_age: {
+    value: number; source: "garmin" | "estimate"; vo2max: number; age: number | null; delta: number | null; as_of: string;
+  } | null;
+}
+
 export interface ActivityImpact {
   tss: number | null;
   tss_source: "power" | "device" | "heart rate" | null;
@@ -1550,6 +1563,8 @@ export interface ActivityImpact {
     form_before?: number | null; form_next?: number; form_label?: string;
     week_tss: number | null; week_share_pct: number | null;
   } | null;
+  /** Whoop-style 0–21 cardiovascular strain from time in HR zones. */
+  strain?: { value: number; trimp: number; label: "light" | "moderate" | "high" | "all out" } | null;
   efficiency: {
     ef: number; n: number; baseline?: number; pct?: number; trend?: null;
     history?: { date: string; ef: number; this?: boolean }[]; verdict?: string;

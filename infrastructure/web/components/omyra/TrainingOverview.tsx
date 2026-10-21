@@ -12,6 +12,7 @@ import { activityIcon, fmtDuration, fmtDistance } from "@/lib/api";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
 import { GoalRings } from "@/components/training/GoalRings";
 import { localISODate } from "@/lib/dates";
+import { LoadExplainer, useFitnessSummary } from "@/components/activity/TrainingImpactCard";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -52,7 +53,11 @@ const TIP = {
 };
 
 const json = <T,>(url: string) => fetch(url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)) as Promise<T>;
-const fmtH = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}h${min % 60 ? String(Math.round(min % 60)).padStart(2, "0") : ""}` : `${Math.round(min)}m`);
+// round first: 119.6 min is "2h", not "1h60"
+const fmtH = (min: number) => {
+  const m = Math.round(min);
+  return m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? String(m % 60).padStart(2, "0") : ""}` : `${m}m`;
+};
 const shortType = (t: string) => t.replace(/^Cycling - /, "").replace(/^Strength - /, "Gym · ");
 
 function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
@@ -196,6 +201,7 @@ function FormCard() {
           </div>
         </div>
         <p className="text-sm text-[#A1A1AA] mt-3">{label}</p>
+        <GoalFitness fitness={last.ctl ?? 0} />
         <div className="mt-3 -mx-1">
           <ResponsiveContainer width="100%" height={70}>
             <AreaChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
@@ -207,8 +213,69 @@ function FormCard() {
           </ResponsiveContainer>
           <p className="text-[10px] text-[#52525B] px-1">Fitness, last 6 weeks</p>
         </div>
+        <FitnessAge />
+        <LoadExplainer />
       </Panel>
     </Section>
+  );
+}
+
+const GOAL_STATUS: Record<string, { text: string; cls: string }> = {
+  "there": { text: "at race-day fitness", cls: "text-emerald-400" },
+  "on track": { text: "on track", cls: "text-emerald-400" },
+  "behind": { text: "behind — build a little faster", cls: "text-amber-400" },
+  "too steep": { text: "the gap needs more than a safe build rate", cls: "text-rose-400" },
+};
+
+/** Fitness now vs the race-day target, with the build rate needed vs the one you're on. */
+function GoalFitness({ fitness }: { fitness: number }) {
+  const { data } = useFitnessSummary();
+  const g = data?.goal, L = data?.load;
+  if (!g || !L) return null;
+  const st = GOAL_STATUS[g.status];
+  const proj = Math.min(100, (g.projected_fitness / g.target_fitness) * 100);
+  return (
+    <div className="mt-4 pt-4 border-t border-[#27272A]">
+      <div className="flex items-baseline justify-between gap-3 text-xs mb-1.5">
+        <span className="text-[10px] text-[#52525B] uppercase tracking-widest">{g.name} · race-day fitness</span>
+        <span className="tabular-nums text-[#FAFAFA]">{Math.round(fitness)} <span className="text-[#71717A]">/ ~{g.target_fitness} · {g.pct}%</span></span>
+      </div>
+      <div className="relative h-2 bg-[#18181B] rounded-full overflow-hidden" title={`At your current build rate: ~${g.projected_fitness} on race day`}>
+        <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.max(0, proj)}%`, background: "var(--viz-i2)", opacity: 0.5 }} />
+        <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${g.pct}%`, background: "var(--viz-i4)" }} />
+      </div>
+      <p className="text-xs text-[#A1A1AA] mt-2">
+        <span className={st.cls}>{st.text}</span>
+        {g.status !== "there" && <> · needs +{g.needed_ramp_per_week}/week over {Math.max(1, g.weeks_to_race - 2)} weeks of build;
+          last 4 weeks {L.ramp_per_week >= 0 ? "+" : ""}{L.ramp_per_week}/week → ~{g.projected_fitness} by race day.</>}
+        {" "}<span className="text-[#71717A]">Keep the build under +{g.safe_ramp}/week.</span>
+      </p>
+    </div>
+  );
+}
+
+/** Fitness age from VO2max — Garmin's when it reports one, otherwise estimated against population norms. */
+function FitnessAge() {
+  const { data } = useFitnessSummary();
+  const f = data?.fitness_age;
+  if (!f) return null;
+  return (
+    <div className="mt-4 pt-4 border-t border-[#27272A] flex items-baseline justify-between gap-3">
+      <div>
+        <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Fitness age</p>
+        <p className="text-2xl font-semibold tabular-nums">
+          {f.value}
+          {f.delta != null && f.delta !== 0 && (
+            <span className={`text-sm font-normal ml-2 ${f.delta < 0 ? "text-emerald-400" : "text-amber-400"}`}>
+              {f.delta < 0 ? `${-f.delta} years younger` : `${f.delta} years older`} than you are
+            </span>
+          )}
+        </p>
+      </div>
+      <p className="text-xs text-[#71717A] text-right tabular-nums">
+        VO₂max {f.vo2max}<br />{f.source === "garmin" ? "from Garmin" : "estimated from VO₂max"}
+      </p>
+    </div>
   );
 }
 

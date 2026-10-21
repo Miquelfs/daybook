@@ -357,6 +357,13 @@ def training_load(
     return result
 
 
+@router.get("/fitness-summary")
+def fitness_summary(conn: DB):
+    """Fitness/fatigue/form now, the race-day fitness target and build rate needed, and fitness age."""
+    from domains.training.fitness_summary import summary
+    return summary(conn)
+
+
 @router.get("/load/{date_str}/activities")
 def load_day_activities(conn: DB, date_str: str):
     """Activities contributing to a specific day's TSS — for click-through on F&F chart."""

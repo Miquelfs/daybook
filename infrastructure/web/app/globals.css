@@ -263,6 +263,10 @@ html[data-theme="light"] svg text[fill="#F59E0B"] { fill: #99570A; }
 html[data-theme="light"] svg text[fill="#22C55E"] { fill: #157A3C; }
 html[data-theme="light"] svg text[fill="#EF4444"] { fill: #B42318; }
 
+/* — Leaflet panes are z-index 400–1000; keep them inside the map so sheets
+     and modals (z-50) stack above a map on the page behind them — */
+.leaflet-container { isolation: isolate; }
+
 /* — Trip map permanent place labels (dark pill, no arrow) — */
 .leaflet-tooltip.db-place-label {
   background: rgba(13, 13, 15, 0.85);

@@ -72,17 +72,25 @@ def _get_zones(conn, date_str: str, sport: str) -> dict:
     }
 
 
-def _bucket_hr_to_zones(hr_stream: list, zones: list) -> dict:
-    """Count seconds in each zone. hr_stream = list of bpm values (1 per second)."""
+def _sample_seconds(stream: list, moving_time_s: int | None) -> float:
+    """Seconds each stream sample stands for. Garmin's activity details are downsampled
+    (≤2000 points by default), so a 2 h ride is ~one sample every 3.6 s, not 1 Hz."""
+    if not stream or not moving_time_s:
+        return 1.0
+    return max(0.5, min(30.0, moving_time_s / len(stream)))
+
+
+def _bucket_hr_to_zones(hr_stream: list, zones: list, dt: float = 1.0) -> dict:
+    """Seconds in each zone. hr_stream = bpm values, one every `dt` seconds."""
     counts = {z["name"]: 0 for z in zones}
     for bpm in hr_stream:
         if bpm is None:
             continue
         for z in zones:
             if z["min_hr"] <= bpm < z["max_hr"]:
-                counts[z["name"]] += 1
+                counts[z["name"]] += dt
                 break
-    return counts
+    return {k: round(v) for k, v in counts.items()}
 
 
 def _z1_z2_fraction(zones_counts: dict) -> float:
@@ -139,7 +147,9 @@ def _compute_np(power_stream: list) -> float | None:
 # ─── hrTSS ───────────────────────────────────────────────────────────────────
 
 def _compute_hr_tss(hr_stream: list, moving_time_s: int, threshold_hr: int, max_hr: int) -> float | None:
-    """TRIMP-based hrTSS. Returns None if insufficient data."""
+    """TRIMP-based hrTSS. Returns None if insufficient data.
+    Each sample is weighted by the time it covers (streams are downsampled, see _sample_seconds)."""
+    dt = _sample_seconds(hr_stream, moving_time_s)
     hr_vals = [v for v in hr_stream if v is not None and v > 40]
     if not hr_vals or not threshold_hr or not max_hr:
         return None
@@ -148,12 +158,12 @@ def _compute_hr_tss(hr_stream: list, moving_time_s: int, threshold_hr: int, max_
     if hr_reserve_max <= 0:
         return None
 
-    # TRIMP per sample (1 second)
+    # TRIMP per sample, weighted by the seconds it covers
     trimp_total = 0.0
     for hr in hr_vals:
         hr_ratio = (hr - 60) / hr_reserve_max
         hr_ratio = max(0.0, min(1.0, hr_ratio))
-        trimp_total += hr_ratio * 0.64 * math.exp(1.92 * hr_ratio)
+        trimp_total += hr_ratio * 0.64 * math.exp(1.92 * hr_ratio) * dt
 
     # Normalise: hrTSS of 100 = 1 hour at threshold
     hr_ratio_threshold = (threshold_hr - 60) / hr_reserve_max
@@ -355,7 +365,8 @@ def compute_for_activity(conn, activity_id: str, date_str: str,
     # HR zones
     zones_counts = {}
     if hr_stream and zones_config["zones"]:
-        zones_counts = _bucket_hr_to_zones(hr_stream, zones_config["zones"])
+        zones_counts = _bucket_hr_to_zones(hr_stream, zones_config["zones"],
+                                           _sample_seconds(hr_stream, moving_time_s))
     zones_json = json.dumps(
         {f"z{i+1}_s": zones_counts.get(z["name"], 0) for i, z in enumerate(zones_config["zones"])}
     )
