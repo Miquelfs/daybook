@@ -144,7 +144,7 @@ def _parse_row(row: list, row_index: int) -> dict | None:
         "flight_number": None,
         "aircraft_reg": acft_reg,
         "aircraft_type": acft_type,
-        "operator": None,
+        "operator": "Aerolink",   # flight school
         "crew_role": crew_role,
         "takeoff_crew": None,
         "landing_crew": None,

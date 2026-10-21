@@ -62,7 +62,7 @@ const ALL_YEARS = Array.from(
 // Operator colour logic based on source + operator field
 function operatorColor(f: FlightSummary): { dot: string; badge: string; label: string } {
   if (f.is_sim) return { dot: "#A78BFA", badge: "bg-violet-900/40 text-violet-300", label: "SIM" };
-  if (f.source === "aerolink") return { dot: "#A78BFA", badge: "bg-violet-900/40 text-violet-300", label: "Aerolink" };
+  if (f.source === "aerolink" || f.operator === "Aerolink") return { dot: "#A78BFA", badge: "bg-violet-900/40 text-violet-300", label: "Aerolink" };
   const op = (f.operator || "").toLowerCase();
   if (op.includes("norwegian") || f.source === "norwegian")
     return { dot: "#EF4444", badge: "bg-red-900/40 text-red-300", label: "Norwegian" };
@@ -383,7 +383,7 @@ export default function AviationPage() {
             <div className="flex items-center gap-3 mb-2 flex-wrap">
               <OpPill label="Ryanair" color="#3B82F6" />
               <OpPill label="Norwegian" color="#EF4444" />
-              <OpPill label="Aerolink / Training" color="#A78BFA" />
+              <OpPill label="Aerolink" color="#A78BFA" />
               <OpPill label="Manual" color="#71717A" />
             </div>
 

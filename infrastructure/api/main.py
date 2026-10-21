@@ -210,6 +210,10 @@ def _run_migrations() -> None:
     _conn10 = _get_conn()
     _migrate_home_places(_conn10)
     _conn10.close()
+    from infrastructure.db.migrate_aerolink_operator import migrate as _migrate_aerolink_op
+    _conn11 = _get_conn()
+    _migrate_aerolink_op(_conn11)
+    _conn11.close()
 
 
 class ThemeIn(BaseModel):

@@ -52,7 +52,7 @@ export function aircraftFamily(f: FlightSummary): string {
 export function flightOperator(f: FlightSummary): string {
   if (f.is_sim) return "Simulator";
   if (f.operator) return f.operator;
-  return f.source === "aerolink" ? "Flight school" : "Other";
+  return f.source === "aerolink" ? "Aerolink" : "Other";
 }
 
 export const SERIES_PALETTE = [
