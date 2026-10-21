@@ -2,15 +2,17 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from "recharts";
 import { format, parseISO, differenceInCalendarDays } from "date-fns";
 import { ShieldCheck, ShieldAlert, Moon, Plane } from "lucide-react";
 import type { LogbookStats, CurrencyStatus, FlightTimeLimits, FlightSummary } from "@/lib/api";
+import {
+  timeSplit, aircraftFamily, flightOperator, FUNCTION_COLOR, FUNCTION_LABEL, SERIES_PALETTE, type TimeFunction,
+} from "@/lib/flight-time";
 
 // Logbook overview, in the same card language as the activity / health views:
 // a hero with the career numbers, one "legal & current" card, and hours by year.
 
-const PIC = "var(--viz-i4)", SIC = "var(--viz-spd)";
 const TIP = {
   contentStyle: { background: "#09090B", border: "1px solid #27272A", borderRadius: 8, fontSize: 12 },
   labelStyle: { color: "#A1A1AA" }, itemStyle: { color: "#FAFAFA" },
@@ -29,8 +31,14 @@ export function LogbookHero({ stats, flights }: { stats: LogbookStats; flights: 
   const t = stats.totals;
   const real = flights.filter((f) => !f.is_sim);
   const last = real.length ? real.reduce((a, b) => (a.date >= b.date ? a : b)) : null;
-  const picPct = t.block_hours ? (t.pic_hours / t.block_hours) * 100 : 0;
-  const sicPct = t.block_hours ? (t.sic_hours / t.block_hours) * 100 : 0;
+  // career split by function — PIC / co-pilot / dual (school) / simulator
+  const split = flights.reduce((acc, f) => {
+    const s = timeSplit(f);
+    (Object.keys(s) as TimeFunction[]).forEach((k) => { acc[k] += hrs(s[k]); });
+    return acc;
+  }, { pic: 0, sic: 0, dual: 0, sim: 0 } as Record<TimeFunction, number>);
+  const allTime = split.pic + split.sic + split.dual + split.sim;
+  const parts = (["pic", "sic", "dual", "sim"] as TimeFunction[]).filter((k) => split[k] > 0);
   const nightPct = t.block_hours ? Math.round((t.night_hours / t.block_hours) * 100) : 0;
   const since = last ? differenceInCalendarDays(new Date(), parseISO(last.date)) : null;
 
@@ -48,13 +56,15 @@ export function LogbookHero({ stats, flights }: { stats: LogbookStats; flights: 
       </p>
 
       <div className="flex h-2.5 rounded-full overflow-hidden gap-[2px] mt-4">
-        {picPct > 0 && <div style={{ width: `${picPct}%`, background: PIC }} />}
-        {sicPct > 0 && <div style={{ width: `${sicPct}%`, background: SIC }} />}
+        {parts.map((k) => <div key={k} style={{ width: `${(split[k] / allTime) * 100}%`, background: FUNCTION_COLOR[k] }} />)}
       </div>
-      <div className="flex justify-between text-xs text-[#71717A] mt-1.5 tabular-nums">
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: PIC }} />PIC {hhmm(t.pic_hours)}</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: SIC }} />SIC {hhmm(t.sic_hours)}</span>
-        <span className="flex items-center gap-1.5"><Moon size={11} />Night {hhmm(t.night_hours)} · {nightPct}%</span>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#71717A] mt-1.5 tabular-nums">
+        {parts.map((k) => (
+          <span key={k} className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full" style={{ background: FUNCTION_COLOR[k] }} />{FUNCTION_LABEL[k]} {hhmm(split[k])}
+          </span>
+        ))}
+        <span className="flex items-center gap-1.5 ml-auto"><Moon size={11} />Night {hhmm(t.night_hours)} · {nightPct}%</span>
       </div>
 
       <div className="grid grid-cols-4 gap-2 mt-4 pt-4 border-t border-[#27272A] text-center">
@@ -138,71 +148,124 @@ export function LegalCard({ currency, limits }: { currency?: CurrencyStatus; lim
 }
 
 // ── hours by year / month ────────────────────────────────────────────────────
-export function HoursCard({ flights }: { flights: FlightSummary[] }) {
-  const real = flights.filter((f) => !f.is_sim);
+type Mode = "function" | "aircraft" | "operator";
+const MODES: { id: Mode; label: string }[] = [
+  { id: "function", label: "Role" }, { id: "aircraft", label: "Aircraft" }, { id: "operator", label: "Where" },
+];
+
+export function HoursCard({ flights, selected = null, onSelectPeriod }: {
+  flights: FlightSummary[];
+  selected?: string | null;                       // "YYYY" or "YYYY-MM"
+  onSelectPeriod?: (period: string | null) => void;
+}) {
   const thisYear = new Date().getFullYear();
-  const years = Array.from(new Set(real.map((f) => Number(f.date.slice(0, 4))))).sort((a, b) => b - a);
+  const years = Array.from(new Set(flights.map((f) => Number(f.date.slice(0, 4))))).sort((a, b) => b - a);
   const [picked, setYear] = useState<number | "all" | null>(null);
+  const [mode, setMode] = useState<Mode>("function");
   const year = picked ?? (years.includes(thisYear) ? thisYear : years[0] ?? "all");   // default once flights load
 
-  const byYear = [...years].reverse().map((y) => {
-    const fs = real.filter((f) => f.date.startsWith(String(y)));
-    return { label: String(y), pic: fs.reduce((a, f) => a + hrs(f.pic_seconds), 0), sic: fs.reduce((a, f) => a + hrs(f.sic_seconds), 0),
-             night: fs.reduce((a, f) => a + hrs(f.night_seconds), 0), n: fs.length };
-  });
-  const months = Array.from({ length: 12 }, (_, i) => {
-    const key = `${year}-${String(i + 1).padStart(2, "0")}`;
-    const fs = real.filter((f) => f.date.startsWith(key));
-    return { label: format(new Date(2000, i, 1), "MMM"), pic: fs.reduce((a, f) => a + hrs(f.pic_seconds), 0),
-             sic: fs.reduce((a, f) => a + hrs(f.sic_seconds), 0), night: fs.reduce((a, f) => a + hrs(f.night_seconds), 0), n: fs.length };
-  });
-  const data = year === "all" ? byYear : months;
-  const total = data.reduce((a, d) => a + d.pic + d.sic, 0);
-  const sectors = data.reduce((a, d) => a + d.n, 0);
+  // series: one key per function / aircraft family / operator, biggest first
+  const keyOf = (f: FlightSummary) => mode === "aircraft" ? aircraftFamily(f) : flightOperator(f);
+  const add = (acc: Record<string, number>, f: FlightSummary) => {
+    if (mode === "function") {
+      const s = timeSplit(f);
+      for (const k of Object.keys(s) as TimeFunction[]) acc[k] = (acc[k] ?? 0) + hrs(s[k]);
+    } else {
+      const k = keyOf(f);
+      acc[k] = (acc[k] ?? 0) + hrs(f.block_seconds ?? f.pic_seconds + f.sic_seconds);
+    }
+    return acc;
+  };
+  const inScope = year === "all" ? flights : flights.filter((f) => f.date.startsWith(String(year)));
+  const totals = inScope.reduce(add, {} as Record<string, number>);
+  const keys = (mode === "function" ? (["pic", "sic", "dual", "sim"] as string[]) : Object.keys(totals).sort((a, b) => totals[b] - totals[a]))
+    .filter((k) => (totals[k] ?? 0) > 0);
+  const color = (k: string, i: number) => mode === "function" ? FUNCTION_COLOR[k as TimeFunction] : SERIES_PALETTE[i % SERIES_PALETTE.length];
+  const name = (k: string) => mode === "function" ? FUNCTION_LABEL[k as TimeFunction] : k;
+
+  const row = (period: string, label: string) => {
+    const fs = flights.filter((f) => f.date.startsWith(period));
+    return { period, label, ...fs.reduce(add, {} as Record<string, number>),
+             night: fs.reduce((a, f) => a + hrs(f.night_seconds), 0), n: fs.filter((f) => !f.is_sim).length };
+  };
+  const span = years.length ? Array.from({ length: years[0] - years[years.length - 1] + 1 }, (_, i) => years[years.length - 1] + i) : [];
+  const data = year === "all"
+    ? span.map((y) => row(String(y), String(y)))
+    : Array.from({ length: 12 }, (_, i) => row(`${year}-${String(i + 1).padStart(2, "0")}`, format(new Date(2000, i, 1), "MMM")));
+
+  const real = inScope.filter((f) => !f.is_sim);
+  const block = real.reduce((a, f) => a + hrs(f.block_seconds ?? f.pic_seconds + f.sic_seconds), 0);
+  const sim = inScope.filter((f) => f.is_sim).reduce((a, f) => a + hrs(f.block_seconds ?? 0), 0);
 
   // same-date comparison with the previous year
   const todayMD = format(new Date(), "MM-dd");
-  const ytd = (y: number) => real.filter((f) => f.date.startsWith(String(y)) && f.date.slice(5) <= todayMD)
+  const ytd = (y: number) => flights.filter((f) => !f.is_sim && f.date.startsWith(String(y)) && f.date.slice(5) <= todayMD)
     .reduce((a, f) => a + hrs(f.block_seconds ?? f.pic_seconds + f.sic_seconds), 0);
   const cmp = year === thisYear && years.includes(thisYear - 1) ? ytd(thisYear) - ytd(thisYear - 1) : null;
 
-  const chips: (number | "all")[] = [...years.slice(0, 6), "all"];
+  const select = (label: unknown) => {
+    const r = data.find((d) => d.label === String(label));
+    if (r && onSelectPeriod) onSelectPeriod(r.period === selected ? null : r.period);
+  };
+  const dim = (period: string) => selected != null && selected !== period && (selected.startsWith(period) ? false : true);
+
+  const chips: (number | "all")[] = [...years, "all"];
+  const seg = (on: boolean) => `shrink-0 px-3 py-1 rounded text-xs font-medium transition-colors ${on ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`;
   return (
     <section className="mb-6">
-      <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Hours</p>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-[#52525B] uppercase tracking-widest">Hours</p>
+        <div className="flex gap-0.5 bg-[#18181B] rounded-lg p-0.5">
+          {MODES.map((m) => <button key={m.id} onClick={() => setMode(m.id)} className={seg(mode === m.id)}>{m.label}</button>)}
+        </div>
+      </div>
       <Panel className="p-4">
         <div className="flex gap-1 bg-[#18181B] rounded-lg p-1 mb-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {chips.map((c) => (
-            <button key={c} onClick={() => setYear(c)}
-                    className={`shrink-0 px-3 py-1 rounded text-xs font-medium transition-colors ${year === c ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
+            <button key={c} onClick={() => setYear(c)} className={seg(year === c)}>
               {c === "all" ? "All years" : c === thisYear ? "This year" : c}
             </button>
           ))}
         </div>
-        <div className="flex items-baseline justify-between gap-3 mb-3">
-          <span className="text-xl font-semibold tabular-nums">{hhmm(total)}<span className="text-sm text-[#A1A1AA] font-normal"> block · {sectors} sectors</span></span>
+        <div className="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
+          <span className="text-xl font-semibold tabular-nums">
+            {hhmm(block)}
+            <span className="text-sm text-[#A1A1AA] font-normal"> block · {real.length} sectors{sim > 0 ? ` · ${hhmm(sim)} sim` : ""}</span>
+          </span>
           {cmp != null && (
             <span className={`text-xs tabular-nums ${cmp >= 0 ? "text-[#A1A1AA]" : "text-[#71717A]"}`}>
               {cmp >= 0 ? "↑" : "↓"} {hhmm(Math.abs(cmp))} vs this date last year
             </span>
           )}
         </div>
-        <ResponsiveContainer width="100%" height={170}>
-          <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -18 }}>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -18 }}
+                    onClick={(st) => select(st?.activeLabel)} style={{ cursor: onSelectPeriod ? "pointer" : undefined }}>
             <CartesianGrid stroke="var(--viz-grid)" vertical={false} strokeDasharray="2 4" />
             <XAxis dataKey="label" interval="preserveStartEnd" minTickGap={8} {...AXIS} />
             <YAxis allowDecimals={false} {...AXIS} />
             <Tooltip {...TIP} cursor={{ fill: "var(--viz-grid)", opacity: 0.4 }}
-                     formatter={(v, n) => [hhmm(Number(v)), n === "pic" ? "PIC" : "SIC"]} />
-            <Bar dataKey="pic" stackId="h" fill={PIC} maxBarSize={30} isAnimationActive={false} stroke="var(--viz-gap)" strokeWidth={1} />
-            <Bar dataKey="sic" stackId="h" fill={SIC} maxBarSize={30} radius={[4, 4, 0, 0]} isAnimationActive={false} stroke="var(--viz-gap)" strokeWidth={1} />
+                     formatter={(v, n) => [hhmm(Number(v)), name(String(n))]} />
+            {keys.map((k, i) => (
+              <Bar key={k} dataKey={k} stackId="h" fill={color(k, i)} maxBarSize={30} isAnimationActive={false}
+                   stroke="var(--viz-gap)" strokeWidth={1} radius={i === keys.length - 1 ? [4, 4, 0, 0] : undefined}>
+                {data.map((d) => <Cell key={d.period} fillOpacity={dim(d.period) ? 0.3 : 1} />)}
+              </Bar>
+            ))}
           </BarChart>
         </ResponsiveContainer>
-        <div className="flex gap-3 text-[11px] text-[#71717A] mt-2">
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: PIC }} />PIC</span>
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: SIC }} />SIC</span>
-          <span className="ml-auto tabular-nums">night {hhmm(data.reduce((a, d) => a + d.night, 0))}</span>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[#71717A] mt-2">
+          {keys.map((k, i) => (
+            <span key={k} className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full" style={{ background: color(k, i) }} />
+              {name(k)} <span className="tabular-nums text-[#A1A1AA]">{hhmm(totals[k])}</span>
+            </span>
+          ))}
+          <span className="ml-auto tabular-nums">night {hhmm(inScope.reduce((a, f) => a + hrs(f.night_seconds), 0))}</span>
         </div>
+        {onSelectPeriod && (
+          <p className="text-[10px] text-[#52525B] mt-2">Tap a bar to list its flights below.</p>
+        )}
       </Panel>
     </section>
   );

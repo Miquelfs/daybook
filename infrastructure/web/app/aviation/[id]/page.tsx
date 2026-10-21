@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { FlightPhysioCard } from "@/components/FlightPhysioCard";
 import { FlightHero } from "@/components/aviation/FlightHero";
 import Link from "next/link";
+import { FlightDayCard } from "@/components/aviation/FlightDayCard";
 import {
   ArrowLeft, Users,
   Fuel, AlertTriangle, FileText, Loader, Pencil, X, Check, Trash2,
@@ -300,6 +301,8 @@ export default function FlightDetailPage() {
       </div>
 
       <FlightHero f={f} />
+
+      <FlightDayCard flightId={id} date={f.date} />
 
       {/* Crew & aircraft details */}
       <Section title="Crew & aircraft">

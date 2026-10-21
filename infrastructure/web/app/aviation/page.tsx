@@ -8,8 +8,8 @@ import {
 } from "recharts";
 import {
   PlaneTakeoff, PlaneLanding, Moon, Plus,
-  Award, ChevronRight, Download,
-  Flag, Compass, Plane, Fuel, Users, Layers, AlertTriangle,
+  ChevronRight, Download,
+  Flag, Plane, Fuel, Layers, AlertTriangle,
   MapPin, X, User, Search,
 } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -28,8 +28,10 @@ import { PunctualityTab } from "@/components/aviation/PunctualityTab";
 import { FlightLoadRollup } from "@/components/StressLifeInsights";
 import { WeatherStress } from "@/components/aviation/WeatherStress";
 import { LogbookChecks } from "@/components/aviation/LogbookChecks";
+import { LogbookFun } from "@/components/aviation/LogbookFun";
 import { localISODate } from "@/lib/dates";
 import { AviationTabs, isAviationTab, type AviationTab } from "@/components/aviation/AviationTabs";
+import { mainFunction, FUNCTION_LABEL, FUNCTION_SHORT, type TimeFunction } from "@/lib/flight-time";
 
 const MAP_STYLE_KEY = "daybook_aviation_map_style";
 
@@ -172,7 +174,13 @@ export default function AviationPage() {
   }
   const [easaPage, setEasaPage] = useState(0);
   const [roleFilter, setRoleFilter] = useState<string>("");
-  const [yearFilter, setYearFilter] = useState<string>("");
+  const [periodFilter, setPeriodFilter] = useState<string>("");   // "", "YYYY" or "YYYY-MM"
+  const flightsListRef = useRef<HTMLDivElement>(null);
+  const selectPeriod = (p: string | null) => {
+    setPeriodFilter(p ?? "");
+    setFlightLimit(p ? 1000 : 10);   // a period is small enough to show whole
+    if (p) requestAnimationFrame(() => flightsListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
   const [codeMode, setCodeMode] = useState<CodeMode>("icao");
   const [flightLimit, setFlightLimit] = useState(10);
   const [mapYear, setMapYear] = useState<string>("");
@@ -222,6 +230,12 @@ export default function AviationPage() {
     enabled: tab === "map",
   });
 
+  const { data: allAirports = [] } = useQuery({
+    queryKey: ["flightAirports", ""],
+    queryFn: () => api.flightAirports(),
+    enabled: tab === "stats",
+  });
+
   const { data: allFlights = [] } = useQuery({
     queryKey: ["flights", "all"],
     queryFn: () => api.flights({}),
@@ -261,8 +275,8 @@ export default function AviationPage() {
 
 
   const filteredFlights = allFlights.filter(f => {
-    if (roleFilter && f.crew_role !== roleFilter) return false;
-    if (yearFilter && !f.date.startsWith(yearFilter)) return false;
+    if (roleFilter && mainFunction(f) !== roleFilter) return false;
+    if (periodFilter && !f.date.startsWith(periodFilter)) return false;
     return true;
   }).slice().reverse(); // newest first
 
@@ -310,10 +324,10 @@ export default function AviationPage() {
           {stats && <LogbookHero stats={stats} flights={allFlights} />}
           <LegalCard currency={currency} limits={limits} />
           <LicensesCard />
-          <HoursCard flights={allFlights} />
+          <HoursCard flights={allFlights} selected={periodFilter || null} onSelectPeriod={selectPeriod} />
 
           {/* Flights list */}
-          <div className="mb-6">
+          <div className="mb-6 scroll-mt-4" ref={flightsListRef}>
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs text-[#52525B] uppercase tracking-widest">Flights</p>
               <CodeToggle />
@@ -346,16 +360,22 @@ export default function AviationPage() {
                   <Search size={12} />
                 </button>
               </form>
+              {periodFilter.length === 7 ? (
+                <button onClick={() => selectPeriod(null)}
+                  className="flex items-center gap-1 bg-[#F59E0B]/15 border border-[#F59E0B]/40 rounded-lg px-2 py-1 text-xs text-[#F59E0B]">
+                  {format(parseISO(periodFilter + "-01"), "MMMM yyyy")}<X size={11} />
+                </button>
+              ) : (
+                <select className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]"
+                  value={periodFilter} onChange={e => { setPeriodFilter(e.target.value); setFlightLimit(10); }}>
+                  <option value="">All years</option>
+                  {uniqueYears.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              )}
               <select className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]"
-                value={yearFilter} onChange={e => { setYearFilter(e.target.value); setFlightLimit(10); }}>
-                <option value="">All years</option>
-                {uniqueYears.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-              <select className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]"
-                value={roleFilter} onChange={e => { setRoleFilter(e.target.value); setFlightLimit(10); }}>
+                value={roleFilter} onChange={e => { setRoleFilter(e.target.value); setFlightLimit(periodFilter ? 1000 : 10); }}>
                 <option value="">All roles</option>
-                <option value="pic">PIC</option>
-                <option value="first_officer">SIC</option>
+                {(Object.keys(FUNCTION_LABEL) as TimeFunction[]).map(k => <option key={k} value={k}>{FUNCTION_LABEL[k]}</option>)}
               </select>
             </div>
 
@@ -559,37 +579,8 @@ export default function AviationPage() {
         <div className="space-y-5">
           <LogbookChecks />
 
-          {/* Records grid */}
-          <div>
-            <SectionTitle icon={<Award size={14} />}>Records</SectionTitle>
-            <div className="grid grid-cols-2 gap-3">
-              {analytics.longest_flight && (
-                <AnalyticCard label="Longest Flight" accent="text-sky-400"
-                  value={hToHHMM((analytics.longest_flight.block_seconds || 0) / 3600)}
-                  sub={`${analytics.longest_flight.dep_icao} → ${analytics.longest_flight.arr_icao} · ${analytics.longest_flight.date}`} />
-              )}
-              {analytics.shortest_flight && (
-                <AnalyticCard label="Shortest Flight"
-                  value={hToHHMM((analytics.shortest_flight.block_seconds || 0) / 3600)}
-                  sub={`${analytics.shortest_flight.dep_icao} → ${analytics.shortest_flight.arr_icao} · ${analytics.shortest_flight.date}`} />
-              )}
-              {analytics.top_route && (
-                <AnalyticCard label="Most Flown Route" accent="text-sky-400"
-                  value={`${analytics.top_route.dep_icao} → ${analytics.top_route.arr_icao}`}
-                  sub={`${analytics.top_route.cnt} sectors · ${hToHHMM(analytics.top_route.total_hours)}`} />
-              )}
-              {analytics.busiest_month && (
-                <AnalyticCard label="Busiest Month"
-                  value={analytics.busiest_month.month}
-                  sub={`${analytics.busiest_month.sectors} sectors · ${hToHHMM(analytics.busiest_month.block_hours)}`} />
-              )}
-              {analytics.top_airport && (
-                <AnalyticCard label="Most Visited Airport" accent="text-amber-400"
-                  value={analytics.top_airport.iata || analytics.top_airport.icao}
-                  sub={`${analytics.top_airport.city || ""} · ${analytics.top_airport.visits} visits`} />
-              )}
-            </div>
-          </div>
+          <LogbookFun flights={allFlights} analytics={analytics} airports={allAirports}
+            onCountry={c => setLookup({ kind: "country", query: c })} />
 
           {/* Night flying */}
           {analytics.night_stats && (
@@ -622,57 +613,6 @@ export default function AviationPage() {
                     sub={`${analytics.night_stats.most_night_flight.dep_icao} → ${analytics.night_stats.most_night_flight.arr_icao} · ${analytics.night_stats.most_night_flight.date}`} />
                 )}
               </div>
-            </div>
-          )}
-
-          {/* Countries — map-style grid */}
-          {analytics.countries.length > 0 && (
-            <div className="bg-[#18181B] rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Flag size={14} className="text-[#52525B]" />
-                <p className="text-sm font-medium text-[#FAFAFA]">Countries</p>
-                <span className="ml-auto text-xs bg-sky-900/40 text-sky-400 px-2 py-0.5 rounded-full font-medium">{analytics.countries.length}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
-                {analytics.countries.map(c => (
-                  <button
-                    key={c}
-                    onClick={() => setLookup({ kind: "country", query: c })}
-                    className="flex items-center gap-1.5 bg-[#09090B] rounded-lg px-2 py-1.5 hover:bg-[#18181B] hover:ring-1 hover:ring-sky-800 transition-colors text-left"
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-sky-500 flex-shrink-0" />
-                    <span className="text-xs text-[#A1A1AA] truncate">{c}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Top destinations */}
-          {analytics.top_destinations.length > 0 && (
-            <div className="bg-[#18181B] rounded-lg p-4">
-              <SectionTitle icon={<Compass size={14} />}>Top Destinations</SectionTitle>
-              {analytics.top_destinations.map((d, i) => (
-                <button key={d.arr_icao} onClick={() => setLookup({ kind: "airport", query: d.arr_icao })} className="w-full flex items-center gap-3 py-1.5 border-b border-[#27272A] last:border-0 hover:bg-[#27272A]/30 -mx-2 px-2 rounded transition-colors">
-                  <span className="text-xs text-[#52525B] w-4">{i + 1}</span>
-                  <span className="font-mono text-[#FAFAFA] text-sm hover:text-sky-400 transition-colors">{d.arr_iata || d.arr_icao}</span>
-                  {d.city && <span className="text-[#71717A] text-xs">{d.city}, {d.country || ""}</span>}
-                  <span className="ml-auto text-[#52525B] text-xs tabular-nums">{d.visits}×</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Passengers */}
-          {analytics.pax_stats && (
-            <div className="bg-[#18181B] rounded-lg p-4">
-              <SectionTitle icon={<Users size={14} />}>Passengers</SectionTitle>
-              <div className="grid grid-cols-3 gap-3">
-                <AnalyticCard label="Total carried" value={fmt(analytics.pax_stats.total_pax)} accent="text-sky-400" />
-                <AnalyticCard label="Avg per flight" value={fmt(analytics.pax_stats.avg_pax)} />
-                <AnalyticCard label="Busiest flight" value={fmt(analytics.pax_stats.max_pax) + " pax"} />
-              </div>
-              <p className="text-xs text-[#52525B] mt-2">Based on {analytics.pax_stats.flights_with_pax} flights with pax data</p>
             </div>
           )}
 
@@ -1086,7 +1026,8 @@ export default function AviationPage() {
 }
 
 function FlightRow({ flight: f, codeMode }: { flight: FlightSummary; codeMode: CodeMode }) {
-  const role = f.crew_role === "pic" ? "PIC" : f.crew_role === "first_officer" ? "SIC" : f.is_sim ? "SIM" : f.crew_role || "—";
+  const fn = mainFunction(f);
+  const role = FUNCTION_SHORT[fn];
   const dep = routeCode(f.dep_icao, f.dep_iata, codeMode);
   const arr = routeCode(f.arr_icao, f.arr_iata, codeMode);
   const { dot, label } = operatorColor(f);
@@ -1098,7 +1039,7 @@ function FlightRow({ flight: f, codeMode }: { flight: FlightSummary; codeMode: C
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-2">
           <span className="font-mono text-sm font-semibold tracking-wide">{dep} <span className="text-[#71717A] font-normal">→</span> {arr}</span>
-          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${f.crew_role === "pic" ? "bg-[#F59E0B]/15 text-amber-400" : "bg-[#27272A] text-[#71717A]"}`}>{role}</span>
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${fn === "pic" ? "bg-[#F59E0B]/15 text-amber-400" : fn === "dual" || fn === "sim" ? "pay-badge-info" : "bg-[#27272A] text-[#71717A]"}`}>{role}</span>
         </p>
         <p className="text-[11px] text-[#71717A] tabular-nums truncate mt-0.5">
           {format(parseISO(f.date), "EEE d MMM")}

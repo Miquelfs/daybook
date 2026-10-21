@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Moon } from "lucide-react";
 import type { FlightSummary } from "@/lib/api";
+import { mainFunction, FUNCTION_SHORT } from "@/lib/flight-time";
 
 function flightOpColor(f: FlightSummary): { dot: string; badge: string } {
   if (f.is_sim) return { dot: "#A78BFA", badge: "bg-violet-900/40 text-violet-300" };
@@ -62,7 +63,7 @@ export function DayFlights({ date }: { date: string }) {
           const bH = Math.floor(blockSec / 3600);
           const bM = Math.floor((blockSec % 3600) / 60);
           const blockStr = blockSec > 0 ? (bH > 0 ? `${bH}h ${bM}m` : `${bM}m`) : "—";
-          const role = f.crew_role === "pic" ? "PIC" : f.crew_role === "first_officer" ? "SIC" : f.crew_role || "—";
+          const role = FUNCTION_SHORT[mainFunction(f)];
           const depLabel = f.is_sim ? (f.aircraft_type || "SIM") : (f.dep_icao || f.dep_iata || "?");
           const arrLabel = f.is_sim ? null : (f.arr_icao || f.arr_iata || "?");
           const depTime = f.off_block_utc ? (f.off_block_utc.length > 5 ? f.off_block_utc.slice(11, 16) : f.off_block_utc) : "";
