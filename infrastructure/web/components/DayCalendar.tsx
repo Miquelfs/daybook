@@ -16,7 +16,8 @@ const KIND_LABEL: Record<string, string> = {
 };
 const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const FIRST_YEAR = 1990;
+// The calendar starts the day you were born (Life profile); this until it loads.
+const FALLBACK_BIRTH = "1997-11-24";
 
 /**
  * Jump to any day. Days view: special days stand out — a line under trip days,
@@ -33,6 +34,15 @@ export function DayCalendar({ date, variant = "icon" }: { date?: string; variant
   const key = format(month, "yyyy-MM");
   const year = month.getFullYear();
   const thisYear = new Date().getFullYear();
+  const { data: profile } = useQuery<{ birthdate?: string } | null>({
+    queryKey: ["life-profile"],
+    queryFn: () => fetch("/api/life/profile").then((r) => (r.ok ? r.json() : null)),
+    enabled: open,
+    staleTime: Infinity,
+  });
+  const birth = profile?.birthdate ?? FALLBACK_BIRTH;
+  const birthYear = Number(birth.slice(0, 4));
+  const birthMonth = birth.slice(0, 7);
   const { data: marks = {} } = useQuery<Record<string, Mark[]>>({
     queryKey: ["calendar-marks", key],
     queryFn: () => fetch(`/api/calendar/marks?month=${key}`).then((r) => (r.ok ? r.json() : {})),
@@ -57,7 +67,7 @@ export function DayCalendar({ date, variant = "icon" }: { date?: string; variant
   const next = () => (view === "days" ? setMonth(addMonths(month, 1))
     : view === "months" ? setMonth(new Date(year + 1, month.getMonth(), 1))
     : setMonth(new Date(year + 12, month.getMonth(), 1)));
-  const atStart = view === "years" ? decade <= FIRST_YEAR : view === "months" ? year <= FIRST_YEAR : false;
+  const atStart = view === "years" ? decade <= birthYear : view === "months" ? year <= birthYear : key <= birthMonth;
   const atEnd = view === "years" ? decade + 12 > thisYear + 1 : view === "months" ? year >= thisYear + 1 : false;
 
   return (
@@ -98,7 +108,7 @@ export function DayCalendar({ date, variant = "icon" }: { date?: string; variant
               <div className="grid grid-cols-3 gap-2">
                 {Array.from({ length: 12 }).map((_, i) => {
                   const y = decade + i;
-                  const off = y < FIRST_YEAR || y > thisYear + 1;
+                  const off = y < birthYear || y > thisYear + 1;
                   return (
                     <button key={y} disabled={off} onClick={() => { setMonth(new Date(y, month.getMonth(), 1)); setView("months"); }}
                             className={`h-11 rounded-lg text-sm tabular-nums transition-colors ${
@@ -117,10 +127,12 @@ export function DayCalendar({ date, variant = "icon" }: { date?: string; variant
                 {MONTHS.map((m, i) => {
                   const isCur = year === thisYear && i === new Date().getMonth();
                   const isSel = i === month.getMonth();
+                  const before = `${year}-${String(i + 1).padStart(2, "0")}` < birthMonth;
                   return (
-                    <button key={m} onClick={() => { setMonth(new Date(year, i, 1)); setView("days"); }}
+                    <button key={m} disabled={before} onClick={() => { setMonth(new Date(year, i, 1)); setView("days"); }}
                             className={`h-11 rounded-lg text-sm transition-colors ${
-                              isSel ? "bg-[#F59E0B] text-black font-semibold"
+                              before ? "text-[#27272A]"
+                                : isSel ? "bg-[#F59E0B] text-black font-semibold"
                                 : isCur ? "ring-1 ring-[#F59E0B] text-[#FAFAFA]"
                                 : "text-[#A1A1AA] hover:bg-[#18181B]"}`}>
                       {m}
@@ -139,6 +151,7 @@ export function DayCalendar({ date, variant = "icon" }: { date?: string; variant
                   const ms = marks[iso] ?? [];
                   const kinds = new Set(ms.map((m) => m.kind));
                   const future = iso > today;
+                  const unborn = iso < birth;
                   const isViewed = date != null && iso === date;
                   const trip = kinds.has("trip") || kinds.has("trip_planned");
                   const title = [format(parseISO(iso), "EEE d MMM"),
@@ -161,6 +174,7 @@ export function DayCalendar({ date, variant = "icon" }: { date?: string; variant
                       )}
                     </span>
                   );
+                  if (unborn) return <span key={iso} className="flex items-center justify-center h-10 text-sm text-[#27272A] tabular-nums">{i + 1}</span>;
                   return future
                     ? <span key={iso} title={title} className="cursor-default">{cell}</span>
                     : <Link key={iso} href={iso === today ? "/" : `/day/${iso}`} title={title} onClick={() => setOpen(false)}>{cell}</Link>;

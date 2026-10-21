@@ -16,7 +16,7 @@ function photoProxy(path: string): string {
   return `/api/photos/${path.split("/").pop()}`;
 }
 
-export function TripCard({ trip, flag }: { trip: Trip; flag: string }) {
+export function TripCard({ trip, flag }: { trip: Trip; flag: React.ReactNode }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(trip.name);

@@ -8,6 +8,7 @@ import { TripJourney } from "@/components/TripJourney";
 import { TripExpenses } from "@/components/TripExpenses";
 import { SectionLabel } from "@/components/MorningBrief";
 import { WithPicker } from "@/components/plan/WithPicker";
+import { Flag } from "@/components/Flag";
 import { localISODate } from "@/lib/dates";
 
 interface Props {
@@ -67,7 +68,9 @@ export default async function TripDetailPage({ params }: Props) {
       </Link>
 
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">🌍 {trip.name}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+          <Flag country={trip.primary_country} region={trip.region} size={24} /> {trip.name}
+        </h1>
         <p className="text-sm text-[#71717A] mt-1">
           {fmtRange(trip.start_date, rangeEnd)} · {trip.n_nights} night{trip.n_nights === 1 ? "" : "s"}
           {trip.passenger_flight_count > 0 && (

@@ -156,7 +156,7 @@ function PersonDetail({ id, goals, onBack, onMakeGoal, onEditGoal }: {
           <div className="space-y-2">
             {t.trips.map((x) => (
               <Link key={`${x.planned ? "p" : "t"}${x.id}`}
-                    href={x.planned ? "/plan" : `/explore/trip/${x.start}/${x.end}`}
+                    href={x.planned ? "/plan?tab=calendar" : `/explore/trip/${x.start}/${x.end}`}
                     className="flex items-center gap-3 bg-[#0D0D0F] border border-[#27272A] hover:border-[#3F3F46] rounded-2xl p-2.5 pr-4 transition-colors">
                 <span className="shrink-0 w-16 h-16 rounded-xl overflow-hidden bg-[#18181B] flex items-center justify-center text-[#52525B]">
                   {x.cover

@@ -58,7 +58,7 @@ function Ahead({ date }: { date: string }) {
     })),
     ...a.trips.filter((t) => t.days_until <= 30).map((t) => ({
       key: `p${t.id}`, on: t.start_date, icon: <Plane size={14} />, label: t.name,
-      when: t.ongoing ? "now" : `in ${t.days_until}d`, warn: t.days_until <= 7, href: "/plan",
+      when: t.ongoing ? "now" : `in ${t.days_until}d`, warn: t.days_until <= 7, href: "/plan?tab=calendar",
     })),
     ...a.upcoming.map((t) => {
       const Icon = area(t.area).icon;

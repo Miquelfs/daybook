@@ -9,7 +9,6 @@ import { localISODate } from "@/lib/dates";
 import { TaskRow } from "./TaskRow";
 import { Block, Panel, Pill } from "./ui";
 import { AREA_LIST, AREAS_WITH_PANEL, area as areaOf } from "./areas";
-import { TripsAhead } from "./TripsAhead";
 
 type When = "today" | "tomorrow" | "weekend" | "next_week" | "someday" | "date";
 const WHEN: { key: When; label: string }[] = [
@@ -272,7 +271,6 @@ export function TasksView({ kind, onEdit, onMore }: {
   return (
     <div className="space-y-8">
       <Composer key={kind} kind={kind} today={today} onMore={onMore} />
-      {kind === "task" && <TripsAhead />}
       {kind === "task"
         ? <TaskTimeline today={today} onEdit={onEdit} />
         : <NoteCards today={today} onEdit={onEdit} />}

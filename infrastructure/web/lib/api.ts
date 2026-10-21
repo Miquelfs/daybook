@@ -792,6 +792,7 @@ export type TopPlace = {
 export type CityStay = {
   city: string;
   country: string;
+  region?: string | null;
   first_date: string;
   last_date: string;
   days: number;
@@ -872,6 +873,8 @@ export type Trip = {
   name: string;
   auto_name: string | null;
   user_name: string | null;
+  /** "Catalonia" when every city of the trip is in Catalonia → senyera. */
+  region?: string | null;
   cover_photo_path: string | null;
   home_at_start: string | null;
   n_days: number;

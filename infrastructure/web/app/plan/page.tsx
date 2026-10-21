@@ -4,7 +4,7 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { differenceInCalendarDays } from "date-fns";
-import { Plus, ChevronDown, ChevronUp, Target, Flame, ListChecks, StickyNote, Users, type LucideIcon } from "lucide-react";
+import { Plus, CalendarDays, ChevronDown, ChevronUp, Target, Flame, ListChecks, StickyNote, Users, type LucideIcon } from "lucide-react";
 import { plansApi, PLAN_KEYS, type Goal, type Task, type TaskKind } from "@/lib/plans-api";
 import { localISODate } from "@/lib/dates";
 import { HabitTracker } from "@/components/habits/HabitTracker";
@@ -13,11 +13,13 @@ import { GoalRow } from "@/components/plan/GoalRow";
 import { GoalSheet } from "@/components/plan/GoalSheet";
 import { TaskSheet } from "@/components/plan/TaskSheet";
 import { TasksView } from "@/components/plan/TasksView";
+import { PlanCalendar } from "@/components/plan/PlanCalendar";
 import { AREA_LIST, area as areaOf } from "@/components/plan/areas";
 import { ActionButton, Block, Label, Panel, Pill, TabBar } from "@/components/plan/ui";
 
 const TABS = [
   { key: "tasks", label: "Tasks", icon: ListChecks },
+  { key: "calendar", label: "Calendar", icon: CalendarDays },
   { key: "goals", label: "Goals", icon: Target },
   { key: "habits", label: "Habits", icon: Flame },
   { key: "people", label: "People", icon: Users },
@@ -157,7 +159,7 @@ function GoalsTab({ onEdit }: { onEdit: (g: Goal) => void }) {
 
 type OpenSheet =
   | { type: "goal"; goal?: Goal; preset?: Partial<Pick<Goal, "title" | "metric" | "metric_param">> }
-  | { type: "task"; kind: TaskKind; task?: Task }
+  | { type: "task"; kind: TaskKind; task?: Task; defaultDate?: string }
   | null;
 
 function PlanPageInner() {
@@ -199,6 +201,13 @@ function PlanPageInner() {
                      onMore={() => setSheet({ type: "task", kind })} />
         </>
       )}
+      {tab === "calendar" && (
+        <PlanCalendar
+          onEditTask={(task) => setSheet({ type: "task", kind: task.kind, task })}
+          onNewTask={(d) => setSheet({ type: "task", kind: "task", defaultDate: d })}
+          onEditGoal={editGoal}
+        />
+      )}
       {tab === "goals" && <GoalsTab onEdit={editGoal} />}
       {tab === "habits" && (
         <HabitTracker
@@ -218,7 +227,7 @@ function PlanPageInner() {
         <GoalSheet goal={sheet.goal} preset={sheet.preset} year={new Date().getFullYear()} onClose={() => setSheet(null)} />
       )}
       {sheet?.type === "task" && (
-        <TaskSheet task={sheet.task} kind={sheet.kind} onClose={() => setSheet(null)} />
+        <TaskSheet task={sheet.task} kind={sheet.kind} defaultDate={sheet.defaultDate} onClose={() => setSheet(null)} />
       )}
     </main>
   );

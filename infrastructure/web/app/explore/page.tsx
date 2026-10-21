@@ -5,6 +5,7 @@ import { ExploreMapConnected } from "@/components/ExploreMapConnected";
 import { TravelMapProvider } from "@/components/TravelMapContext";
 import { CountriesList } from "@/components/CountriesList";
 import { FLAG } from "@/lib/flags";
+import { Flag } from "@/components/Flag";
 import { ManualCountries } from "@/components/ManualCountries";
 import { TripYears } from "@/components/TripYears";
 import { YearSelect } from "@/components/YearSelect";
@@ -167,7 +168,7 @@ export default async function ExplorePage({ searchParams }: Props) {
               {tripsData.total} {tripsData.total === 1 ? "trip" : "trips"} · {totalNightsAway} nights not slept at home
             </span>
           </div>
-          <TripYears groups={tripGroups} flags={FLAG} filtered={!!year} />
+          <TripYears groups={tripGroups} filtered={!!year} />
         </section>
       )}
 
@@ -274,7 +275,7 @@ export default async function ExplorePage({ searchParams }: Props) {
                   href={`/explore/place/${encodeURIComponent(stay.city)}?country=${encodeURIComponent(stay.country)}`}
                   className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#18181B] transition-colors group"
                 >
-                  <span className="text-base w-6 text-center shrink-0">{FLAG[stay.country] ?? "🌍"}</span>
+                  <span className="text-base w-6 text-center shrink-0"><Flag country={stay.country} region={stay.region} /></span>
                   <div className="flex-1 min-w-0">
                     <span className="text-sm text-[#D4D4D8] font-medium group-hover:text-[#FAFAFA] transition-colors">{stay.city}</span>
                     <span className="text-xs text-[#52525B] ml-2">{stay.country}</span>

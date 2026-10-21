@@ -20,7 +20,8 @@ GET    /companions/activity/{id}, /companions/trip/{start}/{end}  — who it was
 GET    /people               — everyone, with days together this year / all time (for search)
 GET    /people/{id}          — one person for a year (?year=): calendar, frequency, what you do together
 GET    /planned-trips        — trips ahead (POST to plan one; PATCH / DELETE /planned-trips/{id})
-GET    /calendar/marks       — ?month=YYYY-MM: trips, events, achievements, birthdays per day (day picker)
+GET    /calendar/marks       — ?month=YYYY-MM[&plan=1]: trips, events, achievements, birthdays per day
+                               (+ tasks, notes, goal deadlines with plan=1 — Plan → Calendar)
 GET    /birthdays            — everyone with a birthday, soonest first
 GET    /agenda               — the Today strip: overdue / today / coming up / notes / birthdays / goals
 """
@@ -419,11 +420,11 @@ def put_trip_with(start: str, end: str, body: WithIn, conn: DB):
 
 
 @router.get("/calendar/marks")
-def calendar_marks(conn: DB, month: str = Query(..., pattern=r"^\d{4}-\d{2}$")):
+def calendar_marks(conn: DB, month: str = Query(..., pattern=r"^\d{4}-\d{2}$"), plan: bool = Query(False)):
     y, m = int(month[:4]), int(month[5:])
     if not 1 <= m <= 12:
         raise HTTPException(status_code=422, detail="month must be YYYY-MM")
-    return calendar_mod.month_marks(conn, y, m)
+    return calendar_mod.month_marks(conn, y, m, plan)
 
 
 @router.get("/birthdays", response_model=list[BirthdayOut])

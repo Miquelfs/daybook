@@ -409,6 +409,14 @@ class CalendarMarksTest(unittest.TestCase):
         self.assertEqual(kinds, {"2026-04-01": ["trip"], "2026-04-02": ["event"], "2026-04-03": ["logged"],
                                  "2026-04-19": ["achievement"], "2026-04-25": ["birthday"]})
         self.assertEqual(m["2026-04-01"][0]["label"], "Lisbon")
+        c.execute("INSERT INTO tasks (title, due_date) VALUES ('Renew DNI', '2026-04-10')")
+        c.execute("INSERT INTO tasks (title, due_date, done_at) VALUES ('done', '2026-04-11', '2026-04-11')")
+        c.execute("INSERT INTO goals (title, deadline) VALUES ('AI Trading', '2026-04-30')")
+        self.assertNotIn("2026-04-10", month_marks(c, 2026, 4))                 # day picker: no tasks
+        p = month_marks(c, 2026, 4, plan=True)
+        self.assertEqual([x["kind"] for x in p["2026-04-10"]], ["task"])
+        self.assertNotIn("2026-04-11", p)
+        self.assertEqual(p["2026-04-30"][0]["kind"], "deadline")
 
 
 class BirthdayTest(unittest.TestCase):

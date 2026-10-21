@@ -306,4 +306,4 @@ export const plansApi = {
 };
 
 /** Everything plan-related a mutation can change — invalidate these together. */
-export const PLAN_KEYS = [["agenda"], ["goals"], ["tasks"], ["birthdays"], ["area-plan"], ["habits"], ["habit"], ["habit-tags"], ["people"], ["person"], ["planned-trips"]] as const;
+export const PLAN_KEYS = [["agenda"], ["goals"], ["tasks"], ["birthdays"], ["area-plan"], ["habits"], ["habit"], ["habit-tags"], ["people"], ["person"], ["planned-trips"], ["plan-calendar"], ["calendar-marks"]] as const;

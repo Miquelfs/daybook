@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { TripCard } from "@/components/TripCard";
 import type { Trip } from "@/lib/api";
+import { Flag } from "@/components/Flag";
 
 /**
  * Trips grouped by year with collapsible sections, so every trip since the
@@ -14,11 +15,9 @@ import type { Trip } from "@/lib/api";
  */
 export function TripYears({
   groups,
-  flags,
   filtered,
 }: {
   groups: { year: string; trips: Trip[] }[];
-  flags: Record<string, string>;
   filtered: boolean;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
@@ -48,7 +47,7 @@ export function TripYears({
             {isOpen && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {trips.map((t) => (
-                  <TripCard key={t.id} trip={t} flag={flags[t.primary_country ?? ""] ?? "🌍"} />
+                  <TripCard key={t.id} trip={t} flag={<Flag country={t.primary_country} region={t.region} />} />
                 ))}
               </div>
             )}

@@ -12,13 +12,17 @@ import { Sheet, Field, inputCls } from "./Sheet";
 import { Block, Panel } from "./ui";
 
 /** Just enough to plan a trip here: name, where, when, who. Not a travel planner. */
-function PlannedTripSheet({ trip, onClose }: { trip?: PlannedTrip; onClose: () => void }) {
+export function PlannedTripSheet({ trip, defaultStart, onClose }: {
+  trip?: PlannedTrip;
+  defaultStart?: string;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const [f, setF] = useState({
     name: trip?.name ?? "",
     destination: trip?.destination ?? "",
-    start_date: trip?.start_date ?? "",
-    end_date: trip?.end_date ?? "",
+    start_date: trip?.start_date ?? defaultStart ?? "",
+    end_date: trip?.end_date ?? defaultStart ?? "",
     notes: trip?.notes ?? "",
   });
   const [people, setPeople] = useState<Contact[]>((trip?.with ?? []) as Contact[]);

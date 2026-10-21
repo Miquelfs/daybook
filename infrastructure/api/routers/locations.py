@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from domains.locations.country_names import to_english
 from domains.locations.flight_filter import cleanup_flight_points, is_airborne
 from domains.locations.locations_query import tracks_for_date
+from domains.locations.regions import catalan_cities, region_for
 from domains.locations.tz_lookup import local_date_for_point
 
 router = APIRouter(prefix="/locations", tags=["locations"])
@@ -589,6 +590,7 @@ def get_city_timeline(year: int | None = None):
         con.close()
         return []
 
+    catalan = catalan_cities(con)
     # Collapse consecutive days in same city into stays
     stays: list[dict] = []
     for r in rows:
@@ -597,7 +599,8 @@ def get_city_timeline(year: int | None = None):
             stays[-1]["last_date"] = date
             stays[-1]["days"] += 1
         else:
-            stays.append({"city": city, "country": country, "first_date": date, "last_date": date, "days": 1})
+            stays.append({"city": city, "country": country, "first_date": date, "last_date": date, "days": 1,
+                          "region": region_for(country, [city], catalan)})
 
     con.close()
     return list(reversed(stays))
@@ -1524,12 +1527,22 @@ def list_trips(limit: int = 100, offset: int = 0, year: int | None = None):
     return {"trips": trips, "total": total}
 
 
+def _catalan() -> set[str]:
+    """Catalan city names (cached in domains.locations.regions)."""
+    loc = _conn()
+    try:
+        return catalan_cities(loc)
+    finally:
+        loc.close()
+
+
 def _trip_row_to_dict(r: sqlite3.Row, con: sqlite3.Connection) -> dict:
     t = dict(r)
     t["countries"] = [_en(c) for c in json.loads(t.pop("countries_json") or "[]")]
     t["cities"] = json.loads(t.pop("cities_json") or "[]")
     t["name"] = t["user_name"] or t["auto_name"]
     t["primary_country"] = _en(t["primary_country"])
+    t["region"] = region_for(t["primary_country"], t["cities"], _catalan())   # Catalonia → senyera
     n_nights = 1 + (
         datetime.fromisoformat(t["end_date"]) - datetime.fromisoformat(t["start_date"])
     ).days

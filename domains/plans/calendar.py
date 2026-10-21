@@ -6,6 +6,9 @@ Calendar marks — what makes a day stand out, for the day picker.
   achievement   a goal marked done that day, or a race day
   birthday      someone's birthday
   logged        you filled the day in (mood or notes) — shown brighter, not as a dot
+
+With plan=True (Plan → Calendar) also what's due: open 'task' / 'note' on its
+date and active goals' 'deadline'. Items carry an id so the UI can open them.
 """
 
 from __future__ import annotations
@@ -18,21 +21,21 @@ from domains.plans.agenda import birthday_on, parse_birthday
 from domains.plans.metrics import _has_column, _has_table
 
 
-def month_marks(conn: sqlite3.Connection, year: int, month: int) -> dict[str, list[dict]]:
+def month_marks(conn: sqlite3.Connection, year: int, month: int, plan: bool = False) -> dict[str, list[dict]]:
     """date → [{kind, label}] for every marked day in the month."""
     first = date(year, month, 1)
     last = date(year, month, calendar.monthrange(year, month)[1])
     m0, m1 = first.isoformat(), last.isoformat()
     marks: dict[str, list[dict]] = {}
 
-    def add(d: str, kind: str, label: str | None = None) -> None:
+    def add(d: str, kind: str, label: str | None = None, item_id=None) -> None:
         if m0 <= d <= m1:
-            marks.setdefault(d, []).append({"kind": kind, "label": label})
+            marks.setdefault(d, []).append({"kind": kind, "label": label, "id": item_id})
 
-    def span(start: str, end: str, kind: str, label: str | None) -> None:
+    def span(start: str, end: str, kind: str, label: str | None, item_id=None) -> None:
         d, e = max(date.fromisoformat(start), first), min(date.fromisoformat(end), last)
         while d <= e:
-            add(d.isoformat(), kind, label)
+            add(d.isoformat(), kind, label, item_id)
             d += timedelta(days=1)
 
     if _has_table(conn, "trips"):
@@ -42,10 +45,10 @@ def month_marks(conn: sqlite3.Connection, year: int, month: int) -> dict[str, li
                 WHERE hidden = 0 AND start_date <= ? AND {ret} >= ?""", (m1, m0)):
             span(s, e, "trip", name)
     if _has_table(conn, "planned_trips"):
-        for s, e, name in conn.execute("""
-                SELECT start_date, end_date, name FROM planned_trips
+        for pid, s, e, name in conn.execute("""
+                SELECT id, start_date, end_date, name FROM planned_trips
                 WHERE adopted_start IS NULL AND start_date <= ? AND end_date >= ?""", (m1, m0)):
-            span(s, e, "trip_planned", name)
+            span(s, e, "trip_planned", name, pid)
     if _has_table(conn, "life_events"):
         for d, label in conn.execute("SELECT event_date, label FROM life_events WHERE event_date BETWEEN ? AND ?", (m0, m1)):
             add(d, "event", label)
@@ -66,4 +69,13 @@ def month_marks(conn: sqlite3.Connection, year: int, month: int) -> dict[str, li
                 SELECT date FROM days WHERE date BETWEEN ? AND ?
                 AND (mood IS NOT NULL OR (notes IS NOT NULL AND notes != ''))""", (m0, m1)):
             add(d, "logged")
+    if plan and _has_table(conn, "tasks"):
+        for tid, d, title, kind in conn.execute("""
+                SELECT id, due_date, title, kind FROM tasks
+                WHERE done_at IS NULL AND due_date BETWEEN ? AND ?""", (m0, m1)):
+            add(d, "note" if kind == "note" else "task", title, tid)
+    if plan and _has_table(conn, "goals"):
+        for gid, d, title in conn.execute("""
+                SELECT id, deadline, title FROM goals WHERE status = 'active' AND deadline BETWEEN ? AND ?""", (m0, m1)):
+            add(d, "deadline", title, gid)
     return marks
