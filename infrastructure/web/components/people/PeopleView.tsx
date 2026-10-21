@@ -76,7 +76,7 @@ function PersonDetail({ id, goals, onBack, onMakeGoal, onEditGoal }: {
   if (!p) return <div className="h-64 rounded-2xl bg-[#18181B] animate-pulse" />;
   const diff = p.count - p.prev_same_period;
   const t = p.together;
-  const hasTogether = t.tags.length || t.sports.length || t.tennis || t.restaurants.length || t.trips.length;
+  const hasTogether = t.activities.length || t.tennis || t.restaurants.length || t.trips.length;
 
   return (
     <div className="space-y-8">
@@ -150,31 +150,55 @@ function PersonDetail({ id, goals, onBack, onMakeGoal, onEditGoal }: {
         <Panel className="p-4"><YearHeatmap dates={p.dates} year={year} /></Panel>
       </Block>
 
-      {hasTogether ? (
-        <Block title="Together" note="What the days with them hold.">
+      <Block title="Together" note={hasTogether ? "What you did with them — from trainings, trips and restaurants you marked." : undefined}>
+        {!hasTogether ? (
+          <div className="border border-dashed border-[#27272A] rounded-2xl px-5 py-6 text-center text-xs text-[#71717A]">
+            Mark them as <span className="text-[#A1A1AA]">With</span> on a training or a trip, or as a companion at a
+            restaurant — what you did together shows up here.
+          </div>
+        ) : (
           <Panel className="p-4 space-y-4">
-            {t.tags.length > 0 && (
+            {t.sports.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
-                {t.tags.map((x) => (
-                  <span key={x.slug} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-[#27272A] text-[#A1A1AA]">
-                    {x.icon && <span>{x.icon}</span>}{x.name}<span className="text-[#52525B] tabular-nums">{x.days}</span>
+                {t.sports.map((x) => (
+                  <span key={x.type} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-[#27272A] text-[#A1A1AA]">
+                    {pretty(x.type)}<span className="text-[#52525B] tabular-nums">×{x.count}</span>
                   </span>
                 ))}
               </div>
             )}
-            {(t.sports.length > 0 || t.tennis) && (
+            {t.activities.length > 0 && (
               <div className="space-y-1">
-                {t.sports.map((s) => (
-                  <p key={s.type} className="flex justify-between text-sm"><span className="text-[#A1A1AA]">{pretty(s.type)}</span>
-                    <span className="text-[#52525B] tabular-nums">{s.days} {s.days === 1 ? "day" : "days"}</span></p>
+                <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Trainings</p>
+                {t.activities.map((a) => (
+                  <Link key={a.id} href={`/activity/${encodeURIComponent(a.id)}`} className="flex justify-between gap-3 text-sm hover:opacity-80">
+                    <span className="text-[#A1A1AA] truncate">
+                      {a.name ?? pretty(a.type ?? "Activity")}
+                      {a.distance_m ? <span className="text-[#52525B]"> · {(a.distance_m / 1000).toFixed(1)} km</span> : null}
+                    </span>
+                    <span className="text-[#52525B] tabular-nums shrink-0">{format(parseISO(a.date), "d MMM yy")}</span>
+                  </Link>
                 ))}
-                {t.tennis && (
-                  <p className="text-xs text-[#71717A]">
-                    Tennis: {t.tennis.sessions} sessions
-                    {t.tennis.as_partner ? ` · ${t.tennis.as_partner} as partners` : ""}
-                    {t.tennis.as_opponent ? ` · ${t.tennis.as_opponent} against` : ""}
-                  </p>
-                )}
+              </div>
+            )}
+            {t.tennis && (
+              <p className="text-sm text-[#A1A1AA]">
+                Tennis · {t.tennis.sessions} sessions
+                <span className="text-[#52525B]">
+                  {t.tennis.as_partner ? ` · ${t.tennis.as_partner} as partners` : ""}
+                  {t.tennis.as_opponent ? ` · ${t.tennis.as_opponent} against` : ""}
+                </span>
+              </p>
+            )}
+            {t.trips.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Trips</p>
+                {t.trips.map((x) => (
+                  <Link key={x.id} href={`/explore/trip/${x.start}/${x.end}`} className="flex justify-between gap-3 text-sm hover:opacity-80">
+                    <span className="text-[#A1A1AA] truncate">{x.name ?? "Trip"}</span>
+                    <span className="text-[#52525B] tabular-nums shrink-0">{format(parseISO(x.start), "d MMM yy")}</span>
+                  </Link>
+                ))}
               </div>
             )}
             {t.restaurants.length > 0 && (
@@ -188,20 +212,9 @@ function PersonDetail({ id, goals, onBack, onMakeGoal, onEditGoal }: {
                 ))}
               </div>
             )}
-            {t.trips.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Trips</p>
-                {t.trips.map((x) => (
-                  <Link key={x.id} href={`/day/${x.start}`} className="flex justify-between gap-3 text-sm hover:opacity-80">
-                    <span className="text-[#A1A1AA] truncate">{x.name ?? "Trip"}</span>
-                    <span className="text-[#52525B] tabular-nums shrink-0">{format(parseISO(x.start), "d MMM yy")}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
           </Panel>
-        </Block>
-      ) : null}
+        )}
+      </Block>
 
       <Block title="By month">
         <Panel className="p-4"><MonthBars counts={p.by_month} year={year} /></Panel>

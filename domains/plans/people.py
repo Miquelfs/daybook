@@ -3,8 +3,9 @@ People — who you spend your days with, from day_companions (logged on Today).
 
   directory()  everyone, with days together this year / all time and last seen — for search
   profile()    one person: days per year, a year calendar, frequency, longest run,
-               weekdays, birthday, and what you do together (tags on those days,
-               sports, tennis, restaurants, trips)
+               weekdays, birthday, and what you did together — only what was
+               linked explicitly: trainings marked "with", tennis sessions,
+               trips marked "with", restaurants with them as companions
 """
 
 from __future__ import annotations
@@ -95,37 +96,29 @@ def profile(conn: sqlite3.Connection, contact_id: int, year: int, today: date) -
         "days_since": (today - date.fromisoformat(dates[-1])).days if dates else None,
         "longest_run": longest_run,
         "typical_gap": sorted(gaps)[len(gaps) // 2] if gaps else None,     # median days between
-        "together": _together(conn, c["name"], contact_id, dates),
+        "together": _together(conn, c["name"], contact_id),
         "recent": list(reversed(dates[-8:])),
     }
 
 
-def _together(conn: sqlite3.Connection, name: str, contact_id: int, dates: list[str]) -> dict:
-    """What you do on the days you're together."""
-    out: dict = {"tags": [], "sports": [], "tennis": None, "restaurants": [], "trips": []}
-    if not dates:
-        return out
-    ph = ",".join("?" * len(dates))
+def _together(conn: sqlite3.Connection, name: str, contact_id: int) -> dict:
+    """What you did together — explicit links only (a day together isn't 'did X together')."""
+    out: dict = {"activities": [], "sports": [], "tennis": None, "restaurants": [], "trips": []}
 
-    if _has_table(conn, "day_tags"):
-        icon = "t.icon" if _has_column(conn, "tags", "icon") else "NULL"
-        out["tags"] = [dict(r) for r in conn.execute(f"""
-            SELECT t.slug, t.name, {icon} AS icon, COUNT(DISTINCT d.date) AS days
-            FROM day_tags d JOIN tags t ON t.id = d.tag_id
-            WHERE d.date IN ({ph}) GROUP BY t.id ORDER BY days DESC LIMIT 8""", dates)]
-
-    if _has_table(conn, "activities"):
-        out["sports"] = [{"type": r[0], "days": r[1]} for r in conn.execute(f"""
-            SELECT activity_type, COUNT(DISTINCT date) FROM activities
-            WHERE date IN ({ph}) AND activity_type IS NOT NULL
-            GROUP BY activity_type ORDER BY 2 DESC LIMIT 5""", dates)]
+    if _has_table(conn, "activity_companions") and _has_table(conn, "activities"):
+        rows = conn.execute("""
+            SELECT a.id, a.date, a.activity_type, a.name, a.distance_meters
+            FROM activity_companions ac JOIN activities a ON a.id = ac.activity_id
+            WHERE ac.contact_id = ? ORDER BY a.date DESC""", (contact_id,)).fetchall()
+        out["activities"] = [{"id": r[0], "date": r[1], "type": r[2], "name": r[3], "distance_m": r[4]} for r in rows[:8]]
+        out["sports"] = [{"type": t, "count": n} for t, n in Counter(r[2] for r in rows if r[2]).most_common(5)]
 
     if _has_table(conn, "tennis_session_player"):
         r = conn.execute("""
-            SELECT COUNT(DISTINCT p.activity_id),
-                   SUM(CASE WHEN p.role='partner' THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN p.role='opponent' THEN 1 ELSE 0 END)
-            FROM tennis_session_player p WHERE p.contact_id=?""", (contact_id,)).fetchone()
+            SELECT COUNT(DISTINCT activity_id),
+                   SUM(CASE WHEN role='partner' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN role='opponent' THEN 1 ELSE 0 END)
+            FROM tennis_session_player WHERE contact_id=?""", (contact_id,)).fetchone()
         if r and r[0]:
             out["tennis"] = {"sessions": r[0], "as_partner": r[1] or 0, "as_opponent": r[2] or 0}
 
@@ -136,15 +129,9 @@ def _together(conn: sqlite3.Connection, name: str, contact_id: int, dates: list[
             WHERE date_visited IS NOT NULL AND companions LIKE ?
             ORDER BY date_visited DESC LIMIT 6""", (f"%{first}%",))]
 
-    if _has_table(conn, "trips"):
-        trips = []
-        for t in conn.execute("""
-            SELECT id, start_date, end_date, user_name, auto_name, primary_country FROM trips
-            WHERE hidden = 0 ORDER BY start_date DESC"""):
-            if any(t["start_date"] <= d <= t["end_date"] for d in dates):
-                trips.append({"id": t["id"], "name": t["user_name"] or t["auto_name"],
-                              "start": t["start_date"], "end": t["end_date"]})
-            if len(trips) >= 6:
-                break
-        out["trips"] = trips
+    if _has_table(conn, "trip_companions") and _has_table(conn, "trips"):
+        out["trips"] = [{"id": r[0], "name": r[1], "start": r[2], "end": r[3]} for r in conn.execute("""
+            SELECT t.id, COALESCE(t.user_name, t.auto_name), t.start_date, t.end_date
+            FROM trip_companions tc JOIN trips t ON t.start_date = tc.start_date AND t.end_date = tc.end_date
+            WHERE tc.contact_id = ? ORDER BY t.start_date DESC LIMIT 6""", (contact_id,))]
     return out

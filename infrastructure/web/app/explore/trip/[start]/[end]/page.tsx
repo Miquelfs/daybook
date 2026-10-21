@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { TripJourney } from "@/components/TripJourney";
 import { TripExpenses } from "@/components/TripExpenses";
 import { SectionLabel } from "@/components/MorningBrief";
+import { WithPicker } from "@/components/plan/WithPicker";
 import { localISODate } from "@/lib/dates";
 
 interface Props {
@@ -75,6 +76,11 @@ export default async function TripDetailPage({ params }: Props) {
       </div>
 
       <div className="flex flex-col gap-10">
+        <section>
+          <SectionLabel>With</SectionLabel>
+          <WithPicker trip={{ start: trip.start_date, end: trip.end_date }} />
+        </section>
+
         {/* Interactive day-by-day journey */}
         <section>
           <SectionLabel>Where I went</SectionLabel>

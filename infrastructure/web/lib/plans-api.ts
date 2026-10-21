@@ -110,6 +110,9 @@ export interface AreaPlan {
   goals: Goal[];
 }
 
+/** Why a tag is a tracked habit. */
+export type HabitWhy = "pinned" | "goal" | "experiment";
+
 export interface Habit {
   id: number;
   slug: string;
@@ -117,15 +120,30 @@ export interface Habit {
   icon: string | null;
   category: string | null;
   is_negative: boolean;
+  why: HabitWhy[];
   week: { date: string; done: boolean }[];   // last 7 days, oldest first
   rate_30: number;                           // % of the last 30 days on target (clean days for negative)
   count_30: number;
   this_year: number;
   total: number;
-  last: string;
+  last: string | null;
   streak_current: number;
   streak_best: number;
   streak_best_end: string | null;
+}
+
+/** Any tag, for Habits → Explore. */
+export interface TagSummary {
+  id: number;
+  slug: string;
+  name: string;
+  icon: string | null;
+  category: string | null;
+  is_negative: boolean;
+  total: number;
+  this_year: number;
+  last: string;
+  tracked: boolean;
 }
 
 export interface HabitDetail {
@@ -135,6 +153,7 @@ export interface HabitDetail {
   icon: string | null;
   category: string | null;
   is_negative: boolean;
+  why: HabitWhy[];
   year: number;
   years: number[];
   dates: string[];
@@ -188,15 +207,18 @@ export interface PersonProfile {
   days_since: number | null;
   longest_run: number;
   typical_gap: number | null;
+  /** Explicit links only — trainings / trips marked "with", tennis, restaurants. */
   together: {
-    tags: { slug: string; name: string; icon: string | null; days: number }[];
-    sports: { type: string; days: number }[];
+    activities: { id: string; date: string; type: string | null; name: string | null; distance_m: number | null }[];
+    sports: { type: string; count: number }[];
     tennis: { sessions: number; as_partner: number; as_opponent: number } | null;
     restaurants: { id: number; name: string; date_visited: string; city: string | null }[];
     trips: { id: number; name: string | null; start: string; end: string }[];
   };
   recent: string[];
 }
+
+export interface Companion { id: number; name: string; emoji: string | null; group_: string | null }
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -217,6 +239,14 @@ export const plansApi = {
   birthdays: () => req<Birthday[]>("GET", "/api/birthdays"),
 
   habits: () => req<Habit[]>("GET", "/api/habits"),
+  exploreTags: () => req<TagSummary[]>("GET", "/api/habits/explore"),
+  track: (slug: string, on: boolean) => req<void>(on ? "POST" : "DELETE", `/api/habits/${encodeURIComponent(slug)}/track`),
+  activityWith: (id: string) => req<Companion[]>("GET", `/api/companions/activity/${encodeURIComponent(id)}`),
+  setActivityWith: (id: string, ids: number[]) =>
+    req<Companion[]>("PUT", `/api/companions/activity/${encodeURIComponent(id)}`, { contact_ids: ids }),
+  tripWith: (start: string, end: string) => req<Companion[]>("GET", `/api/companions/trip/${start}/${end}`),
+  setTripWith: (start: string, end: string, ids: number[]) =>
+    req<Companion[]>("PUT", `/api/companions/trip/${start}/${end}`, { contact_ids: ids }),
   habit: (slug: string, year: number) => req<HabitDetail>("GET", `/api/habits/${encodeURIComponent(slug)}?year=${year}`),
   people: () => req<Person[]>("GET", "/api/people"),
   person: (id: number, year: number) => req<PersonProfile>("GET", `/api/people/${id}?year=${year}`),
@@ -238,4 +268,4 @@ export const plansApi = {
 };
 
 /** Everything plan-related a mutation can change — invalidate these together. */
-export const PLAN_KEYS = [["agenda"], ["goals"], ["tasks"], ["birthdays"], ["area-plan"], ["habits"], ["habit"], ["people"], ["person"]] as const;
+export const PLAN_KEYS = [["agenda"], ["goals"], ["tasks"], ["birthdays"], ["area-plan"], ["habits"], ["habit"], ["habit-tags"], ["people"], ["person"]] as const;

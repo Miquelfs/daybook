@@ -9,6 +9,11 @@ Plan ahead — the future side of the daybook.
                     `repeat` re-arms the task when it's done (the done occurrence
                     is kept as its own row, so it shows on the day it was done).
   contacts.birthday 'YYYY-MM-DD', or '--MM-DD' when the year is unknown.
+  tracked_habits    tags you chose to track as habits (goals / experiments track theirs too).
+  activity_companions / trip_companions
+                    who a training or a trip was *with* — explicit, so People can say
+                    what you actually did together. Trips are keyed by their dates
+                    because the nightly trip detection rebuilds the rows.
 
 Idempotent. Runs on API startup; manual: python -m infrastructure.db.migrate_plans
 """
@@ -53,6 +58,26 @@ def migrate(conn) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_tasks_due  ON tasks(due_date);
         CREATE INDEX IF NOT EXISTS idx_tasks_done ON tasks(done_at);
+
+        CREATE TABLE IF NOT EXISTS tracked_habits (
+            tag_id     INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS activity_companions (
+            activity_id TEXT    NOT NULL,
+            contact_id  INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+            PRIMARY KEY (activity_id, contact_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_activity_companions_contact ON activity_companions(contact_id);
+
+        CREATE TABLE IF NOT EXISTS trip_companions (
+            start_date TEXT    NOT NULL,
+            end_date   TEXT    NOT NULL,
+            contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+            PRIMARY KEY (start_date, end_date, contact_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_trip_companions_contact ON trip_companions(contact_id);
     """)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(contacts)")}
     if cols and "birthday" not in cols:

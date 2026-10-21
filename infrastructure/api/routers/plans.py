@@ -12,8 +12,11 @@ PATCH  /tasks/{id}           — edit; done_at=null re-opens
 POST   /tasks/{id}/complete  — done (a repeating task re-arms at its next date)
 DELETE /tasks/{id}
 GET    /plan/area/{area}     — open tasks, notes and this year's goals for one page (money, health, …)
-GET    /habits               — every recently used tag as a habit: last 7 days, streaks, 30-day rate
-GET    /habits/{slug}        — one habit for a year (?year=): calendar, months, weekdays, streaks
+GET    /habits               — tracked habits (pinned · goal · experiment): last 7 days, streaks, 30-day rate
+GET    /habits/explore       — every tag ever logged, to look back at any of them
+POST   /habits/{slug}/track  — pin a tag as a habit (DELETE unpins)
+GET    /habits/{slug}        — one tag for a year (?year=): calendar, months, weekdays, streaks
+GET    /companions/activity/{id}, /companions/trip/{start}/{end}  — who it was with (PUT {contact_ids})
 GET    /people               — everyone, with days together this year / all time (for search)
 GET    /people/{id}          — one person for a year (?year=): calendar, frequency, what you do together
 GET    /birthdays            — everyone with a birthday, soonest first
@@ -27,8 +30,10 @@ from pathlib import Path
 from typing import Annotated, Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from domains.plans import agenda as agenda_mod
+from domains.plans import companions as companions_mod
 from domains.plans import goals as goals_mod
 from domains.plans import habits as habits_mod
 from domains.plans import people as people_mod
@@ -291,6 +296,23 @@ def list_habits(conn: DB):
     return habits_mod.overview(conn, date.today())
 
 
+@router.get("/habits/explore")
+def explore_habits(conn: DB):
+    return habits_mod.explore(conn, date.today())
+
+
+@router.post("/habits/{slug}/track", status_code=204)
+def track_habit(slug: str, conn: DB):
+    if not habits_mod.set_tracked(conn, slug, True):
+        raise HTTPException(status_code=404, detail="Tag not found")
+
+
+@router.delete("/habits/{slug}/track", status_code=204)
+def untrack_habit(slug: str, conn: DB):
+    if not habits_mod.set_tracked(conn, slug, False):
+        raise HTTPException(status_code=404, detail="Tag not found")
+
+
 @router.get("/habits/{slug}")
 def habit_detail(slug: str, conn: DB, year: int | None = Query(None)):
     today = date.today()
@@ -312,6 +334,33 @@ def person(contact_id: int, conn: DB, year: int | None = Query(None)):
     if out is None:
         raise HTTPException(status_code=404, detail="Person not found")
     return out
+
+
+class WithIn(BaseModel):
+    contact_ids: list[int]
+
+
+@router.get("/companions/activity/{activity_id}")
+def get_activity_with(activity_id: str, conn: DB):
+    return companions_mod.activity_with(conn, activity_id)
+
+
+@router.put("/companions/activity/{activity_id}")
+def put_activity_with(activity_id: str, body: WithIn, conn: DB):
+    out = companions_mod.set_activity_with(conn, activity_id, body.contact_ids)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    return out
+
+
+@router.get("/companions/trip/{start}/{end}")
+def get_trip_with(start: str, end: str, conn: DB):
+    return companions_mod.trip_with(conn, _iso(start, "start"), _iso(end, "end"))
+
+
+@router.put("/companions/trip/{start}/{end}")
+def put_trip_with(start: str, end: str, body: WithIn, conn: DB):
+    return companions_mod.set_trip_with(conn, _iso(start, "start"), _iso(end, "end"), body.contact_ids)
 
 
 @router.get("/birthdays", response_model=list[BirthdayOut])

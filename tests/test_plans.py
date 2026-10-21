@@ -6,6 +6,7 @@ from datetime import date
 
 from domains.plans import agenda as ag
 from domains.plans import goals as gl
+from domains.plans import companions as cm
 from domains.plans import habits as hb
 from domains.plans import people as pp
 from domains.plans.metrics import Ctx, catalog, runs
@@ -20,7 +21,7 @@ def db():
     c.executescript("""
         CREATE TABLE contacts(id INTEGER PRIMARY KEY, name TEXT UNIQUE, emoji TEXT, group_ TEXT);
         CREATE TABLE day_companions(date TEXT, contact_id INTEGER);
-        CREATE TABLE activities(id TEXT, date TEXT, source TEXT, strava_id TEXT, activity_type TEXT,
+        CREATE TABLE activities(id TEXT, date TEXT, source TEXT, strava_id TEXT, activity_type TEXT, name TEXT,
                                 distance_meters REAL, moving_time_seconds INTEGER, duration_seconds INTEGER,
                                 elevation_gain_meters REAL);
         CREATE TABLE sleep(date TEXT PRIMARY KEY, duration_seconds INTEGER);
@@ -260,7 +261,23 @@ class HabitsTest(unittest.TestCase):
         s = hb.streaks(["2026-06-20"], True, TODAY)
         self.assertEqual(s["current"], 12)
 
+    def test_only_tracked_tags_are_habits(self):
+        self.c.execute("INSERT INTO tags (id, slug, name) VALUES (3, 'late_night', 'Late night')")
+        self.c.execute("INSERT INTO day_tags VALUES ('2026-07-01', 3)")
+        self.assertEqual(hb.overview(self.c, TODAY), [])                  # nothing chosen yet
+        self.assertTrue(hb.set_tracked(self.c, "gym", True))
+        self.c.execute("INSERT INTO goals (title, start_date, metric, metric_param) VALUES ('less candy', '2026-01-01', 'tag_days', 'candy')")
+        o = hb.overview(self.c, TODAY)
+        self.assertEqual([(h["slug"], h["why"]) for h in o], [("gym", ["pinned"]), ("candy", ["goal"])])
+        explored = {t["slug"]: t["tracked"] for t in hb.explore(self.c, TODAY)}
+        self.assertEqual(explored, {"gym": True, "candy": True, "late_night": False})
+        hb.set_tracked(self.c, "gym", False)
+        self.assertEqual([h["slug"] for h in hb.overview(self.c, TODAY)], ["candy"])
+        self.assertFalse(hb.set_tracked(self.c, "nope", True))
+
     def test_overview(self):
+        hb.set_tracked(self.c, "gym", True)
+        hb.set_tracked(self.c, "candy", True)
         o = hb.overview(self.c, TODAY)
         self.assertEqual([h["slug"] for h in o], ["gym", "candy"])        # doing-habits first
         gym = o[0]
@@ -303,12 +320,30 @@ class PeopleTest(unittest.TestCase):
         self.assertEqual(p["by_month"][5], 3)
         self.assertEqual(p["typical_gap"], 28)            # median of 1, 1, 28, 31, 365
         t = p["together"]
-        self.assertEqual(t["tags"][0]["name"], "Outdoors")
-        self.assertEqual(t["sports"], [{"type": "tennis", "days": 1}])
+        self.assertNotIn("tags", t)                                         # a day together isn't "did X together"
+        self.assertEqual((t["activities"], t["sports"]), ([], []))
         self.assertEqual(t["tennis"]["as_partner"], 1)
         self.assertEqual([r["name"] for r in t["restaurants"]], ["Can Pep"])
-        self.assertEqual([x["name"] for x in t["trips"]], ["Lisbon"])
+        self.assertEqual(t["trips"], [])                                    # overlapping isn't enough — mark it
+        cm.set_trip_with(self.c, "2026-05-30", "2026-06-04", [1])
+        self.assertEqual([x["name"] for x in pp.profile(self.c, 1, 2026, TODAY)["together"]["trips"]], ["Lisbon"])
         self.assertIsNone(pp.profile(self.c, 99, 2026, TODAY))
+
+
+class CompanionsTest(unittest.TestCase):
+    def test_marking_a_training_logs_the_day_together(self):
+        c = db()
+        c.execute("INSERT INTO contacts (id, name) VALUES (1, 'Oriol'), (2, 'Pol')")
+        c.execute("INSERT INTO activities (id, date, source, activity_type, distance_meters) "
+                  "VALUES ('g1', '2026-06-10', 'garmin', 'cycling', 80000)")
+        out = cm.set_activity_with(c, "g1", [1, 2, 1])
+        self.assertEqual([x["name"] for x in out], ["Oriol", "Pol"])
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM day_companions WHERE date='2026-06-10'").fetchone()[0], 2)
+        cm.set_activity_with(c, "g1", [1])
+        self.assertEqual([x["name"] for x in cm.activity_with(c, "g1")], ["Oriol"])
+        t = pp.profile(c, 1, 2026, TODAY)["together"]
+        self.assertEqual((t["sports"], t["activities"][0]["id"]), ([{"type": "cycling", "count": 1}], "g1"))
+        self.assertIsNone(cm.set_activity_with(c, "nope", [1]))
 
 
 class BirthdayTest(unittest.TestCase):

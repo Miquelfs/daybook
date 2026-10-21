@@ -11,6 +11,7 @@ import { PlanLinkCard, LinkedPlanBar } from "@/components/activity/PlanLink";
 import { ActivityCharts } from "@/components/ActivityCharts";
 import { ActivityNotes } from "@/components/ActivityNotes";
 import { TennisSessionPanel } from "@/components/TennisSessionPanel";
+import { WithPicker } from "@/components/plan/WithPicker";
 import { ActivitySplitsChart } from "@/components/ActivitySplitsChart";
 import { BestEffortsCard, SameRouteCard } from "@/components/activity/EffortsCards";
 import { PlannedVsActual } from "@/components/PlannedVsActual";
@@ -417,6 +418,12 @@ export default async function ActivityPage({ params }: Props) {
           <TennisSessionPanel activityId={decodedId} initial={activity.tennis ?? null} />
         </section>
       )}
+
+      {/* Who it was with — feeds Plan → People */}
+      <section className="mb-8">
+        <SectionLabel>With</SectionLabel>
+        <WithPicker activityId={decodedId} />
+      </section>
 
       {/* Notes & rating */}
       <section className="mb-8">

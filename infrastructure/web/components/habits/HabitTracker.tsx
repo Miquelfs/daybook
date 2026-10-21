@@ -1,20 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
-import { ArrowLeft, Check, Flame, Target, X } from "lucide-react";
-import { plansApi, type Goal, type Habit } from "@/lib/plans-api";
+import { ArrowLeft, Check, ChevronRight, Flame, Pin, Search, Target, X } from "lucide-react";
+import { plansApi, type Goal, type Habit, type HabitWhy } from "@/lib/plans-api";
 import { tagsApi } from "@/lib/tags-api";
 import { localISODate } from "@/lib/dates";
 import { GoalRow } from "@/components/plan/GoalRow";
 import { ActionButton, Block, Panel, Pill } from "@/components/plan/ui";
+import { inputCls } from "@/components/plan/Sheet";
 import { MonthBars, Stat, WeekdayBars, YearHeatmap, YearSwitcher } from "@/components/plan/charts";
 
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
+const WHY: Record<HabitWhy, string> = { pinned: "Pinned", goal: "Goal", experiment: "Experiment" };
 
 function refreshAll(qc: ReturnType<typeof useQueryClient>, date?: string) {
-  for (const k of ["habits", "habit", "goals", "agenda", "area-plan"]) qc.invalidateQueries({ queryKey: [k] });
+  for (const k of ["habits", "habit", "habit-tags", "goals", "agenda", "area-plan"]) qc.invalidateQueries({ queryKey: [k] });
   if (date) qc.invalidateQueries({ queryKey: ["day-tags", date] });
 }
 
@@ -68,7 +71,10 @@ function HabitList({ habits, onOpen }: { habits: Habit[]; onOpen: (slug: string)
             <button onClick={() => onOpen(h.slug)} className="flex-1 min-w-0 flex items-center gap-2 text-left">
               <span className="w-6 text-lg text-center shrink-0">{h.icon ?? "•"}</span>
               <div className="min-w-0">
-                <p className="text-sm font-medium text-[#FAFAFA] truncate">{h.name}</p>
+                <p className="text-sm font-medium text-[#FAFAFA] truncate">
+                  {h.name}
+                  {!h.why.includes("pinned") && <span className="ml-1.5 text-[10px] text-[#52525B]">{WHY[h.why[0]]}</span>}
+                </p>
                 <p className="text-[11px] text-[#71717A] tabular-nums truncate">
                   {h.is_negative ? (
                     <>{h.streak_current}d clean · {h.rate_30}%</>
@@ -100,7 +106,13 @@ function HabitDetailView({ slug, goals, onBack, onMakeGoal, onEditGoal }: {
 }) {
   const qc = useQueryClient();
   const [year, setYear] = useState(new Date().getFullYear());
+  const [allDays, setAllDays] = useState(false);
   const { data: h } = useQuery({ queryKey: ["habit", slug, year], queryFn: () => plansApi.habit(slug, year) });
+
+  async function track(on: boolean) {
+    await plansApi.track(slug, on);
+    refreshAll(qc);
+  }
   const linked = goals.filter((g) => g.metric_param === slug);
 
   async function setDirection(negative: boolean) {
@@ -127,9 +139,17 @@ function HabitDetailView({ slug, goals, onBack, onMakeGoal, onEditGoal }: {
               {h.total} days logged{h.first ? ` since ${format(parseISO(h.first), "d MMM yyyy")}` : ""}
             </p>
           </div>
-          {linked.length === 0 && <ActionButton icon={Target} onClick={() => onMakeGoal(slug)}>Goal</ActionButton>}
         </div>
-        <div className="flex gap-1.5 mt-3">
+        <div className="flex flex-wrap items-center gap-1.5 mt-3">
+          {h.why.includes("pinned")
+            ? <Pill on onClick={() => track(false)}><Pin size={11} /> Tracking</Pill>
+            : <ActionButton icon={Pin} onClick={() => track(true)}>Track as habit</ActionButton>}
+          {linked.length === 0 && <ActionButton icon={Target} onClick={() => onMakeGoal(slug)}>Make it a goal</ActionButton>}
+          {h.why.filter((w) => w !== "pinned").map((w) => (
+            <span key={w} className="text-[11px] text-[#52525B]">tracked by its {WHY[w].toLowerCase()}</span>
+          ))}
+        </div>
+        <div className="flex gap-1.5 mt-2">
           <Pill on={!h.is_negative} onClick={() => setDirection(false)}>Do more</Pill>
           <Pill on={h.is_negative} onClick={() => setDirection(true)}>Do less — count clean days</Pill>
         </div>
@@ -169,13 +189,77 @@ function HabitDetailView({ slug, goals, onBack, onMakeGoal, onEditGoal }: {
       <Block title="By weekday">
         <Panel className="p-4"><WeekdayBars counts={h.by_weekday} /></Panel>
       </Block>
+
+      {h.dates.length > 0 && (
+        <Block title={`Every day · ${year}`} note={`${h.dates.length} ${h.dates.length === 1 ? "day" : "days"} — tap one to open it.`}>
+          <Panel className="px-4 py-1 divide-y divide-[#18181B]">
+            {[...h.dates].reverse().slice(0, allDays ? undefined : 10).map((d) => (
+              <Link key={d} href={`/day/${d}`} className="flex items-center justify-between py-2.5 text-sm hover:opacity-80">
+                <span className="text-[#A1A1AA]">{format(parseISO(d), "EEEE d MMM")}</span>
+                <ChevronRight size={14} className="text-[#3F3F46]" />
+              </Link>
+            ))}
+          </Panel>
+          {h.dates.length > 10 && (
+            <button onClick={() => setAllDays((v) => !v)} className="mt-2 text-xs text-[#52525B] hover:text-[#A1A1AA]">
+              {allDays ? "Show fewer" : `Show all ${h.dates.length}`}
+            </button>
+          )}
+        </Block>
+      )}
     </div>
   );
 }
 
+/** Every tag ever logged — search it, open it, see all its days. */
+function Explore({ onOpen }: { onOpen: (slug: string) => void }) {
+  const [q, setQ] = useState("");
+  const [all, setAll] = useState(false);
+  const { data: tags = [] } = useQuery({ queryKey: ["habit-tags"], queryFn: () => plansApi.exploreTags() });
+  const shown = useMemo(() => {
+    const n = q.trim().toLowerCase();
+    return n ? tags.filter((t) => t.name.toLowerCase().includes(n) || t.slug.includes(n)) : tags;
+  }, [tags, q]);
+  const visible = q || all ? shown : shown.slice(0, 10);
+  const year = new Date().getFullYear();
+
+  return (
+    <Block title="Explore" note="Every tag you've logged — open one to see all its days, its rhythm, or to track it.">
+      <div className="relative mb-2">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#52525B]" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tags — cooking, sauna, reading…"
+               className={`${inputCls} pl-9`} />
+      </div>
+      <Panel className="px-4 py-1 divide-y divide-[#18181B]">
+        {visible.map((t) => (
+          <button key={t.slug} onClick={() => onOpen(t.slug)} className="w-full flex items-center gap-3 py-2.5 text-left">
+            <span className="w-6 text-lg text-center shrink-0">{t.icon ?? "•"}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-[#FAFAFA] truncate">
+                {t.name}
+                {t.tracked && <Pin size={10} className="inline ml-1.5 -mt-0.5 text-[#F59E0B]" aria-label="Tracked" />}
+              </p>
+              <p className="text-[11px] text-[#52525B]">
+                {t.this_year} in {year} · last {format(parseISO(t.last), "d MMM yy")}
+              </p>
+            </div>
+            <span className="text-sm font-semibold tabular-nums text-[#A1A1AA]">{t.total}</span>
+          </button>
+        ))}
+        {visible.length === 0 && <p className="text-xs text-[#52525B] py-4 text-center">No tag matches “{q}”.</p>}
+      </Panel>
+      {!q && shown.length > 10 && (
+        <button onClick={() => setAll((v) => !v)} className="mt-2 text-xs text-[#52525B] hover:text-[#A1A1AA]">
+          {all ? "Show fewer" : `Show all ${shown.length} tags`}
+        </button>
+      )}
+    </Block>
+  );
+}
+
 /**
- * The habit tracker: every tag you've used lately, with the last seven days
- * tappable, its streak and how often you've done it. Open one for its year.
+ * Habits: the ones you chose to work on (pinned, a goal or an experiment) with
+ * the last seven days tappable — and Explore for every other tag you've logged.
  */
 export function HabitTracker({ onMakeGoal, onEditGoal }: {
   onMakeGoal: (slug: string) => void;
@@ -197,24 +281,19 @@ export function HabitTracker({ onMakeGoal, onEditGoal }: {
 
   return (
     <div className="space-y-8">
-      {habitGoals.length > 0 && (
-        <Block title="Habit goals">
-          <Panel className="px-4 py-3 divide-y divide-[#18181B]">
-            {habitGoals.map((g) => <GoalRow key={g.id} goal={g} onClick={() => onEditGoal(g)} />)}
-          </Panel>
+      {isLoading && <div className="h-40 rounded-2xl bg-[#18181B] animate-pulse" />}
+
+      {!isLoading && habits.length === 0 && (
+        <Block title="Tracking">
+          <div className="border border-dashed border-[#27272A] rounded-2xl px-6 py-8 text-center space-y-1">
+            <p className="text-sm text-[#A1A1AA]">No habits yet</p>
+            <p className="text-xs text-[#52525B]">Open a tag below and tap <span className="text-[#A1A1AA]">Track as habit</span> — or give it a goal.</p>
+          </div>
         </Block>
       )}
 
-      {isLoading && <div className="h-64 rounded-2xl bg-[#18181B] animate-pulse" />}
-
-      {!isLoading && habits.length === 0 && (
-        <div className="border border-dashed border-[#27272A] rounded-2xl px-6 py-10 text-center text-sm text-[#71717A]">
-          Tag your days on Today — every tag becomes a habit here.
-        </div>
-      )}
-
       {doing.length > 0 && (
-        <Block title="Doing" note="Tap a day to log it. Open a habit for its year, streaks and goal.">
+        <Block title="Doing" note="Tap a day to log it. Open a habit for its year and streaks.">
           <HabitList habits={doing} onOpen={setOpen} />
         </Block>
       )}
@@ -223,6 +302,16 @@ export function HabitTracker({ onMakeGoal, onEditGoal }: {
           <HabitList habits={cutting} onOpen={setOpen} />
         </Block>
       )}
+
+      {habitGoals.length > 0 && (
+        <Block title="Habit goals">
+          <Panel className="px-4 py-3 divide-y divide-[#18181B]">
+            {habitGoals.map((g) => <GoalRow key={g.id} goal={g} onClick={() => onEditGoal(g)} />)}
+          </Panel>
+        </Block>
+      )}
+
+      <Explore onOpen={setOpen} />
     </div>
   );
 }
