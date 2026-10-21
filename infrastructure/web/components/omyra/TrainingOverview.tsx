@@ -245,12 +245,20 @@ function GoalFitness({ fitness }: { fitness: number }) {
         <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.max(0, proj)}%`, background: "var(--viz-i2)", opacity: 0.5 }} />
         <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${g.pct}%`, background: "var(--viz-i4)" }} />
       </div>
-      <p className="text-xs text-[#A1A1AA] mt-2">
-        <span className={st.cls}>{st.text}</span>
-        {g.status !== "there" && <> · needs +{g.needed_ramp_per_week}/week over {Math.max(1, g.weeks_to_race - 2)} weeks of build;
-          last 4 weeks {L.ramp_per_week >= 0 ? "+" : ""}{L.ramp_per_week}/week → ~{g.projected_fitness} by race day.</>}
-        {" "}<span className="text-[#71717A]">Keep the build under +{g.safe_ramp}/week.</span>
-      </p>
+      <p className="text-sm mt-2"><span className={st.cls}>{st.text}</span></p>
+      {g.status !== "there" ? (
+        <p className="text-xs text-[#A1A1AA] mt-1 leading-relaxed">
+          To reach ~{g.target_fitness} you need <b className="text-[#FAFAFA]">+{g.needed_ramp_per_week} fitness a week</b> for
+          the next {Math.max(1, g.weeks_to_race - 2)} weeks, then a 2-week taper.
+          {" "}Last 4 weeks: {L.ramp_per_week >= 0 ? "+" : ""}{L.ramp_per_week}/week
+          {g.projected_fitness < g.target_fitness
+            ? <> — if that pace simply continued you&apos;d arrive at ~{g.projected_fitness}, so the build needs to come from the plan&apos;s upcoming weeks.</>
+            : <> — keep that up and you arrive at ~{g.projected_fitness}.</>}
+          {" "}<span className="text-[#71717A]">Stay under +{g.safe_ramp}/week to avoid overload.</span>
+        </p>
+      ) : (
+        <p className="text-xs text-[#A1A1AA] mt-1">Hold it there and arrive fresh — the taper does the rest.</p>
+      )}
     </div>
   );
 }
