@@ -4,7 +4,10 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
-import { Plus, CalendarPlus, Copy, Check, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Plus, Check, ChevronDown, ChevronUp, Target, ListChecks, StickyNote, Cake, Sun,
+  type LucideIcon,
+} from "lucide-react";
 import { api, type Contact } from "@/lib/api";
 import { plansApi, type Goal, type Task, type TaskKind } from "@/lib/plans-api";
 import { localISODate } from "@/lib/dates";
@@ -18,12 +21,22 @@ import { inputCls } from "@/components/plan/Sheet";
 import { AREA_LIST, area as areaOf, tint } from "@/components/plan/areas";
 
 type Tab = "goals" | "tasks" | "notes" | "people";
-const TABS: { id: Tab; label: string; emoji: string }[] = [
-  { id: "goals", label: "Goals", emoji: "🎯" },
-  { id: "tasks", label: "Tasks", emoji: "✅" },
-  { id: "notes", label: "Notes", emoji: "📝" },
-  { id: "people", label: "People", emoji: "🎂" },
+const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
+  { id: "goals", label: "Goals", icon: Target },
+  { id: "tasks", label: "Tasks", icon: ListChecks },
+  { id: "notes", label: "Notes", icon: StickyNote },
+  { id: "people", label: "People", icon: Cake },
 ];
+
+function Empty({ icon: Icon, title, sub }: { icon: LucideIcon; title: string; sub?: string }) {
+  return (
+    <div className="text-center py-12 space-y-2">
+      <Icon size={28} strokeWidth={1.5} className="mx-auto text-[#52525B]" />
+      <p className="text-sm text-[#A1A1AA]">{title}</p>
+      {sub && <p className="text-xs text-[#52525B]">{sub}</p>}
+    </div>
+  );
+}
 
 function AddButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
@@ -45,13 +58,15 @@ function GroupTitle({ children, color }: { children: React.ReactNode; color?: st
 
 // ── Summary tiles ────────────────────────────────────────────────────────────
 
-function Tile({ emoji, label, value, sub, color, onClick }: {
-  emoji: string; label: string; value: React.ReactNode; sub?: React.ReactNode; color: string; onClick: () => void;
+function Tile({ icon: Icon, label, value, sub, color, onClick }: {
+  icon: LucideIcon; label: string; value: React.ReactNode; sub?: React.ReactNode; color: string; onClick: () => void;
 }) {
   return (
     <button onClick={onClick} className="text-left rounded-2xl p-3 min-w-0 transition-opacity hover:opacity-90"
             style={{ background: tint(color, 0.13) }}>
-      <p className="text-[11px] text-[#71717A] truncate">{emoji} {label}</p>
+      <p className="flex items-center gap-1.5 text-[11px] text-[#71717A] truncate">
+        <Icon size={12} strokeWidth={2} style={{ color }} /> {label}
+      </p>
       <p className="text-lg font-semibold text-[#FAFAFA] tabular-nums mt-0.5 truncate">{value}</p>
       {sub && <p className="text-[11px] text-[#71717A] truncate">{sub}</p>}
     </button>
@@ -69,15 +84,15 @@ function Summary({ today, go }: { today: string; go: (t: Tab) => void }) {
 
   return (
     <div className="grid grid-cols-3 gap-2">
-      <Tile emoji="🎯" label="Goals" color="#059669" onClick={() => go("goals")}
+      <Tile icon={Target} label="Goals" color="#059669" onClick={() => go("goals")}
             value={a ? <>{a.goals.on_track}<span className="text-[#71717A] text-sm">/{a.goals.total}</span></> : "–"}
             sub="on track" />
-      <Tile emoji="✅" label="Tasks" color={overdue ? "#E11D48" : "#2563EB"} onClick={() => go("tasks")}
+      <Tile icon={ListChecks} label="Tasks" color={overdue ? "#E11D48" : "#2563EB"} onClick={() => go("tasks")}
             value={open.length}
             sub={overdue ? <span className="text-rose-400">{overdue} overdue</span> : "open"} />
-      <Tile emoji="🎂" label="Next birthday" color="#DB2777" onClick={() => go("people")}
+      <Tile icon={Cake} label="Next birthday" color="#DB2777" onClick={() => go("people")}
             value={next ? next.name.split(" ")[0] : "–"}
-            sub={next ? (next.days_until === 0 ? "today 🎉" : dueLabel(next.date, today)) : "add some"} />
+            sub={next ? (next.days_until === 0 ? "today" : dueLabel(next.date, today)) : "add some"} />
     </div>
   );
 }
@@ -120,16 +135,15 @@ function GoalsTab() {
       </div>
 
       {!isLoading && goals.length === 0 && (
-        <div className="text-center py-12 space-y-1">
-          <p className="text-3xl">🎯</p>
-          <p className="text-sm text-[#A1A1AA]">No goals for {year} yet</p>
-          <p className="text-xs text-[#52525B]">Most can track themselves — km, books, sleep, hours, countries…</p>
-        </div>
+        <Empty icon={Target} title={`No goals for ${year} yet`}
+               sub="Most can track themselves — km, books, sleep, hours, countries…" />
       )}
 
       {byArea.map(([a, list]) => (
         <div key={a.key}>
-          <GroupTitle color={a.color}>{a.emoji} {a.label}</GroupTitle>
+          <GroupTitle color={a.color}>
+            <span className="inline-flex items-center gap-1.5"><a.icon size={13} strokeWidth={2} /> {a.label}</span>
+          </GroupTitle>
           <div className="space-y-2">
             {list.map((g) => <GoalCard key={g.id} goal={g} onClick={() => setEditing(g)} />)}
           </div>
@@ -184,7 +198,7 @@ function TasksTab({ kind, today }: { kind: TaskKind; today: string }) {
         ["Overdue", dated.filter((t) => t.due_date! < today), "#E11D48"],
         ["Today", dated.filter((t) => t.due_date === today), "#D97706"],
         ["Upcoming", dated.filter((t) => t.due_date! > today)],
-        ["📥 Inbox", shown.filter((t) => !t.due_date)],
+        ["Inbox", shown.filter((t) => !t.due_date)],
       ];
 
   return (
@@ -207,17 +221,15 @@ function TasksTab({ kind, today }: { kind: TaskKind; today: string }) {
                     className="shrink-0 px-3 py-1 rounded-full text-xs border"
                     style={filter === a.key ? { background: tint(a.color, 0.2), borderColor: a.color, color: a.color }
                                             : { borderColor: "transparent", background: tint(a.color, 0.08) }}>
-              {a.emoji} {a.label}
+              <span className="inline-flex items-center gap-1.5"><a.icon size={12} strokeWidth={2} /> {a.label}</span>
             </button>
           ))}
         </div>
       )}
 
       {open.length === 0 && (
-        <div className="text-center py-12 space-y-1">
-          <p className="text-3xl">{kind === "note" ? "📝" : "🌤️"}</p>
-          <p className="text-sm text-[#A1A1AA]">{kind === "note" ? "No notes waiting to come back" : "Nothing open — enjoy it"}</p>
-        </div>
+        <Empty icon={kind === "note" ? StickyNote : Sun}
+               title={kind === "note" ? "No notes waiting to come back" : "Nothing open — enjoy it"} />
       )}
 
       {groups.filter(([, ts]) => ts.length > 0).map(([title, ts, color]) => (
@@ -270,7 +282,7 @@ function BirthdayRow({ contact }: { contact: Contact }) {
 
   return (
     <div className="flex items-center gap-3 py-2">
-      <Avatar name={contact.name} emoji={contact.emoji} size={30} />
+      <Avatar name={contact.name} size={30} />
       <span className="flex-1 min-w-0 text-sm text-[#FAFAFA] truncate">{contact.name}</span>
       <div className="w-32">
         <input
@@ -307,10 +319,7 @@ function PeopleTab() {
   return (
     <div className="space-y-6">
       {bdays.length === 0 && (
-        <div className="text-center py-8 space-y-1">
-          <p className="text-3xl">🎂</p>
-          <p className="text-sm text-[#A1A1AA]">No birthdays yet — add them below</p>
-        </div>
+        <Empty icon={Cake} title="No birthdays yet — add them below" />
       )}
 
       {byMonth.map(([month, list]) => (
@@ -323,7 +332,7 @@ function PeopleTab() {
                 <div key={b.contact_id}
                      className="flex items-center gap-3 rounded-2xl px-3 py-2.5 border border-[#27272A] bg-[#0D0D0F]"
                      style={soon ? { background: tint("#DB2777", 0.1), borderColor: tint("#DB2777", 0.35) } : undefined}>
-                  <Avatar name={b.name} emoji={b.emoji} size={40} ring={b.days_until === 0} />
+                  <Avatar name={b.name} size={40} ring={b.days_until === 0} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-[#FAFAFA] truncate">
                       {b.name}
@@ -340,7 +349,7 @@ function PeopleTab() {
                   </div>
                   <span className="shrink-0 text-xs font-semibold tabular-nums px-2 py-1 rounded-full"
                         style={{ background: tint("#DB2777", soon ? 0.22 : 0.1), color: "#DB2777" }}>
-                    {b.days_until === 0 ? "Today 🎉" : b.days_until === 1 ? "Tomorrow" : `${b.days_until}d`}
+                    {b.days_until === 0 ? "Today" : b.days_until === 1 ? "Tomorrow" : `${b.days_until}d`}
                   </span>
                 </div>
               );
@@ -363,31 +372,6 @@ function PeopleTab() {
             </div>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ── Calendar subscription ────────────────────────────────────────────────────
-
-function CalendarSubscribe() {
-  const [copied, setCopied] = useState(false);
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  const url = `${base.replace(/^https?:\/\//, "webcal://")}/calendar.ics`;
-  return (
-    <div className="rounded-2xl p-4 space-y-2" style={{ background: tint("#2563EB", 0.08) }}>
-      <p className="text-sm font-medium text-[#FAFAFA] flex items-center gap-2"><CalendarPlus size={14} /> Reminders on your phone</p>
-      <p className="text-xs text-[#71717A]">
-        Subscribe once in Calendar: dated tasks, notes, deadlines, birthdays and goal deadlines arrive with
-        a 09:00 alert — and stay visible offline.
-      </p>
-      <div className="flex items-center gap-2">
-        <a href={url} className="flex-1 min-w-0 truncate text-xs text-[#F59E0B] font-mono">{url}</a>
-        <button
-          onClick={() => { navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-          className="p-1.5 text-[#52525B] hover:text-[#FAFAFA]" aria-label="Copy link">
-          {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-        </button>
       </div>
     </div>
   );
@@ -416,7 +400,7 @@ function PlanPageInner() {
           <button key={t.id} onClick={() => go(t.id)}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-colors ${
                     tab === t.id ? "bg-[#27272A] text-[#FAFAFA] font-medium" : "text-[#71717A] hover:text-[#A1A1AA]"}`}>
-            <span>{t.emoji}</span><span className="hidden min-[380px]:inline">{t.label}</span>
+            <t.icon size={15} strokeWidth={1.75} /><span className="hidden min-[380px]:inline">{t.label}</span>
           </button>
         ))}
       </div>
@@ -425,8 +409,6 @@ function PlanPageInner() {
       {tab === "tasks" && <TasksTab kind="task" today={today} />}
       {tab === "notes" && <TasksTab kind="note" today={today} />}
       {tab === "people" && <PeopleTab />}
-
-      <CalendarSubscribe />
     </main>
   );
 }

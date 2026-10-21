@@ -44,7 +44,6 @@ JOB_LABEL = {
     "compute_training_load": "Fitness / form", "price_sync": "Portfolio prices", "morning_brief": "Morning brief",
     "garmin_workout_push": "Workouts → Garmin", "metar": "METARs", "runways": "Landing runways", "life_review": "Weekly review", "plan_executor": "Investment plans",
     "compute_correlations": "Correlations", "roster_tag_sync": "Roster tags", "strava_sync": "Strava",
-    "agenda_notify": "Morning reminders",
 }
 
 

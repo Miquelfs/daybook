@@ -81,12 +81,12 @@ export function goalSummary(g: Goal): string {
 export const STATE_STYLE: Record<GoalState, { label: string; cls: string }> = {
   on_track:    { label: "On track",    cls: "text-emerald-400 bg-emerald-500/10" },
   behind:      { label: "Behind",      cls: "text-amber-400 bg-amber-500/10" },
-  achieved:    { label: "Achieved 🎉", cls: "text-emerald-400 bg-emerald-500/15" },
+  achieved:    { label: "Achieved", cls: "text-emerald-400 bg-emerald-500/15" },
   missed:      { label: "Missed",      cls: "text-rose-400 bg-rose-500/10" },
   in_progress: { label: "In progress", cls: "text-[#A1A1AA] bg-[#18181B]" },
   overdue:     { label: "Overdue",     cls: "text-rose-400 bg-rose-500/10" },
   not_started: { label: "Not started", cls: "text-[#71717A] bg-[#18181B]" },
-  done:        { label: "Done ✓",      cls: "text-emerald-400 bg-emerald-500/15" },
+  done:        { label: "Done", cls: "text-emerald-400 bg-emerald-500/15" },
   dropped:     { label: "Dropped",     cls: "text-[#52525B] bg-[#18181B]" },
 };
 

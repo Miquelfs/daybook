@@ -107,7 +107,9 @@ export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClo
                       className="px-2.5 py-1 rounded-full text-xs transition-colors border"
                       style={on ? { background: tint(a.color, 0.2), borderColor: a.color, color: a.color }
                                 : { borderColor: "transparent" }}>
-                <span className={on ? "" : "text-[#71717A]"}>{a.emoji} {a.label}</span>
+                <span className={`inline-flex items-center gap-1.5 ${on ? "" : "text-[#71717A]"}`}>
+                  <a.icon size={13} strokeWidth={1.75} /> {a.label}
+                </span>
               </button>
             );
           })}
@@ -119,7 +121,7 @@ export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClo
           <select className={inputCls} value={f.goal_id ?? ""}
                   onChange={(e) => setF({ ...f, goal_id: e.target.value ? Number(e.target.value) : null })}>
             <option value="">—</option>
-            {liveGoals.map((g) => <option key={g.id} value={g.id}>{g.emoji ? `${g.emoji} ` : ""}{g.title}</option>)}
+            {liveGoals.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
           </select>
         </Field>
       )}

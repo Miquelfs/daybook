@@ -1,7 +1,7 @@
 """
 What's ahead: tasks by when they matter, notes resurfacing, birthdays.
 
-Shared by GET /agenda (the Today strip), the calendar feed and the morning push.
+Shared by GET /agenda (the Today strip) and the Plan page.
 """
 
 from __future__ import annotations

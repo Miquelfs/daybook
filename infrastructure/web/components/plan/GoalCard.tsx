@@ -1,13 +1,15 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
+import { Star } from "lucide-react";
 import type { Goal } from "@/lib/plans-api";
 import { STATE_STYLE, goalSummary } from "./format";
-import { area, tint } from "./areas";
+import { area, goalIcon, tint } from "./areas";
 
 export function GoalCard({ goal: g, onClick, compact }: { goal: Goal; onClick?: () => void; compact?: boolean }) {
   const st = STATE_STYLE[g.state];
   const a = area(g.area);
+  const Icon = goalIcon(g.metric, g.area);
   const faded = g.state === "dropped" || g.state === "missed";
   // Pace marker: where the straight line says you should be by now.
   const pace = g.expected != null && g.target
@@ -25,16 +27,18 @@ export function GoalCard({ goal: g, onClick, compact }: { goal: Goal; onClick?: 
       onClick={onClick}
       className={`w-full text-left bg-[#0D0D0F] border border-[#27272A] hover:border-[#3F3F46] rounded-2xl p-3.5 flex gap-3 transition-colors ${faded ? "opacity-55" : ""}`}
     >
-      <span className="shrink-0 w-11 h-11 rounded-xl flex items-center justify-center text-xl"
-            style={{ background: tint(a.color, 0.16) }}>
-        {g.emoji || a.emoji}
+      <span className="shrink-0 w-11 h-11 rounded-xl flex items-center justify-center"
+            style={{ background: tint(a.color, 0.14), color: a.color }}>
+        <Icon size={20} strokeWidth={1.75} />
       </span>
 
       <div className="flex-1 min-w-0 space-y-1.5">
         <div className="flex items-start justify-between gap-2">
           <p className="text-sm font-semibold text-[#FAFAFA] leading-snug">
             {g.title}
-            {g.priority === 3 && <span className="ml-1 text-[11px]" title="Very important">⭐</span>}
+            {g.priority === 3 && (
+              <Star size={11} className="inline ml-1.5 -mt-0.5 text-[#F59E0B] fill-current" aria-label="Very important" />
+            )}
           </p>
           <span className={`shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
         </div>

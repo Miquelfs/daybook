@@ -1,14 +1,12 @@
-"""Plan ahead: automatic goal progress, birthdays, repeating tasks, agenda, calendar feed, push."""
+"""Plan ahead: automatic goal progress, birthdays, repeating tasks, agenda."""
 
 import sqlite3
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date
 
 from domains.plans import agenda as ag
 from domains.plans import goals as gl
-from domains.plans import ics
 from domains.plans.metrics import Ctx, catalog, runs
-from domains.plans.notify import compose
 from infrastructure.db.migrate_plans import migrate
 
 TODAY = date(2026, 7, 2)          # day 183 of 365 → ~50% of the year elapsed
@@ -308,44 +306,6 @@ class TaskTest(unittest.TestCase):
         self.assertEqual([t["title"] for t in a["upcoming"]], ["soon", "cutoff"])
         self.assertEqual([t["title"] for t in a["notes"]], ["resurface"])
         self.assertEqual(a["inbox_count"], 1)
-
-
-class CalendarFeedTest(unittest.TestCase):
-    def test_feed(self):
-        c = db()
-        c.execute("INSERT INTO tasks (title, due_date, remind_days, notes) "
-                  "VALUES ('Renovació DNI, passport; etc', '2026-12-01', 30, 'line1\nline2')")
-        c.execute("INSERT INTO tasks (title, due_date, repeat) VALUES ('Money', '2026-08-01', 'monthly')")
-        c.execute("INSERT INTO tasks (title, due_date, done_at) VALUES ('old', '2026-01-01', '2026-01-01')")
-        c.execute("INSERT INTO contacts (id, name, birthday) VALUES (1, 'Marta', '--02-29')")
-        c.execute("INSERT INTO goals (title, start_date, deadline) VALUES ('" + "Long title " * 10 + "', "
-                  "'2026-01-01', '2026-12-31')")
-        out = ics.build(c, now=datetime(2026, 7, 2, tzinfo=timezone.utc))
-        self.assertTrue(out.startswith("BEGIN:VCALENDAR\r\n") and out.endswith("END:VCALENDAR\r\n"))
-        self.assertIn("SUMMARY:☐ Renovació DNI\\, passport\\; etc", out)
-        self.assertIn("DESCRIPTION:line1\\nline2", out)
-        self.assertIn("TRIGGER;RELATED=START:-P29DT15H", out)       # 09:00, 30 days before
-        self.assertIn("RRULE:FREQ=MONTHLY", out)
-        self.assertNotIn("old", out)
-        self.assertIn("DTSTART;VALUE=DATE:20000229", out)
-        self.assertIn("RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=-1", out)
-        for line in out.split("\r\n"):
-            self.assertLessEqual(len(line.encode()), 75)
-        self.assertEqual(out.count("BEGIN:VEVENT"), 4)
-
-
-class NotifyTest(unittest.TestCase):
-    def test_compose(self):
-        empty = {"birthdays": [], "today": [], "overdue": [], "upcoming": [], "notes": []}
-        self.assertIsNone(compose(empty))
-        a = {**empty,
-             "birthdays": [{"name": "Marta", "days_until": 0, "turning": 34}],
-             "today": [{"title": "Call bank"}],
-             "upcoming": [{"title": "DNI", "days_until": 20, "remind_days": 30},
-                          {"title": "Dentist", "days_until": 3, "remind_days": None}]}
-        title, body = compose(a)
-        self.assertEqual(title, "Today · 1 to do")
-        self.assertEqual(body, "🎂 Marta turns 34 today\n☐ Call bank\n⏳ DNI in 20d")
 
 
 if __name__ == "__main__":

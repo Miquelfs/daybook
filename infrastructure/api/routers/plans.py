@@ -1,6 +1,5 @@
 """
-Plan ahead — goals with automatic progress, tasks, notes that resurface,
-birthdays, and a calendar feed of all of it.
+Plan ahead — goals with automatic progress, tasks, notes that resurface, birthdays.
 
 GET    /goals                — goals with computed progress (?year=)
 GET    /goals/meta           — progress sources (metrics) and the years to offer
@@ -15,7 +14,6 @@ DELETE /tasks/{id}
 GET    /plan/area/{area}     — open tasks, notes and this year's goals for one page (money, health, …)
 GET    /birthdays            — everyone with a birthday, soonest first
 GET    /agenda               — the Today strip: overdue / today / coming up / notes / birthdays / goals
-GET    /calendar.ics         — subscribe in Calendar (webcal://…/calendar.ics)
 """
 
 import sqlite3
@@ -25,11 +23,9 @@ from pathlib import Path
 from typing import Annotated, Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
 
 from domains.plans import agenda as agenda_mod
 from domains.plans import goals as goals_mod
-from domains.plans import ics as ics_mod
 from domains.plans.metrics import METRICS, Ctx, catalog
 from infrastructure.api.db import get_db
 from infrastructure.api.models.plans import (
@@ -265,7 +261,7 @@ def delete_task(task_id: int, conn: DB):
     conn.commit()
 
 
-# ── Per-page plan / birthdays / agenda / calendar ────────────────────────────
+# ── Per-page plan / birthdays / agenda ───────────────────────────────────────
 
 def _live_goals(ctx: Ctx, today: date) -> list[dict]:
     """Active goals running now (this year's, already started)."""
@@ -308,11 +304,3 @@ def get_agenda(conn: DB, day: str | None = Query(None, alias="date")):
     )
     return AgendaOut(**a, goals=brief)
 
-
-@router.get("/calendar.ics")
-def calendar_feed(conn: DB):
-    return Response(
-        content=ics_mod.build(conn),
-        media_type="text/calendar; charset=utf-8",
-        headers={"Content-Disposition": 'inline; filename="daybook.ics"'},
-    )

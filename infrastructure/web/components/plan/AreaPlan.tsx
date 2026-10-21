@@ -32,8 +32,8 @@ export function AreaPlan({ area, className }: { area: AreaKey; className?: strin
     <section className={`rounded-2xl border p-4 space-y-3 ${className ?? ""}`}
              style={{ borderColor: tint(a.color, 0.35), background: tint(a.color, 0.05) }}>
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-[0.15em]" style={{ color: a.color }}>
-          {a.emoji} {a.label} plan
+        <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em]" style={{ color: a.color }}>
+          <a.icon size={14} strokeWidth={2} /> {a.label} plan
         </p>
         <div className="flex items-center gap-3 text-xs">
           <button onClick={() => setTask("new")} className="text-[#71717A] hover:text-[#FAFAFA]">+ Task</button>

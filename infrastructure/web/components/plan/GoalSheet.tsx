@@ -6,21 +6,13 @@ import { api } from "@/lib/api";
 import { tagsApi } from "@/lib/tags-api";
 import { plansApi, PLAN_KEYS, type Goal, type GoalIn, type Metric } from "@/lib/plans-api";
 import { Sheet, Field, Chips, inputCls } from "./Sheet";
-import { AREA_EMOJI, AREA_LIST, area as areaOf, tint, type AreaKey } from "./areas";
+import { AREA_LIST, area as areaOf, goalIcon, tint, type AreaKey } from "./areas";
 import { fmtTime, parseTime } from "./format";
 
 const DISTANCES = [
   { value: "5000", label: "5 k" }, { value: "10000", label: "10 k" },
   { value: "21097", label: "Half" }, { value: "42195", label: "Marathon" },
 ];
-
-/** Keep the first emoji the user typed (ZWJ sequences like 🧑‍✈️ count as one). */
-function firstGrapheme(s: string): string {
-  const seg = typeof Intl !== "undefined" && "Segmenter" in Intl
-    ? [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s)].map((x) => x.segment)
-    : Array.from(s);
-  return seg.find((x) => x.trim()) ?? "";
-}
 
 const num = (s: string) => (s.trim() === "" ? null : Number(s.replace(",", ".")));
 
@@ -48,6 +40,7 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
 
   const m: Metric | undefined = metrics.find((x) => x.key === f.metric);
   const effectiveArea = areaOf(f.area ?? m?.area);
+  const Icon = goalIcon(f.metric, effectiveArea.key);
 
   const { data: tags = [] } = useQuery({
     queryKey: ["tags"], queryFn: () => tagsApi.list(), staleTime: 300_000, enabled: m?.param === "tag",
@@ -82,7 +75,7 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
   function body(): GoalIn {
     return {
       title: f.title.trim(),
-      emoji: f.emoji || null,
+      emoji: f.emoji || null,                // kept as stored; the card shows the metric's icon
       metric: f.metric,
       metric_param: m?.param ? f.metric_param || null : null,
       target: f.metric === "best_time" ? parseTime(f.target) : num(f.target),
@@ -124,16 +117,12 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
 
   return (
     <Sheet title={goal ? "Edit goal" : "New goal"} onClose={onClose}>
-      {/* Emoji tile + title */}
+      {/* Icon (follows what the goal measures) + title */}
       <div className="flex items-center gap-2.5">
-        <input
-          aria-label="Emoji"
-          value={f.emoji}
-          onChange={(e) => setF({ ...f, emoji: firstGrapheme(e.target.value) })}
-          placeholder={effectiveArea.emoji}
-          className="shrink-0 w-12 h-12 rounded-xl text-center text-2xl outline-none border border-transparent focus:border-[#F59E0B] placeholder:opacity-60"
-          style={{ background: tint(effectiveArea.color, 0.18) }}
-        />
+        <span className="shrink-0 w-12 h-12 rounded-xl flex items-center justify-center"
+              style={{ background: tint(effectiveArea.color, 0.14), color: effectiveArea.color }}>
+          <Icon size={22} strokeWidth={1.75} />
+        </span>
         <input
           className={`${inputCls} flex-1 min-w-0 h-12 text-base`}
           placeholder="Cycle 4000 km"
@@ -142,20 +131,12 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
           onChange={(e) => setF({ ...f, title: e.target.value })}
         />
       </div>
-      <div className="flex gap-1 -mt-1">
-        {AREA_EMOJI[effectiveArea.key].map((e) => (
-          <button key={e} type="button" onClick={() => setF({ ...f, emoji: e })}
-                  className={`w-8 h-8 rounded-lg text-base transition-colors ${f.emoji === e ? "bg-[#27272A]" : "hover:bg-[#18181B]"}`}>
-            {e}
-          </button>
-        ))}
-      </div>
 
       <Field label="Progress counts from">
         <select className={inputCls} value={f.metric}
                 onChange={(e) => setF({ ...f, metric: e.target.value, metric_param: "", target: "", baseline: "" })}>
           {grouped.map(([a, list]) => (
-            <optgroup key={a} label={`${areaOf(a).emoji} ${areaOf(a).label}`}>
+            <optgroup key={a} label={areaOf(a).label}>
               {list.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
             </optgroup>
           ))}
@@ -179,7 +160,7 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
         <Field label="Person">
           <select className={inputCls} value={f.metric_param} onChange={(e) => setF({ ...f, metric_param: e.target.value })}>
             <option value="">Choose someone…</option>
-            {contacts.map((c) => <option key={c.id} value={String(c.id)}>{c.emoji ? `${c.emoji} ` : ""}{c.name}</option>)}
+            {contacts.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
           </select>
         </Field>
       )}
@@ -236,7 +217,9 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
                       className="px-2.5 py-1 rounded-full text-xs transition-colors border"
                       style={on ? { background: tint(a.color, 0.2), borderColor: a.color, color: a.color }
                                 : { borderColor: "transparent" }}>
-                <span className={on ? "" : "text-[#71717A]"}>{a.emoji} {a.label}</span>
+                <span className={`inline-flex items-center gap-1.5 ${on ? "" : "text-[#71717A]"}`}>
+                  <a.icon size={13} strokeWidth={1.75} /> {a.label}
+                </span>
               </button>
             );
           })}
@@ -245,7 +228,7 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
 
       <Field label="Importance">
         <Chips value={f.priority} onChange={(v) => setF({ ...f, priority: v })}
-               options={[{ value: 1, label: "Moderate" }, { value: 2, label: "Important" }, { value: 3, label: "⭐ Very important" }]} />
+               options={[{ value: 1, label: "Moderate" }, { value: 2, label: "Important" }, { value: 3, label: "Very important" }]} />
       </Field>
 
       <Field label="Notes">
