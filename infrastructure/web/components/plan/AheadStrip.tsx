@@ -35,6 +35,11 @@ function Ahead({ date }: { date: string }) {
     staleTime: 0,
     retry: 2,
   });
+  const { data: doneToday = [] } = useQuery({
+    queryKey: ["tasks", "done_on", date],
+    queryFn: () => plansApi.tasks({ done_on: date }),
+    staleTime: 0,
+  });
 
   async function quickAdd() {
     if (!quick.trim()) return;
@@ -56,7 +61,8 @@ function Ahead({ date }: { date: string }) {
       key: `b${b.contact_id}`, on: b.date, icon: <Cake size={14} />, label: `${b.name.split(" ")[0]}'s birthday`,
       when: dueLabel(b.date, date), href: "/plan?tab=people",
     })),
-    ...a.trips.filter((t) => t.days_until <= 30).map((t) => ({
+    // Same window for everything: the next 7 days (tasks also once their heads-up starts).
+    ...a.trips.filter((t) => t.ongoing || t.days_until <= 7).map((t) => ({
       key: `p${t.id}`, on: t.start_date, icon: <Plane size={14} />, label: t.name,
       when: t.ongoing ? "now" : `in ${t.days_until}d`, warn: t.days_until <= 7, href: "/plan?tab=calendar",
     })),
@@ -102,13 +108,18 @@ function Ahead({ date }: { date: string }) {
               {due.map((t) => <TaskRow key={t.id} task={t} today={date} onEdit={setEditing} />)}
             </div>
           )}
+          {doneToday.some((t) => t.kind === "task") && (
+            <p className="text-xs text-emerald-400 py-2 border-b border-[#18181B]">
+              ✓ {doneToday.filter((t) => t.kind === "task").length} done today
+            </p>
+          )}
           <div className="flex items-center gap-3 py-2">
             <Plus size={16} className="text-[#52525B] shrink-0 ml-0.5" />
             <input
               value={quick}
               onChange={(e) => setQuick(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); quickAdd(); } }}
-              placeholder={due.length ? "Add something for today…" : "Nothing due today — add something…"}
+              placeholder={due.length || doneToday.length ? "Add something for today…" : "Nothing due today — add something…"}
               className="flex-1 bg-transparent py-1 text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none"
             />
             {quick.trim() && (
@@ -119,7 +130,10 @@ function Ahead({ date }: { date: string }) {
 
         {next.length > 0 && (
           <div className="px-1">
-            <p className="text-[11px] uppercase tracking-wider text-[#52525B] mb-1">Next</p>
+            <div className="flex items-baseline justify-between mb-1">
+              <p className="text-[11px] uppercase tracking-wider text-[#52525B]">Next 7 days</p>
+              <Link href="/plan?tab=calendar" className="text-[11px] text-[#52525B] hover:text-[#A1A1AA]">Calendar →</Link>
+            </div>
             <div className="flex flex-col">
               {next.map((n) => {
                 const body = (

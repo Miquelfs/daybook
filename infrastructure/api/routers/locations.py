@@ -159,11 +159,13 @@ def get_heatmap(year: int | None = None):
         key = (city, country)
         city_totals[key] = city_totals.get(key, 0) + r["days"]
     sorted_cities = sorted(city_totals.items(), key=lambda x: -x[1])
+    catalan = _catalan()
 
     return {
         "points": [[r["lat"], r["lng"], round(float(r["w"]), 2)] for r in points],
         "countries": [{"country": name, "days": days} for name, days in sorted_countries],
-        "cities": [{"city": city, "country": country, "days": days} for (city, country), days in sorted_cities[:40]],
+        "cities": [{"city": city, "country": country, "days": days, "region": region_for(country, [city], catalan)}
+                   for (city, country), days in sorted_cities[:40]],
         "years": [r["y"] for r in years],
         "distinct_days": distinct_days,
     }
@@ -590,7 +592,7 @@ def get_city_timeline(year: int | None = None):
         con.close()
         return []
 
-    catalan = catalan_cities(con)
+    catalan = _catalan()
     # Collapse consecutive days in same city into stays
     stays: list[dict] = []
     for r in rows:
@@ -1528,12 +1530,13 @@ def list_trips(limit: int = 100, offset: int = 0, year: int | None = None):
 
 
 def _catalan() -> set[str]:
-    """Catalan city names (cached in domains.locations.regions)."""
+    """Catalan city names, raw and as _norm_city spells them (cached in domains.locations.regions)."""
     loc = _conn()
     try:
-        return catalan_cities(loc)
+        raw = catalan_cities(loc)
     finally:
         loc.close()
+    return raw | {_norm_city(c) or c for c in raw}
 
 
 def _trip_row_to_dict(r: sqlite3.Row, con: sqlite3.Connection) -> dict:
@@ -1542,7 +1545,7 @@ def _trip_row_to_dict(r: sqlite3.Row, con: sqlite3.Connection) -> dict:
     t["cities"] = json.loads(t.pop("cities_json") or "[]")
     t["name"] = t["user_name"] or t["auto_name"]
     t["primary_country"] = _en(t["primary_country"])
-    t["region"] = region_for(t["primary_country"], t["cities"], _catalan())   # Catalonia → senyera
+    t["region"] = region_for(t["primary_country"], t["cities"], _catalan(), majority=True)   # Catalonia → senyera
     n_nights = 1 + (
         datetime.fromisoformat(t["end_date"]) - datetime.fromisoformat(t["start_date"])
     ).days

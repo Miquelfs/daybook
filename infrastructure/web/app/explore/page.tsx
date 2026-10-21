@@ -23,7 +23,7 @@ export default async function ExplorePage({ searchParams }: Props) {
     api.heatmap(year).catch(() => ({
       points: [] as [number, number, number][],
       countries: [] as { country: string; days: number }[],
-      cities: [] as { city: string; country: string; days: number }[],
+      cities: [] as { city: string; country: string; days: number; region?: string | null }[],
       years: [] as string[],
       distinct_days: 0,
     })),
@@ -213,8 +213,8 @@ export default async function ExplorePage({ searchParams }: Props) {
                   {i + 1}
                 </span>
                 <span className="text-sm text-[#D4D4D8] flex-1 truncate group-hover:text-[#FAFAFA] transition-colors">{c.city}</span>
-                <span className="text-xs text-[#52525B] truncate max-w-[80px]">
-                  {FLAG[c.country] ?? ""} {c.country}
+                <span className="text-xs text-[#52525B] truncate max-w-[90px] inline-flex items-center gap-1">
+                  <Flag country={c.country} region={c.region} size={13} fallback="" /> {c.region === "Catalonia" ? "Catalunya" : c.country}
                 </span>
                 <span className="text-xs text-[#52525B] tabular-nums w-8 text-right shrink-0">
                   {c.days}d
@@ -278,7 +278,7 @@ export default async function ExplorePage({ searchParams }: Props) {
                   <span className="text-base w-6 text-center shrink-0"><Flag country={stay.country} region={stay.region} /></span>
                   <div className="flex-1 min-w-0">
                     <span className="text-sm text-[#D4D4D8] font-medium group-hover:text-[#FAFAFA] transition-colors">{stay.city}</span>
-                    <span className="text-xs text-[#52525B] ml-2">{stay.country}</span>
+                    <span className="text-xs text-[#52525B] ml-2">{stay.region === "Catalonia" ? "Catalunya" : stay.country}</span>
                   </div>
                   <span className="text-xs text-[#52525B] tabular-nums shrink-0">{dateLabel}</span>
                   <span className="text-xs text-[#F59E0B] tabular-nums w-8 text-right shrink-0">{stay.days}d</span>

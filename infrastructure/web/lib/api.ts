@@ -775,7 +775,7 @@ export type ModeOverride = { leg_start: string; leg_end: string; mode: string };
 export type HeatmapData = {
   points: [number, number, number][];   // [lat, lng, weight]
   countries: { country: string; days: number }[];
-  cities: { city: string; country: string; days: number }[];
+  cities: { city: string; country: string; days: number; region?: string | null }[];
   years: string[];
   distinct_days: number;                // days with any location data (no double counting)
 };

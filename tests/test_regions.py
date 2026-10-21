@@ -17,15 +17,22 @@ class CataloniaTest(unittest.TestCase):
     def test_cities_and_region(self):
         regions._CACHE.clear()
         c = sqlite3.connect(":memory:")
-        c.execute("CREATE TABLE tracks(id INTEGER PRIMARY KEY, geocode_city TEXT, geocode_country TEXT, points_json TEXT)")
+        c.executescript("""
+            CREATE TABLE tracks(id INTEGER PRIMARY KEY, geocode_city TEXT, geocode_country TEXT, points_json TEXT);
+            CREATE TABLE visits(place_id TEXT, lat REAL, lng REAL);
+            CREATE TABLE place_names(place_id TEXT, city TEXT, country TEXT);
+            INSERT INTO place_names VALUES ('s', 'Sabadell', 'España'), ('t', 'Arona', 'España');
+            INSERT INTO visits VALUES ('s', 41.55, 2.11), ('t', 28.10, -16.68);""")
         for city, country, lng, lat in [("Barcelona", "España", 2.17, 41.39), ("Gelida", "España", 1.86, 41.44),
                                         ("Palma", "España", 2.65, 39.57), ("Perpignan", "France", 2.89, 42.70)]:
             c.execute("INSERT INTO tracks (geocode_city, geocode_country, points_json) VALUES (?,?,?)",
                       (city, country, json.dumps([{"lat": lat, "lng": lng}])))
         cat = regions.catalan_cities(c)
-        self.assertEqual(cat, {"Barcelona", "Gelida"})
+        self.assertEqual(cat, {"Barcelona", "Gelida", "Sabadell"})                      # Google-history city too
         self.assertEqual(regions.region_for("Spain", ["Barcelona", "Gelida"], cat), "Catalonia")
-        self.assertIsNone(regions.region_for("Spain", ["Barcelona", "Palma"], cat))       # Mallorca too → Spain
+        self.assertIsNone(regions.region_for("Spain", ["Barcelona", "Palma"], cat))       # a city: all must be
+        self.assertEqual(regions.region_for("Spain", ["Barcelona", "Palma", "Gelida"], cat, majority=True), "Catalonia")
+        self.assertIsNone(regions.region_for("Spain", ["Barcelona", "Palma"], cat, majority=True))  # half isn't most
         self.assertIsNone(regions.region_for("France", ["Barcelona"], cat))
 
 
