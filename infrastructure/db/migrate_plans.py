@@ -22,14 +22,14 @@ def migrate(conn) -> None:
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             title        TEXT NOT NULL,
             emoji        TEXT,
-            area         TEXT,
+            area         TEXT,                             -- NULL → the metric's area
             priority     INTEGER NOT NULL DEFAULT 2,       -- 1 moderate · 2 important · 3 very important
             start_date   TEXT NOT NULL,                    -- progress is counted from here
             deadline     TEXT,
-            metric       TEXT NOT NULL DEFAULT 'manual',   -- manual|run_km|ride_km|swim_km|books|net_worth|tag_days
-            metric_param TEXT,                             -- tag slug for tag_days
+            metric       TEXT NOT NULL DEFAULT 'manual',   -- key in domains/plans/metrics.py
+            metric_param TEXT,                             -- tag slug | contact id | distance (m)
             target       REAL,
-            baseline     REAL,                             -- value at start_date (net_worth pace)
+            baseline     REAL,                             -- value at start_date (level metrics)
             current      REAL,                             -- manual numeric progress
             status       TEXT NOT NULL DEFAULT 'active',   -- active|done|dropped
             notes        TEXT,
@@ -45,7 +45,7 @@ def migrate(conn) -> None:
             due_date    TEXT,                              -- note: the date it resurfaces
             remind_days INTEGER,                           -- surface N days before due_date
             repeat      TEXT,                              -- NULL|weekly|monthly|yearly
-            area        TEXT,
+            area        TEXT,                              -- page it belongs to: money, health, aviation…
             goal_id     INTEGER REFERENCES goals(id) ON DELETE SET NULL,
             done_at     TEXT,                              -- local YYYY-MM-DD
             created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))

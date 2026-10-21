@@ -1,48 +1,20 @@
 """
-Goal progress, computed from what the daybook already records.
+Goal progress, computed from what the daybook already records (see metrics.py).
 
-Each goal counts over [start_date, min(today, deadline)]:
-  run_km / ride_km / swim_km   activities distance (Garmin wins over its Strava twin)
-  books                        books finished
-  tag_days                     days carrying a tag. Negative tags (candy, alcohol)
-                               are a ceiling — fewer is better; with no target the
-                               bar is the same window one year earlier.
-  net_worth                    current net worth (money.db), paced from `baseline`
-  manual                       `current` / `target` typed by hand, else just a status
-
-`state` is what the UI shows:
-  done · dropped                 set by hand
-  achieved · missed              target hit / deadline passed without it
-  on_track · behind              against a straight-line pace to the deadline
-  in_progress · overdue          no pace to judge (manual, net worth without baseline)
-  not_started                    start_date still ahead
+Every goal counts over [start_date, min(today, deadline)]. `state` is what the UI shows:
+  done · dropped           set by hand
+  achieved · missed        target reached / deadline passed without it
+  on_track · behind        against a straight-line pace (or, for averages, the target itself)
+  in_progress · overdue    nothing honest to judge yet (manual goals, bests, streaks)
+  not_started              start_date still ahead
 """
 
 from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from typing import Callable
 
-METRICS = ("manual", "run_km", "ride_km", "swim_km", "books", "net_worth", "tag_days")
-
-# Mirrors infrastructure/api/routers/training.py (_RUN_TYPES etc. and _DEDUP).
-SPORT_TYPES = {
-    "run_km": ("running", "trail_running", "treadmill_running", "indoor_running", "virtual_run"),
-    "ride_km": ("cycling", "road_biking", "mountain_biking", "gravel_cycling", "indoor_cycling", "virtual_ride"),
-    "swim_km": ("lap_swimming", "open_water_swimming", "swimming"),
-}
-_DEDUP = """
-    AND NOT (source='strava' AND EXISTS (
-      SELECT 1 FROM activities g
-      WHERE g.date = activities.date
-        AND g.source = 'garmin'
-        AND g.strava_id = CAST(SUBSTR(activities.id, 8) AS TEXT)
-    ))
-"""
-
-UNITS = {"run_km": "km", "ride_km": "km", "swim_km": "km", "books": "books",
-         "net_worth": "€", "tag_days": "days", "manual": ""}
+from domains.plans.metrics import METRICS, Ctx, _tag_dates, runs, tag_info
 
 # Within 5% of the straight-line pace still counts as on track.
 _PACE_SLACK = 0.95
@@ -59,109 +31,98 @@ def _shift_year(d: date, years: int) -> date:
         return d.replace(year=d.year + years, day=28)
 
 
-def _has_column(conn: sqlite3.Connection, table: str, col: str) -> bool:
-    return any(r[1] == col for r in conn.execute(f"PRAGMA table_info({table})"))
+def _clamp_pct(x: float) -> int:
+    return max(0, min(100, round(x * 100)))
 
 
-def distance_km(conn: sqlite3.Connection, metric: str, start: date, end: date) -> float:
-    types = SPORT_TYPES[metric]
-    ph = ",".join("?" * len(types))
-    row = conn.execute(
-        f"""SELECT COALESCE(SUM(distance_meters), 0) / 1000.0 FROM activities
-            WHERE date BETWEEN ? AND ? AND activity_type IN ({ph}) {_DEDUP}""",
-        (start.isoformat(), end.isoformat(), *types),
-    ).fetchone()
-    return round(float(row[0] or 0), 1)
-
-
-def books_finished(conn: sqlite3.Connection, start: date, end: date) -> int:
-    return conn.execute(
-        "SELECT COUNT(*) FROM books WHERE date_finished BETWEEN ? AND ?",
-        (start.isoformat(), end.isoformat()),
-    ).fetchone()[0]
-
-
-def tag_info(conn: sqlite3.Connection, slug: str) -> tuple[int | None, bool]:
-    """(tag id, is_negative) — negative tags are the 'fewer is better' ones."""
-    neg = "is_negative" if _has_column(conn, "tags", "is_negative") else "0"
-    row = conn.execute(f"SELECT id, {neg} FROM tags WHERE slug=?", (slug,)).fetchone()
-    return (row[0], bool(row[1])) if row else (None, False)
-
-
-def tag_days(conn: sqlite3.Connection, tag_id: int, start: date, end: date) -> int:
-    return conn.execute(
-        "SELECT COUNT(DISTINCT date) FROM day_tags WHERE tag_id=? AND date BETWEEN ? AND ?",
-        (tag_id, start.isoformat(), end.isoformat()),
-    ).fetchone()[0]
-
-
-def progress(
-    conn: sqlite3.Connection,
-    goal: dict,
-    today: date,
-    net_worth: Callable[[], float | None] | None = None,
-) -> dict:
+def progress(ctx: Ctx | sqlite3.Connection, goal: dict, today: date) -> dict:
     """The goal plus its computed progress fields."""
+    if isinstance(ctx, sqlite3.Connection):
+        ctx = Ctx(ctx)
     g = dict(goal)
-    metric = g.get("metric") or "manual"
+    key = g.get("metric") or "manual"
+    metric, fn = METRICS.get(key, METRICS["manual"])
+    kind = metric.kind
     start = _d(g["start_date"]) or today
     deadline = _d(g.get("deadline"))
     target = g.get("target")
     end = min(today, deadline) if deadline else today
     past = deadline is not None and deadline < today
+    param = g.get("metric_param")
 
     out = {
         **g,
-        "unit": UNITS.get(metric, ""),
+        "area": g.get("area") or metric.area,
+        "kind": kind,
+        "unit": metric.unit,
         "actual": None, "pct": None, "expected": None,
-        "compare": None, "lower_is_better": False,
-        "needed_per_week": None, "days_left": (deadline - today).days if deadline and not past else None,
+        "compare": None, "lower_is_better": metric.lower_is_better,
+        "needed_per_week": None,
+        "days_left": (deadline - today).days if deadline and not past else None,
         "state": "in_progress",
     }
-
-    if g.get("status") in ("done", "dropped"):
+    closed = g.get("status") in ("done", "dropped")
+    if closed:
         out["state"] = g["status"]
     elif start > today:
         out["state"] = "not_started"
         return out
 
-    # Share of the period already elapsed (straight-line pace).
-    frac = None
+    frac = None                 # share of the period already elapsed
     if deadline and deadline >= start:
-        total = (deadline - start).days + 1
-        frac = min(1.0, max(0.0, ((end - start).days + 1) / total))
+        frac = min(1.0, max(0.0, ((end - start).days + 1) / ((deadline - start).days + 1)))
 
-    actual: float | None = None
-    if metric in SPORT_TYPES:
-        actual = distance_km(conn, metric, start, end)
-    elif metric == "books":
-        actual = books_finished(conn, start, end)
-    elif metric == "tag_days" and g.get("metric_param"):
-        tag_id, negative = tag_info(conn, g["metric_param"])
-        if tag_id is not None:
-            actual = tag_days(conn, tag_id, start, end)
-            out["lower_is_better"] = negative
-            if negative:
-                out["compare"] = tag_days(conn, tag_id, _shift_year(start, -1), _shift_year(end, -1))
-    elif metric == "net_worth":
-        actual = net_worth() if net_worth else None
-        if actual is not None:
-            actual = round(actual, 2)
-    elif metric == "manual":
+    # ── Read the value ───────────────────────────────────────────────────────
+    actual = baseline = None
+    if kind == "manual":
         actual = g.get("current")
+    elif key == "tag_days" and param:
+        actual = fn(ctx, start, end, param)
+        _, negative = tag_info(ctx.conn, param)
+        if actual is not None and negative:
+            kind = out["kind"] = "ceiling"
+            out["lower_is_better"] = True
+            out["compare"] = fn(ctx, _shift_year(start, -1), _shift_year(end, -1), param)
+    elif kind == "streak":
+        got = _tag_dates(ctx.conn, param, start, end) if param else None
+        if got is not None:
+            dates, negative = got
+            longest, current = runs(dates, start, end, want=not negative)
+            actual, out["compare"] = longest, current       # compare = the streak running now
+    elif kind == "level":
+        actual, auto_base = fn(ctx, start, end, param)
+        baseline = g.get("baseline") if g.get("baseline") is not None else auto_base
+    else:
+        actual = fn(ctx, start, end, param)
+    if actual is not None:
+        actual = round(float(actual), 2)
     out["actual"] = actual
 
-    if out["state"] in ("done", "dropped"):
-        if actual is not None and target:
-            out["pct"] = min(100, round(actual / target * 100))
+    if closed:
+        if actual is not None and target and kind in ("sum", "level"):
+            out["pct"] = _clamp_pct(actual / target) if kind == "sum" else None
         return out
 
-    # ── Fewer is better (candy, alcohol) ─────────────────────────────────────
-    if out["lower_is_better"]:
+    # ── Judge it ─────────────────────────────────────────────────────────────
+    if actual is None:
+        if past and kind == "manual":
+            out["state"] = "overdue"
+        return out
+
+    if kind == "manual":
+        if target:
+            out["pct"] = _clamp_pct(actual / target)
+            if actual >= target:
+                out["state"] = "achieved"
+        if past and out["state"] != "achieved":
+            out["state"] = "overdue"
+        return out
+
+    if kind == "ceiling":
         limit = target if target is not None else out["compare"]
         if target is not None and frac is not None:
-            out["expected"] = round(target * frac, 1)          # budget used so far
-            out["pct"] = min(100, round(actual / target * 100)) if target else None
+            out["expected"] = round(target * frac, 1)       # allowance used so far
+            out["pct"] = _clamp_pct(actual / target) if target else None
         bar = out["expected"] if out["expected"] is not None else out["compare"]
         if past:
             out["state"] = "achieved" if limit is None or actual <= limit else "missed"
@@ -169,68 +130,80 @@ def progress(
             out["state"] = "on_track" if actual <= bar else "behind"
         return out
 
-    if actual is None or not target:
-        if metric == "manual" and past:
-            out["state"] = "overdue"
+    if target is None:
         return out
 
-    out["pct"] = min(100, round(actual / target * 100))
-    if actual >= target:
+    if kind == "sum":
+        out["pct"] = _clamp_pct(actual / target) if target else None
+        if actual >= target:
+            out["state"] = "achieved"
+        elif past:
+            out["state"] = "missed"
+        elif frac is not None:
+            out["expected"] = round(target * frac, 1)
+            out["state"] = "on_track" if actual >= out["expected"] * _PACE_SLACK else "behind"
+            weeks_left = max(1.0, ((deadline - today).days + 1) / 7)
+            out["needed_per_week"] = round((target - actual) / weeks_left, 1)
+        return out
+
+    lower = metric.lower_is_better
+    if kind in ("avg", "best"):
+        meets = actual <= target if lower else actual >= target
+        out["pct"] = _clamp_pct(target / actual if lower and actual else actual / target if target else 0)
+        if kind == "best":
+            out["state"] = "achieved" if meets else ("missed" if past else "in_progress")
+        else:
+            out["state"] = ("achieved" if meets else "missed") if past else ("on_track" if meets else "behind")
+        return out
+
+    if kind == "streak":
+        out["pct"] = _clamp_pct(actual / target) if target else None
+        out["state"] = "achieved" if actual >= target else ("missed" if past else "in_progress")
+        return out
+
+    # level: from baseline toward target, either direction
+    out["compare"] = baseline
+    up = target >= (baseline if baseline is not None else actual)
+    out["lower_is_better"] = not up
+    if (actual >= target) if up else (actual <= target):
         out["state"] = "achieved"
+        out["pct"] = 100
         return out
     if past:
         out["state"] = "missed"
+    if baseline is None or baseline == target:
         return out
-
-    remaining = target - actual
-    if deadline:
+    share = (actual - baseline) / (target - baseline)
+    out["pct"] = _clamp_pct(share)
+    if not past and frac is not None:
+        out["expected"] = round(baseline + (target - baseline) * frac, 2)
+        out["state"] = "on_track" if share >= frac * _PACE_SLACK else "behind"
         weeks_left = max(1.0, ((deadline - today).days + 1) / 7)
-        out["needed_per_week"] = round(remaining / weeks_left, 1)
-
-    if metric == "net_worth":
-        base = g.get("baseline")
-        if base is None or frac is None:
-            return out
-        expected = base + (target - base) * frac
-    elif metric == "manual":
-        return out                                  # no honest pace for hand-typed numbers
-    else:
-        if frac is None:
-            return out
-        expected = target * frac
-
-    out["expected"] = round(expected, 1)
-    out["state"] = "on_track" if actual >= expected * _PACE_SLACK else "behind"
+        out["needed_per_week"] = round((target - actual) / weeks_left, 2)
     return out
 
 
-def list_with_progress(
-    conn: sqlite3.Connection,
-    today: date,
-    net_worth: Callable[[], float | None] | None = None,
-    year: int | None = None,
-) -> list[dict]:
-    """All goals (optionally those overlapping `year`), with progress, best first."""
-    rows = [dict(r) for r in conn.execute("SELECT * FROM goals").fetchall()]
+_ORDER = {"behind": 0, "overdue": 1, "on_track": 2, "in_progress": 3, "not_started": 4,
+          "achieved": 5, "done": 6, "missed": 7, "dropped": 8}
+
+
+def list_with_progress(ctx: Ctx | sqlite3.Connection, today: date, year: int | None = None) -> list[dict]:
+    """All goals (optionally those overlapping `year`), with progress — what needs attention first."""
+    if isinstance(ctx, sqlite3.Connection):
+        ctx = Ctx(ctx)
+    rows = [dict(r) for r in ctx.conn.execute("SELECT * FROM goals").fetchall()]
     if year is not None:
         y0, y1 = f"{year}-01-01", f"{year}-12-31"
         rows = [r for r in rows if r["start_date"] <= y1 and (r["deadline"] or "9999") >= y0]
-
-    cache: dict[str, float | None] = {}
-
-    def nw() -> float | None:          # one money.db read, however many goals use it
-        if "v" not in cache:
-            try:
-                cache["v"] = net_worth() if net_worth else None
-            except Exception:
-                cache["v"] = None
-        return cache["v"]
-
-    out = [progress(conn, r, today, nw) for r in rows]
-    order = {"behind": 0, "overdue": 1, "on_track": 2, "in_progress": 3, "not_started": 4,
-             "achieved": 5, "done": 6, "missed": 7, "dropped": 8}
-    out.sort(key=lambda g: (order.get(g["state"], 9), -(g.get("priority") or 0), g["deadline"] or "9999"))
+    out = [progress(ctx, r, today) for r in rows]
+    out.sort(key=lambda g: (_ORDER.get(g["state"], 9), -(g.get("priority") or 0), g["deadline"] or "9999"))
     return out
+
+
+def years(conn: sqlite3.Connection, first_year: int, today: date) -> list[int]:
+    """Years the goals view offers: from the daybook's first year to next year, plus any with goals."""
+    have = {int(r[0][:4]) for r in conn.execute("SELECT start_date FROM goals")}
+    return sorted(set(range(first_year, today.year + 2)) | have)
 
 
 def period_end(start: date) -> date:

@@ -48,15 +48,19 @@ def parse_birthday(s: str | None) -> tuple[int | None, int, int] | None:
 
 
 def normalize_birthday(s: str | None) -> str | None:
-    """Accepts 'YYYY-MM-DD', '--MM-DD' or 'MM-DD'; returns the stored form."""
+    """Typed as 'DD-MM-YYYY' or 'DD-MM' ('/' or '.' work too); stored 'YYYY-MM-DD' / '--MM-DD'.
+    The stored forms themselves are accepted unchanged."""
     if not s or not s.strip():
         return None
-    s = s.strip()
-    if len(s) == 5 and s[2] == "-":
-        s = "--" + s
+    s = s.strip().replace("/", "-").replace(".", "-")
+    parts = s.split("-")
+    if not s.startswith("--") and len(parts) == 3 and len(parts[0]) <= 2:      # DD-MM-YYYY
+        s = f"{parts[2]:0>4}-{parts[1]:0>2}-{parts[0]:0>2}"
+    elif len(parts) == 2:                                                      # DD-MM
+        s = f"--{parts[1]:0>2}-{parts[0]:0>2}"
     p = parse_birthday(s)
     if p is None:
-        raise ValueError("birthday must be YYYY-MM-DD or MM-DD")
+        raise ValueError("birthday must be DD-MM-YYYY, or DD-MM if you don't know the year")
     y, m, d = p
     return f"{y:04d}-{m:02d}-{d:02d}" if y else f"--{m:02d}-{d:02d}"
 

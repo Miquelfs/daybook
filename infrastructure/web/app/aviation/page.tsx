@@ -32,6 +32,7 @@ import { LogbookFun } from "@/components/aviation/LogbookFun";
 import { localISODate } from "@/lib/dates";
 import { AviationTabs, isAviationTab, type AviationTab } from "@/components/aviation/AviationTabs";
 import { mainFunction, FUNCTION_LABEL, FUNCTION_SHORT, type TimeFunction } from "@/lib/flight-time";
+import { AreaPlan } from "@/components/plan/AreaPlan";
 
 const MAP_STYLE_KEY = "daybook_aviation_map_style";
 
@@ -321,6 +322,7 @@ export default function AviationPage() {
       {/* ── OVERVIEW ── */}
       {tab === "overview" && (
         <>
+          <AreaPlan area="aviation" className="mb-6" />
           {stats && <LogbookHero stats={stats} flights={allFlights} />}
           <LegalCard currency={currency} limits={limits} />
           <LicensesCard />

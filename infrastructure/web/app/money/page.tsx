@@ -4,6 +4,7 @@ import { MonthBudgetBar } from "@/components/money/MonthBudgetBar";
 import { TransactionList } from "@/components/money/TransactionList";
 import { MoneyFab } from "@/components/money/MoneyFab";
 import { format, addMonths, subMonths, endOfMonth } from "date-fns";
+import { AreaPlan } from "@/components/plan/AreaPlan";
 
 interface Props {
   searchParams: Promise<{ month?: string }>;
@@ -195,6 +196,8 @@ export default async function MoneyPage({ searchParams }: Props) {
           </section>
         </>
       )}
+
+      <AreaPlan area="money" className="mb-8" />
 
       {/* Transactions explorer */}
       <section>

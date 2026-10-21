@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Activity, Moon, Flame, AlertTriangle } from "lucide-react";
 import { HealthOverview } from "@/components/health/HealthOverview";
+import { AreaPlan } from "@/components/plan/AreaPlan";
 
 const PERIODS = [
   { label: "2W", days: 14 },
@@ -59,6 +60,8 @@ export default function HealthPage() {
           </Link>
         </div>
       </div>
+
+      <AreaPlan area="health" className="mb-6" />
 
       <HealthOverview days={days} />
     </main>

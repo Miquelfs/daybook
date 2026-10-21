@@ -7,6 +7,7 @@ from datetime import date, datetime, timezone
 from domains.plans import agenda as ag
 from domains.plans import goals as gl
 from domains.plans import ics
+from domains.plans.metrics import Ctx, catalog, runs
 from domains.plans.notify import compose
 from infrastructure.db.migrate_plans import migrate
 
@@ -19,8 +20,18 @@ def db():
     c.executescript("""
         CREATE TABLE contacts(id INTEGER PRIMARY KEY, name TEXT UNIQUE, emoji TEXT, group_ TEXT);
         CREATE TABLE day_companions(date TEXT, contact_id INTEGER);
-        CREATE TABLE activities(id TEXT, date TEXT, source TEXT, strava_id TEXT,
-                                activity_type TEXT, distance_meters REAL);
+        CREATE TABLE activities(id TEXT, date TEXT, source TEXT, strava_id TEXT, activity_type TEXT,
+                                distance_meters REAL, moving_time_seconds INTEGER, duration_seconds INTEGER,
+                                elevation_gain_meters REAL);
+        CREATE TABLE sleep(date TEXT PRIMARY KEY, duration_seconds INTEGER);
+        CREATE TABLE weight_log(date TEXT PRIMARY KEY, weight_kg REAL);
+        CREATE TABLE best_effort(activity_id TEXT, date TEXT, sport TEXT, channel TEXT, bucket INTEGER, value REAL);
+        CREATE TABLE flights(id TEXT, date TEXT, is_sim INTEGER DEFAULT 0, block_seconds INTEGER,
+                             pic_seconds INTEGER DEFAULT 0, landings_day INTEGER DEFAULT 0,
+                             landings_night INTEGER DEFAULT 0);
+        CREATE TABLE trips(id INTEGER PRIMARY KEY, start_date TEXT, end_date TEXT, countries_json TEXT,
+                           hidden INTEGER DEFAULT 0);
+        CREATE TABLE manual_country_visits(iso2 TEXT, country TEXT, first_visit TEXT);
         CREATE TABLE books(id INTEGER PRIMARY KEY, title TEXT, date_finished TEXT);
         CREATE TABLE tags(id INTEGER PRIMARY KEY, slug TEXT, is_negative BOOLEAN DEFAULT 0);
         CREATE TABLE day_tags(date TEXT, tag_id INTEGER);
@@ -44,8 +55,8 @@ class GoalProgressTest(unittest.TestCase):
         self.c = db()
 
     def run_km(self, km, day="2026-03-01", source="garmin", id_="garmin_1", strava_id=None):
-        self.c.execute("INSERT INTO activities VALUES (?,?,?,?,?,?)",
-                       (id_, day, source, strava_id, "running", km * 1000))
+        self.c.execute("INSERT INTO activities (id, date, source, strava_id, activity_type, distance_meters) "
+                       "VALUES (?,?,?,?,?,?)", (id_, day, source, strava_id, "running", km * 1000))
 
     def test_run_km_on_pace_and_strava_twin_not_double_counted(self):
         self.run_km(520, id_="garmin_1", strava_id="99")
@@ -97,13 +108,17 @@ class GoalProgressTest(unittest.TestCase):
         p = gl.progress(self.c, goal(metric="tag_days", metric_param="candy", target=10), TODAY)
         self.assertEqual(p["state"], "behind")          # 6 used, budget so far ~5
 
+    def nw(self, value):
+        return Ctx(self.c, net_worth=lambda: value)
+
     def test_net_worth_needs_baseline_for_pace(self):
         g = goal(metric="net_worth", target=50000)
-        self.assertEqual(gl.progress(self.c, g, TODAY, lambda: 30000)["state"], "in_progress")
+        self.assertEqual(gl.progress(self.nw(30000), g, TODAY)["state"], "in_progress")
         g["baseline"] = 20000
-        p = gl.progress(self.c, g, TODAY, lambda: 36000)
+        p = gl.progress(self.nw(36000), g, TODAY)
         self.assertEqual(p["state"], "on_track")          # expected ≈ 35k
-        self.assertEqual(gl.progress(self.c, g, TODAY, lambda: 51000)["state"], "achieved")
+        self.assertEqual(gl.progress(self.nw(51000), g, TODAY)["state"], "achieved")
+        self.assertEqual(gl.progress(self.nw(22000), g, TODAY)["state"], "behind")
 
     def test_manual_and_status(self):
         self.assertEqual(gl.progress(self.c, goal(deadline="2026-06-30"), TODAY)["state"], "overdue")
@@ -122,13 +137,115 @@ class GoalProgressTest(unittest.TestCase):
         self.assertEqual([g["title"] for g in out], ["run", "done26"])
 
 
+class MoreMetricsTest(unittest.TestCase):
+    """The sources beyond km and books — each computed from tables the daybook already fills."""
+
+    def setUp(self):
+        self.c = db()
+
+    def p(self, ctx=None, **kw):
+        return gl.progress(ctx or self.c, goal(**kw), TODAY)
+
+    def test_catalog_has_unique_keys_and_known_kinds(self):
+        keys = [m["key"] for m in catalog()]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertTrue({m["kind"] for m in catalog()} <=
+                        {"sum", "ceiling", "avg", "level", "best", "streak", "manual"})
+        self.assertGreaterEqual(len(keys), 25)
+
+    def test_area_defaults_from_metric(self):
+        self.assertEqual(self.p(metric="ride_km", target=1)["area"], "training")
+        self.assertEqual(self.p(metric="ride_km", target=1, area="people")["area"], "people")
+
+    def test_sleep_average_vs_target(self):
+        for d, h in [("2026-06-01", 7.5), ("2026-06-02", 6.5), ("2025-12-31", 3)]:
+            self.c.execute("INSERT INTO sleep VALUES (?, ?)", (d, h * 3600))
+        p = self.p(metric="sleep_hours", target=7.5)
+        self.assertEqual((p["actual"], p["state"]), (7.0, "behind"))
+        self.assertEqual(self.p(metric="sleep_hours", target=7)["state"], "on_track")
+
+    def test_weight_down_uses_first_weigh_in_as_start(self):
+        for d, kg in [("2025-12-20", 90), ("2026-01-05", 84), ("2026-06-30", 81)]:
+            self.c.execute("INSERT INTO weight_log VALUES (?, ?)", (d, kg))
+        p = self.p(metric="weight", target=78)
+        self.assertEqual((p["actual"], p["compare"]), (81.0, 84.0))
+        self.assertTrue(p["lower_is_better"])
+        self.assertEqual(p["pct"], 50)
+        self.assertEqual(p["state"], "on_track")          # half the way, half the year
+        self.assertEqual(self.p(metric="weight", target=82)["state"], "achieved")
+
+    def test_best_10k_time(self):
+        self.c.execute("INSERT INTO best_effort VALUES ('a', '2026-03-01', 'run', 'pace', 10000, 246)")
+        self.c.execute("INSERT INTO best_effort VALUES ('b', '2026-03-01', 'ride', 'pace', 10000, 90)")
+        p = self.p(metric="best_time", metric_param="10000", target=2400)
+        self.assertEqual((p["actual"], p["state"]), (2460.0, "in_progress"))   # 41:00 vs 40:00
+        self.assertEqual(self.p(metric="best_time", metric_param="10000", target=2500)["state"], "achieved")
+
+    def test_streaks(self):
+        self.assertEqual(runs({"2026-01-02", "2026-01-03"}, date(2026, 1, 1), date(2026, 1, 5), True), (2, 0))
+        self.c.execute("INSERT INTO tags VALUES (1, 'outdoors', 0), (2, 'alcohol', 1)")
+        for d in ["2026-06-28", "2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02"]:
+            self.c.execute("INSERT INTO day_tags VALUES (?, 1)", (d,))
+        self.c.execute("INSERT INTO day_tags VALUES ('2026-06-01', 2)")
+        p = self.p(metric="tag_streak", metric_param="outdoors", target=7)
+        self.assertEqual((p["actual"], p["compare"], p["state"]), (5, 5, "in_progress"))
+        dry = self.p(metric="tag_streak", metric_param="alcohol", target=100)   # days in a row WITHOUT
+        self.assertEqual((dry["actual"], dry["compare"], dry["state"]), (151, 31, "achieved"))
+
+    def test_aviation(self):
+        self.c.execute("INSERT INTO flights VALUES ('1','2026-02-01',0,7200,3600,1,0)")
+        self.c.execute("INSERT INTO flights VALUES ('2','2026-02-02',1,7200,7200,1,1)")   # sim — ignored
+        self.assertEqual(self.p(metric="block_hours", target=4)["actual"], 2.0)
+        self.assertEqual(self.p(metric="landings", target=4)["actual"], 1.0)
+        self.assertEqual(self.p(metric="sectors", target=4)["actual"], 1.0)
+
+    def test_money_saved_and_budget_months(self):
+        m = sqlite3.connect(":memory:")
+        m.execute("CREATE TABLE transactions(date TEXT, amount REAL, transaction_type TEXT, deleted_at TEXT)")
+        m.executemany("INSERT INTO transactions VALUES (?,?,?,NULL)", [
+            ("2026-01-10", 3000, "Income"), ("2026-01-20", -1000, "Expense"),
+            ("2026-02-10", 3000, "Income"), ("2026-02-20", -9000, "Expense"),
+            ("2026-07-01", 3000, "Income"), ("2026-07-01", -100, "Expense"),      # running month
+        ])
+        ctx = Ctx(self.c, money=lambda: m)
+        self.assertEqual(self.p(ctx, metric="saved", target=10000)["actual"], -1100.0)
+        self.assertEqual(self.p(ctx, metric="budget_months", target=12)["actual"], 1.0)
+
+    def test_countries_new_and_visited(self):
+        loc = sqlite3.connect(":memory:")
+        loc.executescript("""
+            CREATE TABLE tracks(date TEXT, geocode_country TEXT);
+            INSERT INTO tracks VALUES ('2025-05-01', 'España'), ('2026-03-01', 'España'),
+                                      ('2026-04-01', 'Norge'), ('2026-05-01', 'Japan');""")
+        self.c.execute("INSERT INTO trips (start_date, end_date, countries_json) VALUES "
+                       "('2026-06-01', '2026-06-05', '[\"Portugal\"]')")
+        self.c.execute("INSERT INTO manual_country_visits VALUES ('JP', 'Japan', '2019')")
+        ctx = Ctx(self.c, locations=lambda: loc)
+        self.assertEqual(self.p(ctx, metric="countries", target=10)["actual"], 4.0)
+        self.assertEqual(self.p(ctx, metric="new_countries", target=5)["actual"], 2.0)   # Norway, Portugal
+
+    def test_person_days(self):
+        self.c.execute("INSERT INTO contacts (id, name) VALUES (7, 'Alice')")
+        for d in ["2026-01-01", "2026-02-01", "2025-12-31"]:
+            self.c.execute("INSERT INTO day_companions VALUES (?, 7)", (d,))
+        self.assertEqual(self.p(metric="person_days", metric_param="7", target=100)["actual"], 2.0)
+
+    def test_years_offered(self):
+        self.c.execute("INSERT INTO goals (title, start_date) VALUES ('x', '2029-01-01')")
+        self.assertEqual(gl.years(self.c, 2026, TODAY), [2026, 2027, 2029])
+
+
 class BirthdayTest(unittest.TestCase):
     def test_parse_and_normalize(self):
-        self.assertEqual(ag.normalize_birthday("03-14"), "--03-14")
-        self.assertEqual(ag.normalize_birthday("1992-03-14"), "1992-03-14")
+        self.assertEqual(ag.normalize_birthday("14-03-1992"), "1992-03-14")
+        self.assertEqual(ag.normalize_birthday("4/3/1992"), "1992-03-04")
+        self.assertEqual(ag.normalize_birthday("14.03"), "--03-14")
+        self.assertEqual(ag.normalize_birthday("1992-03-14"), "1992-03-14")   # stored forms stay valid
+        self.assertEqual(ag.normalize_birthday("--03-14"), "--03-14")
         self.assertIsNone(ag.normalize_birthday(""))
-        with self.assertRaises(ValueError):
-            ag.normalize_birthday("14/03")
+        for bad in ("32-01-1990", "14-13", "march"):
+            with self.assertRaises(ValueError):
+                ag.normalize_birthday(bad)
 
     def test_next_birthday_wraps_and_leap_day(self):
         self.assertEqual(ag.next_birthday("1990-07-01", TODAY), date(2027, 7, 1))

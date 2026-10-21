@@ -3,22 +3,26 @@ Plan ahead — goals with automatic progress, tasks, notes that resurface,
 birthdays, and a calendar feed of all of it.
 
 GET    /goals                — goals with computed progress (?year=)
+GET    /goals/meta           — progress sources (metrics) and the years to offer
 POST   /goals                — new goal
 PATCH  /goals/{id}           — edit / mark done / drop
 DELETE /goals/{id}
-GET    /tasks                — ?status=open|done|all  &kind=task|note  &done_on=YYYY-MM-DD
+GET    /tasks                — ?status=open|done|all  &kind=task|note  &done_on=YYYY-MM-DD  &area=
 POST   /tasks
 PATCH  /tasks/{id}           — edit; done_at=null re-opens
 POST   /tasks/{id}/complete  — done (a repeating task re-arms at its next date)
 DELETE /tasks/{id}
+GET    /plan/area/{area}     — open tasks, notes and this year's goals for one page (money, health, …)
 GET    /birthdays            — everyone with a birthday, soonest first
 GET    /agenda               — the Today strip: overdue / today / coming up / notes / birthdays / goals
 GET    /calendar.ics         — subscribe in Calendar (webcal://…/calendar.ics)
 """
 
 import sqlite3
+from contextlib import contextmanager
 from datetime import date, timedelta
-from typing import Annotated
+from pathlib import Path
+from typing import Annotated, Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -26,9 +30,10 @@ from fastapi.responses import Response
 from domains.plans import agenda as agenda_mod
 from domains.plans import goals as goals_mod
 from domains.plans import ics as ics_mod
+from domains.plans.metrics import METRICS, Ctx, catalog
 from infrastructure.api.db import get_db
 from infrastructure.api.models.plans import (
-    AgendaOut, BirthdayOut, GoalIn, GoalOut, GoalPatch, GoalsBrief,
+    AgendaOut, AreaPlanOut, BirthdayOut, GoalIn, GoalOut, GoalPatch, GoalsBrief, GoalsMeta,
     TaskComplete, TaskIn, TaskOut, TaskPatch,
 )
 
@@ -37,6 +42,8 @@ router = APIRouter(tags=["plans"])
 DB = Annotated[sqlite3.Connection, Depends(get_db)]
 
 GOAL_STATUSES = ("active", "done", "dropped")
+FIRST_YEAR = 2026            # the daybook's first full year — no goals view before it
+_LOCATIONS_DB = Path(__file__).parents[2] / "db" / "locations.db"
 
 
 def _iso(value: str | None, field: str) -> str | None:
@@ -48,33 +55,57 @@ def _iso(value: str | None, field: str) -> str | None:
         raise HTTPException(status_code=422, detail=f"{field} must be YYYY-MM-DD")
 
 
-def _net_worth() -> float | None:
-    """Same figure as Money → total net worth (holdings + liquid accounts).
-    None if money.db can't be read — the goal then just shows no number."""
-    from infrastructure.api.routers.money import portfolio_overview
-    from infrastructure.db.money_connection import get_money_connection
+@contextmanager
+def _ctx(conn: sqlite3.Connection) -> Iterator[Ctx]:
+    """Progress context: money.db / locations.db open only if a goal needs them."""
+    opened: dict[str, sqlite3.Connection | None] = {}
+
+    def money():
+        if "money" not in opened:
+            from infrastructure.db.money_connection import get_money_connection
+            try:
+                opened["money"] = get_money_connection()
+            except Exception:
+                opened["money"] = None
+        return opened["money"]
+
+    def locations():
+        if "loc" not in opened:
+            opened["loc"] = None
+            if _LOCATIONS_DB.exists() and _LOCATIONS_DB.stat().st_size > 0:
+                c = sqlite3.connect(f"file:{_LOCATIONS_DB}?mode=ro", uri=True, timeout=10)
+                c.row_factory = sqlite3.Row
+                opened["loc"] = c
+        return opened["loc"]
+
+    def net_worth():
+        """Same figure as Money → total net worth (holdings + liquid accounts)."""
+        from infrastructure.api.routers.money import portfolio_overview
+        m = money()
+        return portfolio_overview(m).total_net_worth_eur if m is not None else None
+
     try:
-        conn = get_money_connection()
-        try:
-            return portfolio_overview(conn).total_net_worth_eur
-        finally:
-            conn.close()
-    except Exception:
-        return None
+        yield Ctx(conn, money=money, locations=locations, net_worth=net_worth)
+    finally:
+        for c in opened.values():
+            if c is not None:
+                c.close()
 
 
 def _goal_out(conn: sqlite3.Connection, goal_id: int) -> GoalOut:
     row = conn.execute("SELECT * FROM goals WHERE id=?", (goal_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    return GoalOut(**goals_mod.progress(conn, dict(row), date.today(), _net_worth))
+    with _ctx(conn) as ctx:
+        return GoalOut(**goals_mod.progress(ctx, dict(row), date.today()))
 
 
 def _check_goal(fields: dict) -> None:
-    if "metric" in fields and fields["metric"] not in goals_mod.METRICS:
-        raise HTTPException(status_code=422, detail=f"metric must be one of {', '.join(goals_mod.METRICS)}")
-    if fields.get("metric") == "tag_days" and not fields.get("metric_param"):
-        raise HTTPException(status_code=422, detail="tag_days needs metric_param (a tag slug)")
+    if "metric" in fields and fields["metric"] not in METRICS:
+        raise HTTPException(status_code=422, detail=f"unknown metric {fields['metric']!r}")
+    metric = METRICS.get(fields.get("metric") or "manual", METRICS["manual"])[0]
+    if metric.param and not fields.get("metric_param"):
+        raise HTTPException(status_code=422, detail=f"{metric.label} needs a {metric.param}")
     if "status" in fields and fields["status"] not in GOAL_STATUSES:
         raise HTTPException(status_code=422, detail="status must be active, done or dropped")
     if "title" in fields and not (fields["title"] or "").strip():
@@ -94,15 +125,20 @@ def _check_task(fields: dict) -> None:
 
 # ── Goals ────────────────────────────────────────────────────────────────────
 
+@router.get("/goals/meta", response_model=GoalsMeta)
+def goals_meta(conn: DB):
+    return GoalsMeta(metrics=catalog(), years=goals_mod.years(conn, FIRST_YEAR, date.today()))
+
+
 @router.get("/goals", response_model=list[GoalOut])
 def list_goals(conn: DB, year: int | None = Query(None)):
-    return [GoalOut(**g) for g in goals_mod.list_with_progress(conn, date.today(), _net_worth, year)]
+    with _ctx(conn) as ctx:
+        return [GoalOut(**g) for g in goals_mod.list_with_progress(ctx, date.today(), year)]
 
 
 @router.post("/goals", response_model=GoalOut, status_code=201)
 def create_goal(body: GoalIn, conn: DB):
-    fields = body.model_dump()
-    _check_goal(fields)
+    _check_goal(body.model_dump())
     start = date.fromisoformat(_iso(body.start_date, "start_date") or date(date.today().year, 1, 1).isoformat())
     deadline = _iso(body.deadline, "deadline") or goals_mod.period_end(start).isoformat()
     if deadline < start.isoformat():
@@ -160,6 +196,7 @@ def list_tasks(
     status: str = Query("open", pattern="^(open|done|all)$"),
     kind: str | None = Query(None, pattern="^(task|note)$"),
     done_on: str | None = Query(None, description="Only tasks completed on this date"),
+    area: str | None = Query(None),
 ):
     where, params = [], []
     if done_on:
@@ -172,6 +209,9 @@ def list_tasks(
     if kind:
         where.append("kind = ?")
         params.append(kind)
+    if area:
+        where.append("area = ?")
+        params.append(area)
     sql = "SELECT * FROM tasks" + (f" WHERE {' AND '.join(where)}" if where else "")
     order = " ORDER BY done_at DESC, id DESC" if status == "done" or done_on else \
             " ORDER BY due_date IS NULL, due_date, id"
@@ -180,8 +220,7 @@ def list_tasks(
 
 @router.post("/tasks", response_model=TaskOut, status_code=201)
 def create_task(body: TaskIn, conn: DB):
-    fields = body.model_dump()
-    _check_task(fields)
+    _check_task(body.model_dump())
     cur = conn.execute(
         """INSERT INTO tasks (title, notes, kind, due_date, remind_days, repeat, area, goal_id)
            VALUES (?,?,?,?,?,?,?,?)""",
@@ -226,7 +265,24 @@ def delete_task(task_id: int, conn: DB):
     conn.commit()
 
 
-# ── Birthdays / agenda / calendar ────────────────────────────────────────────
+# ── Per-page plan / birthdays / agenda / calendar ────────────────────────────
+
+def _live_goals(ctx: Ctx, today: date) -> list[dict]:
+    """Active goals running now (this year's, already started)."""
+    return [g for g in goals_mod.list_with_progress(ctx, today, today.year)
+            if g["status"] == "active" and g["start_date"] <= today.isoformat()]
+
+
+@router.get("/plan/area/{area}", response_model=AreaPlanOut)
+def area_plan(area: str, conn: DB):
+    today = date.today()
+    rows = conn.execute(
+        "SELECT * FROM tasks WHERE done_at IS NULL AND area=? ORDER BY due_date IS NULL, due_date, id", (area,)
+    ).fetchall()
+    with _ctx(conn) as ctx:
+        goals = [g for g in _live_goals(ctx, today) if g["area"] == area]
+    return AreaPlanOut(area=area, tasks=[TaskOut(**dict(r)) for r in rows], goals=[GoalOut(**g) for g in goals])
+
 
 @router.get("/birthdays", response_model=list[BirthdayOut])
 def list_birthdays(conn: DB):
@@ -238,12 +294,13 @@ def get_agenda(conn: DB, day: str | None = Query(None, alias="date")):
     today = date.fromisoformat(_iso(day, "date") or date.today().isoformat())
     a = agenda_mod.agenda(conn, today)
 
-    # Only goals running now: on-track count, the ones slipping, deadlines within 30 days.
+    # Goals running now: on-track count, the ones slipping, deadlines within 30 days.
     soon = (today + timedelta(days=30)).isoformat()
-    live = [g for g in goals_mod.list_with_progress(conn, today, _net_worth, today.year)
-            if g["status"] == "active" and g["start_date"] <= today.isoformat()]
+    with _ctx(conn) as ctx:
+        live = _live_goals(ctx, today)
     brief = GoalsBrief(
         on_track=sum(g["state"] in ("on_track", "achieved") for g in live),
+        total=len(live),
         behind=[GoalOut(**g) for g in live if g["state"] in ("behind", "overdue")],
         due_soon=[GoalOut(**g) for g in live
                   if g["deadline"] and today.isoformat() <= g["deadline"] <= soon

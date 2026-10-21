@@ -1,48 +1,67 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { tagsApi } from "@/lib/tags-api";
-import { plansApi, PLAN_KEYS, METRIC_LABEL, type Goal, type GoalIn, type GoalMetric } from "@/lib/plans-api";
+import { plansApi, PLAN_KEYS, type Goal, type GoalIn, type Metric } from "@/lib/plans-api";
 import { Sheet, Field, Chips, inputCls } from "./Sheet";
+import { AREA_EMOJI, AREA_LIST, area as areaOf, tint, type AreaKey } from "./areas";
+import { fmtTime, parseTime } from "./format";
 
-const METRIC_HINT: Record<GoalMetric, string> = {
-  manual: "Ticked off by hand — optionally type a number as you go.",
-  run_km: "Counted from your runs (Garmin / Strava).",
-  ride_km: "Counted from your rides (Garmin / Strava).",
-  swim_km: "Counted from your swims.",
-  books: "Books with a finished date in the period.",
-  net_worth: "Money → total net worth. Set a starting value to get a pace.",
-  tag_days: "Days tagged. Negative tags (candy, alcohol) are a ceiling — without a target it's fewer than last year.",
-};
+const DISTANCES = [
+  { value: "5000", label: "5 k" }, { value: "10000", label: "10 k" },
+  { value: "21097", label: "Half" }, { value: "42195", label: "Marathon" },
+];
 
-const num = (s: string) => (s.trim() === "" ? null : Number(s));
+/** Keep the first emoji the user typed (ZWJ sequences like 🧑‍✈️ count as one). */
+function firstGrapheme(s: string): string {
+  const seg = typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s)].map((x) => x.segment)
+    : Array.from(s);
+  return seg.find((x) => x.trim()) ?? "";
+}
+
+const num = (s: string) => (s.trim() === "" ? null : Number(s.replace(",", ".")));
 
 export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; onClose: () => void }) {
   const qc = useQueryClient();
+  const { data: meta } = useQuery({ queryKey: ["goals", "meta"], queryFn: () => plansApi.goalsMeta(), staleTime: 3600_000 });
+  const metrics = useMemo(() => meta?.metrics ?? [], [meta]);
+
   const [f, setF] = useState({
     emoji: goal?.emoji ?? "",
     title: goal?.title ?? "",
-    metric: (goal?.metric ?? "manual") as GoalMetric,
+    metric: goal?.metric ?? "manual",
     metric_param: goal?.metric_param ?? "",
-    target: goal?.target?.toString() ?? "",
+    target: goal?.target == null ? "" : goal.metric === "best_time" ? fmtTime(goal.target) : String(goal.target),
     baseline: goal?.baseline?.toString() ?? "",
     current: goal?.current?.toString() ?? "",
+    area: (goal?.area ?? null) as string | null,          // null → the metric's area
     start_date: goal?.start_date ?? `${year}-01-01`,
     deadline: goal?.deadline ?? `${year}-12-31`,
     priority: (goal?.priority ?? 2) as 1 | 2 | 3,
-    area: goal?.area ?? "",
     notes: goal?.notes ?? "",
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const m: Metric | undefined = metrics.find((x) => x.key === f.metric);
+  const effectiveArea = areaOf(f.area ?? m?.area);
+
   const { data: tags = [] } = useQuery({
-    queryKey: ["tags"],
-    queryFn: () => tagsApi.list(),
-    staleTime: 5 * 60 * 1000,
-    enabled: f.metric === "tag_days",
+    queryKey: ["tags"], queryFn: () => tagsApi.list(), staleTime: 300_000, enabled: m?.param === "tag",
   });
+  const { data: contacts = [] } = useQuery({
+    queryKey: ["contacts"], queryFn: () => api.contacts(), staleTime: 300_000, enabled: m?.param === "contact",
+  });
+  const negativeTag = m?.param === "tag" && tags.find((t) => t.slug === f.metric_param)?.is_negative;
+
+  const grouped = useMemo(() => {
+    const by = new Map<string, Metric[]>();
+    for (const x of metrics) by.set(x.area, [...(by.get(x.area) ?? []), x]);
+    return [...by.entries()];
+  }, [metrics]);
 
   const refresh = () => PLAN_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: [...k] }));
 
@@ -60,75 +79,139 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
     }
   }
 
-  function save() {
-    if (!f.title.trim()) return;
-    const body: GoalIn = {
+  function body(): GoalIn {
+    return {
       title: f.title.trim(),
-      emoji: f.emoji.trim() || null,
+      emoji: f.emoji || null,
       metric: f.metric,
-      metric_param: f.metric === "tag_days" ? f.metric_param || null : null,
-      target: num(f.target),
-      baseline: f.metric === "net_worth" ? num(f.baseline) : null,
+      metric_param: m?.param ? f.metric_param || null : null,
+      target: f.metric === "best_time" ? parseTime(f.target) : num(f.target),
+      baseline: m?.kind === "level" ? num(f.baseline) : null,
       current: f.metric === "manual" ? num(f.current) : null,
+      area: f.area,
       start_date: f.start_date,
       deadline: f.deadline || null,
       priority: f.priority,
-      area: f.area.trim() || null,
       notes: f.notes.trim() || null,
     };
-    run(() => (goal ? plansApi.updateGoal(goal.id, body) : plansApi.createGoal(body)));
   }
 
-  const selectedTag = tags.find((t) => t.slug === f.metric_param);
+  function save() {
+    if (!f.title.trim()) return;
+    run(() => (goal ? plansApi.updateGoal(goal.id, body()) : plansApi.createGoal(body())));
+  }
+
+  function repeatNextYear() {
+    if (!goal) return;
+    const shift = (d: string | null) => (d ? `${Number(d.slice(0, 4)) + 1}${d.slice(4)}` : null);
+    const y = goal.start_date.slice(0, 4);
+    run(() => plansApi.createGoal({
+      ...body(),
+      title: goal.title.replace(y, String(Number(y) + 1)),
+      start_date: shift(goal.start_date)!,
+      deadline: shift(goal.deadline),
+      current: null,
+      baseline: null,
+    }));
+  }
+
+  const targetLabel = negativeTag ? "Max days (optional)"
+    : m?.kind === "streak" ? "Days in a row"
+    : m?.kind === "manual" ? "Target (optional)"
+    : "Target";
+  const unit = f.metric === "best_time" ? "mm:ss" : m?.unit ?? "";
+  const needsParam = m?.param && !f.metric_param;
 
   return (
     <Sheet title={goal ? "Edit goal" : "New goal"} onClose={onClose}>
-      <div className="flex gap-2">
-        <input className={`${inputCls} w-14 text-center`} placeholder="🎯" maxLength={4}
-               value={f.emoji} onChange={(e) => setF({ ...f, emoji: e.target.value })} />
-        <input className={inputCls} placeholder="4000 km on the bike" autoFocus={!goal}
-               value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} />
+      {/* Emoji tile + title */}
+      <div className="flex items-center gap-2.5">
+        <input
+          aria-label="Emoji"
+          value={f.emoji}
+          onChange={(e) => setF({ ...f, emoji: firstGrapheme(e.target.value) })}
+          placeholder={effectiveArea.emoji}
+          className="shrink-0 w-12 h-12 rounded-xl text-center text-2xl outline-none border border-transparent focus:border-[#F59E0B] placeholder:opacity-60"
+          style={{ background: tint(effectiveArea.color, 0.18) }}
+        />
+        <input
+          className={`${inputCls} flex-1 min-w-0 h-12 text-base`}
+          placeholder="Cycle 4000 km"
+          autoFocus={!goal}
+          value={f.title}
+          onChange={(e) => setF({ ...f, title: e.target.value })}
+        />
+      </div>
+      <div className="flex gap-1 -mt-1">
+        {AREA_EMOJI[effectiveArea.key].map((e) => (
+          <button key={e} type="button" onClick={() => setF({ ...f, emoji: e })}
+                  className={`w-8 h-8 rounded-lg text-base transition-colors ${f.emoji === e ? "bg-[#27272A]" : "hover:bg-[#18181B]"}`}>
+            {e}
+          </button>
+        ))}
       </div>
 
-      <Field label="Progress from">
+      <Field label="Progress counts from">
         <select className={inputCls} value={f.metric}
-                onChange={(e) => setF({ ...f, metric: e.target.value as GoalMetric })}>
-          {(Object.keys(METRIC_LABEL) as GoalMetric[]).map((m) => (
-            <option key={m} value={m}>{METRIC_LABEL[m]}</option>
+                onChange={(e) => setF({ ...f, metric: e.target.value, metric_param: "", target: "", baseline: "" })}>
+          {grouped.map(([a, list]) => (
+            <optgroup key={a} label={`${areaOf(a).emoji} ${areaOf(a).label}`}>
+              {list.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
+            </optgroup>
           ))}
         </select>
-        <span className="text-[11px] text-[#52525B] mt-1 block">{METRIC_HINT[f.metric]}</span>
+        {m && <span className="text-[11px] text-[#52525B] mt-1 block">{m.hint}</span>}
       </Field>
 
-      {f.metric === "tag_days" && (
+      {m?.param === "tag" && (
         <Field label="Tag">
-          <select className={inputCls} value={f.metric_param}
-                  onChange={(e) => setF({ ...f, metric_param: e.target.value })}>
+          <select className={inputCls} value={f.metric_param} onChange={(e) => setF({ ...f, metric_param: e.target.value })}>
             <option value="">Choose a tag…</option>
             {tags.map((t) => (
               <option key={t.slug} value={t.slug}>
-                {t.icon ? `${t.icon} ` : ""}{t.name}{t.is_negative ? " (fewer is better)" : ""}
+                {t.icon ? `${t.icon} ` : ""}{t.name}{t.is_negative ? " — fewer is better" : ""}
               </option>
             ))}
           </select>
         </Field>
       )}
+      {m?.param === "contact" && (
+        <Field label="Person">
+          <select className={inputCls} value={f.metric_param} onChange={(e) => setF({ ...f, metric_param: e.target.value })}>
+            <option value="">Choose someone…</option>
+            {contacts.map((c) => <option key={c.id} value={String(c.id)}>{c.emoji ? `${c.emoji} ` : ""}{c.name}</option>)}
+          </select>
+        </Field>
+      )}
+      {m?.param === "distance" && (
+        <Field label="Distance">
+          <Chips value={f.metric_param} onChange={(v) => setF({ ...f, metric_param: v })} options={DISTANCES} />
+        </Field>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label={selectedTag?.is_negative ? "Max days (optional)" : f.metric === "manual" ? "Target (optional)" : "Target"}>
-          <input type="number" inputMode="decimal" className={inputCls} value={f.target}
-                 placeholder={selectedTag?.is_negative ? "vs last year" : ""}
-                 onChange={(e) => setF({ ...f, target: e.target.value })} />
+        <Field label={targetLabel}>
+          <div className="relative">
+            <input
+              inputMode={f.metric === "best_time" ? "text" : "decimal"}
+              className={`${inputCls} pr-14`}
+              value={f.target}
+              placeholder={negativeTag ? "vs last year" : f.metric === "best_time" ? "40:00" : ""}
+              onChange={(e) => setF({ ...f, target: e.target.value })}
+            />
+            {unit && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#52525B] pointer-events-none">{unit}</span>}
+          </div>
         </Field>
-        {f.metric === "net_worth" && (
-          <Field label={`Net worth on ${f.start_date.slice(5)}`}>
-            <input type="number" inputMode="decimal" className={inputCls} value={f.baseline}
+        {m?.kind === "level" && (
+          <Field label={f.metric === "net_worth" ? "Value at the start" : "Start value (auto)"}>
+            <input inputMode="decimal" className={inputCls} value={f.baseline}
+                   placeholder={f.metric === "net_worth" ? "for the pace" : "first logged"}
                    onChange={(e) => setF({ ...f, baseline: e.target.value })} />
           </Field>
         )}
         {f.metric === "manual" && (
-          <Field label="Current">
-            <input type="number" inputMode="decimal" className={inputCls} value={f.current}
+          <Field label="Where you are">
+            <input inputMode="decimal" className={inputCls} value={f.current}
                    onChange={(e) => setF({ ...f, current: e.target.value })} />
           </Field>
         )}
@@ -136,39 +219,53 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="From">
-          <input type="date" className={inputCls} value={f.start_date}
-                 onChange={(e) => setF({ ...f, start_date: e.target.value })} />
+          <input type="date" className={inputCls} value={f.start_date} onChange={(e) => setF({ ...f, start_date: e.target.value })} />
         </Field>
         <Field label="Deadline">
-          <input type="date" className={inputCls} value={f.deadline}
-                 onChange={(e) => setF({ ...f, deadline: e.target.value })} />
+          <input type="date" className={inputCls} value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} />
         </Field>
       </div>
 
+      <Field label="Area">
+        <div className="flex flex-wrap gap-1.5">
+          {AREA_LIST.map((a) => {
+            const on = effectiveArea.key === a.key;
+            return (
+              <button key={a.key} type="button"
+                      onClick={() => setF({ ...f, area: a.key === m?.area ? null : (a.key as AreaKey) })}
+                      className="px-2.5 py-1 rounded-full text-xs transition-colors border"
+                      style={on ? { background: tint(a.color, 0.2), borderColor: a.color, color: a.color }
+                                : { borderColor: "transparent" }}>
+                <span className={on ? "" : "text-[#71717A]"}>{a.emoji} {a.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Field>
+
       <Field label="Importance">
         <Chips value={f.priority} onChange={(v) => setF({ ...f, priority: v })}
-               options={[{ value: 1, label: "Moderate" }, { value: 2, label: "Important" }, { value: 3, label: "Very important" }]} />
+               options={[{ value: 1, label: "Moderate" }, { value: 2, label: "Important" }, { value: 3, label: "⭐ Very important" }]} />
       </Field>
 
       <Field label="Notes">
-        <textarea rows={2} className={`${inputCls} resize-none`} value={f.notes}
-                  onChange={(e) => setF({ ...f, notes: e.target.value })} />
+        <textarea rows={2} className={`${inputCls} resize-none`} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} />
       </Field>
 
-      {error && <p className="text-red-400 text-xs">{error}</p>}
+      {error && <p className="text-rose-400 text-xs">{error}</p>}
 
-      <button onClick={save} disabled={busy || !f.title.trim() || (f.metric === "tag_days" && !f.metric_param)}
+      <button onClick={save} disabled={busy || !f.title.trim() || !!needsParam}
               className="w-full bg-[#F59E0B] text-black font-semibold rounded-xl py-3 text-sm disabled:opacity-40">
         {busy ? "Saving…" : goal ? "Save" : "Add goal"}
       </button>
 
       {goal && (
-        <div className="flex items-center justify-between text-xs pt-1">
+        <div className="flex items-center justify-between gap-3 text-xs pt-1 flex-wrap">
           <div className="flex gap-3">
             {goal.status === "active" ? (
               <>
                 <button disabled={busy} onClick={() => run(() => plansApi.updateGoal(goal.id, { status: "done" }))}
-                        className="text-emerald-400 hover:text-emerald-300">Mark done</button>
+                        className="text-emerald-400">Mark done</button>
                 <button disabled={busy} onClick={() => run(() => plansApi.updateGoal(goal.id, { status: "dropped" }))}
                         className="text-[#71717A] hover:text-[#A1A1AA]">Drop</button>
               </>
@@ -176,10 +273,13 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
               <button disabled={busy} onClick={() => run(() => plansApi.updateGoal(goal.id, { status: "active" }))}
                       className="text-[#A1A1AA] hover:text-[#FAFAFA]">Reopen</button>
             )}
+            <button disabled={busy} onClick={repeatNextYear} className="text-[#A1A1AA] hover:text-[#FAFAFA]">
+              ↻ Repeat in {Number(goal.start_date.slice(0, 4)) + 1}
+            </button>
           </div>
           <button disabled={busy}
                   onClick={() => confirm(`Delete “${goal.title}”?`) && run(() => plansApi.deleteGoal(goal.id))}
-                  className="text-red-400/80 hover:text-red-400">Delete</button>
+                  className="text-rose-400/80 hover:text-rose-400">Delete</button>
         </div>
       )}
     </Sheet>

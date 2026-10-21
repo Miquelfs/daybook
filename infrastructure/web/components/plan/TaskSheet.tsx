@@ -4,11 +4,13 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { plansApi, PLAN_KEYS, type Task, type TaskIn, type TaskKind, type TaskRepeat } from "@/lib/plans-api";
 import { Sheet, Field, Chips, inputCls } from "./Sheet";
+import { AREA_LIST, tint } from "./areas";
 
-export function TaskSheet({ task, kind = "task", defaultDate, onClose }: {
+export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClose }: {
   task?: Task;
   kind?: TaskKind;
   defaultDate?: string;
+  defaultArea?: string;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
@@ -19,7 +21,7 @@ export function TaskSheet({ task, kind = "task", defaultDate, onClose }: {
     due_date: task?.due_date ?? defaultDate ?? "",
     repeat: (task?.repeat ?? null) as TaskRepeat | null,
     remind_days: task?.remind_days ?? null,
-    area: task?.area ?? "",
+    area: (task?.area ?? defaultArea ?? null) as string | null,
     goal_id: task?.goal_id ?? null,
   });
   const [busy, setBusy] = useState(false);
@@ -57,7 +59,7 @@ export function TaskSheet({ task, kind = "task", defaultDate, onClose }: {
       due_date: f.due_date || null,
       repeat: f.due_date && !isNote ? f.repeat : null,
       remind_days: f.due_date && !isNote ? f.remind_days : null,
-      area: f.area.trim() || null,
+      area: f.area,
       goal_id: f.goal_id,
     };
     run(() => (task ? plansApi.updateTask(task.id, body) : plansApi.createTask(body)));
@@ -96,21 +98,33 @@ export function TaskSheet({ task, kind = "task", defaultDate, onClose }: {
         </>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Area">
-          <input className={inputCls} placeholder="Home, Finance…" value={f.area}
-                 onChange={(e) => setF({ ...f, area: e.target.value })} />
-        </Field>
-        <Field label="Goal">
+      <Field label="Area — also shows it on that page">
+        <div className="flex flex-wrap gap-1.5">
+          {AREA_LIST.map((a) => {
+            const on = f.area === a.key;
+            return (
+              <button key={a.key} type="button" onClick={() => setF({ ...f, area: on ? null : a.key })}
+                      className="px-2.5 py-1 rounded-full text-xs transition-colors border"
+                      style={on ? { background: tint(a.color, 0.2), borderColor: a.color, color: a.color }
+                                : { borderColor: "transparent" }}>
+                <span className={on ? "" : "text-[#71717A]"}>{a.emoji} {a.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Field>
+
+      {liveGoals.length > 0 && (
+        <Field label="Towards a goal">
           <select className={inputCls} value={f.goal_id ?? ""}
                   onChange={(e) => setF({ ...f, goal_id: e.target.value ? Number(e.target.value) : null })}>
             <option value="">—</option>
             {liveGoals.map((g) => <option key={g.id} value={g.id}>{g.emoji ? `${g.emoji} ` : ""}{g.title}</option>)}
           </select>
         </Field>
-      </div>
+      )}
 
-      {error && <p className="text-red-400 text-xs">{error}</p>}
+      {error && <p className="text-rose-400 text-xs">{error}</p>}
 
       <button onClick={save} disabled={busy || !f.title.trim()}
               className="w-full bg-[#F59E0B] text-black font-semibold rounded-xl py-3 text-sm disabled:opacity-40">
@@ -121,7 +135,7 @@ export function TaskSheet({ task, kind = "task", defaultDate, onClose }: {
         <div className="flex justify-end text-xs">
           <button disabled={busy}
                   onClick={() => confirm(`Delete “${task.title}”?`) && run(() => plansApi.deleteTask(task.id))}
-                  className="text-red-400/80 hover:text-red-400">Delete</button>
+                  className="text-rose-400/80 hover:text-rose-400">Delete</button>
         </div>
       )}
     </Sheet>

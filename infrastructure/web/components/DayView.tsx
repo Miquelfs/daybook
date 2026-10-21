@@ -92,9 +92,6 @@ export async function DayView({ date }: { date: string }) {
       <DayHeader date={date} />
 
       <div className="flex flex-col gap-12 mt-10">
-        {/* Today: what's ahead (tasks, notes, birthdays, goals). Past day: what got done. */}
-        <AheadStrip date={date} isToday={date === localToday} />
-
         <MorningBrief
           sleep={day.sleep}
           stats={day.daily_stats}
@@ -103,6 +100,9 @@ export async function DayView({ date }: { date: string }) {
           brief={morningBriefData?.brief ?? null}
           aiAvailable={aiStatus?.ollama_available ?? false}
         />
+
+        {/* Today: tasks, notes, birthdays, goals. Past day: what got done. */}
+        <AheadStrip date={date} isToday={date === localToday} />
 
         {/* Recovery cue sits tight above Training — it's a lead-in to it, not
             a standalone section, so keep the gap small (gap-4, not gap-12). */}

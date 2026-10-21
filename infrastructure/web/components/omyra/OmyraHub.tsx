@@ -13,6 +13,7 @@ import { VolumeChart, ProgressComparisonChart } from "@/components/training/Prog
 import { TrainingRouteMap } from "@/components/training/TrainingRouteMap";
 import { TrainingOverview } from "@/components/omyra/TrainingOverview";
 import { AddActivitySheet } from "@/components/omyra/AddActivitySheet";
+import { AreaPlan } from "@/components/plan/AreaPlan";
 
 const TABS = [
   { key: "training", label: "Training", icon: Activity },
@@ -83,6 +84,8 @@ export function OmyraHub() {
           ))}
         </div>
       </div>
+
+      <AreaPlan area="training" className="mb-6" />
 
       {tab === "training" && <TrainingOverview onOpenRace={() => select("race")} />}
       {tab === "race" && <RaceCockpit />}

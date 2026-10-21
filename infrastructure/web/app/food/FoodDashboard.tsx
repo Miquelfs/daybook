@@ -22,6 +22,7 @@ import { HeartDot, HEART_META } from "@/components/HeartRatingBadge";
 import { HeartHealthyPick } from "@/components/HeartHealthyPick";
 import { FoodWellnessImpact } from "@/components/FoodWellnessImpact";
 import { WeeklyMealPlan } from "@/components/WeeklyMealPlan";
+import { AreaPlan } from "@/components/plan/AreaPlan";
 
 // Theme tokens (globals.css) so charts and bars read on paper and on dark
 const AMBER = "var(--viz-i4)";     // eaten
@@ -326,6 +327,8 @@ export function FoodDashboard() {
           </div>
         </div>
       </div>
+
+      <AreaPlan area="food" />
 
       {/* Hero — how much is left today, macros, energy balance, what training asks for */}
       <Panel className="p-5">

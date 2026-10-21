@@ -53,11 +53,12 @@ class GoalOut(BaseModel):
     created_at: str
     # computed
     state: str
+    kind: str                              # sum | ceiling | avg | level | best | streak | manual
     unit: str
     actual: float | None = None
     pct: int | None = None
     expected: float | None = None
-    compare: float | None = None           # negative tags: same window last year
+    compare: float | None = None           # ceiling: last year · streak: current run · level: start value
     lower_is_better: bool = False
     needed_per_week: float | None = None
     days_left: int | None = None
@@ -119,8 +120,25 @@ class BirthdayOut(BaseModel):
     days_together_this_year: int = 0
 
 
+class MetricOut(BaseModel):
+    key: str
+    label: str
+    area: str
+    unit: str
+    kind: str
+    hint: str
+    param: str | None = None               # tag | contact | distance
+    lower_is_better: bool = False
+
+
+class GoalsMeta(BaseModel):
+    metrics: list[MetricOut]
+    years: list[int]
+
+
 class GoalsBrief(BaseModel):
     on_track: int = 0
+    total: int = 0
     behind: list[GoalOut] = []
     due_soon: list[GoalOut] = []           # active, deadline within 30 days
 
@@ -134,3 +152,9 @@ class AgendaOut(BaseModel):
     inbox_count: int
     birthdays: list[BirthdayOut]
     goals: GoalsBrief
+
+
+class AreaPlanOut(BaseModel):
+    area: str
+    tasks: list[TaskOut]
+    goals: list[GoalOut]
