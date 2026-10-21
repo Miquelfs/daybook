@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, Mountain, CalendarRange, List, Zap, TrendingUp, Map, Droplet, Plus } from "lucide-react";
+import { Activity, Mountain, CalendarRange, List, Zap, TrendingUp, Map, Droplet, Flame, Plus } from "lucide-react";
 import { RaceCockpit } from "@/components/race/RaceCockpit";
 import OmyraTab from "@/components/training/OmyraTab";
 import FuelTab from "@/components/training/FuelTab";
@@ -14,6 +14,7 @@ import { TrainingRouteMap } from "@/components/training/TrainingRouteMap";
 import { TrainingOverview } from "@/components/omyra/TrainingOverview";
 import { AddActivitySheet } from "@/components/omyra/AddActivitySheet";
 import { AreaPlan } from "@/components/plan/AreaPlan";
+import { ActivityStreaks } from "@/components/training/ActivityStreaks";
 
 const TABS = [
   { key: "training", label: "Training", icon: Activity },
@@ -22,6 +23,7 @@ const TABS = [
   { key: "log", label: "Log", icon: List },
   { key: "load", label: "Load", icon: Zap },
   { key: "progress", label: "Progress", icon: TrendingUp },
+  { key: "streaks", label: "Streaks", icon: Flame },
   { key: "map", label: "Map", icon: Map },
   { key: "fuel", label: "Fuel", icon: Droplet },
 ] as const;
@@ -40,7 +42,7 @@ function Block({ title, note, children }: { title: string; note?: string; childr
 
 // Omyra — training as its own home: Training overview first (with the Mallorca 312
 // banner), then the race cockpit, the plan and the analytics.
-// Deep links: /omyra?tab=race|plan|log|load|progress|map|fuel, /omyra?plan=next (→ race).
+// Deep links: /omyra?tab=race|plan|log|load|progress|streaks|map|fuel, /omyra?plan=next (→ race).
 export function OmyraHub() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("training");
@@ -91,6 +93,7 @@ export function OmyraHub() {
       {tab === "race" && <RaceCockpit />}
       {tab === "plan" && <OmyraTab />}
       {tab === "fuel" && <FuelTab />}
+      {tab === "streaks" && <ActivityStreaks />}
       {tab === "log" && <Block title="Training log"><TrainingLogCalendar /></Block>}
       {tab === "load" && (
         <section className="space-y-6">

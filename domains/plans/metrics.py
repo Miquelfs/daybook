@@ -114,6 +114,26 @@ def _tag_dates(conn, slug: str, start: date, end: date) -> tuple[set[str], bool]
     return {r[0] for r in rows}, negative
 
 
+_DISTANCE_LABEL = {"5000": "5 k", "10000": "10 k", "21097": "Half marathon", "42195": "Marathon"}
+
+
+def param_info(conn: sqlite3.Connection, kind: str | None, param) -> dict:
+    """What a goal is tied to, for display: the tag's name + emoji, the person, the distance."""
+    label = icon = None
+    if kind == "tag" and param:
+        row = conn.execute("SELECT name, icon FROM tags WHERE slug=?", (param,)).fetchone() \
+            if _has_column(conn, "tags", "icon") else conn.execute("SELECT slug, NULL FROM tags WHERE slug=?", (param,)).fetchone()
+        if row:
+            label, icon = row[0], row[1]
+    elif kind == "contact" and param:
+        row = conn.execute("SELECT name, emoji FROM contacts WHERE id=?", (int(param),)).fetchone()
+        if row:
+            label, icon = row[0], row[1]
+    elif kind == "distance" and param:
+        label = _DISTANCE_LABEL.get(str(param), f"{int(param) / 1000:g} k")
+    return {"param_label": label, "param_icon": icon}
+
+
 def runs(days: set[str], start: date, end: date, want: bool) -> tuple[int, int]:
     """(longest, current) run of consecutive days in [start, end] whose membership == want."""
     longest = cur = 0

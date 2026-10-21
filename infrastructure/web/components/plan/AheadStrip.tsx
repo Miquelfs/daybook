@@ -95,7 +95,7 @@ function Ahead({ date }: { date: string }) {
         <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-1.5">
           {due.length > 0 && (
             <div className="divide-y divide-[#18181B] border-b border-[#18181B]">
-              {due.map((t) => <TaskRow key={t.id} task={t} today={date} onEdit={setEditing} muted />)}
+              {due.map((t) => <TaskRow key={t.id} task={t} today={date} onEdit={setEditing} />)}
             </div>
           )}
           <div className="flex items-center gap-3 py-2">
@@ -167,7 +167,7 @@ function DoneOn({ date }: { date: string }) {
     <section>
       <SectionLabel>Got done</SectionLabel>
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-1.5 divide-y divide-[#18181B]">
-        {done.map((t) => <TaskRow key={t.id} task={t} today={date} muted />)}
+        {done.map((t) => <TaskRow key={t.id} task={t} today={date} />)}
       </div>
     </section>
   );

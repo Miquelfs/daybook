@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { plansApi, PLAN_KEYS, type Task, type TaskIn, type TaskKind, type TaskRepeat } from "@/lib/plans-api";
 import { Sheet, Field, Chips, inputCls } from "./Sheet";
-import { AREA_LIST, tint } from "./areas";
+import { AREA_LIST } from "./areas";
+import { Pill } from "./ui";
 
 export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClose }: {
   task?: Task;
@@ -100,19 +101,11 @@ export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClo
 
       <Field label="Area — also shows it on that page">
         <div className="flex flex-wrap gap-1.5">
-          {AREA_LIST.map((a) => {
-            const on = f.area === a.key;
-            return (
-              <button key={a.key} type="button" onClick={() => setF({ ...f, area: on ? null : a.key })}
-                      className="px-2.5 py-1 rounded-full text-xs transition-colors border"
-                      style={on ? { background: tint(a.color, 0.2), borderColor: a.color, color: a.color }
-                                : { borderColor: "transparent" }}>
-                <span className={`inline-flex items-center gap-1.5 ${on ? "" : "text-[#71717A]"}`}>
-                  <a.icon size={13} strokeWidth={1.75} /> {a.label}
-                </span>
-              </button>
-            );
-          })}
+          {AREA_LIST.map((a) => (
+            <Pill key={a.key} on={f.area === a.key} onClick={() => setF({ ...f, area: f.area === a.key ? null : a.key })}>
+              <a.icon size={12} strokeWidth={1.75} /> {a.label}
+            </Pill>
+          ))}
         </div>
       </Field>
 

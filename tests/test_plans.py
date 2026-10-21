@@ -31,7 +31,7 @@ def db():
                            hidden INTEGER DEFAULT 0);
         CREATE TABLE manual_country_visits(iso2 TEXT, country TEXT, first_visit TEXT);
         CREATE TABLE books(id INTEGER PRIMARY KEY, title TEXT, date_finished TEXT);
-        CREATE TABLE tags(id INTEGER PRIMARY KEY, slug TEXT, is_negative BOOLEAN DEFAULT 0);
+        CREATE TABLE tags(id INTEGER PRIMARY KEY, slug TEXT, is_negative BOOLEAN DEFAULT 0, name TEXT, icon TEXT);
         CREATE TABLE day_tags(date TEXT, tag_id INTEGER);
         CREATE TABLE app_settings(key TEXT PRIMARY KEY, value TEXT);
     """)
@@ -90,7 +90,7 @@ class GoalProgressTest(unittest.TestCase):
         self.assertEqual(p["state"], "behind")
 
     def test_negative_tag_vs_last_year(self):
-        self.c.execute("INSERT INTO tags VALUES (1, 'candy', 1)")
+        self.c.execute("INSERT INTO tags (id, slug, is_negative) VALUES (1, 'candy', 1)")
         for d in ["2025-02-01", "2025-03-01", "2025-04-01", "2026-02-01"]:
             self.c.execute("INSERT INTO day_tags VALUES (?, 1)", (d,))
         self.c.execute("INSERT INTO day_tags VALUES ('2025-09-01', 1)")   # after the window → not compared
@@ -100,7 +100,7 @@ class GoalProgressTest(unittest.TestCase):
         self.assertEqual(p["state"], "on_track")
 
     def test_negative_tag_with_ceiling(self):
-        self.c.execute("INSERT INTO tags VALUES (1, 'candy', 1)")
+        self.c.execute("INSERT INTO tags (id, slug, is_negative) VALUES (1, 'candy', 1)")
         for m in range(1, 7):
             self.c.execute("INSERT INTO day_tags VALUES (?, 1)", (f"2026-0{m}-01",))
         p = gl.progress(self.c, goal(metric="tag_days", metric_param="candy", target=10), TODAY)
@@ -181,7 +181,7 @@ class MoreMetricsTest(unittest.TestCase):
 
     def test_streaks(self):
         self.assertEqual(runs({"2026-01-02", "2026-01-03"}, date(2026, 1, 1), date(2026, 1, 5), True), (2, 0))
-        self.c.execute("INSERT INTO tags VALUES (1, 'outdoors', 0), (2, 'alcohol', 1)")
+        self.c.execute("INSERT INTO tags (id, slug, is_negative) VALUES (1, 'outdoors', 0), (2, 'alcohol', 1)")
         for d in ["2026-06-28", "2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02"]:
             self.c.execute("INSERT INTO day_tags VALUES (?, 1)", (d,))
         self.c.execute("INSERT INTO day_tags VALUES ('2026-06-01', 2)")
@@ -221,6 +221,12 @@ class MoreMetricsTest(unittest.TestCase):
         ctx = Ctx(self.c, locations=lambda: loc)
         self.assertEqual(self.p(ctx, metric="countries", target=10)["actual"], 4.0)
         self.assertEqual(self.p(ctx, metric="new_countries", target=5)["actual"], 2.0)   # Norway, Portugal
+
+    def test_tag_goal_carries_the_tags_emoji(self):
+        self.c.execute("INSERT INTO tags (id, slug, name, icon) VALUES (5, 'gym', 'Gym', '🏋️')")
+        p = self.p(metric="tag_days", metric_param="gym", target=100)
+        self.assertEqual((p["param_label"], p["param_icon"]), ("Gym", "🏋️"))
+        self.assertEqual(self.p(metric="best_time", metric_param="10000", target=1)["param_label"], "10 k")
 
     def test_person_days(self):
         self.c.execute("INSERT INTO contacts (id, name) VALUES (7, 'Alice')")

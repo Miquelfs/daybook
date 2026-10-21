@@ -14,7 +14,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
-from domains.plans.metrics import METRICS, Ctx, _tag_dates, runs, tag_info
+from domains.plans.metrics import METRICS, Ctx, _tag_dates, param_info, runs, tag_info
 
 # Within 5% of the straight-line pace still counts as on track.
 _PACE_SLACK = 0.95
@@ -59,6 +59,7 @@ def progress(ctx: Ctx | sqlite3.Connection, goal: dict, today: date) -> dict:
         "compare": None, "lower_is_better": metric.lower_is_better,
         "needed_per_week": None,
         "days_left": (deadline - today).days if deadline and not past else None,
+        **param_info(ctx.conn, metric.param, param),
         "state": "in_progress",
     }
     closed = g.get("status") in ("done", "dropped")

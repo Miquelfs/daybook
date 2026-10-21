@@ -49,6 +49,9 @@ export interface Goal {
   lower_is_better: boolean;
   needed_per_week: number | null;
   days_left: number | null;
+  /** What the goal is tied to: tag name, person, distance — and the tag's emoji. */
+  param_label: string | null;
+  param_icon: string | null;
 }
 
 export type GoalIn = Partial<Pick<Goal,

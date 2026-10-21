@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { format } from "date-fns";
-import { Activity, Moon, Flame, AlertTriangle } from "lucide-react";
+import { Activity, Moon, AlertTriangle } from "lucide-react";
 import {
   injuriesApi,
   type Injury,
@@ -736,9 +736,6 @@ export default function InjuriesPage() {
           </Link>
           <Link href="/health/sleep" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
             <Moon size={13} />Sleep
-          </Link>
-          <Link href="/health/streaks" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <Flame size={13} />Streaks
           </Link>
           <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#27272A] text-[#FAFAFA] whitespace-nowrap">
             <AlertTriangle size={13} />Injuries

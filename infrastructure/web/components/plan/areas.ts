@@ -1,7 +1,6 @@
 // Areas tie goals, tasks and notes to the part of the daybook they belong to.
 // A goal's area comes from its metric unless set; a task's area also puts it
-// on that page (Money, Health, Logbook, …). Line icons (lucide, like the rest
-// of the app) and mid-tone colours that read on both the dark and light theme.
+// on that page (Money, Health, Logbook, …). Line icons, like the app's tabs.
 
 import {
   Activity, Apple, Bike, BookOpen, Clock, Coins, Dumbbell, Earth, FileText, Flame, Footprints, Gauge,
@@ -18,24 +17,23 @@ export interface Area {
   key: AreaKey;
   label: string;
   icon: LucideIcon;
-  color: string;
   href: string | null;
 }
 
 export const AREAS: Record<AreaKey, Area> = {
-  training: { key: "training", label: "Training",  icon: Activity,     color: "#EA580C", href: "/omyra" },
-  health:   { key: "health",   label: "Health",    icon: HeartPulse,   color: "#C026D3", href: "/health" },
-  food:     { key: "food",     label: "Food",      icon: Apple,        color: "#65A30D", href: "/food" },
-  habits:   { key: "habits",   label: "Habits",    icon: Sprout,       color: "#0891B2", href: "/tags" },
-  people:   { key: "people",   label: "People",    icon: Users,        color: "#DB2777", href: "/plan?tab=people" },
-  money:    { key: "money",    label: "Money",     icon: Wallet,       color: "#059669", href: "/money" },
-  aviation: { key: "aviation", label: "Aviation",  icon: PlaneTakeoff, color: "#2563EB", href: "/aviation" },
-  travel:   { key: "travel",   label: "Travel",    icon: Earth,        color: "#0D9488", href: "/explore" },
-  culture:  { key: "culture",  label: "Reading & culture", icon: BookOpen, color: "#7C3AED", href: "/explore" },
-  projects: { key: "projects", label: "Projects",  icon: Wrench,       color: "#4F46E5", href: null },
-  home:     { key: "home",     label: "Home",      icon: House,        color: "#CA8A04", href: null },
-  admin:    { key: "admin",    label: "Admin",     icon: FileText,     color: "#64748B", href: null },
-  personal: { key: "personal", label: "Personal",  icon: Sparkles,     color: "#D97706", href: null },
+  training: { key: "training", label: "Training",  icon: Activity,     href: "/omyra" },
+  health:   { key: "health",   label: "Health",    icon: HeartPulse,   href: "/health" },
+  food:     { key: "food",     label: "Food",      icon: Apple,        href: "/food" },
+  habits:   { key: "habits",   label: "Habits",    icon: Sprout,       href: "/plan?tab=habits" },
+  people:   { key: "people",   label: "People",    icon: Users,        href: "/plan?tab=people" },
+  money:    { key: "money",    label: "Money",     icon: Wallet,       href: "/money" },
+  aviation: { key: "aviation", label: "Aviation",  icon: PlaneTakeoff, href: "/aviation" },
+  travel:   { key: "travel",   label: "Travel",    icon: Earth,        href: "/explore" },
+  culture:  { key: "culture",  label: "Reading & culture", icon: BookOpen, href: "/explore" },
+  projects: { key: "projects", label: "Projects",  icon: Wrench,       href: null },
+  home:     { key: "home",     label: "Home",      icon: House,        href: null },
+  admin:    { key: "admin",    label: "Admin",     icon: FileText,     href: null },
+  personal: { key: "personal", label: "Personal",  icon: Sparkles,     href: null },
 };
 
 export const AREA_LIST = Object.values(AREAS);
@@ -59,9 +57,4 @@ const METRIC_ICON: Record<string, LucideIcon> = {
 
 export function goalIcon(metric: string, areaKey: string | null | undefined): LucideIcon {
   return METRIC_ICON[metric] ?? area(areaKey).icon;
-}
-
-/** Translucent fill of an area colour (hex + alpha) for tiles and chips. */
-export function tint(color: string, alpha = 0.14): string {
-  return `${color}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`;
 }

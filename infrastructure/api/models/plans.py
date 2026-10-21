@@ -62,6 +62,8 @@ class GoalOut(BaseModel):
     lower_is_better: bool = False
     needed_per_week: float | None = None
     days_left: int | None = None
+    param_label: str | None = None         # the tag / person / distance the goal is tied to
+    param_icon: str | None = None          # the tag's (or person's) emoji
 
 
 class TaskIn(BaseModel):

@@ -300,8 +300,9 @@ function Dropdown({
   );
 }
 
-export function HabitCalendar() {
-  const [mode, setMode] = useState<"tags" | "people">("tags");
+/** `fixedMode` pins it to tags (Plan → Habits) or people (Plan → People) and hides the toggle. */
+export function HabitCalendar({ fixedMode }: { fixedMode?: "tags" | "people" } = {}) {
+  const [mode, setMode] = useState<"tags" | "people">(fixedMode ?? "tags");
   const [weeks, setWeeks] = useState(26);
   const [cat, setCat] = useState("default");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -410,7 +411,7 @@ export function HabitCalendar() {
       {/* Controls */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1">
+          {!fixedMode && <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1">
             {(["tags", "people"] as const).map((m) => (
               <button
                 key={m}
@@ -422,7 +423,7 @@ export function HabitCalendar() {
                 {m}
               </button>
             ))}
-          </div>
+          </div>}
           {options.length > 1 && (
             <Dropdown
               label={mode === "tags" ? "Category" : "Group"}

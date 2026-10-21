@@ -121,7 +121,6 @@ export default function LoadIndexPage() {
           <Link href="/health" className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors">Overview</Link>
           <Link href="/health/sleep" className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors">Sleep</Link>
           <Link href="/omyra?tab=load" className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors">Training</Link>
-          <Link href="/health/streaks" className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors">Streaks</Link>
           <Link href="/health/injuries" className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors">Injuries</Link>
         </div>
       </div>

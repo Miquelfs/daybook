@@ -6,7 +6,8 @@ import { api } from "@/lib/api";
 import { tagsApi } from "@/lib/tags-api";
 import { plansApi, PLAN_KEYS, type Goal, type GoalIn, type Metric } from "@/lib/plans-api";
 import { Sheet, Field, Chips, inputCls } from "./Sheet";
-import { AREA_LIST, area as areaOf, goalIcon, tint, type AreaKey } from "./areas";
+import { AREA_LIST, area as areaOf, goalIcon, type AreaKey } from "./areas";
+import { Pill } from "./ui";
 import { fmtTime, parseTime } from "./format";
 
 const DISTANCES = [
@@ -14,18 +15,32 @@ const DISTANCES = [
   { value: "21097", label: "Half" }, { value: "42195", label: "Marathon" },
 ];
 
+/** Keep the first emoji typed (ZWJ sequences like 🧑‍✈️ count as one). */
+function firstGrapheme(s: string): string {
+  const seg = typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s)].map((x) => x.segment)
+    : Array.from(s);
+  return seg.find((x) => x.trim()) ?? "";
+}
+
 const num = (s: string) => (s.trim() === "" ? null : Number(s.replace(",", ".")));
 
-export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; onClose: () => void }) {
+/** `preset` pre-fills a new goal — e.g. Habits → "Make it a goal" passes the tag. */
+export function GoalSheet({ goal, year, preset, onClose }: {
+  goal?: Goal;
+  year: number;
+  preset?: Partial<Pick<Goal, "title" | "metric" | "metric_param" | "emoji">>;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const { data: meta } = useQuery({ queryKey: ["goals", "meta"], queryFn: () => plansApi.goalsMeta(), staleTime: 3600_000 });
   const metrics = useMemo(() => meta?.metrics ?? [], [meta]);
 
   const [f, setF] = useState({
-    emoji: goal?.emoji ?? "",
-    title: goal?.title ?? "",
-    metric: goal?.metric ?? "manual",
-    metric_param: goal?.metric_param ?? "",
+    emoji: goal?.emoji ?? preset?.emoji ?? "",
+    title: goal?.title ?? preset?.title ?? "",
+    metric: goal?.metric ?? preset?.metric ?? "manual",
+    metric_param: goal?.metric_param ?? preset?.metric_param ?? "",
     target: goal?.target == null ? "" : goal.metric === "best_time" ? fmtTime(goal.target) : String(goal.target),
     baseline: goal?.baseline?.toString() ?? "",
     current: goal?.current?.toString() ?? "",
@@ -35,6 +50,7 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
     priority: (goal?.priority ?? 2) as 1 | 2 | 3,
     notes: goal?.notes ?? "",
   });
+  const [pickEmoji, setPickEmoji] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,7 +64,10 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
   const { data: contacts = [] } = useQuery({
     queryKey: ["contacts"], queryFn: () => api.contacts(), staleTime: 300_000, enabled: m?.param === "contact",
   });
-  const negativeTag = m?.param === "tag" && tags.find((t) => t.slug === f.metric_param)?.is_negative;
+  const pickedTag = m?.param === "tag" ? tags.find((t) => t.slug === f.metric_param) : undefined;
+  const negativeTag = pickedTag?.is_negative;
+  // What the tile shows: your emoji, else the tag's own emoji, else the metric's line icon.
+  const glyph = f.emoji || pickedTag?.icon || "";
 
   const grouped = useMemo(() => {
     const by = new Map<string, Metric[]>();
@@ -75,7 +94,7 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
   function body(): GoalIn {
     return {
       title: f.title.trim(),
-      emoji: f.emoji || null,                // kept as stored; the card shows the metric's icon
+      emoji: f.emoji || null,                // empty → the tag's emoji / the metric's icon
       metric: f.metric,
       metric_param: m?.param ? f.metric_param || null : null,
       target: f.metric === "best_time" ? parseTime(f.target) : num(f.target),
@@ -117,12 +136,13 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
 
   return (
     <Sheet title={goal ? "Edit goal" : "New goal"} onClose={onClose}>
-      {/* Icon (follows what the goal measures) + title */}
+      {/* Glyph (tap to set an emoji) + title */}
       <div className="flex items-center gap-2.5">
-        <span className="shrink-0 w-12 h-12 rounded-xl flex items-center justify-center"
-              style={{ background: tint(effectiveArea.color, 0.14), color: effectiveArea.color }}>
-          <Icon size={22} strokeWidth={1.75} />
-        </span>
+        <button type="button" onClick={() => setPickEmoji((v) => !v)} aria-label="Emoji"
+                className={`shrink-0 w-12 h-12 rounded-xl bg-[#18181B] border flex items-center justify-center text-2xl text-[#A1A1AA] transition-colors ${
+                  pickEmoji ? "border-[#F59E0B]" : "border-[#27272A] hover:border-[#3F3F46]"}`}>
+          {glyph || <Icon size={22} strokeWidth={1.75} />}
+        </button>
         <input
           className={`${inputCls} flex-1 min-w-0 h-12 text-base`}
           placeholder="Cycle 4000 km"
@@ -131,6 +151,18 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
           onChange={(e) => setF({ ...f, title: e.target.value })}
         />
       </div>
+
+      {pickEmoji && (
+        <div className="flex items-center gap-2 -mt-1">
+          <input autoFocus value={f.emoji} placeholder={pickedTag?.icon ?? "🙂"}
+                 onChange={(e) => setF({ ...f, emoji: firstGrapheme(e.target.value) })}
+                 className={`${inputCls} w-20 text-center text-lg py-1.5`} />
+          <span className="text-[11px] text-[#52525B] flex-1">
+            Any emoji. Leave empty to use {pickedTag?.icon ? `the tag's ${pickedTag.icon}` : "the line icon"}.
+          </span>
+          {f.emoji && <button type="button" onClick={() => setF({ ...f, emoji: "" })} className="text-xs text-[#71717A]">Clear</button>}
+        </div>
+      )}
 
       <Field label="Progress counts from">
         <select className={inputCls} value={f.metric}
@@ -209,20 +241,12 @@ export function GoalSheet({ goal, year, onClose }: { goal?: Goal; year: number; 
 
       <Field label="Area">
         <div className="flex flex-wrap gap-1.5">
-          {AREA_LIST.map((a) => {
-            const on = effectiveArea.key === a.key;
-            return (
-              <button key={a.key} type="button"
-                      onClick={() => setF({ ...f, area: a.key === m?.area ? null : (a.key as AreaKey) })}
-                      className="px-2.5 py-1 rounded-full text-xs transition-colors border"
-                      style={on ? { background: tint(a.color, 0.2), borderColor: a.color, color: a.color }
-                                : { borderColor: "transparent" }}>
-                <span className={`inline-flex items-center gap-1.5 ${on ? "" : "text-[#71717A]"}`}>
-                  <a.icon size={13} strokeWidth={1.75} /> {a.label}
-                </span>
-              </button>
-            );
-          })}
+          {AREA_LIST.map((a) => (
+            <Pill key={a.key} on={effectiveArea.key === a.key}
+                  onClick={() => setF({ ...f, area: a.key === m?.area ? null : (a.key as AreaKey) })}>
+              <a.icon size={12} strokeWidth={1.75} /> {a.label}
+            </Pill>
+          ))}
         </div>
       </Field>
 

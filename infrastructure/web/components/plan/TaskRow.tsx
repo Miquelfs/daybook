@@ -5,16 +5,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Check, StickyNote } from "lucide-react";
 import { plansApi, PLAN_KEYS, type Task } from "@/lib/plans-api";
 import { taskMeta } from "./format";
-import { area, tint } from "./areas";
+import { area } from "./areas";
 
 /** One task / note: tap the circle to complete (a note is dismissed), the text to edit. */
-export function TaskRow({ task: t, today, onEdit, hideArea, muted }: {
+export function TaskRow({ task: t, today, onEdit, hideArea }: {
   task: Task;
   today: string;
   onEdit?: (t: Task) => void;
   hideArea?: boolean;
-  /** Grey icon, no colour — for the calm Today view. */
-  muted?: boolean;
 }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -46,9 +44,8 @@ export function TaskRow({ task: t, today, onEdit, hideArea, muted }: {
         {done && <Check size={12} className="text-black" />}
       </button>
       {a && !hideArea && (
-        <span className="shrink-0 w-6 h-6 -my-0.5 rounded-md flex items-center justify-center"
-              style={muted ? undefined : { background: tint(a.color, 0.14), color: a.color }} title={a.label}>
-          <a.icon size={14} strokeWidth={1.75} className={muted ? "text-[#52525B]" : ""} />
+        <span className="shrink-0 mt-0.5 text-[#52525B]" title={a.label}>
+          <a.icon size={15} strokeWidth={1.75} />
         </span>
       )}
       <button onClick={() => onEdit?.(t)} className="flex-1 min-w-0 text-left">

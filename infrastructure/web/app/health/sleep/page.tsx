@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Activity, Moon, Flame, AlertTriangle } from "lucide-react";
+import { Activity, Moon, AlertTriangle } from "lucide-react";
 import { api } from "@/lib/api";
 import { SleepOverview } from "@/components/sleep/SleepOverview";
 import { SleepPatterns } from "@/components/sleep/SleepPatterns";
@@ -74,9 +74,6 @@ export default function SleepPage() {
           <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#27272A] text-[#FAFAFA] whitespace-nowrap">
             <Moon size={13} />Sleep
           </span>
-          <Link href="/health/streaks" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <Flame size={13} />Streaks
-          </Link>
           <Link href="/health/injuries" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
             <AlertTriangle size={13} />Injuries
           </Link>

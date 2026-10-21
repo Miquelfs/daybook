@@ -1,5 +1,5 @@
 import { differenceInCalendarDays, format, parseISO } from "date-fns";
-import type { Goal, GoalState, Task } from "@/lib/plans-api";
+import type { Goal, Task } from "@/lib/plans-api";
 
 /** "Today", "Tomorrow", "Fri", "24 Oct", "3d overdue". */
 export function dueLabel(due: string, today: string): string {
@@ -39,7 +39,9 @@ export function fmtNum(v: number, unit: string): string {
     ? Math.round(v).toLocaleString("en-GB")
     : String(Math.round(v * 10) / 10);
   if (!unit) return n;
-  return unit.startsWith("/") ? `${n}${unit}` : `${n} ${unit}`;
+  if (unit.startsWith("/")) return `${n}${unit}`;
+  // "1 day", "1 book" — not "1 days"
+  return `${n} ${n === "1" && unit.endsWith("s") ? unit.slice(0, -1) : unit}`;
 }
 
 /** One line under the bar — what the number means right now. */
@@ -77,18 +79,6 @@ export function goalSummary(g: Goal): string {
     }
   }
 }
-
-export const STATE_STYLE: Record<GoalState, { label: string; cls: string }> = {
-  on_track:    { label: "On track",    cls: "text-emerald-400 bg-emerald-500/10" },
-  behind:      { label: "Behind",      cls: "text-amber-400 bg-amber-500/10" },
-  achieved:    { label: "Achieved", cls: "text-emerald-400 bg-emerald-500/15" },
-  missed:      { label: "Missed",      cls: "text-rose-400 bg-rose-500/10" },
-  in_progress: { label: "In progress", cls: "text-[#A1A1AA] bg-[#18181B]" },
-  overdue:     { label: "Overdue",     cls: "text-rose-400 bg-rose-500/10" },
-  not_started: { label: "Not started", cls: "text-[#71717A] bg-[#18181B]" },
-  done:        { label: "Done", cls: "text-emerald-400 bg-emerald-500/15" },
-  dropped:     { label: "Dropped",     cls: "text-[#52525B] bg-[#18181B]" },
-};
 
 export function taskMeta(t: Task, today: string): string[] {
   const bits: string[] = [];
