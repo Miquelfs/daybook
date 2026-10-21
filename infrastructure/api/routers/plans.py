@@ -12,6 +12,10 @@ PATCH  /tasks/{id}           — edit; done_at=null re-opens
 POST   /tasks/{id}/complete  — done (a repeating task re-arms at its next date)
 DELETE /tasks/{id}
 GET    /plan/area/{area}     — open tasks, notes and this year's goals for one page (money, health, …)
+GET    /habits               — every recently used tag as a habit: last 7 days, streaks, 30-day rate
+GET    /habits/{slug}        — one habit for a year (?year=): calendar, months, weekdays, streaks
+GET    /people               — everyone, with days together this year / all time (for search)
+GET    /people/{id}          — one person for a year (?year=): calendar, frequency, what you do together
 GET    /birthdays            — everyone with a birthday, soonest first
 GET    /agenda               — the Today strip: overdue / today / coming up / notes / birthdays / goals
 """
@@ -26,6 +30,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from domains.plans import agenda as agenda_mod
 from domains.plans import goals as goals_mod
+from domains.plans import habits as habits_mod
+from domains.plans import people as people_mod
 from domains.plans.metrics import METRICS, Ctx, catalog
 from infrastructure.api.db import get_db
 from infrastructure.api.models.plans import (
@@ -278,6 +284,34 @@ def area_plan(area: str, conn: DB):
     with _ctx(conn) as ctx:
         goals = [g for g in _live_goals(ctx, today) if g["area"] == area]
     return AreaPlanOut(area=area, tasks=[TaskOut(**dict(r)) for r in rows], goals=[GoalOut(**g) for g in goals])
+
+
+@router.get("/habits")
+def list_habits(conn: DB):
+    return habits_mod.overview(conn, date.today())
+
+
+@router.get("/habits/{slug}")
+def habit_detail(slug: str, conn: DB, year: int | None = Query(None)):
+    today = date.today()
+    out = habits_mod.detail(conn, slug, year or today.year, today)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Habit not found")
+    return out
+
+
+@router.get("/people")
+def list_people(conn: DB):
+    return people_mod.directory(conn, date.today())
+
+
+@router.get("/people/{contact_id}")
+def person(contact_id: int, conn: DB, year: int | None = Query(None)):
+    today = date.today()
+    out = people_mod.profile(conn, contact_id, year or today.year, today)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+    return out
 
 
 @router.get("/birthdays", response_model=list[BirthdayOut])

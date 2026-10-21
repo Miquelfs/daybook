@@ -110,6 +110,94 @@ export interface AreaPlan {
   goals: Goal[];
 }
 
+export interface Habit {
+  id: number;
+  slug: string;
+  name: string;
+  icon: string | null;
+  category: string | null;
+  is_negative: boolean;
+  week: { date: string; done: boolean }[];   // last 7 days, oldest first
+  rate_30: number;                           // % of the last 30 days on target (clean days for negative)
+  count_30: number;
+  this_year: number;
+  total: number;
+  last: string;
+  streak_current: number;
+  streak_best: number;
+  streak_best_end: string | null;
+}
+
+export interface HabitDetail {
+  id: number;
+  slug: string;
+  name: string;
+  icon: string | null;
+  category: string | null;
+  is_negative: boolean;
+  year: number;
+  years: number[];
+  dates: string[];
+  count: number;
+  days_elapsed: number;
+  rate: number;
+  per_week: number | null;
+  by_month: number[];
+  by_weekday: number[];                      // Mon … Sun
+  best_in_year: number;
+  total: number;
+  first: string | null;
+  streak_current: number;
+  streak_best: number;
+  streak_best_end: string | null;
+}
+
+export interface PersonBirthday { stored: string; next: string; days_until: number; turning: number | null }
+
+export interface Person {
+  id: number;
+  name: string;
+  emoji: string | null;
+  group_: string | null;
+  total: number;
+  this_year: number;
+  last: string | null;
+  days_since: number | null;
+  birthday: PersonBirthday | null;
+}
+
+export interface PersonProfile {
+  id: number;
+  name: string;
+  emoji: string | null;
+  group_: string | null;
+  birthday: PersonBirthday | null;
+  year: number;
+  years: number[];
+  dates: string[];
+  count: number;
+  prev_same_period: number;
+  per_month: number | null;
+  share: number;
+  by_year: { year: number; days: number }[];
+  by_month: number[];
+  by_weekday: number[];
+  total: number;
+  first: string | null;
+  last: string | null;
+  days_since: number | null;
+  longest_run: number;
+  typical_gap: number | null;
+  together: {
+    tags: { slug: string; name: string; icon: string | null; days: number }[];
+    sports: { type: string; days: number }[];
+    tennis: { sessions: number; as_partner: number; as_opponent: number } | null;
+    restaurants: { id: number; name: string; date_visited: string; city: string | null }[];
+    trips: { id: number; name: string | null; start: string; end: string }[];
+  };
+  recent: string[];
+}
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
@@ -128,6 +216,10 @@ export const plansApi = {
   agenda: (date: string) => req<Agenda>("GET", `/api/agenda?date=${date}`),
   birthdays: () => req<Birthday[]>("GET", "/api/birthdays"),
 
+  habits: () => req<Habit[]>("GET", "/api/habits"),
+  habit: (slug: string, year: number) => req<HabitDetail>("GET", `/api/habits/${encodeURIComponent(slug)}?year=${year}`),
+  people: () => req<Person[]>("GET", "/api/people"),
+  person: (id: number, year: number) => req<PersonProfile>("GET", `/api/people/${id}?year=${year}`),
   goalsMeta: () => req<{ metrics: Metric[]; years: number[] }>("GET", "/api/goals/meta"),
   areaPlan: (area: string) => req<AreaPlan>("GET", `/api/plan/area/${area}`),
   goals: (year?: number) => req<Goal[]>("GET", `/api/goals${year ? `?year=${year}` : ""}`),
@@ -146,4 +238,4 @@ export const plansApi = {
 };
 
 /** Everything plan-related a mutation can change — invalidate these together. */
-export const PLAN_KEYS = [["agenda"], ["goals"], ["tasks"], ["birthdays"], ["area-plan"]] as const;
+export const PLAN_KEYS = [["agenda"], ["goals"], ["tasks"], ["birthdays"], ["area-plan"], ["habits"], ["habit"], ["people"], ["person"]] as const;
