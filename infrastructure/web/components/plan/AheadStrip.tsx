@@ -57,11 +57,8 @@ function Ahead({ date }: { date: string }) {
   const due = [...a.overdue, ...a.today, ...a.notes];
   const bdayToday = a.birthdays.filter((b) => b.days_until === 0);
   const next: { key: string; on: string; icon: React.ReactNode; label: string; when: string; warn?: boolean; onClick?: () => void; href?: string }[] = [
-    ...a.birthdays.filter((b) => b.days_until > 0 && b.days_until <= 7).map((b) => ({
-      key: `b${b.contact_id}`, on: b.date, icon: <Cake size={14} />, label: `${b.name.split(" ")[0]}'s birthday`,
-      when: dueLabel(b.date, date), href: "/plan?tab=people",
-    })),
-    // Same window for everything: the next 7 days (tasks also once their heads-up starts).
+    // Next 7 days for trips and tasks (tasks also once their heads-up starts).
+    // Birthdays only on the day itself — the line at the top of the card.
     ...a.trips.filter((t) => t.ongoing || t.days_until <= 7).map((t) => ({
       key: `p${t.id}`, on: t.start_date, icon: <Plane size={14} />, label: t.name,
       when: t.ongoing ? "now" : `in ${t.days_until}d`, warn: t.days_until <= 7, href: "/plan?tab=calendar",

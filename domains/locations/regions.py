@@ -9,6 +9,7 @@ point per Spanish city is enough to know which cities are Catalan.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import time
 
@@ -37,17 +38,25 @@ def in_catalonia(lng: float, lat: float) -> bool:
     return inside
 
 
-_CACHE: dict[str, tuple[float, set[str]]] = {}
+_CACHE: dict[str, tuple[float, dict]] = {}
 _TTL_S = 6 * 3600
 
 
-def catalan_cities(con: sqlite3.Connection) -> set[str]:
-    """City names that lie in Catalonia — from one GPS point per city on Overland
-    tracks and one per city on Google-history visits. Cached 6 h."""
-    hit = _CACHE.get("cat")
+def city_points(con: sqlite3.Connection) -> dict[str, tuple[float, float]]:
+    """City → (lng, lat) for Spanish cities: one GPS point per city on Overland
+    tracks, the average visit position on Google history. Cached 6 h."""
+    hit = _CACHE.get("pts")
     if hit and time.monotonic() - hit[0] < _TTL_S:
         return hit[1]
-    points: list[tuple[str, float, float]] = []
+    out: dict[str, tuple[float, float]] = {}
+    try:
+        for city, lng, lat in con.execute("""
+                SELECT p.city, AVG(v.lng), AVG(v.lat) FROM visits v JOIN place_names p ON p.place_id = v.place_id
+                WHERE p.city IS NOT NULL AND p.country IN ('Spain', 'España')
+                  AND v.lat IS NOT NULL AND v.lat != 0 GROUP BY p.city"""):
+            out[city] = (float(lng), float(lat))
+    except sqlite3.Error:
+        pass
     try:
         for city, pj in con.execute("""
                 SELECT geocode_city, points_json FROM tracks WHERE id IN (
@@ -56,29 +65,45 @@ def catalan_cities(con: sqlite3.Connection) -> set[str]:
                     GROUP BY geocode_city)"""):
             try:
                 p = json.loads(pj)[0]
-                points.append((city, float(p["lng"]), float(p["lat"])))
+                out[city] = (float(p["lng"]), float(p["lat"]))
             except (ValueError, KeyError, IndexError, TypeError):
                 continue
     except sqlite3.Error:
         pass
-    try:
-        for city, lng, lat in con.execute("""
-                SELECT p.city, AVG(v.lng), AVG(v.lat) FROM visits v JOIN place_names p ON p.place_id = v.place_id
-                WHERE p.city IS NOT NULL AND p.country IN ('Spain', 'España')
-                  AND v.lat IS NOT NULL AND v.lat != 0 GROUP BY p.city"""):
-            points.append((city, float(lng), float(lat)))
-    except sqlite3.Error:
-        pass
-    out = {city for city, lng, lat in points if in_catalonia(lng, lat)}
-    _CACHE["cat"] = (time.monotonic(), out)
+    _CACHE["pts"] = (time.monotonic(), out)
     return out
 
 
-def region_for(country: str | None, cities: list[str], catalan: set[str], majority: bool = False) -> str | None:
-    """'Catalonia' when the place is in Catalonia. For a trip (`majority`), when
-    most of its cities are — the home end of a trip (Palma) shouldn't veto it."""
+def catalan_cities(con: sqlite3.Connection) -> set[str]:
+    """Spanish city names that lie in Catalonia."""
+    return {c for c, (lng, lat) in city_points(con).items() if in_catalonia(lng, lat)}
+
+
+def km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Great-circle distance between two (lng, lat) points."""
+    lng1, lat1, lng2, lat2 = map(math.radians, (*a, *b))
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lng2 - lng1) / 2) ** 2
+    return 6371 * 2 * math.asin(math.sqrt(h))
+
+
+def region_for(country: str | None, cities: list[str], catalan: set[str]) -> str | None:
+    """'Catalonia' when every one of the cities is in Catalonia."""
     if country not in SPAIN or not cities:
         return None
-    n = sum(1 for c in cities if c in catalan)
-    ok = n * 2 > len(cities) if majority else n == len(cities)
-    return "Catalonia" if ok else None
+    return "Catalonia" if all(c in catalan for c in cities) else None
+
+
+HOME_RADIUS_KM = 80     # the home island / area — Palma while in Mallorca, Tenerife before
+
+
+def trip_region(country: str | None, cities: list[str], catalan: set[str],
+                points: dict[str, tuple[float, float]], home: tuple[float, float] | None) -> str | None:
+    """A trip is Catalan when every city it went to *away from home* is. The home
+    end (flying out of Palma) doesn't count; without a known home, most cities must be."""
+    if country not in SPAIN or not cities:
+        return None
+    if home is None:
+        n = sum(1 for c in cities if c in catalan)
+        return "Catalonia" if n * 2 > len(cities) else None
+    away = [c for c in cities if c not in points or km(points[c], home) > HOME_RADIUS_KM]
+    return region_for(country, away, catalan)
