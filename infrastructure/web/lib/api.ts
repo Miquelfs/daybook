@@ -1551,8 +1551,12 @@ export interface FitnessSummary {
     status: "there" | "on track" | "behind" | "too steep";
   } | null;
   fitness_age: {
-    value: number; source: "garmin" | "estimate"; vo2max: number; age: number | null; delta: number | null; as_of: string;
+    value: number; source: "garmin" | "estimate"; vo2max: number | null; age: number | null; delta: number | null; as_of: string;
+    precise?: number; achievable?: number | null;
+    components?: Record<string, { value: number | null; target: number | null }>;
   } | null;
+  /** Whoop-style day strain (0–21), last 7 days, oldest first. */
+  strain: { today: number; today_label: string | null; avg: number; days: { date: string; value: number }[] } | null;
 }
 
 export interface ActivityImpact {

@@ -430,6 +430,38 @@ def streams_from_cache(conn) -> tuple[int, int]:
     return done, len(rows)
 
 
+def _num(v):
+    """Garmin wraps some values as {"value": x, "targetValue": y}."""
+    if isinstance(v, dict):
+        v = v.get("value")
+    return round(float(v), 1) if isinstance(v, (int, float)) else None
+
+
+def sync_fitness_age(client, conn, d: str) -> bool:
+    """Garmin's own fitness age (VO2max + age + resting HR + BMI/body fat + vigorous minutes)."""
+    try:
+        if hasattr(client, "get_fitnessage_data"):
+            raw = client.get_fitnessage_data(d)
+        else:
+            raw = client.connectapi(f"/fitnessage-service/fitnessage/{d}")
+    except Exception as e:
+        print(f"  WARN fitness age {d}: {e}", file=sys.stderr)
+        return False
+    if not isinstance(raw, dict) or not _num(raw.get("fitnessAge")):
+        return False
+    comp = raw.get("components") or {}
+    components = {k: {"value": _num(v), "target": _num((v or {}).get("targetValue")) if isinstance(v, dict) else None}
+                  for k, v in comp.items()} if isinstance(comp, dict) else {}
+    conn.execute("""CREATE TABLE IF NOT EXISTS garmin_fitness_age (
+        date TEXT PRIMARY KEY, fitness_age REAL, chronological_age INTEGER, achievable_fitness_age REAL,
+        components_json TEXT, raw_payload TEXT)""")
+    conn.execute("INSERT OR REPLACE INTO garmin_fitness_age VALUES (?,?,?,?,?,?)",
+                 (d, _num(raw.get("fitnessAge")), raw.get("chronologicalAge"), _num(raw.get("achievableFitnessAge")),
+                  json.dumps(components), json.dumps(raw, ensure_ascii=False)))
+    conn.commit()
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync Garmin activity details + physio")
     parser.add_argument("--days", type=int, default=7)
@@ -438,6 +470,7 @@ def main() -> None:
     parser.add_argument("--recompute", action="store_true")
     parser.add_argument("--skip-physio", action="store_true")
     parser.add_argument("--skip-splits", action="store_true")
+    parser.add_argument("--fitness-age-only", action="store_true", help="Only fetch today's Garmin fitness age")
     parser.add_argument("--fetch-streams", action="store_true",
                         help="Also fetch per-second HR/speed/distance streams")
     parser.add_argument("--cached-streams", action="store_true",
@@ -449,6 +482,13 @@ def main() -> None:
         done, total = streams_from_cache(conn)
         conn.close()
         print(f"Streams unpacked from cache: {done}/{total} activities", file=sys.stderr)
+        return
+
+    if args.fitness_age_only:
+        conn = get_connection()
+        ok = sync_fitness_age(get_client(), conn, date.today().isoformat())
+        conn.close()
+        print(f"Fitness age: {'stored' if ok else 'not available'}", file=sys.stderr)
         return
 
     lookback = args.backfill_days or args.days
@@ -519,6 +559,8 @@ def main() -> None:
             conn.commit()
             d += timedelta(days=1)
             time.sleep(RATE_LIMIT_SLEEP)
+        if sync_fitness_age(client, conn, today):
+            print(f"  fitness age {today} ✓", file=sys.stderr)
 
     conn.close()
 

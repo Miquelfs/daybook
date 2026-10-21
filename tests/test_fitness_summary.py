@@ -79,5 +79,30 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual((fa["value"], fa["source"], fa["delta"]), (29, "garmin", -7))
 
 
+    def test_garmin_fitness_age_wins(self):
+        c = _db()
+        c.execute("INSERT INTO garmin_physio VALUES ('2026-10-20', 52.6, NULL, '{}')")
+        c.execute("CREATE TABLE garmin_fitness_age (date TEXT, fitness_age REAL, chronological_age INT,"
+                  " achievable_fitness_age REAL, components_json TEXT, raw_payload TEXT)")
+        c.execute("INSERT INTO garmin_fitness_age VALUES ('2026-10-21', 22.4, 36, 20.0,"
+                  " '{\"rhr\": {\"value\": 48, \"target\": null}}', '{}')")
+        fa = summary(c, today=date(2026, 10, 21))["fitness_age"]
+        self.assertEqual((fa["value"], fa["source"], fa["delta"], fa["achievable"]), (22, "garmin", -14, 20))
+        self.assertEqual(fa["components"]["rhr"]["value"], 48)
+
+    def test_daily_strain(self):
+        c = _db()
+        c.execute("CREATE TABLE activities (id TEXT, date TEXT)")
+        c.execute("CREATE TABLE activity_analysis (activity_id TEXT, result_json TEXT)")
+        zones = {"hr": {"zones": [{"zone": "Z1", "secs": 3780}, {"zone": "Z2", "secs": 3120}, {"zone": "Z3", "secs": 279}]}}
+        c.execute("INSERT INTO activities VALUES ('a','2026-10-21')")
+        c.execute("INSERT INTO activity_analysis VALUES ('a', ?)", (json.dumps(zones),))
+        st = summary(c, today=date(2026, 10, 21))["strain"]
+        self.assertEqual(len(st["days"]), 7)
+        self.assertEqual(st["today"], 14.0)
+        self.assertEqual(st["today_label"], "high")
+        self.assertEqual(st["days"][0]["value"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

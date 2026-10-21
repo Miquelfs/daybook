@@ -54,8 +54,14 @@ def strain_from_trimp(trimp: float) -> float:
     return round(21 * (1 - math.exp(-max(0.0, trimp) / STRAIN_K)), 1)
 
 
-def _strain(conn, act, t, analysis) -> dict | None:
-    """Zone-weighted minutes (Z1×1 … Z5×5) → 0–21. Prefers the 1 Hz analysis zones."""
+def zone_trimp(conn, activity_id: str, t: set[str], analysis: dict | None = None) -> float | None:
+    """Zone-weighted minutes (Z1×1 … Z5×5). Prefers the 1 Hz analysis zones (passed in or cached)."""
+    if analysis is None and "activity_analysis" in t:
+        r = conn.execute("SELECT result_json FROM activity_analysis WHERE activity_id=?", (activity_id,)).fetchone()
+        try:
+            analysis = json.loads(r[0]) if r and r[0] else None
+        except ValueError:
+            analysis = None
     secs: dict[int, float] = {}
     for z in ((analysis or {}).get("hr") or {}).get("zones") or []:
         name = str(z.get("zone", ""))
@@ -63,17 +69,26 @@ def _strain(conn, act, t, analysis) -> dict | None:
             secs[int(name[1:])] = float(z.get("secs") or 0)
     if not secs and "activity_detail" in t:
         try:
-            r = conn.execute("SELECT zones_json FROM activity_detail WHERE activity_id=?", (act["id"],)).fetchone()
+            r = conn.execute("SELECT zones_json FROM activity_detail WHERE activity_id=?", (activity_id,)).fetchone()
             if r and r[0]:
                 secs = {int(k[1]): float(v or 0) for k, v in json.loads(r[0]).items() if k[1:2].isdigit()}
         except (sqlite3.OperationalError, ValueError, TypeError):
             secs = {}
     if not sum(secs.values()):
         return None
-    trimp = sum(s / 60 * z for z, s in secs.items())
+    return sum(s / 60 * z for z, s in secs.items())
+
+
+def strain_label(v: float) -> str:
+    return "light" if v < 10 else "moderate" if v < 14 else "high" if v < 18 else "all out"
+
+
+def _strain(conn, act, t, analysis) -> dict | None:
+    trimp = zone_trimp(conn, act["id"], t, analysis)
+    if trimp is None:
+        return None
     v = strain_from_trimp(trimp)
-    return {"value": v, "trimp": round(trimp),
-            "label": "light" if v < 10 else "moderate" if v < 14 else "high" if v < 18 else "all out"}
+    return {"value": v, "trimp": round(trimp), "label": strain_label(v)}
 
 
 def _load(conn, d: str, tss: float | None, t) -> dict | None:

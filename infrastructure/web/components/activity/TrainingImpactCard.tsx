@@ -46,27 +46,6 @@ function Progress({ label, value, total, unit, pct, prev, prevLabel }: {
   );
 }
 
-/** 0–21 with Whoop's bands: light < 10, moderate < 14, high < 18, all out. */
-function StrainBar({ value }: { value: number }) {
-  const bands = [[0, 10, "light"], [10, 14, "moderate"], [14, 18, "high"], [18, 21, "all out"]] as const;
-  return (
-    <div className="mb-4">
-      <div className="relative flex gap-[2px] h-1.5 rounded-full overflow-hidden">
-        {bands.map(([lo, hi], i) => (
-          <div key={lo} style={{ flexGrow: hi - lo, flexBasis: 0, background: ["var(--viz-i1)", "var(--viz-i3)", "var(--viz-i5)", "var(--viz-i7)"][i],
-                                 opacity: value >= lo ? 1 : 0.35 }} />
-        ))}
-      </div>
-      <div className="relative h-3">
-        <span className="absolute top-0 w-0.5 h-2 bg-[#FAFAFA] -translate-x-1/2" style={{ left: `${(Math.min(21, value) / 21) * 100}%` }} />
-      </div>
-      <div className="flex justify-between text-[10px] text-[#71717A] -mt-1">
-        <span>0</span><span>light · moderate · high · all out</span><span>21</span>
-      </div>
-    </div>
-  );
-}
-
 export function useFitnessSummary() {
   return useQuery<FitnessSummary | null>({
     queryKey: ["fitness-summary"],
@@ -122,11 +101,6 @@ export function TrainingImpactCard({ impact, sport }: { impact: ActivityImpact; 
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-1">
           <span className="flex flex-wrap items-baseline gap-x-4">
-            {impact.strain && (
-              <span className="text-xl font-semibold tabular-nums" title="Whoop-style strain, 0–21: time in each heart-rate zone, weighted by zone, on a scale where every point is harder to earn">
-                {impact.strain.value.toFixed(1)}<span className="text-sm text-[#A1A1AA] font-normal"> strain · {impact.strain.label}</span>
-              </span>
-            )}
             <span className="text-xl font-semibold tabular-nums">
               {impact.tss ?? "—"}<span className="text-sm text-[#A1A1AA] font-normal"> TSS</span>
             </span>
@@ -144,10 +118,6 @@ export function TrainingImpactCard({ impact, sport }: { impact: ActivityImpact; 
         )}
         {impact.tss_source && impact.tss_source !== "power" && (
           <p className="text-[10px] text-[#52525B] -mt-3 mb-4">load from {impact.tss_source}</p>
-        )}
-
-        {impact.strain && (
-          <StrainBar value={impact.strain.value} />
         )}
 
         {load?.fitness != null && (

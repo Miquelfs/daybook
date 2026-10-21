@@ -213,6 +213,7 @@ function FormCard() {
           </ResponsiveContainer>
           <p className="text-[10px] text-[#52525B] px-1">Fitness, last 6 weeks</p>
         </div>
+        <StrainWeek />
         <FitnessAge />
         <LoadExplainer />
       </Panel>
@@ -254,27 +255,94 @@ function GoalFitness({ fitness }: { fitness: number }) {
   );
 }
 
-/** Fitness age from VO2max — Garmin's when it reports one, otherwise estimated against population norms. */
+/** Day strain (Whoop-style 0–21) for the last 7 days — every workout that day combined. */
+function StrainWeek() {
+  const { data } = useFitnessSummary();
+  const st = data?.strain;
+  if (!st || !st.days.some((d) => d.value > 0)) return null;
+  return (
+    <div className="mt-4 pt-4 border-t border-[#27272A]">
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Strain today</p>
+          <p className="text-2xl font-semibold tabular-nums">
+            {st.today.toFixed(1)}
+            <span className="text-sm font-normal text-[#71717A] ml-2">/ 21{st.today_label ? ` · ${st.today_label}` : " · rest"}</span>
+          </p>
+        </div>
+        <p className="text-xs text-[#71717A] tabular-nums">7-day avg {st.avg.toFixed(1)}</p>
+      </div>
+      <div className="flex items-end gap-1.5 h-14 mt-2" role="img" aria-label="Strain, last 7 days">
+        {st.days.map((d, i) => (
+          <div key={d.date} className="flex-1 flex flex-col items-center gap-1 h-full justify-end"
+               title={`${format(parseISO(d.date), "EEE d MMM")}: ${d.value.toFixed(1)}`}>
+            <div className="w-full rounded-t"
+                 style={{ height: `${Math.max(4, (d.value / 21) * 100)}%`,
+                          background: i === st.days.length - 1 ? "var(--viz-i4)" : d.value ? "var(--viz-i2)" : "var(--viz-grid)" }} />
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-1.5 mt-1">
+        {st.days.map((d) => (
+          <span key={d.date} className="flex-1 text-center text-[10px] text-[#71717A]">{format(parseISO(d.date), "EEEEE")}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const FA_COMPONENT: Record<string, { label: string; fmt: (v: number) => string }> = {
+  rhr: { label: "Resting HR", fmt: (v) => `${Math.round(v)} bpm` },
+  bmi: { label: "BMI", fmt: (v) => v.toFixed(1) },
+  bodyFat: { label: "Body fat", fmt: (v) => `${v.toFixed(1)}%` },
+  vigorousDaysAvg: { label: "Vigorous days/wk", fmt: (v) => v.toFixed(1) },
+  vigorousMinutesAvg: { label: "Vigorous min/wk", fmt: (v) => `${Math.round(v)}` },
+};
+
+/** Fitness age — Garmin's when synced (VO2max, resting HR, BMI, vigorous minutes), else estimated from VO2max. */
 function FitnessAge() {
   const { data } = useFitnessSummary();
   const f = data?.fitness_age;
   if (!f) return null;
+  const comps = Object.entries(f.components ?? {}).filter(([k, c]) => FA_COMPONENT[k] && c.value != null);
   return (
-    <div className="mt-4 pt-4 border-t border-[#27272A] flex items-baseline justify-between gap-3">
-      <div>
-        <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Fitness age</p>
-        <p className="text-2xl font-semibold tabular-nums">
-          {f.value}
-          {f.delta != null && f.delta !== 0 && (
-            <span className={`text-sm font-normal ml-2 ${f.delta < 0 ? "text-emerald-400" : "text-amber-400"}`}>
-              {f.delta < 0 ? `${-f.delta} years younger` : `${f.delta} years older`} than you are
-            </span>
-          )}
+    <div className="mt-4 pt-4 border-t border-[#27272A]">
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Fitness age</p>
+          <p className="text-2xl font-semibold tabular-nums">
+            {f.value}
+            {f.delta != null && f.delta !== 0 && (
+              <span className={`text-sm font-normal ml-2 ${f.delta < 0 ? "text-emerald-400" : "text-amber-400"}`}>
+                {f.delta < 0 ? `${-f.delta} years younger` : `${f.delta} years older`} than you are
+              </span>
+            )}
+          </p>
+        </div>
+        <p className="text-xs text-[#71717A] text-right tabular-nums">
+          {f.vo2max ? <>VO₂max {f.vo2max}<br /></> : null}
+          {f.source === "garmin" ? "from Garmin" : "rough estimate from VO₂max"}
         </p>
       </div>
-      <p className="text-xs text-[#71717A] text-right tabular-nums">
-        VO₂max {f.vo2max}<br />{f.source === "garmin" ? "from Garmin" : "estimated from VO₂max"}
-      </p>
+      {comps.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+          {comps.map(([k, c]) => (
+            <div key={k}>
+              <p className="text-[10px] text-[#52525B] uppercase tracking-widest">{FA_COMPONENT[k].label}</p>
+              <p className="text-sm tabular-nums">
+                {FA_COMPONENT[k].fmt(c.value!)}
+                {c.target != null && <span className="text-[#71717A]"> · target {FA_COMPONENT[k].fmt(c.target)}</span>}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+      {f.achievable != null && f.achievable < f.value && (
+        <p className="text-xs text-[#71717A] mt-2">Garmin says {f.achievable} is reachable by hitting those targets.</p>
+      )}
+      {f.source === "estimate" && (
+        <p className="text-xs text-[#71717A] mt-2">Garmin&apos;s own number appears after the next nightly sync.</p>
+      )}
     </div>
   );
 }

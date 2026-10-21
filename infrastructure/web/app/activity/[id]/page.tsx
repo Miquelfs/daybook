@@ -30,6 +30,27 @@ function StatBlock({ label, value }: { label: string; value: string | null }) {
   );
 }
 
+/** Strain 0–21 — computed from heart-rate zones automatically, nothing to enter. */
+function StrainChip({ strain }: { strain: NonNullable<ActivityImpact["strain"]> }) {
+  const pct = (Math.min(21, strain.value) / 21) * 100;
+  return (
+    <div className="mt-5 flex items-center gap-4">
+      <div className="shrink-0">
+        <span className="text-xs text-[#52525B] uppercase tracking-widest">Strain</span>
+        <p className="text-xl font-semibold tabular-nums">
+          {strain.value.toFixed(1)} <span className="text-sm font-normal text-[#71717A]">/ 21 · {strain.label}</span>
+        </p>
+      </div>
+      <div className="flex-1 min-w-0 pt-4">
+        <div className="relative h-1.5 rounded-full bg-[#18181B] overflow-hidden">
+          <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${pct}%`, background: "var(--viz-i4)" }} />
+        </div>
+        <p className="text-[10px] text-[#71717A] mt-1">from time in each heart-rate zone · light &lt;10 · moderate &lt;14 · high &lt;18 · all out</p>
+      </div>
+    </div>
+  );
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">{children}</p>
@@ -251,6 +272,7 @@ export default async function ActivityPage({ params }: Props) {
             <StatBlock label="Calories" value={activity.calories ? `${activity.calories} kcal` : null} />
           </div>
         )}
+        {impact?.strain && <StrainChip strain={impact.strain} />}
         <p className="text-xs text-[#71717A] mt-3 tabular-nums">
           {[
             hasDistance && activity.calories ? `${activity.calories} kcal` : null,

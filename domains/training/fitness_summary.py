@@ -50,7 +50,39 @@ def _find_key(obj, key):
     return None
 
 
+def _age(conn, t, today: date) -> int | None:
+    if "user_profile" not in t:
+        return None
+    p = conn.execute("SELECT birthdate FROM user_profile WHERE id=1").fetchone()
+    if not p or not p[0]:
+        return None
+    b = date.fromisoformat(p[0])
+    return today.year - b.year - ((today.month, today.day) < (b.month, b.day))
+
+
 def fitness_age(conn, t: set[str], today: date) -> dict | None:
+    age = _age(conn, t, today)
+    vo2row = conn.execute(
+        """SELECT vo2max_run, vo2max_bike FROM garmin_physio
+           WHERE vo2max_run IS NOT NULL OR vo2max_bike IS NOT NULL ORDER BY date DESC LIMIT 1""").fetchone() \
+        if "garmin_physio" in t else None
+    vo2 = (vo2row["vo2max_run"] or vo2row["vo2max_bike"]) if vo2row else None
+    # Garmin's own number first — it also weighs resting HR, BMI and vigorous minutes
+    if "garmin_fitness_age" in t:
+        g = conn.execute("SELECT * FROM garmin_fitness_age WHERE fitness_age IS NOT NULL AND date >= ? "
+                         "ORDER BY date DESC LIMIT 1", ((today - timedelta(days=30)).isoformat(),)).fetchone()
+        if g:
+            age = g["chronological_age"] or age
+            value = round(g["fitness_age"])
+            try:
+                comps = json.loads(g["components_json"] or "{}")
+            except ValueError:
+                comps = {}
+            return {"value": value, "precise": g["fitness_age"], "source": "garmin",
+                    "vo2max": round(vo2, 1) if vo2 else None, "age": age,
+                    "delta": value - age if age is not None else None, "as_of": g["date"],
+                    "achievable": round(g["achievable_fitness_age"]) if g["achievable_fitness_age"] else None,
+                    "components": comps}
     if "garmin_physio" not in t:
         return None
     row = conn.execute(
@@ -59,12 +91,6 @@ def fitness_age(conn, t: set[str], today: date) -> dict | None:
     if not row:
         return None
     vo2 = row["vo2max_run"] or row["vo2max_bike"]
-    age = None
-    if "user_profile" in t:
-        p = conn.execute("SELECT birthdate FROM user_profile WHERE id=1").fetchone()
-        if p and p[0]:
-            b = date.fromisoformat(p[0])
-            age = today.year - b.year - ((today.month, today.day) < (b.month, b.day))
     garmin_age = None
     try:
         garmin_age = _find_key(json.loads(row["raw_payload"] or "{}"), "fitnessAge")
@@ -78,10 +104,34 @@ def fitness_age(conn, t: set[str], today: date) -> dict | None:
             "delta": value - age if age is not None else None, "as_of": row["date"]}
 
 
+def daily_strain(conn, t: set[str], today: date, days: int = 7) -> dict | None:
+    """Whoop-style day strain: all of a day's workouts, combined on the 0–21 scale."""
+    if "activities" not in t:
+        return None
+    from domains.training.activity_impact import strain_from_trimp, strain_label, zone_trimp
+    start = today - timedelta(days=days - 1)
+    rows = conn.execute("SELECT id, date FROM activities WHERE date BETWEEN ? AND ?",
+                        (start.isoformat(), today.isoformat())).fetchall()
+    trimp: dict[str, float] = {}
+    for r in rows:
+        v = zone_trimp(conn, r["id"], t)
+        if v:
+            trimp[r["date"]] = trimp.get(r["date"], 0.0) + v
+    series = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).isoformat()
+        series.append({"date": d, "value": strain_from_trimp(trimp[d]) if d in trimp else 0.0})
+    vals = [s["value"] for s in series]
+    today_v = vals[-1]
+    return {"today": today_v, "today_label": strain_label(today_v) if today_v else None,
+            "avg": round(sum(vals) / days, 1), "days": series}
+
+
 def summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
     today = today or date.today()
     t = _tables(conn)
-    out: dict = {"load": None, "goal": None, "fitness_age": fitness_age(conn, t, today)}
+    out: dict = {"load": None, "goal": None, "fitness_age": fitness_age(conn, t, today),
+                 "strain": daily_strain(conn, t, today)}
     if "training_load_daily" not in t:
         return out
     rows = conn.execute(

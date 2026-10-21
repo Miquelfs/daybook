@@ -684,6 +684,16 @@ CREATE TABLE IF NOT EXISTS garmin_physio (
 
 CREATE INDEX IF NOT EXISTS idx_garmin_physio_date ON garmin_physio(date);
 
+-- Garmin fitness age (fitnessage-service): VO2max + age + resting HR + BMI/body fat + vigorous minutes
+CREATE TABLE IF NOT EXISTS garmin_fitness_age (
+    date                    TEXT PRIMARY KEY,
+    fitness_age             REAL,
+    chronological_age       INTEGER,
+    achievable_fitness_age  REAL,
+    components_json         TEXT,              -- {rhr|bmi|vigorousDaysAvg|…: {value, target}}
+    raw_payload             TEXT
+);
+
 -- Manual weigh-ins (sparse; one per date, upserted via /health/weight)
 CREATE TABLE IF NOT EXISTS weight_log (
     date        TEXT PRIMARY KEY,

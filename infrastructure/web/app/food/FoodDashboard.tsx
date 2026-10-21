@@ -23,15 +23,90 @@ import { HeartHealthyPick } from "@/components/HeartHealthyPick";
 import { FoodWellnessImpact } from "@/components/FoodWellnessImpact";
 import { WeeklyMealPlan } from "@/components/WeeklyMealPlan";
 
-const AMBER = "#F59E0B";
-const GREEN = "#34D399";
-const RED = "#F87171";
-const TEAL = "#22D3EE";
+// Theme tokens (globals.css) so charts and bars read on paper and on dark
+const AMBER = "var(--viz-i4)";     // eaten
+const GREEN = "var(--viz-cad)";    // on target / deficit
+const RED = "var(--viz-hr)";       // over / surplus
+const TEAL = "var(--viz-spd)";     // burned, water
+const TIP = {
+  contentStyle: { background: "#09090B", border: "1px solid #27272A", borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: "#A1A1AA" }, itemStyle: { color: "#FAFAFA" },
+};
+
+function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h2 className="text-xs text-[#52525B] uppercase tracking-widest shrink-0">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <div className={`bg-[#0D0D0F] border border-[#27272A] rounded-2xl ${className}`}>{children}</div>;
+}
+
+type DaySession = {
+  id: number; session_type: string; status: string; effective_duration_min: number | null; duration_min: number;
+  discipline: string; fueling?: { during?: { carbs_g_h: number; fluid_ml_h: number }; pre?: { carbs_g: number }; post?: { carbs_g: number; protein_g: number } } | null;
+};
+
+/** Training that day → what it asks of the plate (links food to the Omyra plan). */
+function TrainingFuel({ date }: { date: string }) {
+  const { data } = useQuery<{ sessions: DaySession[] }>({
+    queryKey: ["race-day-food", date],
+    queryFn: () => fetch(`/api/race-plans/day/${date}`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : { sessions: [] })),
+    staleTime: 60_000,
+  });
+  const s = (data?.sessions ?? []).find((x) => x.status !== "skipped" && x.status !== "displaced" && x.fueling?.during);
+  if (!s?.fueling?.during) return null;
+  const mins = s.effective_duration_min ?? s.duration_min;
+  const f = s.fueling;
+  return (
+    <Link href={`/day/${date}`}
+          className="mt-4 flex items-center gap-3 bg-[#18181B] rounded-xl px-3 py-2.5 hover:bg-[#27272A] transition-colors">
+      <span className="text-xl">{s.discipline === "cycling" ? "🚴" : s.discipline === "running" ? "🏃" : "🏋️"}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">
+          {s.session_type.replace(/^Cycling - |^Running - |^Strength - /, "")} · {mins} min{s.status === "completed" ? " ✓" : ""}
+        </p>
+        <p className="text-xs text-[#71717A] tabular-nums">
+          {f.pre?.carbs_g ? `${f.pre.carbs_g} g carbs before · ` : ""}
+          {f.during!.carbs_g_h ? `${f.during!.carbs_g_h} g/h during · ` : ""}
+          {f.post ? `${f.post.carbs_g} g carbs + ${f.post.protein_g} g protein after` : ""}
+        </p>
+      </div>
+      <ChevronRight size={14} className="text-[#71717A] shrink-0" />
+    </Link>
+  );
+}
+
+/** A macro as a compact chip with its own progress bar. */
+function MacroChip({ label, value, target, unit = "g", color }: {
+  label: string; value: number; target?: number | null; unit?: string; color: string;
+}) {
+  return (
+    <div className="bg-[#18181B] rounded-xl px-3 py-2.5 min-w-0">
+      <p className="text-[10px] text-[#52525B] uppercase tracking-widest">{label}</p>
+      <p className="text-base font-semibold tabular-nums">
+        {Math.round(value)}<span className="text-xs font-normal text-[#71717A]">{target ? ` / ${Math.round(target)}` : ""} {unit}</span>
+      </p>
+      {target ? (
+        <div className="h-1 rounded-full bg-[#27272A] overflow-hidden mt-1.5">
+          <div className="h-full rounded-full" style={{ width: `${Math.min(100, (value / target) * 100)}%`, background: color }} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 // Weight change is judged against the cut goal: a loss (negative) is on-track
 // (green), a gain (positive) is off-track (red), flat is neutral.
 function kgColor(kg: number | null | undefined): string {
-  if (kg == null || Math.abs(kg) < 0.1) return "#A1A1AA";
+  if (kg == null || Math.abs(kg) < 0.1) return "var(--viz-ref)";
   return kg < 0 ? GREEN : RED;
 }
 function fmtKg(kg: number): string {
@@ -59,11 +134,11 @@ function EnergyBalance({
   const scale = Math.max(eaten, burned ?? 0, 1);
   const deficit = net != null && net <= 0;
   return (
-    <div className="pt-3 border-t border-[#18181B]">
+    <div className="pt-4 mt-4 border-t border-[#27272A]">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs text-[#52525B] uppercase tracking-widest">Energy balance</span>
         {net != null ? (
-          <span className={`text-sm font-semibold tabular-nums ${deficit ? "text-[#34D399]" : "text-[#F87171]"}`}>
+          <span className={`text-sm font-semibold tabular-nums ${deficit ? "text-emerald-400" : "text-rose-400"}`}>
             {Math.abs(Math.round(net))} kcal {deficit ? "deficit" : "surplus"}
           </span>
         ) : (
@@ -216,7 +291,7 @@ export function FoodDashboard() {
           <Link
             href="/food/library"
             className="inline-flex items-center gap-1 text-xs font-medium uppercase tracking-widest
-                       text-[#34D399] hover:text-[#6EE7B7] bg-[#34D399]/10 hover:bg-[#34D399]/15
+                       text-[#F59E0B] bg-[#F59E0B]/10 hover:bg-[#F59E0B]/20
                        rounded-full px-2.5 py-1 transition-colors"
           >
             🥗 Foods →
@@ -252,46 +327,43 @@ export function FoodDashboard() {
         </div>
       </div>
 
-      {/* Today totals vs target + burn */}
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-4">
-        <div className="space-y-1.5">
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs text-[#52525B] uppercase tracking-widest">
-              Calories
-              {targetIsSuggested && targetKcal != null && (
-                <span className="ml-1.5 normal-case tracking-normal text-[10px] text-[#3F3F46]">· suggested plan</span>
-              )}
-            </span>
-            <span className={`text-sm tabular-nums ${overTarget ? "text-[#F87171]" : "text-[#FAFAFA]"}`}>
-              {Math.round(consumed)}
-              {targetKcal != null
-                ? <span className="text-[#52525B]"> / {Math.round(targetKcal)}</span>
-                : <span className="text-[#3F3F46]"> · no plan set</span>}
-            </span>
-          </div>
-          <Bar2 value={consumed} max={targetKcal ?? 0} color={overTarget ? RED : AMBER} />
-        </div>
-
-        <div className="space-y-1.5">
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs text-[#52525B] uppercase tracking-widest">Protein</span>
-            <span className="text-sm tabular-nums text-[#FAFAFA]">
-              {Math.round(consumedProtein)}
-              {proteinTarget != null
-                ? <span className="text-[#52525B]"> / {Math.round(proteinTarget)} g</span>
-                : <span className="text-[#3F3F46]"> · no plan set</span>}
-            </span>
-          </div>
-          <Bar2 value={consumedProtein} max={proteinTarget ?? 0} color={GREEN} />
-        </div>
-
-        <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs tabular-nums pt-1 border-t border-[#18181B]">
-          <span className="text-[#A1A1AA]">Carbs {Math.round(summary?.consumed_carbs_g ?? 0)}g</span>
-          <span className="text-[#A1A1AA]">Fat {Math.round(summary?.consumed_fat_g ?? 0)}g</span>
-          <span className="text-[#A1A1AA]">Sugar {Math.round(summary?.consumed_sugar_g ?? 0)}g</span>
-          {summary?.remaining_kcal != null && (
-            <span className="text-[#71717A] ml-auto">{Math.round(summary.remaining_kcal)} kcal left</span>
+      {/* Hero — how much is left today, macros, energy balance, what training asks for */}
+      <Panel className="p-5">
+        <p className="text-[10px] uppercase tracking-[0.2em] text-[#71717A]">
+          {date === today ? "Today" : format(parseISO(date), "EEE d MMM")}
+          {targetIsSuggested && targetKcal != null ? " · suggested plan" : ""}
+        </p>
+        <p className="mt-1 flex items-baseline gap-2">
+          {targetKcal != null ? (
+            <>
+              <span className={`text-4xl font-semibold tracking-tight tabular-nums ${overTarget ? "text-rose-400" : ""}`}>
+                {Math.abs(Math.round(targetKcal - consumed)).toLocaleString("en-GB")}
+              </span>
+              <span className="text-sm text-[#A1A1AA]">kcal {overTarget ? "over target" : "left"}</span>
+            </>
+          ) : (
+            <>
+              <span className="text-4xl font-semibold tracking-tight tabular-nums">{Math.round(consumed).toLocaleString("en-GB")}</span>
+              <span className="text-sm text-[#A1A1AA]">kcal eaten · no target set</span>
+            </>
           )}
+        </p>
+        {targetKcal != null && (
+          <>
+            <p className="text-xs text-[#71717A] tabular-nums mt-1">
+              {Math.round(consumed).toLocaleString("en-GB")} eaten of {Math.round(targetKcal).toLocaleString("en-GB")}
+            </p>
+            <div className="h-2 rounded-full bg-[#18181B] overflow-hidden mt-3">
+              <div className="h-full rounded-full transition-all"
+                   style={{ width: `${Math.min(100, (consumed / targetKcal) * 100)}%`, background: overTarget ? RED : AMBER }} />
+            </div>
+          </>
+        )}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+          <MacroChip label="Protein" value={consumedProtein} target={proteinTarget} color={GREEN} />
+          <MacroChip label="Carbs" value={summary?.consumed_carbs_g ?? 0} color={AMBER} />
+          <MacroChip label="Fat" value={summary?.consumed_fat_g ?? 0} color={AMBER} />
+          <MacroChip label="Sugar" value={summary?.consumed_sugar_g ?? 0} color={AMBER} />
         </div>
 
         {/* Energy balance: eaten (in) vs Garmin burned (out) */}
@@ -301,18 +373,71 @@ export function FoodDashboard() {
           active={summary?.burned_active_kcal ?? null}
           net={summary?.net_vs_burn_kcal ?? null}
         />
-      </div>
+        <TrainingFuel date={date} />
+      </Panel>
+
+      {/* Log food — the main action, right under the numbers */}
+      <Section title="Log food">
+        <FoodEntryComposer date={date} />
+      </Section>
+
+      {/* Entries grouped by meal */}
+      {entries.length > 0 && (
+        <Section title="Meals" action={<span className="text-xs text-[#71717A] tabular-nums">{entries.length} item{entries.length === 1 ? "" : "s"}</span>}>
+          <div className="space-y-5">
+            <HeartBalance entries={entries} />
+            {groupByMeal(entries).map((g) => {
+              const gk = g.items.reduce((a, e) => a + e.kcal, 0);
+              const gp = g.items.reduce((a, e) => a + e.protein_g, 0);
+              return (
+                <div key={g.key}>
+                  <div className="flex items-baseline justify-between mb-2 px-1">
+                    <span className="text-sm font-medium">{g.emoji} {g.label}</span>
+                    <span className="text-xs text-[#71717A] tabular-nums">{Math.round(gk)} kcal · {Math.round(gp)}g P</span>
+                  </div>
+                  <Panel className="divide-y divide-[#18181B] overflow-hidden">
+                    {g.items.map((e) => (
+                      <div key={e.id} className="px-4 py-3 flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-[#FAFAFA] truncate flex items-center gap-1.5">
+                            {e.heart_rating && <HeartDot rating={e.heart_rating} title={e.heart_note ?? undefined} />}
+                            {e.description}
+                          </p>
+                          <p className="text-xs text-[#71717A] tabular-nums">
+                            {Math.round(e.kcal)} kcal · {Math.round(e.protein_g)}P / {Math.round(e.carbs_g)}C / {Math.round(e.fat_g)}F
+                            {e.fiber_g != null && e.fiber_g > 0 && ` · ${Math.round(e.fiber_g)}g fibre`}
+                            {e.saturated_fat_g != null && e.saturated_fat_g > 0 && ` · ${Math.round(e.saturated_fat_g)}g sat fat`}
+                          </p>
+                          {e.heart_rating && (e.heart_rating === "limit" || e.heart_rating === "avoid") && e.heart_note && (
+                            <p className="text-[11px] text-[#71717A] mt-0.5">{e.heart_note}</p>
+                          )}
+                        </div>
+                        <EntryTime entry={e} date={date} />
+                        <button onClick={() => del(e.id)} aria-label="Delete" className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
+                          <Trash2 size={14} className="text-[#52525B]" />
+                        </button>
+                      </div>
+                    ))}
+                  </Panel>
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
 
       {/* Water */}
-      <WaterTracker date={date} />
+      <section>
+        <div className="space-y-3">
+          <WaterTracker date={date} />
 
       {/* 7-day water trend — each day's litres, goal line, calm nudge */}
       {waterWeek.length > 0 && (
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+        <Panel className="p-4">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-xs text-[#52525B] uppercase tracking-widest">💧 Water · last 7 days</p>
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Last 7 days</p>
             <p className="text-[11px] text-[#71717A] tabular-nums">
-              avg <span className="font-semibold text-[#22D3EE]">{(waterAvg / 1000).toFixed(1)}L</span>
+              avg <span className="font-semibold text-[#FAFAFA]">{(waterAvg / 1000).toFixed(1)}L</span>
               <span className="text-[#3F3F46]"> / {(waterGoal / 1000).toFixed(1)}L goal</span> · {waterDaysHit}/7 hit
             </p>
           </div>
@@ -331,7 +456,7 @@ export function FoodDashboard() {
                   />
                   <div
                     className="w-full rounded-md transition-all"
-                    style={{ height: `${Math.max(d.ml > 0 ? 6 : 0, (d.ml / waterScale) * 100)}%`, background: d.hit ? "#22D3EE" : "#0E7490" }}
+                    style={{ height: `${Math.max(d.ml > 0 ? 6 : 0, (d.ml / waterScale) * 100)}%`, background: TEAL, opacity: d.hit ? 1 : 0.45 }}
                     title={`${(d.ml / 1000).toFixed(2)} L`}
                   />
                 </div>
@@ -348,15 +473,13 @@ export function FoodDashboard() {
               ? "💪 You're hitting your hydration goal — keep it up."
               : `Averaging ${((waterGoal - waterAvg) / 1000).toFixed(1)}L under goal — a glass more per day gets you there.`}
           </p>
-        </div>
+        </Panel>
       )}
+        </div>
+      </section>
 
       {/* 7-day chart — switch between eaten-vs-target and eaten-vs-burned balance */}
-      <div>
-        <div className="flex items-center justify-between mb-2 gap-2">
-          <p className="text-xs text-[#52525B] uppercase tracking-widest">
-            Last 7 days · {chartMode === "target" ? "eaten vs target" : "eaten vs burned"}
-          </p>
+      <Section title="Last 7 days" action={
           <div className="flex items-center gap-3">
             {chartMode === "target" && targetKcal != null && (
               <p className="text-[11px] text-[#71717A] tabular-nums hidden sm:block">
@@ -375,22 +498,20 @@ export function FoodDashboard() {
                 vs burn
               </button>
             </div>
-          </div>
-        </div>
+          </div>}>
+        <Panel className="p-4">
+        <p className="text-sm text-[#A1A1AA] mb-3">{chartMode === "target" ? "Eaten vs your target" : "Eaten vs what Garmin says you burned"}</p>
         <div className="h-40">
           <ResponsiveContainer width="100%" height="100%">
             {chartMode === "target" ? (
               <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#18181B" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ background: "#111113", border: "1px solid #27272A", borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: "#A1A1AA" }}
-                />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--viz-grid)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: "var(--viz-axis)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "var(--viz-axis)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <Tooltip {...TIP} cursor={{ fill: "var(--viz-grid)", opacity: 0.4 }} />
                 {targetKcal != null && (
-                  <ReferenceLine y={targetKcal} stroke="#71717A" strokeDasharray="4 4"
-                    label={{ value: `${Math.round(targetKcal)} kcal`, fill: "#A1A1AA", fontSize: 10, position: "insideTopRight" }} />
+                  <ReferenceLine y={targetKcal} stroke="var(--viz-ref)" strokeDasharray="4 4"
+                    label={{ value: `${Math.round(targetKcal)} kcal`, fill: "var(--viz-axis)", fontSize: 10, position: "insideTopRight" }} />
                 )}
                 <Bar dataKey="kcal" radius={[4, 4, 0, 0]}>
                   {chartData.map((d, i) => (
@@ -400,14 +521,11 @@ export function FoodDashboard() {
               </BarChart>
             ) : (
               <ComposedChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#18181B" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ background: "#111113", border: "1px solid #27272A", borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: "#A1A1AA" }}
-                />
-                <Legend wrapperStyle={{ fontSize: 10, color: "#71717A" }} iconType="plainline" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--viz-grid)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: "var(--viz-axis)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "var(--viz-axis)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <Tooltip {...TIP} cursor={{ fill: "var(--viz-grid)", opacity: 0.4 }} />
+                <Legend wrapperStyle={{ fontSize: 10, color: "var(--viz-axis)" }} iconType="plainline" />
                 {/* Eaten bar coloured by whether the day was a deficit (≤ burn) or surplus */}
                 <Bar dataKey="kcal" name="eaten" radius={[4, 4, 0, 0]}>
                   {chartData.map((d, i) => (
@@ -423,20 +541,20 @@ export function FoodDashboard() {
         </div>
         {chartMode === "balance" && (
           <p className="text-[11px] text-[#52525B] mt-1.5">
-            <span className="text-[#34D399]">Green</span> = ate under your Garmin burn (deficit) ·{" "}
-            <span className="text-[#F87171]">red</span> = over (surplus). The{" "}
-            <span className="text-[#22D3EE]">teal line</span> is calories burned.
+            <span className="text-emerald-400">Green</span> = ate under your Garmin burn (deficit) ·{" "}
+            <span className="text-rose-400">red</span> = over (surplus). The line is calories burned.
           </p>
         )}
-      </div>
+        </Panel>
+      </Section>
 
       {/* Food × how you feel — which eating patterns move energy/mood/stress */}
       <FoodWellnessImpact date={date} />
 
       {/* Expenditure calibration — predicted vs actual weight change */}
       {calib?.enough && (
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
-          <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">Calibration · last {calib.window_days}d</p>
+        <Section title={`Calibration · last ${calib.window_days} days`}>
+        <Panel className="p-4">
           {calib.calibrated && calib.actual_kg != null ? (
             <>
               <div className="flex items-center justify-between text-sm tabular-nums">
@@ -461,7 +579,7 @@ export function FoodDashboard() {
               {calib.maintenance_adjust_kcal != null && Math.abs(calib.maintenance_adjust_kcal) >= 75 && (
                 <p className="text-xs text-[#52525B] mt-2 pt-2 border-t border-[#18181B]">
                   Your real maintenance looks{" "}
-                  <span className={calib.maintenance_adjust_kcal > 0 ? "text-[#34D399]" : "text-[#F87171]"}>
+                  <span className={calib.maintenance_adjust_kcal > 0 ? "text-emerald-400" : "text-rose-400"}>
                     ~{Math.abs(calib.maintenance_adjust_kcal)} kcal {calib.maintenance_adjust_kcal > 0 ? "higher" : "lower"}
                   </span>{" "}
                   than modeled — you can {calib.maintenance_adjust_kcal > 0 ? "eat a bit more" : "tighten the target"} and still hit your rate.
@@ -478,74 +596,26 @@ export function FoodDashboard() {
               </p>
             </div>
           )}
-        </div>
+        </Panel>
+        </Section>
       )}
 
       {/* Weight — the fat-loss metric lives here now */}
       <WeightSection />
 
-      {/* Targets editor */}
-      <TargetsEditor date={date} targets={targets} onSaved={() => qc.invalidateQueries({ queryKey: ["food-targets", date] })} />
-
-      {/* Heart-healthy pick (today only) */}
-      {date === today && <HeartHealthyPick date={date} />}
-
-      {/* Weekly meal plan + one shopping list for the supermarket */}
-      <WeeklyMealPlan date={date} />
-
-      {/* Add food */}
-      <div>
-        <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">Log food</p>
-        <FoodEntryComposer date={date} />
-      </div>
-
-      {/* Entries grouped by meal */}
-      {entries.length > 0 && (
-        <div className="space-y-4">
-          <HeartBalance entries={entries} />
-          {groupByMeal(entries).map((g) => {
-            const gk = g.items.reduce((a, e) => a + e.kcal, 0);
-            const gp = g.items.reduce((a, e) => a + e.protein_g, 0);
-            return (
-              <div key={g.key}>
-                <div className="flex items-baseline justify-between mb-2">
-                  <span className="text-xs text-[#52525B] uppercase tracking-widest">{g.emoji} {g.label}</span>
-                  <span className="text-xs text-[#52525B] tabular-nums">{Math.round(gk)} kcal · {Math.round(gp)}g P</span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  {g.items.map((e) => (
-                    <div key={e.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-[#FAFAFA] truncate flex items-center gap-1.5">
-                          {e.heart_rating && <HeartDot rating={e.heart_rating} title={e.heart_note ?? undefined} />}
-                          {e.description}
-                        </p>
-                        <p className="text-xs text-[#52525B] tabular-nums">
-                          {Math.round(e.kcal)} kcal · {Math.round(e.protein_g)}P / {Math.round(e.carbs_g)}C / {Math.round(e.fat_g)}F
-                          {e.fiber_g != null && e.fiber_g > 0 && ` · ${Math.round(e.fiber_g)}g fibre`}
-                          {e.saturated_fat_g != null && e.saturated_fat_g > 0 && ` · ${Math.round(e.saturated_fat_g)}g sat fat`}
-                        </p>
-                        {e.heart_rating && (e.heart_rating === "limit" || e.heart_rating === "avoid") && e.heart_note && (
-                          <p className="text-[11px] text-[#71717A] mt-0.5">{e.heart_note}</p>
-                        )}
-                      </div>
-                      <EntryTime entry={e} date={date} />
-                      <button onClick={() => del(e.id)} className="p-1.5 rounded-lg hover:bg-[#27272A] shrink-0">
-                        <Trash2 size={14} className="text-[#52525B]" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+      {/* The plan: target, heart-healthy pick, the week's meals + shopping list */}
+      <Section title="Plan">
+        <div className="space-y-3">
+          <TargetsEditor date={date} targets={targets} onSaved={() => qc.invalidateQueries({ queryKey: ["food-targets", date] })} />
+          {date === today && <HeartHealthyPick date={date} />}
+          <WeeklyMealPlan date={date} />
         </div>
-      )}
+      </Section>
 
       {/* AI coach: what to eat next + foods to watch */}
       <div>
         <div className="flex items-center justify-between mb-2 gap-2">
-          <p className="text-xs text-[#52525B] uppercase tracking-widest shrink-0">Coach · what to eat</p>
+          <h2 className="text-xs text-[#52525B] uppercase tracking-widest shrink-0">Coach · what to eat</h2>
           <div className="flex items-center gap-2">
             <select
               value={coachMeal}
@@ -571,7 +641,7 @@ export function FoodDashboard() {
         {coach && (
           <div className="space-y-3">
             {coach.next_meal && (
-              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
                 <div className="flex items-start gap-3">
                   <UtensilsCrossed size={16} className="text-[#F59E0B] mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
@@ -594,15 +664,15 @@ export function FoodDashboard() {
             )}
 
             {coach.avoid && coach.avoid.length > 0 && (
-              <div className="bg-[#F87171]/5 border border-[#F87171]/20 rounded-xl p-4 space-y-2">
-                <p className="text-xs text-[#F87171] uppercase tracking-widest flex items-center gap-1.5">
+              <div className="bg-[#0D0D0F] border border-[#EF4444]/30 rounded-2xl p-4 space-y-2">
+                <p className="text-xs text-rose-400 uppercase tracking-widest flex items-center gap-1.5">
                   <AlertTriangle size={12} /> Watch out
                 </p>
                 {coach.avoid.map((a, i) => (
                   <div key={i} className="text-sm">
                     <span className="text-[#FAFAFA] font-medium">{a.item}</span>
                     <span className="text-[#71717A]"> — {a.reason}</span>
-                    {a.swap && <span className="text-[#34D399]"> → try {a.swap}</span>}
+                    {a.swap && <span className="text-emerald-400"> → try {a.swap}</span>}
                   </div>
                 ))}
               </div>
@@ -642,9 +712,9 @@ function HeartBalance({ entries }: { entries: FoodEntry[] }) {
     : `${flagged} food${flagged > 1 ? "s" : ""} to watch for your cholesterol today.`;
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-[#52525B] uppercase tracking-widest">Heart balance</span>
+        <span className="text-[10px] text-[#52525B] uppercase tracking-widest">Heart balance</span>
         <span className="text-xs text-[#71717A] tabular-nums">
           {satKnown && `${Math.round(sat)}g sat fat`}{satKnown && fibreKnown && " · "}
           {fibreKnown && `${Math.round(fibre)}g fibre`}
@@ -664,7 +734,7 @@ function HeartBalance({ entries }: { entries: FoodEntry[] }) {
             </span>
           ))}
         </div>
-        <span className={`text-[11px] ${flagged === 0 ? "text-[#34D399]" : "text-[#FBBF24]"}`}>{msg}</span>
+        <span className={`text-[11px] ${flagged === 0 ? "text-emerald-400" : "text-amber-400"}`}>{msg}</span>
       </div>
       {total === 0 && <p className="text-[11px] text-[#52525B]">No foods logged yet.</p>}
     </div>
@@ -746,10 +816,10 @@ function TargetsEditor({
     "w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] tabular-nums focus:outline-none focus:border-[#3F3F46]";
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs text-[#52525B] uppercase tracking-widest">Daily target</p>
+          <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Daily target</p>
           <p className="text-sm text-[#FAFAFA] tabular-nums mt-0.5">
             {active
               ? `${Math.round(active.target_kcal)} kcal · ${Math.round(active.protein_g)}g protein`
