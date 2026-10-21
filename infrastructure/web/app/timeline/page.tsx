@@ -1,15 +1,14 @@
 "use client";
 
 import { useState, Suspense } from "react";
-import { useRouter } from "next/navigation";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { CalendarSearch } from "lucide-react";
 import { format, subDays, parseISO, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachWeekOfInterval, eachMonthOfInterval } from "date-fns";
 import { api, type DaySummary } from "@/lib/api";
 import Link from "next/link";
 import { DayCard } from "@/components/DayCard";
 import { LifeGridClient } from "@/app/life/LifeGridClient";
 import { WeekCharts } from "@/components/WeekCharts";
+import { DayCalendar } from "@/components/DayCalendar";
 
 const PAGE_SIZE = 30;
 
@@ -51,16 +50,6 @@ type Tab = "days" | "weeks" | "life";
 
 export default function TimelinePage() {
   const [tab, setTab] = useState<Tab>("days");
-  const router = useRouter();
-  const [jumpDate, setJumpDate] = useState("");
-  const today = format(new Date(), "yyyy-MM-dd");
-
-  // Navigate only on an explicit confirm (Go / Enter / closing the picker).
-  // iOS fires `change` on every wheel spin — prefilled with today — so
-  // navigating on change jumped straight to today before a date was picked.
-  function jumpToDate(d: string) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d >= "1990-01-01" && d <= today) router.push(`/day/${d}`);
-  }
 
   return (
     <main className="w-full px-4 pb-20">
@@ -72,32 +61,8 @@ export default function TimelinePage() {
             <h1 className="text-2xl font-semibold tracking-tight">Timeline</h1>
           </div>
 
-          {/* Jump to a specific date */}
-          <label className="shrink-0 flex items-center gap-1.5 bg-[#0D0D0F] border border-[#27272A] rounded-lg px-2.5 py-1.5 mt-1 cursor-pointer hover:border-[#3F3F46] transition-colors">
-            <CalendarSearch size={13} className="text-[#52525B]" />
-            <input
-              type="date"
-              value={jumpDate}
-              max={today}
-              onChange={(e) => setJumpDate(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") jumpToDate(jumpDate); }}
-              onBlur={() => {
-                // Touch pickers (iOS "Done") blur on close — treat that as confirm.
-                if (window.matchMedia("(pointer: coarse)").matches) jumpToDate(jumpDate);
-              }}
-              className="bg-transparent text-xs text-[#A1A1AA] outline-none [color-scheme:dark] w-[112px]"
-              aria-label="Jump to date"
-            />
-            {jumpDate && (
-              <button
-                type="button"
-                onClick={(e) => { e.preventDefault(); jumpToDate(jumpDate); }}
-                className="text-xs font-medium text-[#A1A1AA] hover:text-[#FAFAFA] px-1"
-              >
-                Go
-              </button>
-            )}
-          </label>
+          {/* Jump to a specific date — same calendar as the day header */}
+          <div className="mt-1"><DayCalendar variant="label" /></div>
         </div>
       </header>
 
