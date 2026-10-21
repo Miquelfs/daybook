@@ -31,13 +31,14 @@ def db():
                              pic_seconds INTEGER DEFAULT 0, landings_day INTEGER DEFAULT 0,
                              landings_night INTEGER DEFAULT 0);
         CREATE TABLE trips(id INTEGER PRIMARY KEY, start_date TEXT, end_date TEXT, countries_json TEXT,
-                           hidden INTEGER DEFAULT 0, user_name TEXT, auto_name TEXT, primary_country TEXT);
+                           hidden INTEGER DEFAULT 0, user_name TEXT, auto_name TEXT, primary_country TEXT,
+                           cover_photo_path TEXT);
         CREATE TABLE manual_country_visits(iso2 TEXT, country TEXT, first_visit TEXT);
         CREATE TABLE restaurants(id INTEGER PRIMARY KEY, name TEXT, date_visited TEXT, city TEXT, companions TEXT);
         CREATE TABLE tennis_session_player(activity_id TEXT, contact_id INTEGER, role TEXT);
         CREATE TABLE books(id INTEGER PRIMARY KEY, title TEXT, date_finished TEXT);
         CREATE TABLE tags(id INTEGER PRIMARY KEY, slug TEXT, is_negative BOOLEAN DEFAULT 0, name TEXT, icon TEXT, category TEXT);
-        CREATE TABLE day_tags(date TEXT, tag_id INTEGER);
+        CREATE TABLE day_tags(date TEXT, tag_id INTEGER, note TEXT);
         CREATE TABLE app_settings(key TEXT PRIMARY KEY, value TEXT);
     """)
     migrate(c)
@@ -97,8 +98,8 @@ class GoalProgressTest(unittest.TestCase):
     def test_negative_tag_vs_last_year(self):
         self.c.execute("INSERT INTO tags (id, slug, is_negative) VALUES (1, 'candy', 1)")
         for d in ["2025-02-01", "2025-03-01", "2025-04-01", "2026-02-01"]:
-            self.c.execute("INSERT INTO day_tags VALUES (?, 1)", (d,))
-        self.c.execute("INSERT INTO day_tags VALUES ('2025-09-01', 1)")   # after the window → not compared
+            self.c.execute("INSERT INTO day_tags (date, tag_id) VALUES (?, 1)", (d,))
+        self.c.execute("INSERT INTO day_tags (date, tag_id) VALUES ('2025-09-01', 1)")   # after the window → not compared
         p = gl.progress(self.c, goal(metric="tag_days", metric_param="candy"), TODAY)
         self.assertTrue(p["lower_is_better"])
         self.assertEqual((p["actual"], p["compare"]), (1, 3))
@@ -107,7 +108,7 @@ class GoalProgressTest(unittest.TestCase):
     def test_negative_tag_with_ceiling(self):
         self.c.execute("INSERT INTO tags (id, slug, is_negative) VALUES (1, 'candy', 1)")
         for m in range(1, 7):
-            self.c.execute("INSERT INTO day_tags VALUES (?, 1)", (f"2026-0{m}-01",))
+            self.c.execute("INSERT INTO day_tags (date, tag_id) VALUES (?, 1)", (f"2026-0{m}-01",))
         p = gl.progress(self.c, goal(metric="tag_days", metric_param="candy", target=10), TODAY)
         self.assertEqual(p["state"], "behind")          # 6 used, budget so far ~5
 
@@ -188,8 +189,8 @@ class MoreMetricsTest(unittest.TestCase):
         self.assertEqual(runs({"2026-01-02", "2026-01-03"}, date(2026, 1, 1), date(2026, 1, 5), True), (2, 0))
         self.c.execute("INSERT INTO tags (id, slug, is_negative) VALUES (1, 'outdoors', 0), (2, 'alcohol', 1)")
         for d in ["2026-06-28", "2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02"]:
-            self.c.execute("INSERT INTO day_tags VALUES (?, 1)", (d,))
-        self.c.execute("INSERT INTO day_tags VALUES ('2026-06-01', 2)")
+            self.c.execute("INSERT INTO day_tags (date, tag_id) VALUES (?, 1)", (d,))
+        self.c.execute("INSERT INTO day_tags (date, tag_id) VALUES ('2026-06-01', 2)")
         p = self.p(metric="tag_streak", metric_param="outdoors", target=7)
         self.assertEqual((p["actual"], p["compare"], p["state"]), (5, 5, "in_progress"))
         dry = self.p(metric="tag_streak", metric_param="alcohol", target=100)   # days in a row WITHOUT
@@ -249,8 +250,8 @@ class HabitsTest(unittest.TestCase):
         self.c = db()
         self.c.execute("INSERT INTO tags (id, slug, name, icon, is_negative) VALUES (1,'gym','Gym','🏋️',0), (2,'candy','Candy','🍬',1)")
         for d in ["2026-06-28", "2026-06-29", "2026-06-30", "2026-07-01", "2026-03-02", "2026-03-03"]:
-            self.c.execute("INSERT INTO day_tags VALUES (?, 1)", (d,))
-        self.c.execute("INSERT INTO day_tags VALUES ('2026-06-20', 2)")
+            self.c.execute("INSERT INTO day_tags (date, tag_id) VALUES (?, 1)", (d,))
+        self.c.execute("INSERT INTO day_tags (date, tag_id) VALUES ('2026-06-20', 2)")
 
     def test_positive_streak_stays_alive_until_today_is_logged(self):
         s = hb.streaks(["2026-06-30", "2026-07-01"], False, TODAY)        # today (2 Jul) not logged yet
@@ -263,7 +264,7 @@ class HabitsTest(unittest.TestCase):
 
     def test_only_tracked_tags_are_habits(self):
         self.c.execute("INSERT INTO tags (id, slug, name) VALUES (3, 'late_night', 'Late night')")
-        self.c.execute("INSERT INTO day_tags VALUES ('2026-07-01', 3)")
+        self.c.execute("INSERT INTO day_tags (date, tag_id) VALUES ('2026-07-01', 3)")
         self.assertEqual(hb.overview(self.c, TODAY), [])                  # nothing chosen yet
         self.assertTrue(hb.set_tracked(self.c, "gym", True))
         self.c.execute("INSERT INTO goals (title, start_date, metric, metric_param) VALUES ('less candy', '2026-01-01', 'tag_days', 'candy')")
@@ -285,6 +286,21 @@ class HabitsTest(unittest.TestCase):
         self.assertEqual((gym["count_30"], gym["streak_current"], gym["this_year"]), (4, 4, 6))
         self.assertEqual(o[1]["rate_30"], 97)                              # 29 clean days of 30
 
+    def test_counted_habit_sums_the_amounts(self):
+        self.c.execute("INSERT INTO tags (id, slug, name, is_negative) VALUES (9, 'alcohol', 'Alcohol', 1)")
+        self.c.executemany("INSERT INTO day_tags (date, tag_id, note) VALUES (?, 9, ?)",
+                           [("2026-06-30", "8"), ("2026-07-01", "2"), ("2026-03-01", None)])
+        hb.set_tracked(self.c, "alcohol", True)
+        h = next(x for x in hb.overview(self.c, TODAY) if x["slug"] == "alcohol")
+        self.assertTrue(h["counted"])
+        self.assertEqual((h["count_30"], h["amount_30"]), (2, 10))
+        self.assertEqual([w["count"] for w in h["week"]][-3:], [8, 2, None])
+        d = hb.detail(self.c, "alcohol", 2026, TODAY)
+        self.assertEqual((d["count"], d["amount"], d["amount_max"], d["amount_per_day"]), (3, 11, 8, 3.7))
+        self.assertEqual(d["amount_by_month"][5], 8)
+        g = gl.progress(self.c, goal(metric="tag_total", metric_param="alcohol", target=100), TODAY)
+        self.assertEqual((g["actual"], g["kind"], g["state"]), (11.0, "ceiling", "on_track"))
+
     def test_detail_year(self):
         d = hb.detail(self.c, "gym", 2026, TODAY)
         self.assertEqual((d["count"], d["by_month"][2], d["by_month"][5], d["by_weekday"][0]), (6, 2, 3, 2))
@@ -301,11 +317,20 @@ class PeopleTest(unittest.TestCase):
         for d in ["2025-05-01", "2025-06-01", "2026-06-01", "2026-06-02", "2026-06-03", "2026-07-01", "2026-12-31"]:
             self.c.execute("INSERT INTO day_companions VALUES (?, 1)", (d,))
         self.c.execute("INSERT INTO tags (id, slug, name, icon) VALUES (1, 'outdoors', 'Outdoors', '🌲')")
-        self.c.execute("INSERT INTO day_tags VALUES ('2026-06-01', 1)")
+        self.c.execute("INSERT INTO day_tags (date, tag_id) VALUES ('2026-06-01', 1)")
         self.c.execute("INSERT INTO activities (id, date, source, activity_type) VALUES ('a', '2026-06-02', 'garmin', 'tennis')")
         self.c.execute("INSERT INTO tennis_session_player VALUES ('a', 1, 'partner')")
         self.c.execute("INSERT INTO restaurants (name, date_visited, companions) VALUES ('Can Pep', '2026-06-03', 'Alice, Marta')")
         self.c.execute("INSERT INTO trips (start_date, end_date, user_name) VALUES ('2026-05-30', '2026-06-04', 'Lisbon')")
+
+    def test_share_counts_from_when_logging_started(self):
+        c = db()
+        c.execute("INSERT INTO contacts (id, name) VALUES (1, 'Oriol')")
+        for d in ["2026-06-01", "2026-06-11", "2026-06-21"]:                   # logging began 1 Jun
+            c.execute("INSERT INTO day_companions VALUES (?, 1)", (d,))
+        p = pp.profile(c, 1, 2026, TODAY)
+        self.assertEqual((p["since"], p["share"]), ("2026-06-01", 9))           # 3 of 32 days, not of 183
+        self.assertIsNone(p["prev_same_period"])                                # no 2025 to compare
 
     def test_directory_sorted_by_this_year(self):
         d = pp.directory(self.c, TODAY)
@@ -344,6 +369,26 @@ class CompanionsTest(unittest.TestCase):
         t = pp.profile(c, 1, 2026, TODAY)["together"]
         self.assertEqual((t["sports"], t["activities"][0]["id"]), ([{"type": "cycling", "count": 1}], "g1"))
         self.assertIsNone(cm.set_activity_with(c, "nope", [1]))
+
+
+class PlannedTripsTest(unittest.TestCase):
+    def test_plan_then_adopt_detected_trip(self):
+        from domains.plans import planned_trips as pt
+        c = db()
+        c.execute("INSERT INTO contacts (id, name) VALUES (1, 'Alice')")
+        pid = pt.save(c, {"name": "Lisbon", "start_date": "2026-07-10", "end_date": "2026-07-14"}, [1])
+        up = pt.upcoming(c, TODAY)
+        self.assertEqual((up[0]["days_until"], up[0]["nights"], up[0]["with"][0]["name"]), (8, 4, "Alice"))
+        self.assertEqual(pt.adopt(c), 0)                                   # nothing detected yet
+        c.execute("INSERT INTO trips (start_date, end_date, auto_name) VALUES ('2026-07-11', '2026-07-13', 'Portugal · 3 days')")
+        self.assertEqual(pt.adopt(c), 1)
+        self.assertEqual(c.execute("SELECT user_name FROM trips").fetchone()[0], "Lisbon")
+        self.assertEqual(c.execute("SELECT contact_id FROM trip_companions").fetchall()[0][0], 1)
+        self.assertEqual(pt.upcoming(c, TODAY), [])                        # adopted → no longer "ahead"
+        t = pp.profile(c, 1, 2026, date(2026, 7, 20))["together"]["trips"]
+        self.assertEqual([(x["name"], x["planned"]) for x in t], [("Lisbon", False)])
+        self.assertIsNone(pt.get(c, 999, TODAY))
+        pt.delete(c, pid)
 
 
 class BirthdayTest(unittest.TestCase):

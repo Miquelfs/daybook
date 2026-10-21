@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { addDays, format, parseISO } from "date-fns";
-import { Cake, Inbox, Plus, Target } from "lucide-react";
+import { Cake, Inbox, Plane, Plus, Target } from "lucide-react";
 import { SectionLabel } from "@/components/MorningBrief";
 import { plansApi, PLAN_KEYS, type Task } from "@/lib/plans-api";
 import { TaskRow } from "./TaskRow";
@@ -55,6 +55,10 @@ function Ahead({ date }: { date: string }) {
     ...a.birthdays.filter((b) => b.days_until > 0 && b.days_until <= 7).map((b) => ({
       key: `b${b.contact_id}`, on: b.date, icon: <Cake size={14} />, label: `${b.name.split(" ")[0]}'s birthday`,
       when: dueLabel(b.date, date), href: "/plan?tab=people",
+    })),
+    ...a.trips.filter((t) => t.days_until <= 30).map((t) => ({
+      key: `p${t.id}`, on: t.start_date, icon: <Plane size={14} />, label: t.name,
+      when: t.ongoing ? "now" : `in ${t.days_until}d`, warn: t.days_until <= 7, href: "/plan",
     })),
     ...a.upcoming.map((t) => {
       const Icon = area(t.area).icon;

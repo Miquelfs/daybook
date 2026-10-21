@@ -9,17 +9,19 @@ import { localISODate } from "@/lib/dates";
 import { TaskRow } from "./TaskRow";
 import { Block, Panel, Pill } from "./ui";
 import { AREA_LIST, area as areaOf } from "./areas";
+import { TripsAhead } from "./TripsAhead";
 
-type When = "today" | "tomorrow" | "weekend" | "next_week" | "someday";
+type When = "today" | "tomorrow" | "weekend" | "next_week" | "someday" | "date";
 const WHEN: { key: When; label: string }[] = [
   { key: "today", label: "Today" },
   { key: "tomorrow", label: "Tomorrow" },
   { key: "weekend", label: "Weekend" },
   { key: "next_week", label: "Next week" },
   { key: "someday", label: "Someday" },
+  { key: "date", label: "Pick a date" },
 ];
 
-function whenToDate(w: When, today: string): string | null {
+function whenToDate(w: When, today: string, picked: string): string | null {
   const t = parseISO(today);
   const iso = (d: Date) => format(d, "yyyy-MM-dd");
   switch (w) {
@@ -27,6 +29,7 @@ function whenToDate(w: When, today: string): string | null {
     case "tomorrow": return iso(addDays(t, 1));
     case "weekend": return t.getDay() === 6 || t.getDay() === 0 ? today : iso(nextSaturday(t));
     case "next_week": return iso(nextMonday(t));
+    case "date": return picked || null;
     default: return null;
   }
 }
@@ -41,13 +44,14 @@ function Composer({ kind, today, onMore }: { kind: TaskKind; today: string; onMo
   const [title, setTitle] = useState("");
   const [when, setWhen] = useState<When>(kind === "note" ? "next_week" : "today");
   const [areaKey, setAreaKey] = useState<string | null>(null);
+  const [picked, setPicked] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function add() {
     if (!title.trim()) return;
     setBusy(true);
     try {
-      await plansApi.createTask({ title: title.trim(), kind, due_date: whenToDate(when, today), area: areaKey });
+      await plansApi.createTask({ title: title.trim(), kind, due_date: whenToDate(when, today, picked), area: areaKey });
       setTitle("");
       refresh(qc);
     } finally {
@@ -62,7 +66,7 @@ function Composer({ kind, today, onMore }: { kind: TaskKind; today: string; onMo
                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
                placeholder={kind === "note" ? "A thought to bring back later…" : "Add a task…"}
                className="flex-1 min-w-0 bg-transparent px-1 py-1.5 text-[15px] text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none" />
-        <button onClick={add} disabled={busy || !title.trim()} aria-label="Add"
+        <button onClick={add} disabled={busy || !title.trim() || (when === "date" && !picked)} aria-label="Add"
                 className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-[#F59E0B] text-black disabled:bg-[#18181B] disabled:text-[#3F3F46] transition-colors">
           <CornerDownLeft size={15} />
         </button>
@@ -70,10 +74,15 @@ function Composer({ kind, today, onMore }: { kind: TaskKind; today: string; onMo
       <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] -mx-1 px-1">
         {WHEN.map((w) => (
           <Pill key={w.key} on={when === w.key} onClick={() => setWhen(w.key)}>
-            {w.key === "someday" && kind === "note" ? "No date" : w.label}
+            {w.key === "someday" && kind === "note" ? "No date"
+              : w.key === "date" && picked ? format(parseISO(picked), "EEE d MMM") : w.label}
           </Pill>
         ))}
       </div>
+      {when === "date" && (
+        <input type="date" value={picked} min={today} onChange={(e) => setPicked(e.target.value)} autoFocus
+               className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] outline-none focus:border-[#F59E0B]" />
+      )}
       <div className="flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] -mx-1 px-1">
         {AREA_LIST.map((a) => (
           <button key={a.key} type="button" title={a.label} aria-label={a.label}
@@ -259,6 +268,7 @@ export function TasksView({ kind, onEdit, onMore }: {
   return (
     <div className="space-y-8">
       <Composer key={kind} kind={kind} today={today} onMore={onMore} />
+      {kind === "task" && <TripsAhead />}
       {kind === "task"
         ? <TaskTimeline today={today} onEdit={onEdit} />
         : <NoteCards today={today} onEdit={onEdit} />}

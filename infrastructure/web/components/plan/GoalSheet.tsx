@@ -45,7 +45,7 @@ export function GoalSheet({ goal, year, preset, onClose }: {
     baseline: goal?.baseline?.toString() ?? "",
     current: goal?.current?.toString() ?? "",
     area: (goal?.area ?? null) as string | null,          // null → the metric's area
-    start_date: goal?.start_date ?? `${year}-01-01`,
+    start_date: goal ? goal.start_date ?? "" : "",          // optional — empty counts from 1 Jan
     deadline: goal?.deadline ?? `${year}-12-31`,
     priority: (goal?.priority ?? 2) as 1 | 2 | 3,
     notes: goal?.notes ?? "",
@@ -101,7 +101,7 @@ export function GoalSheet({ goal, year, preset, onClose }: {
       baseline: m?.kind === "level" ? num(f.baseline) : null,
       current: f.metric === "manual" ? num(f.current) : null,
       area: f.area,
-      start_date: f.start_date,
+      start_date: f.start_date || null,
       deadline: f.deadline || null,
       priority: f.priority,
       notes: f.notes.trim() || null,
@@ -116,11 +116,11 @@ export function GoalSheet({ goal, year, preset, onClose }: {
   function repeatNextYear() {
     if (!goal) return;
     const shift = (d: string | null) => (d ? `${Number(d.slice(0, 4)) + 1}${d.slice(4)}` : null);
-    const y = goal.start_date.slice(0, 4);
+    const y = (goal.start_date ?? goal.deadline ?? String(year)).slice(0, 4);
     run(() => plansApi.createGoal({
       ...body(),
       title: goal.title.replace(y, String(Number(y) + 1)),
-      start_date: shift(goal.start_date)!,
+      start_date: shift(goal.start_date),
       deadline: shift(goal.deadline),
       current: null,
       baseline: null,
@@ -231,8 +231,14 @@ export function GoalSheet({ goal, year, preset, onClose }: {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="From">
-          <input type="date" className={inputCls} value={f.start_date} onChange={(e) => setF({ ...f, start_date: e.target.value })} />
+        <Field label="From (optional)">
+          <div className="relative">
+            <input type="date" className={inputCls} value={f.start_date} onChange={(e) => setF({ ...f, start_date: e.target.value })} />
+            {f.start_date && (
+              <button type="button" onClick={() => setF({ ...f, start_date: "" })}
+                      className="absolute right-9 top-1/2 -translate-y-1/2 text-[10px] text-[#71717A] hover:text-[#FAFAFA]">Clear</button>
+            )}
+          </div>
         </Field>
         <Field label="Deadline">
           <input type="date" className={inputCls} value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} />
@@ -281,7 +287,7 @@ export function GoalSheet({ goal, year, preset, onClose }: {
                       className="text-[#A1A1AA] hover:text-[#FAFAFA]">Reopen</button>
             )}
             <button disabled={busy} onClick={repeatNextYear} className="text-[#A1A1AA] hover:text-[#FAFAFA]">
-              ↻ Repeat in {Number(goal.start_date.slice(0, 4)) + 1}
+              ↻ Repeat in {Number((goal.start_date ?? goal.deadline ?? String(year)).slice(0, 4)) + 1}
             </button>
           </div>
           <button disabled={busy}

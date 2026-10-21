@@ -8,8 +8,8 @@ class GoalIn(BaseModel):
     emoji: str | None = None
     area: str | None = None
     priority: int = Field(2, ge=1, le=3)
-    start_date: str | None = None          # default: 1 Jan this year
-    deadline: str | None = None            # default: 31 Dec of the start year
+    start_date: str | None = None          # optional — progress then counts from 1 Jan
+    deadline: str | None = None            # default: 31 Dec of the start (or this) year
     metric: str = "manual"
     metric_param: str | None = None
     target: float | None = None
@@ -40,7 +40,7 @@ class GoalOut(BaseModel):
     emoji: str | None = None
     area: str | None = None
     priority: int
-    start_date: str
+    start_date: str | None = None
     deadline: str | None = None
     metric: str
     metric_param: str | None = None
@@ -154,6 +154,7 @@ class AgendaOut(BaseModel):
     inbox_count: int
     birthdays: list[BirthdayOut]
     goals: GoalsBrief
+    trips: list[dict] = []                 # planned trips starting within 60 days
 
 
 class AreaPlanOut(BaseModel):

@@ -26,7 +26,8 @@ export interface Goal {
   emoji: string | null;
   area: string | null;
   priority: 1 | 2 | 3;
-  start_date: string;
+  /** null → progress counts from 1 Jan of the deadline's year. */
+  start_date: string | null;
   deadline: string | null;
   metric: GoalMetric;
   metric_param: string | null;
@@ -102,6 +103,7 @@ export interface Agenda {
   inbox_count: number;
   birthdays: Birthday[];
   goals: { on_track: number; total: number; behind: Goal[]; due_soon: Goal[] };
+  trips: PlannedTrip[];
 }
 
 export interface AreaPlan {
@@ -121,7 +123,10 @@ export interface Habit {
   category: string | null;
   is_negative: boolean;
   why: HabitWhy[];
-  week: { date: string; done: boolean }[];   // last 7 days, oldest first
+  /** Amount tags (drinks, times): each day carries a number. */
+  counted: boolean;
+  amount_30: number | null;
+  week: { date: string; done: boolean; count: number | null }[];   // last 7 days, oldest first
   rate_30: number;                           // % of the last 30 days on target (clean days for negative)
   count_30: number;
   this_year: number;
@@ -164,6 +169,12 @@ export interface HabitDetail {
   by_month: number[];
   by_weekday: number[];                      // Mon … Sun
   best_in_year: number;
+  counted: boolean;
+  counts: Record<string, number>;
+  amount: number | null;
+  amount_by_month: number[] | null;
+  amount_per_day: number | null;
+  amount_max: number | null;
   total: number;
   first: string | null;
   streak_current: number;
@@ -195,9 +206,12 @@ export interface PersonProfile {
   years: number[];
   dates: string[];
   count: number;
-  prev_same_period: number;
+  /** null when you weren't logging people yet at this point last year. */
+  prev_same_period: number | null;
   per_month: number | null;
   share: number;
+  /** Shares count from here when you started logging mid-year. */
+  since: string | null;
   by_year: { year: number; days: number }[];
   by_month: number[];
   by_weekday: number[];
@@ -213,10 +227,30 @@ export interface PersonProfile {
     sports: { type: string; count: number }[];
     tennis: { sessions: number; as_partner: number; as_opponent: number } | null;
     restaurants: { id: number; name: string; date_visited: string; city: string | null }[];
-    trips: { id: number; name: string | null; start: string; end: string }[];
+    trips: {
+      id: number; name: string | null; start: string; end: string; planned: boolean;
+      countries: string[]; cover: string | null; nights: number; days_until: number | null;
+    }[];
   };
   recent: string[];
 }
+
+export interface PlannedTrip {
+  id: number;
+  name: string;
+  destination: string | null;
+  start_date: string;
+  end_date: string;
+  notes: string | null;
+  nights: number;
+  days_until: number;
+  ongoing: boolean;
+  with: Companion[];
+}
+
+export type PlannedTripIn = Partial<Pick<PlannedTrip, "name" | "destination" | "start_date" | "end_date" | "notes">> & {
+  contact_ids?: number[];
+};
 
 export interface Companion { id: number; name: string; emoji: string | null; group_: string | null }
 
@@ -238,6 +272,10 @@ export const plansApi = {
   agenda: (date: string) => req<Agenda>("GET", `/api/agenda?date=${date}`),
   birthdays: () => req<Birthday[]>("GET", "/api/birthdays"),
 
+  plannedTrips: () => req<PlannedTrip[]>("GET", "/api/planned-trips"),
+  createPlannedTrip: (body: PlannedTripIn) => req<PlannedTrip>("POST", "/api/planned-trips", body),
+  updatePlannedTrip: (id: number, body: PlannedTripIn) => req<PlannedTrip>("PATCH", `/api/planned-trips/${id}`, body),
+  deletePlannedTrip: (id: number) => req<void>("DELETE", `/api/planned-trips/${id}`),
   habits: () => req<Habit[]>("GET", "/api/habits"),
   exploreTags: () => req<TagSummary[]>("GET", "/api/habits/explore"),
   track: (slug: string, on: boolean) => req<void>(on ? "POST" : "DELETE", `/api/habits/${encodeURIComponent(slug)}/track`),
@@ -268,4 +306,4 @@ export const plansApi = {
 };
 
 /** Everything plan-related a mutation can change — invalidate these together. */
-export const PLAN_KEYS = [["agenda"], ["goals"], ["tasks"], ["birthdays"], ["area-plan"], ["habits"], ["habit"], ["habit-tags"], ["people"], ["person"]] as const;
+export const PLAN_KEYS = [["agenda"], ["goals"], ["tasks"], ["birthdays"], ["area-plan"], ["habits"], ["habit"], ["habit-tags"], ["people"], ["person"], ["planned-trips"]] as const;

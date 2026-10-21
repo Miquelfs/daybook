@@ -10,6 +10,7 @@ People — who you spend your days with, from day_companions (logged on Today).
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections import Counter
 from datetime import date
@@ -62,7 +63,12 @@ def profile(conn: sqlite3.Connection, contact_id: int, year: int, today: date) -
     in_year = [d for d in dates if d.startswith(f"{year}-")]
     y0 = date(year, 1, 1)
     y_end = min(date(year, 12, 31), today)
-    elapsed = max(0, (y_end - y0).days + 1)
+    # Shares count from when you started logging companions — a mid-year start
+    # shouldn't make every person look rarer.
+    first_logged = conn.execute("SELECT MIN(date) FROM day_companions").fetchone()[0]
+    tracking = date.fromisoformat(first_logged) if first_logged else y0
+    window0 = max(y0, tracking)
+    elapsed = max(0, (y_end - window0).days + 1)
 
     by_year = Counter(d[:4] for d in dates)
     by_month = [0] * 12
@@ -72,8 +78,10 @@ def profile(conn: sqlite3.Connection, contact_id: int, year: int, today: date) -
         by_month[dd.month - 1] += 1
         by_weekday[dd.weekday()] += 1
 
-    # Same window last year, for "vs last year".
-    prev_same = sum(1 for d in dates if d.startswith(f"{year - 1}-") and d[5:] <= y_end.isoformat()[5:])
+    # Same window last year, for "vs last year" — only if you were logging back then.
+    prev_end = date(year - 1, y_end.month, min(y_end.day, 28 if y_end.month == 2 else y_end.day))
+    prev_same = (sum(1 for d in dates if d.startswith(f"{year - 1}-") and d <= prev_end.isoformat())
+                 if tracking <= prev_end else None)
     gaps = [(date.fromisoformat(b) - date.fromisoformat(a)).days for a, b in zip(dates, dates[1:])]
     longest_run = runs(set(dates), date.fromisoformat(dates[0]), today, True)[0] if dates else 0
 
@@ -87,6 +95,7 @@ def profile(conn: sqlite3.Connection, contact_id: int, year: int, today: date) -
         "prev_same_period": prev_same,
         "per_month": round(len(in_year) / (elapsed / 30.44), 1) if elapsed >= 28 else None,
         "share": round(len(in_year) / elapsed * 100) if elapsed else 0,
+        "since": window0.isoformat() if window0 > y0 else None,          # shares measured from here
         "by_year": [{"year": int(y), "days": n} for y, n in sorted(by_year.items())],
         "by_month": by_month,
         "by_weekday": by_weekday,
@@ -96,12 +105,12 @@ def profile(conn: sqlite3.Connection, contact_id: int, year: int, today: date) -
         "days_since": (today - date.fromisoformat(dates[-1])).days if dates else None,
         "longest_run": longest_run,
         "typical_gap": sorted(gaps)[len(gaps) // 2] if gaps else None,     # median days between
-        "together": _together(conn, c["name"], contact_id),
+        "together": _together(conn, c["name"], contact_id, today),
         "recent": list(reversed(dates[-8:])),
     }
 
 
-def _together(conn: sqlite3.Connection, name: str, contact_id: int) -> dict:
+def _together(conn: sqlite3.Connection, name: str, contact_id: int, today: date) -> dict:
     """What you did together — explicit links only (a day together isn't 'did X together')."""
     out: dict = {"activities": [], "sports": [], "tennis": None, "restaurants": [], "trips": []}
 
@@ -129,9 +138,29 @@ def _together(conn: sqlite3.Connection, name: str, contact_id: int) -> dict:
             WHERE date_visited IS NOT NULL AND companions LIKE ?
             ORDER BY date_visited DESC LIMIT 6""", (f"%{first}%",))]
 
+    trips = []
+    if _has_table(conn, "planned_trips"):                     # coming up together
+        for r in conn.execute("""
+            SELECT p.id, p.name, p.destination, p.start_date, p.end_date FROM planned_trips p
+            JOIN planned_trip_companions c ON c.planned_id = p.id
+            WHERE c.contact_id = ? AND p.adopted_start IS NULL AND p.end_date >= ?
+            ORDER BY p.start_date""", (contact_id, today.isoformat())):
+            trips.append({"id": r[0], "name": r[1], "start": r[3], "end": r[4], "planned": True,
+                          "countries": [r[2]] if r[2] else [], "cover": None,
+                          "nights": (date.fromisoformat(r[4]) - date.fromisoformat(r[3])).days,
+                          "days_until": (date.fromisoformat(r[3]) - today).days})
     if _has_table(conn, "trip_companions") and _has_table(conn, "trips"):
-        out["trips"] = [{"id": r[0], "name": r[1], "start": r[2], "end": r[3]} for r in conn.execute("""
-            SELECT t.id, COALESCE(t.user_name, t.auto_name), t.start_date, t.end_date
+        for r in conn.execute("""
+            SELECT t.id, COALESCE(t.user_name, t.auto_name), t.start_date, t.end_date, t.countries_json, t.cover_photo_path
             FROM trip_companions tc JOIN trips t ON t.start_date = tc.start_date AND t.end_date = tc.end_date
-            WHERE tc.contact_id = ? ORDER BY t.start_date DESC LIMIT 6""", (contact_id,))]
+            WHERE tc.contact_id = ? ORDER BY t.start_date DESC LIMIT 8""", (contact_id,)):
+            try:
+                countries = json.loads(r[4]) if r[4] else []
+            except ValueError:
+                countries = []
+            trips.append({"id": r[0], "name": r[1], "start": r[2], "end": r[3], "planned": False,
+                          "countries": countries, "cover": r[5],
+                          "nights": (date.fromisoformat(r[3]) - date.fromisoformat(r[2])).days + 1,
+                          "days_until": None})
+    out["trips"] = trips
     return out

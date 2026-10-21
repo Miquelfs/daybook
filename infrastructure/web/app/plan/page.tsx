@@ -2,14 +2,14 @@
 
 import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { differenceInCalendarDays } from "date-fns";
 import { Plus, ChevronDown, ChevronUp, Target, Flame, ListChecks, StickyNote, Users, type LucideIcon } from "lucide-react";
-import { plansApi, type Goal, type Task, type TaskKind } from "@/lib/plans-api";
+import { plansApi, PLAN_KEYS, type Goal, type Task, type TaskKind } from "@/lib/plans-api";
 import { localISODate } from "@/lib/dates";
 import { HabitTracker } from "@/components/habits/HabitTracker";
 import { PeopleView } from "@/components/people/PeopleView";
-import { DoneCard, GoalRow } from "@/components/plan/GoalRow";
+import { GoalRow } from "@/components/plan/GoalRow";
 import { GoalSheet } from "@/components/plan/GoalSheet";
 import { TaskSheet } from "@/components/plan/TaskSheet";
 import { TasksView } from "@/components/plan/TasksView";
@@ -46,7 +46,9 @@ function GoalsHero({ goals, year, years, setYear }: {
   const behind = counted.filter((g) => ["behind", "overdue"].includes(g.state)).length;
   const done = counted.filter((g) => ["achieved", "done"].includes(g.state)).length;
   const today = new Date();
-  const left = year === today.getFullYear() ? differenceInCalendarDays(new Date(year, 11, 31), today) : null;
+  const daysInYear = differenceInCalendarDays(new Date(year + 1, 0, 1), new Date(year, 0, 1));
+  const day = Math.min(daysInYear, Math.max(0, differenceInCalendarDays(today, new Date(year, 0, 1)) + 1));
+  const yearPct = Math.round((day / daysInYear) * 100);
 
   return (
     <Panel className="p-5">
@@ -57,9 +59,15 @@ function GoalsHero({ goals, year, years, setYear }: {
             <span className="text-4xl font-semibold tracking-tight tabular-nums">{onTrack}</span>
             <span className="text-sm text-[#A1A1AA]">of {counted.length} on track</span>
           </p>
-          <p className="text-xs text-[#71717A] mt-1">
-            {left != null ? `${left} days left in the year` : year > today.getFullYear() ? "Next year" : "Closed year"}
+          <p className="text-xs text-[#71717A] mt-1 tabular-nums">
+            {day === 0 ? `Starts in ${differenceInCalendarDays(new Date(year, 0, 1), today)} days`
+              : `Day ${day}/${daysInYear} · ${yearPct}% of the year`}
           </p>
+          {day > 0 && day < daysInYear && (
+            <div className="h-1 w-40 bg-[#18181B] rounded-full mt-2">
+              <div className="h-full rounded-full bg-[#52525B]" style={{ width: `${yearPct}%` }} />
+            </div>
+          )}
         </div>
         <div className="flex gap-1 shrink-0">
           {years.map((y) => (
@@ -83,7 +91,12 @@ function GoalsHero({ goals, year, years, setYear }: {
 }
 
 function GoalsTab({ onEdit }: { onEdit: (g: Goal) => void }) {
+  const qc = useQueryClient();
   const thisYear = new Date().getFullYear();
+  async function tick(g: Goal) {
+    await plansApi.updateGoal(g.id, { status: g.status === "done" ? "active" : "done" });
+    PLAN_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: [...k] }));
+  }
   const [year, setYear] = useState(thisYear);
   const [showClosed, setShowClosed] = useState(false);
   const { data: meta } = useQuery({ queryKey: ["goals", "meta"], queryFn: () => plansApi.goalsMeta(), staleTime: 3600_000 });
@@ -110,16 +123,16 @@ function GoalsTab({ onEdit }: { onEdit: (g: Goal) => void }) {
       {byArea.map(([a, list]) => (
         <Block key={a.key} title={a.label}>
           <Panel className="px-4 py-3 divide-y divide-[#18181B]">
-            {list.map((g) => <GoalRow key={g.id} goal={g} onClick={() => onEdit(g)} />)}
+            {list.map((g) => <GoalRow key={g.id} goal={g} onClick={() => onEdit(g)} onTick={tick} />)}
           </Panel>
         </Block>
       ))}
 
       {achieved.length > 0 && (
         <Block title={`Achieved · ${achieved.length}`}>
-          <div className="grid grid-cols-2 gap-2">
-            {achieved.map((g) => <DoneCard key={g.id} goal={g} onClick={() => onEdit(g)} />)}
-          </div>
+          <Panel className="px-4 py-3 divide-y divide-[#18181B] border-emerald-500/25">
+            {achieved.map((g) => <GoalRow key={g.id} goal={g} onClick={() => onEdit(g)} onTick={tick} />)}
+          </Panel>
         </Block>
       )}
 

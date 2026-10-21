@@ -48,9 +48,11 @@ export function fmtNum(v: number, unit: string): string {
 export function goalSummary(g: Goal): string {
   const u = g.unit;
   const a = g.actual;
+  if (g.state === "done" && g.completed_at && (a == null || g.kind === "manual"))
+    return `Done on ${format(parseISO(g.completed_at), "d MMM yyyy")}`;
   if (a == null) {
     if (g.state === "overdue" && g.deadline) return `Deadline was ${format(parseISO(g.deadline), "d MMM")}`;
-    if (g.state === "not_started") return `Starts ${format(parseISO(g.start_date), "d MMM")}`;
+    if (g.state === "not_started" && g.start_date) return `Starts ${format(parseISO(g.start_date), "d MMM")}`;
     if (g.days_left != null) return `${g.days_left} days left`;
     return "";
   }

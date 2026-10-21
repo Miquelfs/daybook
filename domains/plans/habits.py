@@ -15,11 +15,17 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, timedelta
 
-from domains.plans.metrics import _has_column, _has_table, runs
+from domains.plans.metrics import _has_column, _has_table, runs, tag_counts
 
 
 def _negative_col(conn: sqlite3.Connection) -> str:
     return "t.is_negative" if _has_column(conn, "tags", "is_negative") else "0"
+
+
+def _is_counted(conn: sqlite3.Connection, tag_id: int) -> bool:
+    """Amount tags (drinks, times): any day logged with a number in its note."""
+    return conn.execute(
+        "SELECT 1 FROM day_tags WHERE tag_id=? AND note GLOB '[0-9]*' LIMIT 1", (tag_id,)).fetchone() is not None
 
 
 def _dates(conn: sqlite3.Connection, tag_id: int) -> list[str]:
@@ -97,13 +103,17 @@ def overview(conn: sqlite3.Connection, today: date) -> list[dict]:
     out = []
     for r in rows:
         dates = _dates(conn, r["id"])
+        counted = _is_counted(conn, r["id"])
+        counts = tag_counts(conn, r["id"], d30) if counted else {}
         have = set(dates)
         last30 = sum(1 for x in dates if x >= d30)
         negative = bool(r["neg"])
         out.append({
             "id": r["id"], "slug": r["slug"], "name": r["name"], "icon": r["icon"],
             "category": r["category"], "is_negative": negative, "why": why[r["id"]],
-            "week": [{"date": d, "done": d in have} for d in week],
+            "counted": counted,
+            "amount_30": sum(counts.values()) if counted else None,
+            "week": [{"date": d, "done": d in have, "count": counts.get(d) if counted else None} for d in week],
             "rate_30": round((30 - last30 if negative else last30) / 30 * 100),
             "count_30": last30,
             "this_year": sum(1 for x in dates if x >= year0),
@@ -141,16 +151,21 @@ def detail(conn: sqlite3.Connection, slug: str, year: int, today: date) -> dict 
         return None
     dates = _dates(conn, row["id"])
     negative = bool(row["neg"])
+    counted = _is_counted(conn, row["id"])
     in_year = [d for d in dates if d.startswith(f"{year}-")]
+    counts = tag_counts(conn, row["id"], f"{year}-01-01", f"{year}-12-31") if counted else {}
     y0 = date(year, 1, 1)
     y_end = min(date(year, 12, 31), today)
     elapsed = max(0, (y_end - y0).days + 1)
     by_month = [0] * 12
     by_weekday = [0] * 7          # Mon … Sun
+    amount_month = [0] * 12
     for d in in_year:
         dd = date.fromisoformat(d)
         by_month[dd.month - 1] += 1
         by_weekday[dd.weekday()] += 1
+        amount_month[dd.month - 1] += counts.get(d, 0)
+    amount = sum(counts.values())
     years = sorted({int(d[:4]) for d in dates} | {today.year})
     best_in_year, _ = runs(set(in_year), y0, y_end, not negative) if elapsed else (0, 0)
     return {
@@ -166,6 +181,12 @@ def detail(conn: sqlite3.Connection, slug: str, year: int, today: date) -> dict 
         "by_month": by_month,
         "by_weekday": by_weekday,
         "best_in_year": best_in_year,
+        "counted": counted,
+        "counts": counts,                                   # date → amount (counted tags only)
+        "amount": amount if counted else None,
+        "amount_by_month": amount_month if counted else None,
+        "amount_per_day": round(amount / len(in_year), 1) if counted and in_year else None,
+        "amount_max": max(counts.values()) if counts else None,
         "total": len(dates),
         "first": dates[0] if dates else None,
         **{f"streak_{k}": v for k, v in streaks(dates, negative, today).items()},

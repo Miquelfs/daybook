@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import { ArrowLeft, Check, ChevronRight, Flame, Pin, Search, Target, X } from "lucide-react";
 import { plansApi, type Goal, type Habit, type HabitWhy } from "@/lib/plans-api";
-import { tagsApi } from "@/lib/tags-api";
+import { tagsApi, COUNTER_PLACEHOLDER } from "@/lib/tags-api";
 import { localISODate } from "@/lib/dates";
 import { GoalRow } from "@/components/plan/GoalRow";
 import { ActionButton, Block, Panel, Pill } from "@/components/plan/ui";
@@ -14,6 +14,11 @@ import { inputCls } from "@/components/plan/Sheet";
 import { MonthBars, Stat, WeekdayBars, YearHeatmap, YearSwitcher } from "@/components/plan/charts";
 
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
+/** "drinks", "times" — from the tag's counter label. */
+function unitOf(slug: string): string {
+  return (COUNTER_PLACEHOLDER[slug] ?? "Times").split(" ")[0].toLowerCase();
+}
+
 const WHY: Record<HabitWhy, string> = { pinned: "Pinned", goal: "Goal", experiment: "Experiment" };
 
 function refreshAll(qc: ReturnType<typeof useQueryClient>, date?: string) {
@@ -22,7 +27,7 @@ function refreshAll(qc: ReturnType<typeof useQueryClient>, date?: string) {
 }
 
 /** Tap a day to log / unlog the habit's tag on it — the same as tagging the day on Today. */
-function DayDot({ habit, day }: { habit: Habit; day: { date: string; done: boolean } }) {
+function DayDot({ habit, day }: { habit: Habit; day: { date: string; done: boolean; count: number | null } }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const today = day.date === localISODate();
@@ -46,7 +51,9 @@ function DayDot({ habit, day }: { habit: Habit; day: { date: string; done: boole
               day.done
                 ? slip ? "bg-rose-500/15 border-rose-500/50 text-rose-400" : "bg-[#F59E0B] border-[#F59E0B] text-black"
                 : `border-[#27272A] text-transparent hover:border-[#52525B] ${today ? "border-[#52525B]" : ""}`}`}>
-      {day.done && (slip ? <X size={12} strokeWidth={2.5} /> : <Check size={12} strokeWidth={3} />)}
+      {day.done && (day.count != null && day.count > 1
+        ? <span className="text-[11px] font-bold tabular-nums">{day.count}</span>
+        : slip ? <X size={12} strokeWidth={2.5} /> : <Check size={12} strokeWidth={3} />)}
     </button>
   );
 }
@@ -76,7 +83,9 @@ function HabitList({ habits, onOpen }: { habits: Habit[]; onOpen: (slug: string)
                   {!h.why.includes("pinned") && <span className="ml-1.5 text-[10px] text-[#52525B]">{WHY[h.why[0]]}</span>}
                 </p>
                 <p className="text-[11px] text-[#71717A] tabular-nums truncate">
-                  {h.is_negative ? (
+                  {h.counted && h.amount_30 != null ? (
+                    <>{h.amount_30} {unitOf(h.slug)} · {h.count_30}d{h.is_negative ? ` · ${h.streak_current}d clean` : ""}</>
+                  ) : h.is_negative ? (
                     <>{h.streak_current}d clean · {h.rate_30}%</>
                   ) : (
                     <>
@@ -166,6 +175,13 @@ function HabitDetailView({ slug, goals, onBack, onMakeGoal, onEditGoal }: {
           <Stat label={h.is_negative ? "Clean days" : "Completion"} value={`${h.rate}%`}
                 sub={`of ${h.days_elapsed} days`} tone={h.is_negative ? (h.rate >= 80 ? "text-emerald-400" : "") : ""} />
         </div>
+        {h.counted && h.amount != null && (
+          <div className="grid grid-cols-3 gap-4 mt-5 pt-5 border-t border-[#27272A]">
+            <Stat label={`${unitOf(h.slug)} · ${h.year}`} value={h.amount} />
+            <Stat label="Per day" value={h.amount_per_day ?? "—"} sub="when it happens" />
+            <Stat label="Most in a day" value={h.amount_max ?? "—"} />
+          </div>
+        )}
       </Panel>
 
       {linked.length > 0 && (
@@ -178,12 +194,13 @@ function HabitDetailView({ slug, goals, onBack, onMakeGoal, onEditGoal }: {
 
       <Block title="Calendar" action={<YearSwitcher years={h.years} year={year} onChange={setYear} />}>
         <Panel className="p-4">
-          <YearHeatmap dates={h.dates} year={year} slip={h.is_negative} />
+          <YearHeatmap dates={h.dates} year={year} slip={h.is_negative} counts={h.counted ? h.counts : undefined} />
         </Panel>
       </Block>
 
-      <Block title="By month" note={h.count ? `Most in ${months[bestMonth]} (${h.by_month[bestMonth]} days).` : undefined}>
-        <Panel className="p-4"><MonthBars counts={h.by_month} year={year} /></Panel>
+      <Block title={h.counted ? `${unitOf(h.slug)} by month` : "By month"}
+             note={h.count ? `Most in ${months[bestMonth]} (${h.by_month[bestMonth]} days).` : undefined}>
+        <Panel className="p-4"><MonthBars counts={h.counted && h.amount_by_month ? h.amount_by_month : h.by_month} year={year} /></Panel>
       </Block>
 
       <Block title="By weekday">

@@ -19,6 +19,7 @@ GET    /habits/{slug}        — one tag for a year (?year=): calendar, months, 
 GET    /companions/activity/{id}, /companions/trip/{start}/{end}  — who it was with (PUT {contact_ids})
 GET    /people               — everyone, with days together this year / all time (for search)
 GET    /people/{id}          — one person for a year (?year=): calendar, frequency, what you do together
+GET    /planned-trips        — trips ahead (POST to plan one; PATCH / DELETE /planned-trips/{id})
 GET    /birthdays            — everyone with a birthday, soonest first
 GET    /agenda               — the Today strip: overdue / today / coming up / notes / birthdays / goals
 """
@@ -37,6 +38,7 @@ from domains.plans import companions as companions_mod
 from domains.plans import goals as goals_mod
 from domains.plans import habits as habits_mod
 from domains.plans import people as people_mod
+from domains.plans import planned_trips as trips_mod
 from domains.plans.metrics import METRICS, Ctx, catalog
 from infrastructure.api.db import get_db
 from infrastructure.api.models.plans import (
@@ -146,15 +148,16 @@ def list_goals(conn: DB, year: int | None = Query(None)):
 @router.post("/goals", response_model=GoalOut, status_code=201)
 def create_goal(body: GoalIn, conn: DB):
     _check_goal(body.model_dump())
-    start = date.fromisoformat(_iso(body.start_date, "start_date") or date(date.today().year, 1, 1).isoformat())
-    deadline = _iso(body.deadline, "deadline") or goals_mod.period_end(start).isoformat()
-    if deadline < start.isoformat():
+    start = _iso(body.start_date, "start_date")                 # optional — no start → counts from 1 Jan
+    deadline = _iso(body.deadline, "deadline") or goals_mod.period_end(
+        date.fromisoformat(start) if start else date.today()).isoformat()
+    if start and deadline < start:
         raise HTTPException(status_code=422, detail="deadline is before start_date")
     cur = conn.execute(
         """INSERT INTO goals (title, emoji, area, priority, start_date, deadline, metric,
                               metric_param, target, baseline, current, notes)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (body.title.strip(), body.emoji, body.area, body.priority, start.isoformat(), deadline,
+        (body.title.strip(), body.emoji, body.area, body.priority, start, deadline,
          body.metric, body.metric_param, body.target, body.baseline, body.current, body.notes),
     )
     conn.commit()
@@ -277,7 +280,7 @@ def delete_task(task_id: int, conn: DB):
 def _live_goals(ctx: Ctx, today: date) -> list[dict]:
     """Active goals running now (this year's, already started)."""
     return [g for g in goals_mod.list_with_progress(ctx, today, today.year)
-            if g["status"] == "active" and g["start_date"] <= today.isoformat()]
+            if g["status"] == "active" and goals_mod.effective_start(g, today) <= today]
 
 
 @router.get("/plan/area/{area}", response_model=AreaPlanOut)
@@ -340,6 +343,56 @@ class WithIn(BaseModel):
     contact_ids: list[int]
 
 
+class PlannedTripIn(BaseModel):
+    name: str | None = None
+    destination: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    notes: str | None = None
+    contact_ids: list[int] | None = None
+
+
+def _check_trip(fields: dict) -> dict:
+    for f in ("start_date", "end_date"):
+        if f in fields:
+            fields[f] = _iso(fields[f], f)
+    if fields.get("start_date") and fields.get("end_date") and fields["end_date"] < fields["start_date"]:
+        raise HTTPException(status_code=422, detail="end_date is before start_date")
+    if "name" in fields and not (fields["name"] or "").strip():
+        raise HTTPException(status_code=422, detail="name cannot be empty")
+    return fields
+
+
+@router.get("/planned-trips")
+def list_planned_trips(conn: DB):
+    return trips_mod.upcoming(conn, date.today())
+
+
+@router.post("/planned-trips", status_code=201)
+def create_planned_trip(body: PlannedTripIn, conn: DB):
+    fields = _check_trip(body.model_dump(exclude={"contact_ids"}, exclude_none=True))
+    if not all(fields.get(f) for f in ("name", "start_date", "end_date")):
+        raise HTTPException(status_code=422, detail="name, start_date and end_date are required")
+    pid = trips_mod.save(conn, fields, body.contact_ids)
+    return trips_mod.get(conn, pid, date.today())
+
+
+@router.patch("/planned-trips/{planned_id}")
+def update_planned_trip(planned_id: int, body: PlannedTripIn, conn: DB):
+    current = trips_mod.get(conn, planned_id, date.today())
+    if current is None:
+        raise HTTPException(status_code=404, detail="Planned trip not found")
+    fields = body.model_dump(exclude={"contact_ids"}, exclude_unset=True)
+    _check_trip({**{k: current[k] for k in ("start_date", "end_date")}, **fields})
+    trips_mod.save(conn, _check_trip(fields), body.contact_ids, planned_id)
+    return trips_mod.get(conn, planned_id, date.today())
+
+
+@router.delete("/planned-trips/{planned_id}", status_code=204)
+def delete_planned_trip(planned_id: int, conn: DB):
+    trips_mod.delete(conn, planned_id)
+
+
 @router.get("/companions/activity/{activity_id}")
 def get_activity_with(activity_id: str, conn: DB):
     return companions_mod.activity_with(conn, activity_id)
@@ -385,5 +438,6 @@ def get_agenda(conn: DB, day: str | None = Query(None, alias="date")):
                   if g["deadline"] and today.isoformat() <= g["deadline"] <= soon
                   and g["state"] not in ("achieved", "behind", "overdue")],
     )
-    return AgendaOut(**a, goals=brief)
+    trips = [t for t in trips_mod.upcoming(conn, today) if t["days_until"] <= 60]
+    return AgendaOut(**a, goals=brief, trips=trips)
 

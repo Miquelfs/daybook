@@ -1,9 +1,9 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
-import { Star, Trophy } from "lucide-react";
+import { Check, Star } from "lucide-react";
 import type { Goal, GoalState } from "@/lib/plans-api";
-import { fmtNum, goalSummary } from "./format";
+import { goalSummary } from "./format";
 import { goalIcon } from "./areas";
 
 // Status is the only colour on a goal — same palette as Omyra's form/readiness.
@@ -31,8 +31,11 @@ export function GoalGlyph({ goal: g, size = 36 }: { goal: Goal; size?: number })
   );
 }
 
-/** One goal inside a Panel: glyph, title, status, an amber bar with the pace tick, one line of meaning. */
-export function GoalRow({ goal: g, onClick }: { goal: Goal; onClick?: () => void }) {
+/**
+ * One goal inside a Panel: glyph, title, status, an amber bar with the pace tick,
+ * one line of meaning. Manual goals get a tick circle — that's how they're done.
+ */
+export function GoalRow({ goal: g, onClick, onTick }: { goal: Goal; onClick?: () => void; onTick?: (g: Goal) => void }) {
   const st = STATE[g.state];
   const faded = g.state === "dropped" || g.state === "missed";
   const pct = g.pct ?? (g.kind === "ceiling" && g.compare && g.actual != null
@@ -44,8 +47,12 @@ export function GoalRow({ goal: g, onClick }: { goal: Goal; onClick?: () => void
     : null;
   const done = g.state === "achieved" || g.state === "done";
 
+  const tickable = onTick && g.kind === "manual" && g.status !== "dropped";
+  const ticked = g.status === "done";
+
   return (
-    <button onClick={onClick} className={`w-full text-left flex gap-3 py-3 first:pt-0 last:pb-0 ${faded ? "opacity-50" : ""}`}>
+    <div className={`flex items-center gap-3 py-3 first:pt-0 last:pb-0 ${faded ? "opacity-50" : ""}`}>
+    <button onClick={onClick} className="flex-1 min-w-0 w-full text-left flex gap-3">
       <GoalGlyph goal={g} />
       <div className="flex-1 min-w-0 space-y-1.5">
         <div className="flex items-baseline justify-between gap-2">
@@ -69,30 +76,14 @@ export function GoalRow({ goal: g, onClick }: { goal: Goal; onClick?: () => void
         </div>
       </div>
     </button>
+    {tickable && (
+      <button onClick={() => onTick!(g)} aria-label={ticked ? "Mark not done" : "Mark done"}
+              className={`shrink-0 w-7 h-7 rounded-full border flex items-center justify-center transition-colors ${
+                ticked ? "bg-emerald-500 border-emerald-500 text-black" : "border-[#3F3F46] text-transparent hover:border-emerald-500 hover:text-emerald-500"}`}>
+        <Check size={14} strokeWidth={3} />
+      </button>
+    )}
+    </div>
   );
 }
 
-/** A finished goal, celebrated: trophy, the final number, when it was done. */
-export function DoneCard({ goal: g, onClick }: { goal: Goal; onClick?: () => void }) {
-  const final = g.actual != null && g.kind !== "manual"
-    ? `${fmtNum(g.actual, g.unit)}${g.target != null && g.kind === "sum" ? ` of ${fmtNum(g.target, g.unit)}` : ""}`
-    : null;
-  const when = g.completed_at ? format(parseISO(g.completed_at), "d MMM") : g.state === "achieved" ? "target reached" : null;
-  return (
-    <button onClick={onClick}
-            className="text-left bg-[#0D0D0F] border border-emerald-500/25 hover:border-emerald-500/45 rounded-2xl p-4 transition-colors flex flex-col gap-3 min-h-[8.5rem]">
-      <div className="flex items-start justify-between">
-        <GoalGlyph goal={g} size={34} />
-        <span className="w-7 h-7 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
-          <Trophy size={14} />
-        </span>
-      </div>
-      <div className="min-w-0 mt-auto">
-        <p className="text-sm font-semibold text-[#FAFAFA] leading-snug line-clamp-2">{g.title}</p>
-        <p className="text-[11px] text-emerald-400 mt-1 tabular-nums">
-          {final ?? "Done"}{when ? <span className="text-[#52525B]"> · {when}</span> : null}
-        </p>
-      </div>
-    </button>
-  );
-}

@@ -15,8 +15,13 @@ const ROSE = "#E11D48";
  * each month with its count. `slip` colours logged days rose — for habits
  * you're cutting down, where a logged day is the miss. Today is outlined.
  */
-export function YearHeatmap({ dates, year, slip = false }: { dates: string[]; year: number; slip?: boolean }) {
+export function YearHeatmap({ dates, year, slip = false, counts }: {
+  dates: string[]; year: number; slip?: boolean;
+  /** Amount per day (drinks, times) — shades each day by how much. */
+  counts?: Record<string, number>;
+}) {
   const have = new Set(dates);
+  const max = counts ? Math.max(1, ...Object.values(counts)) : 1;
   const today = localISODate();
   const fill = slip ? ROSE : AMBER;
 
@@ -41,10 +46,10 @@ export function YearHeatmap({ dates, year, slip = false }: { dates: string[]; ye
                 const iso = `${prefix}${String(k + 1).padStart(2, "0")}`;
                 const on = have.has(iso);
                 return (
-                  <span key={iso} title={`${iso}${on ? (slip ? " · logged" : " · done") : ""}`}
+                  <span key={iso} title={`${iso}${on ? (counts?.[iso] ? ` · ${counts[iso]}` : slip ? " · logged" : " · done") : ""}`}
                         className={`aspect-square rounded-[3px] ${on ? "" : "bg-[#18181B]"} ${iso > today ? "opacity-40" : ""}`}
                         style={{
-                          ...(on ? { background: fill } : {}),
+                          ...(on ? { background: fill, opacity: counts ? 0.35 + 0.65 * ((counts[iso] ?? 1) / max) : 1 } : {}),
                           ...(iso === today ? { outline: `1.5px solid ${AMBER}`, outlineOffset: 1 } : {}),
                         }} />
                 );

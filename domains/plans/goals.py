@@ -1,7 +1,8 @@
 """
 Goal progress, computed from what the daybook already records (see metrics.py).
 
-Every goal counts over [start_date, min(today, deadline)]. `state` is what the UI shows:
+Every goal counts over [start, min(today, deadline)] — start is start_date, or
+1 Jan of the deadline's year when the goal has no real start. `state` is what the UI shows:
   done · dropped           set by hand
   achieved · missed        target reached / deadline passed without it
   on_track · behind        against a straight-line pace (or, for averages, the target itself)
@@ -43,8 +44,8 @@ def progress(ctx: Ctx | sqlite3.Connection, goal: dict, today: date) -> dict:
     key = g.get("metric") or "manual"
     metric, fn = METRICS.get(key, METRICS["manual"])
     kind = metric.kind
-    start = _d(g["start_date"]) or today
     deadline = _d(g.get("deadline"))
+    start = effective_start(g, today)
     target = g.get("target")
     end = min(today, deadline) if deadline else today
     past = deadline is not None and deadline < today
@@ -77,7 +78,7 @@ def progress(ctx: Ctx | sqlite3.Connection, goal: dict, today: date) -> dict:
     actual = baseline = None
     if kind == "manual":
         actual = g.get("current")
-    elif key == "tag_days" and param:
+    elif key in ("tag_days", "tag_total") and param:
         actual = fn(ctx, start, end, param)
         _, negative = tag_info(ctx.conn, param)
         if actual is not None and negative:
@@ -188,6 +189,14 @@ _ORDER = {"behind": 0, "overdue": 1, "on_track": 2, "in_progress": 3, "not_start
           "achieved": 5, "done": 6, "missed": 7, "dropped": 8}
 
 
+def effective_start(g: dict, today: date) -> date:
+    """start_date, or 1 Jan of the deadline's (else this) year."""
+    if g.get("start_date"):
+        return date.fromisoformat(g["start_date"])
+    d = _d(g.get("deadline"))
+    return date((d or today).year, 1, 1)
+
+
 def list_with_progress(ctx: Ctx | sqlite3.Connection, today: date, year: int | None = None) -> list[dict]:
     """All goals (optionally those overlapping `year`), with progress — what needs attention first."""
     if isinstance(ctx, sqlite3.Connection):
@@ -195,7 +204,8 @@ def list_with_progress(ctx: Ctx | sqlite3.Connection, today: date, year: int | N
     rows = [dict(r) for r in ctx.conn.execute("SELECT * FROM goals").fetchall()]
     if year is not None:
         y0, y1 = f"{year}-01-01", f"{year}-12-31"
-        rows = [r for r in rows if r["start_date"] <= y1 and (r["deadline"] or "9999") >= y0]
+        rows = [r for r in rows
+                if effective_start(r, today).isoformat() <= y1 and (r["deadline"] or "9999") >= y0]
     out = [progress(ctx, r, today) for r in rows]
     out.sort(key=lambda g: (_ORDER.get(g["state"], 9), -(g.get("priority") or 0), g["deadline"] or "9999"))
     return out
@@ -203,7 +213,8 @@ def list_with_progress(ctx: Ctx | sqlite3.Connection, today: date, year: int | N
 
 def years(conn: sqlite3.Connection, first_year: int, today: date) -> list[int]:
     """Years the goals view offers: from the daybook's first year to next year, plus any with goals."""
-    have = {int(r[0][:4]) for r in conn.execute("SELECT start_date FROM goals")}
+    have = {int((r[0] or r[1] or str(today.year))[:4])
+            for r in conn.execute("SELECT start_date, deadline FROM goals")}
     return sorted(set(range(first_year, today.year + 2)) | have)
 
 

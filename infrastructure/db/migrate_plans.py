@@ -10,6 +10,8 @@ Plan ahead — the future side of the daybook.
                     is kept as its own row, so it shows on the day it was done).
   contacts.birthday 'YYYY-MM-DD', or '--MM-DD' when the year is unknown.
   tracked_habits    tags you chose to track as habits (goals / experiments track theirs too).
+  planned_trips     trips you're about to take — just name, dates, who. Once the trip
+                    happens and is detected, its name and companions carry over.
   activity_companions / trip_companions
                     who a training or a trip was *with* — explicit, so People can say
                     what you actually did together. Trips are keyed by their dates
@@ -20,16 +22,14 @@ Idempotent. Runs on API startup; manual: python -m infrastructure.db.migrate_pla
 
 from infrastructure.db.connection import get_connection
 
-
-def migrate(conn) -> None:
-    conn.executescript("""
+_GOALS_SQL = """
         CREATE TABLE IF NOT EXISTS goals (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             title        TEXT NOT NULL,
             emoji        TEXT,
             area         TEXT,                             -- NULL → the metric's area
             priority     INTEGER NOT NULL DEFAULT 2,       -- 1 moderate · 2 important · 3 very important
-            start_date   TEXT NOT NULL,                    -- progress is counted from here
+            start_date   TEXT,                             -- progress counted from here; NULL → 1 Jan
             deadline     TEXT,
             metric       TEXT NOT NULL DEFAULT 'manual',   -- key in domains/plans/metrics.py
             metric_param TEXT,                             -- tag slug | contact id | distance (m)
@@ -41,6 +41,35 @@ def migrate(conn) -> None:
             completed_at TEXT,
             created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         );
+"""
+
+
+def _goals_start_optional(conn) -> None:
+    """Goals created before start_date became optional have it NOT NULL — rebuild once.
+
+    SQLite's documented table rebuild: foreign keys off (so tasks.goal_id isn't
+    nulled by the drop), build goals_new, copy, drop, rename into place."""
+    info = {r[1]: r for r in conn.execute("PRAGMA table_info(goals)")}
+    if not info.get("start_date") or not info["start_date"][3]:      # [3] = notnull
+        return
+    cols = ", ".join(info)
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(f"""
+            BEGIN;
+            {_GOALS_SQL.replace("IF NOT EXISTS goals", "goals_new")}
+            INSERT INTO goals_new ({cols}) SELECT {cols} FROM goals;
+            DROP TABLE goals;
+            ALTER TABLE goals_new RENAME TO goals;
+            COMMIT;
+        """)
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def migrate(conn) -> None:
+    conn.executescript(_GOALS_SQL + """
 
         CREATE TABLE IF NOT EXISTS tasks (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,7 +107,26 @@ def migrate(conn) -> None:
             PRIMARY KEY (start_date, end_date, contact_id)
         );
         CREATE INDEX IF NOT EXISTS idx_trip_companions_contact ON trip_companions(contact_id);
+
+        CREATE TABLE IF NOT EXISTS planned_trips (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            name          TEXT NOT NULL,
+            destination   TEXT,
+            start_date    TEXT NOT NULL,
+            end_date      TEXT NOT NULL,
+            notes         TEXT,
+            adopted_start TEXT,                             -- the detected trip it became
+            adopted_end   TEXT,
+            created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS planned_trip_companions (
+            planned_id INTEGER NOT NULL REFERENCES planned_trips(id) ON DELETE CASCADE,
+            contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+            PRIMARY KEY (planned_id, contact_id)
+        );
     """)
+    _goals_start_optional(conn)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(contacts)")}
     if cols and "birthday" not in cols:
         conn.execute("ALTER TABLE contacts ADD COLUMN birthday TEXT")

@@ -134,6 +134,20 @@ def param_info(conn: sqlite3.Connection, kind: str | None, param) -> dict:
     return {"param_label": label, "param_icon": icon}
 
 
+def tag_counts(conn: sqlite3.Connection, tag_id: int, start: str = "0000", end: str = "9999") -> dict[str, int]:
+    """date → amount logged that day. Counter tags keep it in the note (3 drinks);
+    a day without a number counts once."""
+    out: dict[str, int] = {}
+    for d, note in conn.execute(
+            "SELECT date, note FROM day_tags WHERE tag_id=? AND date BETWEEN ? AND ?", (tag_id, start, end)):
+        try:
+            n = int(float(note)) if note not in (None, "") else 1
+        except (TypeError, ValueError):
+            n = 1
+        out[d] = out.get(d, 0) + max(n, 0)
+    return out
+
+
 def runs(days: set[str], start: date, end: date, want: bool) -> tuple[int, int]:
     """(longest, current) run of consecutive days in [start, end] whose membership == want."""
     longest = cur = 0
@@ -273,6 +287,11 @@ def _tag_days(ctx: Ctx, start: date, end: date, slug) -> float | None:
     return None if got is None else len(got[0])
 
 
+def _tag_total(ctx: Ctx, start: date, end: date, slug) -> float | None:
+    tag_id = tag_info(ctx.conn, slug)[0] if slug else None
+    return None if tag_id is None else sum(tag_counts(ctx.conn, tag_id, _iso(start), _iso(end)).values())
+
+
 def _person_days(ctx: Ctx, start: date, end: date, contact_id) -> float | None:
     if not contact_id:
         return None
@@ -324,6 +343,9 @@ _reg(Metric("screen_time", "Screen time per day", "health", "min", "avg", "Avera
 _reg(Metric("tag_days", "Days with a tag", "habits", "days", "sum",
             "Days tagged. Negative tags (candy, alcohol) become a ceiling — fewer is better.", param="tag"),
      _tag_days)
+_reg(Metric("tag_total", "Amount of a tag", "habits", "times", "sum",
+            "Adds up the number logged each day — drinks, times. Negative tags become a ceiling.", param="tag"),
+     _tag_total)
 _reg(Metric("tag_streak", "Days in a row", "habits", "days", "streak",
             "Longest streak with the tag — for negative tags, the longest run without it.", param="tag"),
      None)

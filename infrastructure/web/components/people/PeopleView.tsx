@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
-import { ArrowLeft, Cake, Check, ChevronRight, Search, Target } from "lucide-react";
+import { ArrowLeft, Cake, Check, ChevronRight, Earth, Plane, Search, Target } from "lucide-react";
 import { api, type Contact } from "@/lib/api";
 import { plansApi, type Goal, type Person } from "@/lib/plans-api";
 import { Avatar } from "@/components/plan/Avatar";
@@ -74,9 +74,9 @@ function PersonDetail({ id, goals, onBack, onMakeGoal, onEditGoal }: {
   const linked = goals.filter((g) => g.metric === "person_days" && g.metric_param === String(id));
 
   if (!p) return <div className="h-64 rounded-2xl bg-[#18181B] animate-pulse" />;
-  const diff = p.count - p.prev_same_period;
+  const diff = p.prev_same_period == null ? null : p.count - p.prev_same_period;
   const t = p.together;
-  const hasTogether = t.activities.length || t.tennis || t.restaurants.length || t.trips.length;
+  const hasTogether = t.activities.length || t.tennis || t.restaurants.length;
 
   return (
     <div className="space-y-8">
@@ -119,7 +119,7 @@ function PersonDetail({ id, goals, onBack, onMakeGoal, onEditGoal }: {
             <p className="text-[10px] uppercase tracking-[0.2em] text-[#71717A]">Days together · {year}</p>
             <p className="mt-1 flex items-baseline gap-2">
               <span className="text-4xl font-semibold tracking-tight tabular-nums">{p.count}</span>
-              {p.prev_same_period > 0 || p.count > 0 ? (
+              {diff != null && (p.prev_same_period! > 0 || p.count > 0) ? (
                 <span className={`text-sm ${diff > 0 ? "text-emerald-400" : diff < 0 ? "text-amber-400" : "text-[#71717A]"}`}>
                   {diff === 0 ? "same as" : `${diff > 0 ? "+" : ""}${diff} vs`} {year - 1} by now
                 </span>
@@ -130,7 +130,8 @@ function PersonDetail({ id, goals, onBack, onMakeGoal, onEditGoal }: {
         </div>
         <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-[#27272A]">
           <Stat label="Per month" value={p.per_month ?? "—"} sub="days" />
-          <Stat label="Of your days" value={`${p.share}%`} />
+          <Stat label="Of your days" value={`${p.share}%`}
+                sub={p.since ? `since ${format(parseISO(p.since), "d MMM")}` : undefined} />
           <Stat label="Last" value={ago(p.days_since)} />
           <Stat label="Usually every" value={p.typical_gap != null ? `${p.typical_gap}d` : "—"} />
           <Stat label="Longest run" value={p.longest_run} sub="days in a row" />
@@ -150,10 +151,41 @@ function PersonDetail({ id, goals, onBack, onMakeGoal, onEditGoal }: {
         <Panel className="p-4"><YearHeatmap dates={p.dates} year={year} /></Panel>
       </Block>
 
-      <Block title="Together" note={hasTogether ? "What you did with them — from trainings, trips and restaurants you marked." : undefined}>
+      {t.trips.length > 0 && (
+        <Block title="Trips together">
+          <div className="space-y-2">
+            {t.trips.map((x) => (
+              <Link key={`${x.planned ? "p" : "t"}${x.id}`}
+                    href={x.planned ? "/plan" : `/explore/trip/${x.start}/${x.end}`}
+                    className="flex items-center gap-3 bg-[#0D0D0F] border border-[#27272A] hover:border-[#3F3F46] rounded-2xl p-2.5 pr-4 transition-colors">
+                <span className="shrink-0 w-16 h-16 rounded-xl overflow-hidden bg-[#18181B] flex items-center justify-center text-[#52525B]">
+                  {x.cover
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={`/api/photos/${x.cover.split("/").pop()}`} alt="" className="w-full h-full object-cover" />
+                    : x.planned ? <Plane size={22} strokeWidth={1.5} /> : <Earth size={22} strokeWidth={1.5} />}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[#FAFAFA] truncate">{x.name ?? "Trip"}</p>
+                  <p className="text-xs text-[#71717A] tabular-nums">
+                    {format(parseISO(x.start), "d MMM")} – {format(parseISO(x.end), "d MMM yyyy")} · {x.nights} {x.nights === 1 ? "night" : "nights"}
+                  </p>
+                  {x.countries.length > 0 && <p className="text-[11px] text-[#52525B] truncate">{x.countries.join(" · ")}</p>}
+                </div>
+                {x.planned && x.days_until != null && (
+                  <span className="shrink-0 text-xs text-[#F59E0B] tabular-nums">
+                    {x.days_until <= 0 ? "Now" : `In ${x.days_until}d`}
+                  </span>
+                )}
+              </Link>
+            ))}
+          </div>
+        </Block>
+      )}
+
+      <Block title="Together" note={hasTogether ? "What you did with them — from trainings and restaurants you marked." : undefined}>
         {!hasTogether ? (
           <div className="border border-dashed border-[#27272A] rounded-2xl px-5 py-6 text-center text-xs text-[#71717A]">
-            Mark them as <span className="text-[#A1A1AA]">With</span> on a training or a trip, or as a companion at a
+            Mark them as <span className="text-[#A1A1AA]">With</span> on a training, or as a companion at a
             restaurant — what you did together shows up here.
           </div>
         ) : (
@@ -189,17 +221,6 @@ function PersonDetail({ id, goals, onBack, onMakeGoal, onEditGoal }: {
                   {t.tennis.as_opponent ? ` · ${t.tennis.as_opponent} against` : ""}
                 </span>
               </p>
-            )}
-            {t.trips.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Trips</p>
-                {t.trips.map((x) => (
-                  <Link key={x.id} href={`/explore/trip/${x.start}/${x.end}`} className="flex justify-between gap-3 text-sm hover:opacity-80">
-                    <span className="text-[#A1A1AA] truncate">{x.name ?? "Trip"}</span>
-                    <span className="text-[#52525B] tabular-nums shrink-0">{format(parseISO(x.start), "d MMM yy")}</span>
-                  </Link>
-                ))}
-              </div>
             )}
             {t.restaurants.length > 0 && (
               <div className="space-y-1">
