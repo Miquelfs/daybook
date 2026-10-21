@@ -391,6 +391,26 @@ class PlannedTripsTest(unittest.TestCase):
         pt.delete(c, pid)
 
 
+class CalendarMarksTest(unittest.TestCase):
+    def test_month_marks(self):
+        from domains.plans.calendar import month_marks
+        c = db()
+        c.executescript("""
+            CREATE TABLE life_events(event_date TEXT, label TEXT);
+            CREATE TABLE days(date TEXT PRIMARY KEY, mood INTEGER, notes TEXT);
+            INSERT INTO life_events VALUES ('2026-04-02', 'New job');
+            INSERT INTO days VALUES ('2026-04-03', 7, NULL), ('2026-04-04', NULL, '');
+        """)
+        c.execute("INSERT INTO trips (start_date, end_date, user_name) VALUES ('2026-03-30', '2026-04-01', 'Lisbon')")
+        c.execute("INSERT INTO goals (title, status, completed_at) VALUES ('Marathon', 'done', '2026-04-19')")
+        c.execute("INSERT INTO contacts (id, name, birthday) VALUES (1, 'Pol', '--04-25')")
+        m = month_marks(c, 2026, 4)
+        kinds = {d: [x["kind"] for x in v] for d, v in m.items()}
+        self.assertEqual(kinds, {"2026-04-01": ["trip"], "2026-04-02": ["event"], "2026-04-03": ["logged"],
+                                 "2026-04-19": ["achievement"], "2026-04-25": ["birthday"]})
+        self.assertEqual(m["2026-04-01"][0]["label"], "Lisbon")
+
+
 class BirthdayTest(unittest.TestCase):
     def test_parse_and_normalize(self):
         self.assertEqual(ag.normalize_birthday("14-03-1992"), "1992-03-14")

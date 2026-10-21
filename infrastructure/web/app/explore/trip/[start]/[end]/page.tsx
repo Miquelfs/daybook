@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, ImagePlus } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type TracksGeoJSON } from "@/lib/api";
 import { TripJourney } from "@/components/TripJourney";
 import { TripExpenses } from "@/components/TripExpenses";
 import { SectionLabel } from "@/components/MorningBrief";
@@ -37,16 +37,23 @@ export default async function TripDetailPage({ params }: Props) {
 
   const rangeEnd = trip.return_date ?? end;
 
-  const [tracks, days] = await Promise.all([
-    api.tracksRange(start, rangeEnd).catch(() => ({ type: "FeatureCollection" as const, features: [] })),
-    api.range(start, rangeEnd).catch(() => []),
-  ]);
-
   // Every date in the trip window (inclusive of the home-coming day), for the scrubber.
   const tripDates: string[] = [];
   for (let t = new Date(start + "T12:00:00"); t <= new Date(rangeEnd + "T12:00:00"); t.setDate(t.getDate() + 1)) {
     tripDates.push(localISODate(t));
   }
+
+  // Tracks per day — the exact request the day page makes. One /tracks-range call
+  // for the whole trip can outlast the server-fetch timeout on the Pi and come
+  // back empty; per day, a slow or failed day only blanks itself.
+  const [perDay, days] = await Promise.all([
+    Promise.all(tripDates.map((d) =>
+      api.tracks(d)
+        .then((g) => g.features.map((f) => ({ ...f, properties: { ...f.properties, date: d } })))
+        .catch(() => []))),
+    api.range(start, rangeEnd).catch(() => []),
+  ]);
+  const tracks: TracksGeoJSON = { type: "FeatureCollection", features: perDay.flat() };
 
   const withPhotos = days.filter((d) => d.photo_path);
 

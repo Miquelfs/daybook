@@ -20,6 +20,7 @@ GET    /companions/activity/{id}, /companions/trip/{start}/{end}  — who it was
 GET    /people               — everyone, with days together this year / all time (for search)
 GET    /people/{id}          — one person for a year (?year=): calendar, frequency, what you do together
 GET    /planned-trips        — trips ahead (POST to plan one; PATCH / DELETE /planned-trips/{id})
+GET    /calendar/marks       — ?month=YYYY-MM: trips, events, achievements, birthdays per day (day picker)
 GET    /birthdays            — everyone with a birthday, soonest first
 GET    /agenda               — the Today strip: overdue / today / coming up / notes / birthdays / goals
 """
@@ -34,6 +35,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from domains.plans import agenda as agenda_mod
+from domains.plans import calendar as calendar_mod
 from domains.plans import companions as companions_mod
 from domains.plans import goals as goals_mod
 from domains.plans import habits as habits_mod
@@ -414,6 +416,14 @@ def get_trip_with(start: str, end: str, conn: DB):
 @router.put("/companions/trip/{start}/{end}")
 def put_trip_with(start: str, end: str, body: WithIn, conn: DB):
     return companions_mod.set_trip_with(conn, _iso(start, "start"), _iso(end, "end"), body.contact_ids)
+
+
+@router.get("/calendar/marks")
+def calendar_marks(conn: DB, month: str = Query(..., pattern=r"^\d{4}-\d{2}$")):
+    y, m = int(month[:4]), int(month[5:])
+    if not 1 <= m <= 12:
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+    return calendar_mod.month_marks(conn, y, m)
 
 
 @router.get("/birthdays", response_model=list[BirthdayOut])

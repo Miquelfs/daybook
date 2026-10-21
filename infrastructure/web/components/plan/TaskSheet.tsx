@@ -99,7 +99,7 @@ export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClo
         </>
       )}
 
-      <Field label="Area — also shows it on that page">
+      <Field label="Area">
         <div className="flex flex-wrap gap-1.5">
           {AREA_LIST.map((a) => (
             <Pill key={a.key} on={f.area === a.key} onClick={() => setF({ ...f, area: f.area === a.key ? null : a.key })}>

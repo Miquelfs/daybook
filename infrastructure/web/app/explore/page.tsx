@@ -9,7 +9,6 @@ import { ManualCountries } from "@/components/ManualCountries";
 import { TripYears } from "@/components/TripYears";
 import { YearSelect } from "@/components/YearSelect";
 import type { TopPlace, CityStay, WorldCoverage, FunFactCard, Trip } from "@/lib/api";
-import { AreaPlan } from "@/components/plan/AreaPlan";
 
 interface Props {
   searchParams: Promise<{ year?: string }>;
@@ -91,9 +90,6 @@ export default async function ExplorePage({ searchParams }: Props) {
           </Link>
         </div>
       </div>
-
-      <AreaPlan area="travel" className="mb-6" />
-      <AreaPlan area="culture" className="mb-6" />
 
       <TravelMapProvider>
       {/* Combined travel map — coverage choropleth / GPS heatmap, one toggle */}

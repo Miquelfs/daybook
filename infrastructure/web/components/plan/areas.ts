@@ -38,6 +38,9 @@ export const AREAS: Record<AreaKey, Area> = {
 
 export const AREA_LIST = Object.values(AREAS);
 
+/** Areas whose page shows a plan panel (AreaPlan) — Money, Health, Logbook, Omyra, Food. */
+export const AREAS_WITH_PANEL = new Set<AreaKey>(["training", "health", "food", "money", "aviation"]);
+
 export function area(key: string | null | undefined): Area {
   return AREAS[(key ?? "") as AreaKey] ?? AREAS.personal;
 }

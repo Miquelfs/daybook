@@ -8,7 +8,7 @@ import { plansApi, PLAN_KEYS, type Task, type TaskKind } from "@/lib/plans-api";
 import { localISODate } from "@/lib/dates";
 import { TaskRow } from "./TaskRow";
 import { Block, Panel, Pill } from "./ui";
-import { AREA_LIST, area as areaOf } from "./areas";
+import { AREA_LIST, AREAS_WITH_PANEL, area as areaOf } from "./areas";
 import { TripsAhead } from "./TripsAhead";
 
 type When = "today" | "tomorrow" | "weekend" | "next_week" | "someday" | "date";
@@ -94,7 +94,11 @@ function Composer({ kind, today, onMore }: { kind: TaskKind; today: string; onMo
         ))}
         <button onClick={onMore} className="shrink-0 ml-1 text-xs text-[#52525B] hover:text-[#A1A1AA] whitespace-nowrap">More…</button>
       </div>
-      {areaKey && <p className="text-[11px] text-[#52525B] px-1 -mt-1">{areaOf(areaKey).label} — it&apos;ll also show on that page.</p>}
+      {areaKey && (
+        <p className="text-[11px] text-[#52525B] px-1 -mt-1">
+          {areaOf(areaKey).label}{AREAS_WITH_PANEL.has(areaOf(areaKey).key) ? " — it'll also show on that page." : ""}
+        </p>
+      )}
     </Panel>
   );
 }

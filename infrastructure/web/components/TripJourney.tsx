@@ -118,6 +118,13 @@ export function TripJourney({ dates, geojson }: { dates: string[]; geojson: Trac
         ))}
       </div>
 
+      {selected !== "all" && (
+        <Link href={`/day/${selected}`}
+              className="self-start inline-flex items-center gap-1 text-xs text-[#F59E0B] hover:underline -mt-1">
+          Open {shortDate(selected)} <ArrowRight size={12} />
+        </Link>
+      )}
+
       {/* Map — remount on selection so the frame + labels rebuild cleanly.
           Pass `date` only for a single day so per-leg mode editing works there. */}
       <div ref={mapWrapRef}>
@@ -153,6 +160,12 @@ export function TripJourney({ dates, geojson }: { dates: string[]; geojson: Trac
                     </span>
                     <span className="flex items-center gap-2">
                       <span className="text-[10px] text-[#52525B] tabular-nums">{items.length} place{items.length === 1 ? "" : "s"}</span>
+                      {date && (
+                        <Link href={`/day/${date}`} onClick={(e) => e.stopPropagation()} aria-label={`Open ${shortDate(date)}`}
+                              className="text-[#52525B] hover:text-[#F59E0B] p-0.5">
+                          <ArrowRight size={12} />
+                        </Link>
+                      )}
                       <ChevronDown size={12} className={`text-[#52525B] transition-transform ${isOpen ? "rotate-180" : ""}`} />
                     </span>
                   </div>
