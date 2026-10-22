@@ -1,10 +1,8 @@
 """
-Planned trips — the shape of a trip worth remembering, not a travel agency:
-name, dates, destination, who; per day the plan, where you sleep, its price and
-whether it's booked (planned_trip_days); packing by section, open decisions,
-risks and info notes (planned_trip_items); budget lines low / mid / high /
-actual in the local currency (planned_trip_budget); a checklist (tasks with
-planned_trip_id). Passenger flights logged inside the window show up on their own. Once you're back and trip detection finds the
+Planned trips — light on purpose (the daybook isn't a travel planner): name,
+dates, destination, who's coming, a budget, one line per day (planned_trip_days)
+and a checklist (tasks with planned_trip_id). Passenger flights logged inside
+the window show up on their own. Once you're back and trip detection finds the
 real trip (overlapping dates), adopt() hands it the name and the companions,
 and that trip's page shows the plan next to what actually happened.
 
@@ -55,27 +53,13 @@ def detail(conn: sqlite3.Connection, planned_id: int, today: date) -> dict | Non
     if base is None:
         return None
     start, end = date.fromisoformat(base["start_date"]), date.fromisoformat(base["end_date"])
-    saved = {r["date"]: dict(r) for r in conn.execute(
-        "SELECT * FROM planned_trip_days WHERE planned_id=?", (planned_id,))}
+    notes = {d: n for d, n in conn.execute(
+        "SELECT date, note FROM planned_trip_days WHERE planned_id=?", (planned_id,))}
     days = []
     d = start
     while d <= end:
-        r = saved.get(d.isoformat(), {})
-        days.append({
-            "date": d.isoformat(), "note": r.get("note") or None, "kind": r.get("kind"),
-            "sleep": r.get("sleep"), "sleep_cost": r.get("sleep_cost"),
-            "booked": bool(r.get("booked")), "booking_ref": r.get("booking_ref"),
-        })
+        days.append({"date": d.isoformat(), "note": notes.get(d.isoformat())})
         d += timedelta(days=1)
-    items = [dict(r) for r in conn.execute(
-        "SELECT * FROM planned_trip_items WHERE planned_id=? ORDER BY kind, sort, id", (planned_id,))]
-    for it in items:
-        it["done"] = bool(it["done"])
-    lines = [dict(r) for r in conn.execute(
-        "SELECT * FROM planned_trip_budget WHERE planned_id=? ORDER BY sort, id", (planned_id,))]
-    totals = {k: sum((ln[k] or 0) for ln in lines) for k in ("low", "mid", "high", "actual")}
-    fx = base.get("fx_rate")
-    totals_eur = {k: round(v / fx, 2) if fx else None for k, v in totals.items()}
     checklist = [dict(r) for r in conn.execute(
         "SELECT * FROM tasks WHERE planned_trip_id=? ORDER BY done_at IS NOT NULL, due_date IS NULL, due_date, id",
         (planned_id,))]
@@ -85,97 +69,16 @@ def detail(conn: sqlite3.Connection, planned_id: int, today: date) -> dict | Non
             SELECT id, date, origin, destination, flight_number, airline, dep_time, arr_time
             FROM passenger_flights WHERE date BETWEEN ? AND ? ORDER BY date, dep_time""",
             ((start - timedelta(days=1)).isoformat(), (end + timedelta(days=1)).isoformat()))]
-    return {
-        **base, "days": days, "checklist": checklist, "flights": flights,
-        "items": items,
-        "budget_lines": lines,
-        "budget_totals": totals,
-        "budget_totals_eur": totals_eur,
-        "sleep_total": sum(x["sleep_cost"] or 0 for x in days),
-        # A night needs booking when you sleep somewhere — not in the air on a travel day.
-        "nights_booked": sum(1 for x in days if x["sleep"] and x["kind"] != "travel" and x["booked"]),
-        "nights_to_book": sum(1 for x in days if x["sleep"] and x["kind"] != "travel" and not x["booked"]),
-    }
+    return {**base, "days": days, "checklist": checklist, "flights": flights}
 
 
-DAY_FIELDS = ("note", "kind", "sleep", "sleep_cost", "booked", "booking_ref")
-
-
-def set_day(conn: sqlite3.Connection, planned_id: int, day: str, fields: dict) -> None:
-    """Merge `fields` into the day (only the keys given). A day left with nothing is removed."""
-    row = conn.execute("SELECT * FROM planned_trip_days WHERE planned_id=? AND date=?",
-                       (planned_id, day)).fetchone()
-    cur = {k: (row[k] if row else None) for k in DAY_FIELDS}
-    for k, v in fields.items():
-        if k in DAY_FIELDS:
-            cur[k] = v.strip() if isinstance(v, str) else v
-    cur["note"] = cur["note"] or ""
-    cur["booked"] = 1 if cur["booked"] else 0
-    if not (cur["note"] or cur["kind"] or cur["sleep"] or cur["sleep_cost"] or cur["booked"] or cur["booking_ref"]):
-        conn.execute("DELETE FROM planned_trip_days WHERE planned_id=? AND date=?", (planned_id, day))
+def set_day(conn: sqlite3.Connection, planned_id: int, day: str, note: str | None) -> None:
+    if note and note.strip():
+        conn.execute("""INSERT INTO planned_trip_days (planned_id, date, note) VALUES (?, ?, ?)
+                        ON CONFLICT(planned_id, date) DO UPDATE SET note = excluded.note""",
+                     (planned_id, day, note.strip()))
     else:
-        conn.execute(f"""INSERT INTO planned_trip_days (planned_id, date, {", ".join(DAY_FIELDS)})
-                         VALUES (?, ?, {", ".join("?" * len(DAY_FIELDS))})
-                         ON CONFLICT(planned_id, date) DO UPDATE SET
-                         {", ".join(f"{k}=excluded.{k}" for k in DAY_FIELDS)}""",
-                     (planned_id, day, *[cur[k] for k in DAY_FIELDS]))
-    conn.commit()
-
-
-ITEM_KINDS = ("pack", "decision", "risk", "info")
-
-
-def add_item(conn: sqlite3.Connection, planned_id: int, kind: str, title: str,
-             section: str | None = None, detail: str | None = None) -> int:
-    sort = conn.execute("SELECT COALESCE(MAX(sort), 0) + 1 FROM planned_trip_items WHERE planned_id=?",
-                        (planned_id,)).fetchone()[0]
-    cur = conn.execute("""INSERT INTO planned_trip_items (planned_id, kind, section, title, detail, sort)
-                          VALUES (?,?,?,?,?,?)""", (planned_id, kind, section, title, detail, sort))
-    conn.commit()
-    return cur.lastrowid
-
-
-def update_item(conn: sqlite3.Connection, item_id: int, fields: dict) -> bool:
-    allowed = {k: (int(v) if k == "done" else v) for k, v in fields.items()
-               if k in ("section", "title", "detail", "done")}
-    if not conn.execute("SELECT 1 FROM planned_trip_items WHERE id=?", (item_id,)).fetchone():
-        return False
-    if allowed:
-        conn.execute(f"UPDATE planned_trip_items SET {', '.join(f'{k}=?' for k in allowed)} WHERE id=?",
-                     [*allowed.values(), item_id])
-        conn.commit()
-    return True
-
-
-def delete_item(conn: sqlite3.Connection, item_id: int) -> None:
-    conn.execute("DELETE FROM planned_trip_items WHERE id=?", (item_id,))
-    conn.commit()
-
-
-def add_budget_line(conn: sqlite3.Connection, planned_id: int, fields: dict) -> int:
-    sort = conn.execute("SELECT COALESCE(MAX(sort), 0) + 1 FROM planned_trip_budget WHERE planned_id=?",
-                        (planned_id,)).fetchone()[0]
-    cur = conn.execute("""INSERT INTO planned_trip_budget (planned_id, line, low, mid, high, actual, sort)
-                          VALUES (?,?,?,?,?,?,?)""",
-                       (planned_id, fields["line"], fields.get("low"), fields.get("mid"),
-                        fields.get("high"), fields.get("actual"), sort))
-    conn.commit()
-    return cur.lastrowid
-
-
-def update_budget_line(conn: sqlite3.Connection, line_id: int, fields: dict) -> bool:
-    allowed = {k: v for k, v in fields.items() if k in ("line", "low", "mid", "high", "actual")}
-    if not conn.execute("SELECT 1 FROM planned_trip_budget WHERE id=?", (line_id,)).fetchone():
-        return False
-    if allowed:
-        conn.execute(f"UPDATE planned_trip_budget SET {', '.join(f'{k}=?' for k in allowed)} WHERE id=?",
-                     [*allowed.values(), line_id])
-        conn.commit()
-    return True
-
-
-def delete_budget_line(conn: sqlite3.Connection, line_id: int) -> None:
-    conn.execute("DELETE FROM planned_trip_budget WHERE id=?", (line_id,))
+        conn.execute("DELETE FROM planned_trip_days WHERE planned_id=? AND date=?", (planned_id, day))
     conn.commit()
 
 
@@ -199,7 +102,7 @@ def get(conn: sqlite3.Connection, planned_id: int, today: date) -> dict | None:
 
 
 def save(conn: sqlite3.Connection, fields: dict, contact_ids: list[int] | None, planned_id: int | None = None) -> int:
-    cols = ("name", "destination", "start_date", "end_date", "notes", "budget", "currency", "fx_rate", "flights_eur")
+    cols = ("name", "destination", "start_date", "end_date", "notes", "budget")
     vals = {k: fields[k] for k in cols if k in fields}
     if planned_id is None:
         cur = conn.execute(f"INSERT INTO planned_trips ({', '.join(vals)}) VALUES ({', '.join('?' * len(vals))})",

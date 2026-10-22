@@ -27,9 +27,6 @@ export function PlannedTripSheet({ trip, defaultStart, onClose }: {
     end_date: trip?.end_date ?? defaultStart ?? "",
     notes: trip?.notes ?? "",
     budget: trip?.budget != null ? String(trip.budget) : "",
-    currency: trip?.currency ?? "",
-    fx_rate: trip?.fx_rate != null ? String(trip.fx_rate) : "",
-    flights_eur: trip?.flights_eur != null ? String(trip.flights_eur) : "",
   });
   const router = useRouter();
   const [people, setPeople] = useState<Contact[]>((trip?.with ?? []) as Contact[]);
@@ -55,9 +52,6 @@ export function PlannedTripSheet({ trip, defaultStart, onClose }: {
     start_date: f.start_date, end_date: f.end_date || f.start_date,
     notes: f.notes.trim() || null, contact_ids: people.map((p) => p.id),
     budget: f.budget.trim() ? Number(f.budget.replace(",", ".")) : null,
-    currency: f.currency.trim().toUpperCase() || null,
-    fx_rate: f.fx_rate.trim() ? Number(f.fx_rate.replace(",", ".")) : null,
-    flights_eur: f.flights_eur.trim() ? Number(f.flights_eur.replace(",", ".")) : null,
   };
   const valid = f.name.trim() && f.start_date && (!f.end_date || f.end_date >= f.start_date);
 
@@ -79,24 +73,10 @@ export function PlannedTripSheet({ trip, defaultStart, onClose }: {
                  onChange={(e) => setF({ ...f, end_date: e.target.value })} />
         </Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Budget target (€)">
-          <input inputMode="decimal" className={inputCls} placeholder="1240" value={f.budget}
-                 onChange={(e) => setF({ ...f, budget: e.target.value })} />
-        </Field>
-        <Field label="Flights (€)">
-          <input inputMode="decimal" className={inputCls} placeholder="300" value={f.flights_eur}
-                 onChange={(e) => setF({ ...f, flights_eur: e.target.value })} />
-        </Field>
-        <Field label="Local currency">
-          <input className={`${inputCls} uppercase`} placeholder="TWD" maxLength={3} value={f.currency}
-                 onChange={(e) => setF({ ...f, currency: e.target.value })} />
-        </Field>
-        <Field label="Per €1">
-          <input inputMode="decimal" className={inputCls} placeholder="36" value={f.fx_rate}
-                 onChange={(e) => setF({ ...f, fx_rate: e.target.value })} />
-        </Field>
-      </div>
+      <Field label="Budget (€, optional)">
+        <input inputMode="decimal" className={inputCls} placeholder="2000" value={f.budget}
+               onChange={(e) => setF({ ...f, budget: e.target.value })} />
+      </Field>
       <Field label="With">
         <ContactsPicker selected={people} onChange={setPeople} placeholder="Who's coming?" />
       </Field>

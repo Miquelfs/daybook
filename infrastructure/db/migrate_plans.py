@@ -10,14 +10,10 @@ Plan ahead — the future side of the daybook.
                     is kept as its own row, so it shows on the day it was done).
   contacts.birthday 'YYYY-MM-DD', or '--MM-DD' when the year is unknown.
   tracked_habits    tags you chose to track as habits (goals / experiments track theirs too).
-  planned_trips     trips you're about to take — name, dates, who, currency + rate,
-                    flights cost. Per day (planned_trip_days): the plan, kind
-                    (travel / rest / ride), where you sleep, its price, booked + ref.
-                    planned_trip_items: packing (by section), open decisions, risks,
-                    info notes (logistics, numbers). planned_trip_budget: lines with
-                    low / mid / high / actual in the local currency. The checklist is
-                    tasks with planned_trip_id. Once the trip happens and is detected,
-                    its name and companions carry over and its page shows the plan.
+  planned_trips     trips you're about to take — name, dates, who, a budget, a one-line
+                    outline per day (planned_trip_days) and a checklist (tasks with
+                    planned_trip_id). Once the trip happens and is detected, its name
+                    and companions carry over and its page shows the plan.
   activity_companions / trip_companions
                     who a training or a trip was *with* — explicit, so People can say
                     what you actually did together. Trips are keyed by their dates
@@ -140,29 +136,6 @@ def migrate(conn) -> None:
             PRIMARY KEY (planned_id, date)
         );
 
-        CREATE TABLE IF NOT EXISTS planned_trip_items (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            planned_id INTEGER NOT NULL REFERENCES planned_trips(id) ON DELETE CASCADE,
-            kind       TEXT    NOT NULL,              -- pack | decision | risk | info
-            section    TEXT,                          -- pack category / risk "where" / info heading
-            title      TEXT    NOT NULL,
-            detail     TEXT,                          -- decision answer / risk plan / info text
-            done       INTEGER NOT NULL DEFAULT 0,    -- packed / decided
-            sort       INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_trip_items ON planned_trip_items(planned_id, kind);
-
-        CREATE TABLE IF NOT EXISTS planned_trip_budget (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            planned_id INTEGER NOT NULL REFERENCES planned_trips(id) ON DELETE CASCADE,
-            line       TEXT    NOT NULL,
-            low        REAL,
-            mid        REAL,
-            high       REAL,
-            actual     REAL,
-            sort       INTEGER NOT NULL DEFAULT 0
-        );
-
         CREATE TABLE IF NOT EXISTS planned_trip_companions (
             planned_id INTEGER NOT NULL REFERENCES planned_trips(id) ON DELETE CASCADE,
             contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
@@ -174,19 +147,7 @@ def migrate(conn) -> None:
         "due_time": "TEXT",                                   # HH:MM, optional
         "planned_trip_id": "INTEGER REFERENCES planned_trips(id) ON DELETE SET NULL",  # trip checklist
     })
-    _add_columns(conn, "planned_trips", {
-        "budget": "REAL",
-        "currency": "TEXT",            # local currency code, e.g. TWD
-        "fx_rate": "REAL",             # local units per €
-        "flights_eur": "REAL",         # flights, paid in €
-    })
-    _add_columns(conn, "planned_trip_days", {
-        "kind": "TEXT",                # travel | rest | ride
-        "sleep": "TEXT",               # town you sleep in
-        "sleep_cost": "REAL",          # local currency
-        "booked": "INTEGER NOT NULL DEFAULT 0",
-        "booking_ref": "TEXT",
-    })
+    _add_columns(conn, "planned_trips", {"budget": "REAL"})
     cols = {r[1] for r in conn.execute("PRAGMA table_info(contacts)")}
     if cols and "birthday" not in cols:
         conn.execute("ALTER TABLE contacts ADD COLUMN birthday TEXT")
