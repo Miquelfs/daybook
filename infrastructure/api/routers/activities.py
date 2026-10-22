@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from typing import Annotated, Optional
 
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from infrastructure.api.db import get_db
@@ -435,6 +436,30 @@ def get_activity_efforts(activity_id: str, conn: Annotated[sqlite3.Connection, D
     except Exception:
         pass
     return {"efforts": for_activity(conn, activity_id)}
+
+
+@router.get("/{activity_id}/plan-match")
+def get_plan_match(activity_id: str, conn: Annotated[sqlite3.Connection, Depends(get_db)]):
+    """Does this activity fit another session of the week better than the one it's linked to?"""
+    from domains.training.session_match import suggest
+    try:
+        return {"match": suggest(conn, activity_id)}
+    except sqlite3.OperationalError:
+        return {"match": None}
+
+
+class PlanSwap(BaseModel):
+    session_id: int
+
+
+@router.post("/{activity_id}/plan-match")
+def swap_plan_match(activity_id: str, body: PlanSwap, conn: Annotated[sqlite3.Connection, Depends(get_db)]):
+    """Count this activity as `session_id`; the session it leaves takes that slot, back to pending."""
+    from domains.training.session_match import swap
+    try:
+        return swap(conn, activity_id, body.session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.get("/{activity_id}/impact")

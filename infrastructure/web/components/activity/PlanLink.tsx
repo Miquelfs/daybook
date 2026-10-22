@@ -111,3 +111,66 @@ export function LinkedPlanBar({ sessionId, sessionType, discipline }: { sessionI
     </div>
   );
 }
+
+type MatchSession = { id: number; session_type: string; session_date: string; intensity_zone: string; duration_min: number; score: number };
+type PlanMatch = {
+  activity: { intensity_zone: number | null; minutes: number };
+  current: MatchSession | null;
+  suggestion: MatchSession | null;
+};
+
+const weekday = (d: string) => new Date(d + "T12:00:00").toLocaleDateString("en-GB", { weekday: "long" });
+
+/** Linked, but the ride fits another session of the week better → offer to count it as that one. */
+export function PlanMatchSuggestion({ activityId }: { activityId: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const { data } = useQuery<PlanMatch | null>({
+    queryKey: ["plan-match", activityId],
+    queryFn: async () => {
+      const r = await fetch(`/api/activities/${encodeURIComponent(activityId)}/plan-match`, { cache: "no-store" });
+      return r.ok ? (await r.json()).match : null;
+    },
+  });
+  const s = data?.suggestion, cur = data?.current;
+  if (!s || dismissed) return null;
+
+  async function swap() {
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch(`/api/activities/${encodeURIComponent(activityId)}/plan-match`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: s!.id }),
+      });
+      if (!r.ok) throw new Error();
+      router.refresh();
+    } catch { setErr("Couldn't relink — try again."); setBusy(false); }
+  }
+
+  const z = data!.activity.intensity_zone;
+  return (
+    <div className="bg-[#0D0D0F] border border-[#F59E0B]/40 rounded-2xl p-4 mb-6">
+      <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">Fits another session better</p>
+      <p className="text-sm text-[#A1A1AA]">
+        You rode {data!.activity.minutes} min{z != null ? <> at about <b className="text-[#FAFAFA]">Z{z.toFixed(1)}</b></> : null} —
+        closer to {weekday(s.session_date)}&apos;s <b className="text-[#FAFAFA]">{short(s.session_type)}</b>{" "}
+        ({s.intensity_zone} · {s.duration_min} min, {Math.round(s.score * 100)}% fit)
+        {cur ? <> than {short(cur.session_type)} ({cur.intensity_zone} · {cur.duration_min} min, {Math.round(cur.score * 100)}% fit)</> : null}.
+      </p>
+      {cur && (
+        <p className="text-xs text-[#71717A] mt-1">
+          {short(cur.session_type)} goes back to your plan{s.session_date > cur.session_date ? ` on ${weekday(s.session_date)}` : ""}, still to do.
+        </p>
+      )}
+      <div className="flex items-center gap-3 mt-3">
+        <button onClick={swap} disabled={busy}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#F59E0B] text-[#09090B] disabled:opacity-50">
+          {busy ? "Relinking…" : `Count it as ${short(s.session_type)}`}
+        </button>
+        <button onClick={() => setDismissed(true)} className="text-xs text-[#71717A] hover:text-[#A1A1AA]">Keep as is</button>
+      </div>
+      {err && <p className="text-xs text-rose-400 mt-2">{err}</p>}
+    </div>
+  );
+}

@@ -7,7 +7,7 @@ import { ActivityWind } from "@/components/ActivityWind";
 import { ActivityAnalysisCards } from "@/components/activity/ActivityAnalysisCards";
 import { TrainingImpactCard } from "@/components/activity/TrainingImpactCard";
 import { GymSessionCard } from "@/components/activity/GymSessionCard";
-import { PlanLinkCard, LinkedPlanBar } from "@/components/activity/PlanLink";
+import { PlanLinkCard, LinkedPlanBar, PlanMatchSuggestion } from "@/components/activity/PlanLink";
 import { ActivityCharts } from "@/components/ActivityCharts";
 import { ActivityNotes } from "@/components/ActivityNotes";
 import { TennisSessionPanel } from "@/components/TennisSessionPanel";
@@ -297,8 +297,11 @@ export default async function ActivityPage({ params }: Props) {
 
       {/* Plan link: offer the day's sessions when unlinked; show + undo when linked */}
       {activity.plan_session ? (
-        <LinkedPlanBar sessionId={activity.plan_session.id} sessionType={activity.plan_session.session_type}
-                       discipline={activity.plan_session.discipline} />
+        <>
+          <LinkedPlanBar sessionId={activity.plan_session.id} sessionType={activity.plan_session.session_type}
+                         discipline={activity.plan_session.discipline} />
+          <PlanMatchSuggestion activityId={decodedId} />
+        </>
       ) : (
         <PlanLinkCard activityId={decodedId} date={activity.date} />
       )}

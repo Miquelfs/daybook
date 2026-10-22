@@ -271,12 +271,36 @@ def root():
     }
 
 
+# After pulling new activities: route + second-by-second streams, then the metrics
+# built on them (hrTSS, zones, analysis, strain) and fitness — the same chain the
+# nightly job runs, limited to the last 2 days so a ride is complete right away.
+_POST_ACTIVITY_STEPS = (
+    ["-m", "domains.health.garmin.garmin_activity_detail_sync", "--days", "2", "--fetch-streams", "--skip-physio"],
+    ["-m", "domains.health.compute_activity_metrics", "--days", "2"],
+    ["-m", "domains.health.activity_analysis", "--days", "2"],
+    ["-m", "domains.health.compute_training_load"],
+)
+
+
+def _run_post_activity() -> str | None:
+    error = None
+    for args in _POST_ACTIVITY_STEPS:
+        try:
+            r = subprocess.run([sys.executable, *args], cwd=str(ROOT), capture_output=True, timeout=300)
+            if r.returncode != 0 and error is None:
+                error = (r.stderr or b"").decode(errors="replace")[-500:] or f"exit {r.returncode}"
+        except Exception as e:
+            error = error or str(e)
+    return error
+
+
 def _run_garmin_sync() -> None:
     subprocess.run(
         [sys.executable, "-m", "domains.health.garmin.garmin_sync"],
         cwd=str(ROOT),
         capture_output=True,
     )
+    _run_post_activity()
 
 
 @app.post("/sync/garmin")
@@ -310,6 +334,8 @@ def _run_full_refresh(day: str) -> None:
         except Exception as e:  # timeout / spawn failure — keep going, record first
             if error is None:
                 error = str(e)
+    post_error = _run_post_activity()          # always — a hiccup above shouldn't leave the ride half-synced
+    error = error or post_error
     # Completion beacon (best-effort — a failed sync still stamps last_attempt).
     try:
         from infrastructure.db.connection import get_connection as _get_conn
