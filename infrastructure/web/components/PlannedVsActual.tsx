@@ -127,6 +127,22 @@ export function PlannedVsActual({ planSession, splits, activity }: {
           </p>
         )}
 
+        {/* Tour day: the planned route vs what was ridden */}
+        {planSession.course && (
+          <div className="bg-[#18181B] rounded-xl px-3 py-2.5 text-sm">
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-0.5">Route · {planSession.course.name}</p>
+            <p className="text-[#A1A1AA]">
+              {planSession.course.followed_pct != null
+                ? <><b className={planSession.course.followed_pct >= 90 ? "text-emerald-400" : "text-amber-400"}>{planSession.course.followed_pct}%</b> of the planned course ridden · </>
+                : null}
+              planned {planSession.course.km} km, +{planSession.course.climb_m.toLocaleString("en-GB")} m
+              {planSession.course.climb_raw_m - planSession.course.climb_m >= 50
+                ? <span className="text-[#71717A]"> (Garmin {planSession.course.climb_raw_m.toLocaleString("en-GB")} m with tunnels)</span> : null}
+              <span className="text-[#71717A]"> · ~{planSession.course.tss} TSS</span>
+            </p>
+          </div>
+        )}
+
         {/* How hard it felt — saved on the plan session */}
         <div>
           <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-2">

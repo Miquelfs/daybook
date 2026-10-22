@@ -560,6 +560,29 @@ def get_activity_streams(
     }
 
 
+def _course_followed(conn, session_id: int, activity_id: str) -> dict | None:
+    """Planned course (tour days) vs the ride: how much of the route was ridden, and the numbers side by side."""
+    from domains.training.blocks import course_for
+    c = course_for(conn, session_id)
+    if not c:
+        return None
+    out = {k: c.get(k) for k in ("name", "km", "climb_m", "climb_raw_m", "high_m", "minutes", "tss")} | {
+        "tunnels": c.get("tunnels") or [], "followed_pct": None}
+    try:
+        from domains.health.geo import Grid, activity_track, decode, sample
+        poly = conn.execute("SELECT polyline FROM activities WHERE id=?", (activity_id,)).fetchone()
+        ride = sample(activity_track(conn, activity_id, poly[0] if poly else None), 100)
+        plan = sample(decode(c["polyline"]), 100)
+        if ride and plan:
+            g = Grid(60, plan[0][0])
+            for p in ride:
+                g.add(p)
+            out["followed_pct"] = round(sum(1 for p in plan if g.near(p)) / len(plan) * 100)
+    except Exception:
+        pass
+    return out
+
+
 @router.patch("/{activity_id}", response_model=ActivityDetail)
 def patch_activity(
     activity_id: str,
@@ -717,6 +740,7 @@ def _linked_plan_session(conn: sqlite3.Connection, activity_id: str):
         "duration_min": ps["duration_min"], "effective_duration_min": ps["effective_duration_min"],
         "week_number": ps["week_number"], "structure": structure, "fueling": fueling,
         "rpe_actual": ps["rpe_actual"] if "rpe_actual" in ps.keys() else None,
+        "course": _course_followed(conn, ps["id"], activity_id),
     }
 
     flog = None

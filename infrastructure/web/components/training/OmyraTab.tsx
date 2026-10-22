@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { CourseCard } from "@/components/training/CourseCard";
+import type { PlanCourse } from "@/lib/api";
 import { sessionIcon } from "@/lib/sport";
 import { WeekPlanner } from "@/components/training/WeekPlanner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -60,6 +62,7 @@ interface WeekDay {
 }
 
 interface PlanSession {
+  course?: PlanCourse | null;
   id: number;
   goal_id: number;
   session_type: string;
@@ -236,6 +239,9 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
             onUnlinked={() => { onUpdate(); onClose(); }}
           />
         )}
+
+        {/* Tour day: the route it follows */}
+        {session.course && <CourseCard course={session.course} />}
 
         {/* Workout phases */}
         {(() => {

@@ -1,5 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { CourseCard } from "@/components/training/CourseCard";
+import type { PlanCourse } from "@/lib/api";
 import { sessionIcon } from "@/lib/sport";
 import Link from "next/link";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
@@ -53,6 +55,7 @@ interface Fueling {
 }
 
 interface PlanSession {
+  course?: PlanCourse | null;
   id: number;
   goal_id: number;
   goal_name: string;
@@ -600,6 +603,9 @@ function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
             onUnlinked={() => { onUpdate(); onClose(); }}
           />
         )}
+
+        {/* Tour day: the route it follows */}
+        {session.course && <CourseCard course={session.course} />}
 
         {/* Workout phases */}
         <div className="space-y-2">

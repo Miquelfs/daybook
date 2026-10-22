@@ -4,6 +4,7 @@ Prefix: /race-plans
 """
 
 import json
+import xml.etree.ElementTree as ET
 import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Annotated, Optional
@@ -508,6 +509,17 @@ def _session_actual(conn: sqlite3.Connection, activity_id: Optional[str]) -> Opt
     }
 
 
+def _course_summary(conn: sqlite3.Connection, session_id: int, full: bool = False) -> Optional[dict]:
+    """The GPX course a session follows (tour days). Lists get the numbers; the day view also gets map + profile."""
+    from domains.training.blocks import course_for
+    c = course_for(conn, session_id)
+    if not c:
+        return None
+    if not full:
+        c = {k: v for k, v in c.items() if k not in ("polyline", "profile")}
+    return c
+
+
 def _session_out(row: sqlite3.Row, conn: Optional[sqlite3.Connection] = None) -> dict:
     keys = row.keys()
     structure = None
@@ -539,6 +551,7 @@ def _session_out(row: sqlite3.Row, conn: Optional[sqlite3.Connection] = None) ->
         "role": row["role"] if "role" in keys else None,
         "structure": structure,
         "actual": _session_actual(conn, completed_activity_id) if conn is not None else None,
+        "course": _course_summary(conn, row["id"]) if conn is not None else None,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -1028,6 +1041,16 @@ class BlockDay(BaseModel):
     climb_m: float = 0
     note: Optional[str] = None
     optional: bool = False
+    gpx: Optional[str] = None            # a GPX course for the day — time, load and climbs come from the route
+
+
+class CourseFile(BaseModel):
+    name: Optional[str] = None
+    gpx: str
+
+
+class CourseParse(BaseModel):
+    files: list[CourseFile]
 
 
 class BlockCreate(BaseModel):
@@ -1036,6 +1059,22 @@ class BlockCreate(BaseModel):
     end_date: str
     kind: str = "tour"
     days: list[BlockDay] = []
+
+
+@router.post("/courses/parse")
+def parse_courses(body: CourseParse):
+    """Preview GPX courses before adding a tour: distance, tunnel-corrected climbing, climbs, time, load."""
+    from domains.training import gpx_course
+    out = []
+    for f in body.files:
+        try:
+            c = gpx_course.parse(f.gpx, f.name)
+            c.pop("polyline", None)
+            c.pop("profile", None)
+            out.append({"file": f.name, **c})
+        except Exception as e:                      # one bad file shouldn't sink the others
+            out.append({"file": f.name, "error": str(e)[:200]})
+    return out
 
 
 @router.get("/goals/{goal_id}/blocks")
@@ -1054,6 +1093,8 @@ def create_training_block(goal_id: int, body: BlockCreate, conn: DB):
                              [d.model_dump() for d in body.days], "camp" if body.kind == "camp" else "tour")
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ET.ParseError as e:
+        raise HTTPException(status_code=422, detail=f"GPX could not be read: {e}")
 
 
 @router.delete("/blocks/{block_id}", status_code=200)
@@ -1677,6 +1718,7 @@ def day_prescription(date_str: str, conn: DB):
 
         sessions.append({
             **_session_out(r, conn),
+            "course": _course_summary(conn, r["id"], full=True),
             "ride_fuel": ride_fuel,
             "goal_name": r["goal_name"],
             "adaptation_note": adaptation_note,

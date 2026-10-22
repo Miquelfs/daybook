@@ -143,6 +143,15 @@ export type PlanSessionStep = {
   cue?: string;
 };
 
+/** A planned route (GPX) a session follows — tour days. `polyline`/`profile` only on the day view. */
+export type PlanCourse = {
+  name: string; km: number; climb_m: number; climb_raw_m: number; high_m: number | null; minutes: number;
+  avg_kmh: number | null; tss: number;
+  climbs: { km: number; length_km: number; gain_m: number; avg_pct: number; max_200m_pct: number; start_min: number; minutes: number }[];
+  tunnels: { from_km: number; to_km: number; length_km: number; peak_m: number }[];
+  polyline?: string; profile?: [number, number][];
+};
+
 export type LinkedPlanSession = {
   id: number;
   goal_id: number;
@@ -155,6 +164,9 @@ export type LinkedPlanSession = {
   structure: PlanSessionStep[] | null;
   fueling: Record<string, unknown> | null;
   rpe_actual?: number | null;
+  /** Tour day: the planned course, and how much of it the ride followed. */
+  course?: (Pick<PlanCourse, "name" | "km" | "climb_m" | "climb_raw_m" | "high_m" | "minutes" | "tss" | "tunnels">
+            & { followed_pct: number | null }) | null;
 };
 
 // Real activity stats merged onto a plan session that was completed by (auto- or
