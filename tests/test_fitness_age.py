@@ -56,9 +56,16 @@ class FitnessAgeTest(unittest.TestCase):
         self.assertEqual(k["activity"]["years"], -2.0)
         self.assertEqual(k["steps"]["years"], 0.5)
         self.assertEqual(k["bmi"]["value"], 24.5)
-        self.assertLess(r["fitness_age"], 24)                      # Garmin says 22
+        self.assertTrue(22 <= r["fitness_age"] <= 26)              # bonuses overlap; Garmin says 22
         self.assertLessEqual(r["achievable"], r["fitness_age"])
         self.assertIn(r["biggest_gain"], ("steps", "activity", "hrv"))
+
+    def test_your_real_numbers(self):
+        c, today = _db(rhr=42, hrv=84, steps=12482, sleep_h=7.2, train_min_day=36, vig_share=0.4)
+        r = fa.compute(c, today, "male")
+        self.assertEqual(r["raw_adjust_years"], -8.2)             # what simply adding them up gave (20)
+        self.assertEqual(r["fitness_age"], 23)                     # overlap-aware
+        self.assertGreaterEqual(r["achievable"], 21)
 
     def test_poor_habits_age_you(self):
         c, today = _db(rhr=72, hrv=30, steps=3000, sleep_h=5.5, train_min_day=5)

@@ -3,7 +3,9 @@ Daybook fitness age — Garmin's idea, with more of what matters and every step 
 
   base        the age whose *average* VO2max equals yours (HUNT3 / NTNU norms, the
               same study behind Garmin's fitness age), by sex — or both averaged
-  adjusted    in years, each capped, from the last 28 days:
+  adjusted    in years, each capped, from the last 28 days (bonuses overlap — the same
+              strong heart shows in several of them — so they add with diminishing
+              returns towards 8 years; penalties add in full):
                 resting HR      lower is better (each 10 bpm ≈ notable mortality risk)
                 HRV             vs what's typical for your age
                 activity        WHO weekly minutes, vigorous counting double
@@ -92,6 +94,16 @@ def years_sleep(hours: float) -> float:
 
 def years_bmi(bmi: float) -> float:
     return (1.0 if bmi < 18.5 else 0.0 if bmi < 25 else 0.5 if bmi < 27.5 else 1.5 if bmi < 30 else 3.0)
+
+
+OVERLAP_YEARS = 8.0     # bonuses saturate towards this: a strong heart shows in VO2max, RHR, HRV and training at once
+
+
+def combine(years: list[float]) -> float:
+    """Penalties add up in full (separate risks); bonuses overlap, so they add with diminishing returns."""
+    bonus = -sum(y for y in years if y < 0)
+    penalty = sum(y for y in years if y > 0)
+    return -OVERLAP_YEARS * (1 - math.exp(-bonus / OVERLAP_YEARS)) + min(10.0, penalty)
 
 
 BEST = {"rhr": -3.0, "hrv": -2.0, "activity": -2.5, "steps": -1.5, "sleep": -0.5, "bmi": 0.0}
@@ -244,14 +256,16 @@ def compute(conn, on: date | None = None, sex: str | None = None) -> dict | None
                       "years": years_bmi(bmi), "good": "under 25",
                       "why": f"{w[0]:.1f} kg at {height:.2f} m — counts lightly: muscle weighs too"})
 
-    adj = max(-10.0, min(10.0, sum(c["years"] for c in comps)))
+    adj = combine([c["years"] for c in comps])
     fa = max(MIN_AGE, min(MAX_AGE, base + adj))
-    best = max(MIN_AGE, base + sum(BEST[c["key"]] for c in comps))
-    for c in comps:
-        c["gain"] = round(c["years"] - BEST[c["key"]], 1)            # years still on the table
+    best = max(MIN_AGE, base + combine([BEST[c["key"]] for c in comps]))
+    for c in comps:                                     # years still on the table if this factor were at its best
+        others = [x["years"] for x in comps if x is not c]
+        c["gain"] = round(combine(others + [c["years"]]) - combine(others + [BEST[c["key"]]]), 1)
     return {"date": end, "age": age, "fitness_age": round(fa), "precise": round(fa, 1),
             "delta": round(fa - age), "sex_norms": sex, "vo2max": round(vo2, 1),
             "vo2_age": round(base, 1), "adjust_years": round(adj, 1),
+            "raw_adjust_years": round(sum(c["years"] for c in comps), 1),
             "achievable": round(best), "components": comps,
             "biggest_gain": max(comps, key=lambda c: c["gain"])["key"] if comps and max(c["gain"] for c in comps) >= 0.5
             else None}

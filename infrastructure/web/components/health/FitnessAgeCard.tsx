@@ -10,7 +10,7 @@ type Component = { key: string; label: string; value: number; unit: string; year
 type FitnessAge = {
   now: {
     date: string; age: number; fitness_age: number; precise: number; delta: number; sex_norms: "male" | "female" | "both";
-    vo2max: number; vo2_age: number; adjust_years: number; achievable: number; components: Component[];
+    vo2max: number; vo2_age: number; adjust_years: number; raw_adjust_years: number; achievable: number; components: Component[];
     biggest_gain: string | null;
   } | null;
   history: { date: string; fitness_age: number; vo2max: number }[];
@@ -94,6 +94,17 @@ export function FitnessAgeCard() {
               </div>
             );
           })}
+          <div className="flex items-center gap-3 text-xs pt-1 border-t border-[#18181B]">
+            <span className="w-24 shrink-0 text-[#A1A1AA]">Together</span>
+            <span className="flex-1 text-[#71717A]">
+              {Math.abs(n.raw_adjust_years - n.adjust_years) >= 0.3
+                ? <>not {yrs(n.raw_adjust_years)}: these overlap — a strong heart shows in several of them — so they don&apos;t simply add up</>
+                : <>the factors above combined</>}
+            </span>
+            <span className={`w-14 text-right tabular-nums font-semibold ${n.adjust_years < 0 ? "text-emerald-400" : n.adjust_years > 0 ? "text-amber-400" : ""}`}>
+              {yrs(n.adjust_years)}
+            </span>
+          </div>
           <div className="flex items-center gap-3 text-[10px] text-[#71717A]">
             <span className="w-24 shrink-0" /><span className="w-24 shrink-0" />
             <div className="flex-1 flex justify-between"><span>← younger</span><span>older →</span></div>
@@ -133,7 +144,9 @@ export function FitnessAgeCard() {
             The base is the age whose average VO₂max equals yours (HUNT study norms — the same research behind Garmin&apos;s
             number). The last 28 days then move it: resting heart rate, overnight HRV against what&apos;s typical for your age,
             weekly training (WHO minutes, vigorous counting double), daily steps, sleep length and — lightly, because it
-            misreads muscle — BMI. Each factor is capped so no single one dominates.
+            misreads muscle — BMI. Each factor is capped so no single one dominates, and the bonuses overlap (a fit heart
+            already shows in VO₂max, resting HR and HRV), so together they add with diminishing returns; penalties
+            count in full.
           </p>
         </details>
       </div>
