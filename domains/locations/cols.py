@@ -156,13 +156,35 @@ def scan_activity(conn, act) -> list[int]:
     return hit
 
 
+# A Strava import of a ride Garmin already has (with its route) is the same ride — count it once.
+_TWIN = """source='strava' AND EXISTS (
+    SELECT 1 FROM activities g WHERE g.source='garmin' AND g.date = activities.date
+      AND g.strava_id = CAST(SUBSTR(activities.id, 8) AS TEXT) AND g.polyline IS NOT NULL AND g.polyline != '')"""
+
+
+def _has_twin_columns(conn) -> bool:
+    return {"source", "strava_id"} <= {r[1] for r in conn.execute("PRAGMA table_info(activities)")}
+
+
+def _drop_strava_twins(conn) -> int:
+    """Remove visits recorded from Strava copies of Garmin rides (before this rule existed)."""
+    if not _has_twin_columns(conn):
+        return 0
+    n = conn.execute(f"DELETE FROM col_visits WHERE activity_id IN (SELECT id FROM activities WHERE {_TWIN})").rowcount
+    conn.commit()
+    return n
+
+
 def sync(conn, days: int | None = 7, verbose: bool = False) -> dict:
     """1. work out every map tile the pending rides need; 2. download the missing ones politely (stop at the
     first Overpass failure, keep what came in); 3. scan every ride whose tiles are all here — the rest wait
     for the next run."""
     ensure_tables(conn)
+    _drop_strava_twins(conn)
     q = """SELECT id, date, activity_type, polyline FROM activities
            WHERE polyline IS NOT NULL AND polyline != '' AND id NOT IN (SELECT activity_id FROM col_scan)"""
+    if _has_twin_columns(conn):
+        q += f" AND NOT ({_TWIN})"
     params: tuple = ()
     if days is not None:
         q += " AND date >= ?"

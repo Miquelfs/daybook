@@ -109,6 +109,23 @@ class ColsTest(unittest.TestCase):
         self.assertEqual(q.call_count, 3)                                   # 12 + 12 + 1
         self.assertEqual(sl.call_count, 2)                                  # a pause between queries
 
+    def test_strava_copy_of_a_garmin_ride_counts_once(self):
+        c = sqlite3.connect(":memory:")
+        c.row_factory = sqlite3.Row
+        c.execute("CREATE TABLE activities (id TEXT, date TEXT, activity_type TEXT, polyline TEXT, source TEXT, strava_id TEXT)")
+        ride = encode(_line((39.5696, 2.6502), SOLLER))
+        c.execute("INSERT INTO activities VALUES ('garmin_1','2026-05-14','cycling',?,'garmin','999')", (ride,))
+        c.execute("INSERT INTO activities VALUES ('strava_999','2026-05-14','Ride',?,'strava',NULL)", (ride,))
+        c.execute("INSERT INTO activities VALUES ('strava_5','2023-06-01','Ride',?,'strava',NULL)", (ride,))   # no twin
+        cols.ensure_tables(c)
+        c.execute("INSERT INTO col_visits VALUES (1, 'strava_999', '2026-05-14', 'ride')")                 # old double
+        with mock.patch.object(cols.overpass, "query", return_value=FAKE), \
+             mock.patch.object(cols, "_road_grid", return_value=None):
+            out = cols.sync(c, None)
+        self.assertEqual(out["scanned"], 2)
+        sol = next(x for x in cols.summary(c)["climbed"] if x["name"] == "Coll de Sóller")
+        self.assertEqual(sol["times"], 2)                     # garmin_1 + the 2023 Strava-only ride
+
 
 if __name__ == "__main__":
     unittest.main()
