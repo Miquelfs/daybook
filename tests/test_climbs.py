@@ -48,10 +48,8 @@ def _db():
 
 
 def fake_overpass(q, **kw):
-    if "mountain_pass" in q:
-        return {"elements": [{"id": 9, "lat": PASS[0], "lon": PASS[1],
-                              "tags": {"name": "Coll de Sóller", "mountain_pass": "yes", "ele": "497"}}]}
     return {"elements": [
+        {"id": 9, "lat": PASS[0], "lon": PASS[1], "tags": {"name": "Coll de Sóller", "mountain_pass": "yes", "ele": "497"}},
         {"id": 1, "lat": TOP[0] + 0.001, "lon": TOP[1], "tags": {"name": "Mirador de Boca Tauce", "tourism": "viewpoint"}},
         {"id": 2, "lat": FOOT[0], "lon": FOOT[1] + 0.005, "tags": {"name": "Adeje", "place": "village"}},
     ]}
@@ -83,6 +81,17 @@ class ClimbsTest(unittest.TestCase):
         self.assertTrue(first["first_time"])
         self.assertEqual(second["nth"], 2)
         self.assertTrue(second["best_vam"])                                  # faster this time
+
+    def test_outage_waits_and_missing_data_isnt_marked_done(self):
+        c = _db()
+        c.execute("INSERT INTO activities VALUES ('nogps','2026-05-04','road_biking',NULL)")
+        c.execute("INSERT INTO activity_streams VALUES ('nogps','directelevation','[1,2,3]')")
+        with mock.patch.object(climbs.overpass, "query", side_effect=RuntimeError("502")), \
+             mock.patch.object(climbs.time, "sleep"):
+            out = climbs.sync(c, None)
+        self.assertEqual((out["scanned"], out["waiting"], out["no_data"]), (1, 3, 1))   # only the flat ride is done
+        done = {r[0] for r in c.execute("SELECT activity_id FROM climb_scan")}
+        self.assertEqual(done, {"flat"})
 
     def test_unnamed_summit(self):
         name = climbs.name_summit(self.c, (40.5, 3.9), 812)

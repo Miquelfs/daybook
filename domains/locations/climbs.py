@@ -30,8 +30,8 @@ from datetime import date, timedelta
 
 from domains.health.geo import dist_m
 from domains.locations import overpass
-from domains.locations.cols import BATCH, PAUSE_S, _drop_strava_twins, _ele, _has_twin_columns, _tile, _tile_bbox, \
-    _TWIN, counts, ensure_tables as ensure_col_tables, fetch_tiles
+from domains.locations.cols import PAUSE_S, _drop_strava_twins, _ele, _has_twin_columns, _TWIN, counts, \
+    ensure_tables as ensure_col_tables
 from domains.training.gpx_course import STEP_M, climb_spans, climb_stats
 
 MIN_GAIN_M, MIN_GRADE = 100, 0.03
@@ -46,7 +46,7 @@ def ensure_tables(conn) -> None:
         CREATE TABLE IF NOT EXISTS climb_poi (osm_id INTEGER PRIMARY KEY, name TEXT NOT NULL, lat REAL NOT NULL,
             lng REAL NOT NULL, kind TEXT NOT NULL, ele REAL);
         CREATE INDEX IF NOT EXISTS idx_climb_poi_latlng ON climb_poi(lat, lng);
-        CREATE TABLE IF NOT EXISTS climb_poi_tiles (tile TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS climb_poi_cells (cell TEXT PRIMARY KEY,
             fetched_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')));
         CREATE TABLE IF NOT EXISTS climbs (key TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL,
             lat REAL NOT NULL, lng REAL NOT NULL, ele REAL, osm_id INTEGER);
@@ -123,26 +123,39 @@ def find_climbs(pts) -> list[dict]:
 
 # ── naming ───────────────────────────────────────────────────────────────────
 
-def fetch_poi_tiles(conn, tiles: set[str]) -> None:
-    have = {r[0] for r in conn.execute("SELECT tile FROM climb_poi_tiles")}
-    todo = sorted(tiles - have)
-    for i in range(0, len(todo), BATCH):
+CELL = 0.01                    # ~1 km naming cells
+NEAR_M, PLACE_M = 1400, 3600   # around a cell centre: covers the 150–600 m naming radii / the 3 km side radius
+CELLS_PER_QUERY = 25
+
+
+def cell(p) -> str:
+    return f"{round(p[0] / CELL) * CELL:.2f}:{round(p[1] / CELL) * CELL:.2f}"
+
+
+def fetch_poi_cells(conn, cells: set[str]) -> None:
+    """Named passes, viewpoints, peaks (≤ 1.4 km) and villages (≤ 3.6 km) around each cell — small queries that
+    overloaded public Overpass servers still answer. Raises on failure; cells already in stay cached."""
+    have = {r[0] for r in conn.execute("SELECT cell FROM climb_poi_cells")}
+    todo = sorted(cells - have)
+    for i in range(0, len(todo), CELLS_PER_QUERY):
         if i:
             time.sleep(PAUSE_S)
-        batch = todo[i:i + BATCH]
+        batch = todo[i:i + CELLS_PER_QUERY]
         parts = []
-        for t in batch:
-            s, w, n, e = _tile_bbox(t)
-            bb = f"({s},{w},{n},{e})"
-            parts.append(f'node["place"~"^(town|village|hamlet|locality|isolated_dwelling)$"]["name"]{bb};'
-                         f'node["tourism"="viewpoint"]["name"]{bb};node["natural"="peak"]["name"]{bb};')
-        data = overpass.query(f"[out:json][timeout:120];({''.join(parts)});out;", attempts=4, timeout_s=130, backoff_s=5)
+        for c in batch:
+            lat, lng = c.split(":")
+            near, far = f"(around:{NEAR_M},{lat},{lng})", f"(around:{PLACE_M},{lat},{lng})"
+            parts.append(f'node["mountain_pass"="yes"]["name"]{near};node["natural"="saddle"]["name"]{near};'
+                         f'node["tourism"="viewpoint"]["name"]{near};node["natural"="peak"]["name"]{near};'
+                         f'node["place"~"^(town|village|hamlet|locality|isolated_dwelling)$"]["name"]{far};')
+        data = overpass.query(f"[out:json][timeout:90];({''.join(parts)});out;", attempts=4, timeout_s=100, backoff_s=5)
         for el in data.get("elements", []):
             tg = el.get("tags", {})
-            kind = "viewpoint" if tg.get("tourism") == "viewpoint" else "peak" if tg.get("natural") == "peak" else "place"
+            kind = ("col" if tg.get("mountain_pass") == "yes" or tg.get("natural") == "saddle" else
+                    "viewpoint" if tg.get("tourism") == "viewpoint" else "peak" if tg.get("natural") == "peak" else "place")
             conn.execute("INSERT OR REPLACE INTO climb_poi VALUES (?,?,?,?,?,?)",
                          (el["id"], tg["name"], el["lat"], el["lon"], kind, _ele(tg.get("ele"))))
-        conn.executemany("INSERT OR REPLACE INTO climb_poi_tiles (tile) VALUES (?)", [(t,) for t in batch])
+        conn.executemany("INSERT OR REPLACE INTO climb_poi_cells (cell) VALUES (?)", [(c,) for c in batch])
         conn.commit()
 
 
@@ -160,6 +173,10 @@ def _nearest(conn, table: str, p, radius_m: float, where: str = "", params: tupl
 
 def name_summit(conn, top, top_ele: float) -> dict:
     col = _nearest(conn, "cols", top, NAME_RADIUS["col"])
+    poi_col = _nearest(conn, "climb_poi", top, NAME_RADIUS["col"], "AND kind='col'")
+    if not col and poi_col:
+        return {"key": f"osm:{poi_col['osm_id']}", "name": poi_col["name"], "kind": "col", "lat": poi_col["lat"],
+                "lng": poi_col["lng"], "ele": poi_col["ele"] or top_ele, "osm_id": poi_col["osm_id"]}
     if col:
         return {"key": f"osm:{col['osm_id']}", "name": col["name"], "kind": "col", "lat": col["lat"],
                 "lng": col["lng"], "ele": col["ele"] or top_ele, "osm_id": col["osm_id"]}
@@ -169,7 +186,7 @@ def name_summit(conn, top, top_ele: float) -> dict:
             return {"key": f"osm:{poi['osm_id']}", "name": poi["name"], "kind": kind, "lat": poi["lat"],
                     "lng": poi["lng"], "ele": top_ele, "osm_id": poi["osm_id"]}
     g = (round(top[0] / UNNAMED_GRID) * UNNAMED_GRID, round(top[1] / UNNAMED_GRID) * UNNAMED_GRID)
-    near = _nearest(conn, "climb_poi", top, 8000, "AND kind='place'")
+    near = _nearest(conn, "climb_poi", top, PLACE_M - 700, "AND kind='place'")
     label = f"Climb to {round(top_ele):,} m" + (f" near {near['name']}" if near else "")
     return {"key": f"geo:{g[0]:.3f}:{g[1]:.3f}", "name": label, "kind": "summit", "lat": top[0], "lng": top[1],
             "ele": top_ele, "osm_id": None}
@@ -214,24 +231,25 @@ def sync(conn, days: int | None = 7, verbose: bool = False) -> dict:
         q += " AND date >= ?"
         params = ((date.today() - timedelta(days=days)).isoformat(),)
     acts = [a for a in conn.execute(q + " ORDER BY date", params).fetchall() if counts(a["activity_type"])]
-    pending = []
+    pending, no_data = [], 0
     for a in acts:
-        found = find_climbs(ride_points(conn, a["id"]))
-        tiles = {_tile(*c[k]) for c in found for k in ("top", "foot")}
-        pending.append((a, found, tiles))
+        pts = ride_points(conn, a["id"])
+        if len(pts) < 20:                     # GPS / elevation / time incomplete: don't mark it done
+            no_data += 1
+            continue
+        found = find_climbs(pts)
+        cells = {cell(c[k]) for c in found for k in ("top", "foot")}
+        pending.append((a, found, cells))
     error = None
     try:
-        need = set().union(*(t for _, _, t in pending)) if pending else set()
-        fetch_tiles(conn, need)                 # cols / passes for naming
-        fetch_poi_tiles(conn, need)             # viewpoints, peaks, villages
+        fetch_poi_cells(conn, set().union(*(c for _, _, c in pending)) if pending else set())
     except RuntimeError as e:
         error = str(e)
         print(f"  climbs: OpenStreetMap unavailable ({error[:120]}) — some rides wait for the next run", file=sys.stderr)
-    have = {r[0] for r in conn.execute("SELECT tile FROM climb_poi_tiles")} & \
-        {r[0] for r in conn.execute("SELECT tile FROM col_tiles")}
+    have = {r[0] for r in conn.execute("SELECT cell FROM climb_poi_cells")}
     scanned = climbs = waiting = 0
-    for a, found, tiles in pending:
-        if not tiles <= have:
+    for a, found, cells in pending:
+        if not cells <= have:
             waiting += 1
             continue
         keys = scan_activity(conn, a, found)
@@ -239,7 +257,7 @@ def sync(conn, days: int | None = 7, verbose: bool = False) -> dict:
         climbs += len(keys)
         if verbose and keys:
             print(f"  {a['date']} {a['id']}: {len(keys)} climb(s)", file=sys.stderr)
-    out = {"scanned": scanned, "climbs": climbs, "waiting": waiting}
+    out = {"scanned": scanned, "climbs": climbs, "waiting": waiting, "no_data": no_data}
     if error:
         out["error"] = error
     return out
@@ -291,7 +309,12 @@ def for_activity(conn, activity_id: str) -> list[dict]:
 if __name__ == "__main__":
     from infrastructure.db.connection import get_connection
     c = get_connection()
+    if "--all" in sys.argv:                  # re-check rides recorded without climbs (cheap: no network unless named)
+        ensure_tables(c)
+        c.execute("DELETE FROM climb_scan WHERE activity_id NOT IN (SELECT activity_id FROM climb_visits)")
+        c.commit()
     out = sync(c, None if "--all" in sys.argv else 7, verbose=True)
     print(f"climbs: scanned {out['scanned']} rides, {out['climbs']} climbs"
-          + (f", {out['waiting']} rides waiting for map data (next run)" if out.get("waiting") else ""), file=sys.stderr)
+          + (f", {out['waiting']} rides waiting for map data (next run)" if out.get("waiting") else "")
+          + (f", {out['no_data']} rides without full GPS/elevation/time" if out.get("no_data") else ""), file=sys.stderr)
     c.close()
