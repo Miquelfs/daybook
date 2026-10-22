@@ -1,0 +1,88 @@
+"""Cols (bike rides only): OSM tiles fetched once, tracks matched to passes, counts, Mallorca to-do, outage-safe."""
+
+import sqlite3
+import unittest
+from unittest import mock
+
+from domains.health.geo import encode
+from domains.locations import cols
+
+SOLLER = (39.7351, 2.7110)          # Coll de Sóller-ish
+HONOR = (39.7140, 2.8000)
+FAR = (39.6500, 2.6200)             # a col the rides never go near
+
+
+def _el(i, name, p, ele):
+    return {"type": "node", "id": i, "lat": p[0], "lon": p[1], "tags": {"name": name, "mountain_pass": "yes", "ele": ele}}
+
+
+FAKE = {"elements": [_el(1, "Coll de Sóller", SOLLER, "497"), _el(2, "Coll d'Honor", HONOR, "550 m"),
+                     _el(3, "Coll des Far", FAR, "300")]}
+
+
+def _line(a, b, n=60):
+    return [(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n) for i in range(n + 1)]
+
+
+def _db():
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.execute("CREATE TABLE activities (id TEXT, date TEXT, activity_type TEXT, polyline TEXT)")
+    home = (39.5696, 2.6502)
+    c.execute("INSERT INTO activities VALUES ('r1','2026-09-01','road_biking',?)",
+              (encode(_line(home, SOLLER) + _line(SOLLER, home)),))
+    c.execute("INSERT INTO activities VALUES ('r2','2026-10-01','cycling',?)",
+              (encode(_line(home, SOLLER) + _line(SOLLER, HONOR) + _line(HONOR, home)),))
+    for aid, kind in (("swim", "open_water_swimming"), ("run", "trail_running"), ("walk", "walking"),
+                      ("trainer", "indoor_cycling")):
+        c.execute("INSERT INTO activities VALUES (?,'2026-10-02',?,?)", (aid, kind, encode(_line(home, SOLLER))))
+    c.execute("INSERT INTO activities VALUES ('hike','2026-10-05','hiking',?)", (encode(_line(home, SOLLER)),))
+    return c
+
+
+class ColsTest(unittest.TestCase):
+    def test_sync_and_summary(self):
+        c = _db()
+        with mock.patch.object(cols.overpass, "query", return_value=FAKE) as q, \
+             mock.patch.object(cols, "_road_grid", return_value=None):
+            out = cols.sync(c, None)
+            calls = q.call_count
+            cols.sync(c, None)                                   # nothing new: no more downloads
+            self.assertEqual(q.call_count, calls)
+        self.assertEqual(out["scanned"], 2)                       # outdoor rides only: no hike, run, walk, swim, trainer
+        s = cols.summary(c)
+        got = {x["name"]: x for x in s["climbed"]}
+        self.assertEqual(set(got), {"Coll de Sóller", "Coll d'Honor"})
+        self.assertEqual(got["Coll de Sóller"]["times"], 2)
+        self.assertEqual(got["Coll de Sóller"]["sports"], ["ride"])
+        self.assertEqual(got["Coll de Sóller"]["first_date"], "2026-09-01")
+        self.assertEqual(got["Coll d'Honor"]["ele"], 550)
+        self.assertEqual(s["highest"]["name"], "Coll d'Honor")
+        per = {x["name"]: x for x in cols.for_activity(c, "r2")}
+        self.assertEqual((per["Coll de Sóller"]["nth"], per["Coll de Sóller"]["first_time"]), (2, False))
+        self.assertTrue(per["Coll d'Honor"]["first_time"])
+
+    def test_mallorca_todo_road_cols(self):
+        c = _db()
+        road = mock.Mock()
+        road.near = lambda p: True                                # all three are road cols
+        with mock.patch.object(cols.overpass, "query", return_value=FAKE), \
+             mock.patch.object(cols, "_road_grid", return_value=road):
+            cols.sync(c, None)
+        m = cols.summary(c)["mallorca"]
+        self.assertEqual((m["road_climbed"], m["road_total"]), (2, 3))
+        self.assertEqual([t["name"] for t in m["todo"]], ["Coll des Far"])
+
+    def test_outage_leaves_activities_for_next_run(self):
+        c = _db()
+        with mock.patch.object(cols.overpass, "query", side_effect=RuntimeError("502")):
+            out = cols.sync(c, None)
+        self.assertEqual(out["scanned"], 0)
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM col_scan").fetchone()[0], 0)
+        with mock.patch.object(cols.overpass, "query", return_value=FAKE), \
+             mock.patch.object(cols, "_road_grid", return_value=None):
+            self.assertEqual(cols.sync(c, None)["scanned"], 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

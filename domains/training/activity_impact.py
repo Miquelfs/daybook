@@ -345,6 +345,14 @@ def _matched(conn, act, sport) -> dict | None:
             "items": items[-12:]}
 
 
+def _cols(conn, activity_id: str) -> list[dict]:
+    try:
+        from domains.locations.cols import for_activity
+        return for_activity(conn, activity_id)
+    except Exception:
+        return []
+
+
 def impact(conn: sqlite3.Connection, activity_id: str, analysis: dict | None = None,
            fuel_target_fn=None) -> dict | None:
     act = conn.execute("SELECT * FROM activities WHERE id=?", (activity_id,)).fetchone()
@@ -360,7 +368,8 @@ def impact(conn: sqlite3.Connection, activity_id: str, analysis: dict | None = N
         "efficiency": _efficiency(conn, act, sport, t),
         "race": _race(conn, act, sport, t, analysis, fuel_target_fn),
         "matched": _matched(conn, act, sport),
+        "cols": _cols(conn, act["id"]),
     }
-    if not any((out["tss"], out["load"], out["strain"], out["efficiency"], out["race"], out["matched"])):
+    if not any((out["tss"], out["load"], out["strain"], out["efficiency"], out["race"], out["matched"], out["cols"])):
         return None
     return out

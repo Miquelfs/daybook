@@ -357,6 +357,13 @@ def training_load(
     return result
 
 
+@router.get("/cols")
+def cols_climbed(conn: DB):
+    """Every col/pass you've ridden, run or hiked over, and Mallorca's road cols still to climb."""
+    from domains.locations.cols import summary
+    return summary(conn)
+
+
 @router.get("/mallorca-coverage")
 def mallorca_coverage(conn: DB):
     """Bikeable roads and villages of Mallorca your rides have covered (cached until the next ride)."""

@@ -52,6 +52,26 @@ function StrainChip({ strain }: { strain: NonNullable<ActivityImpact["strain"]> 
   );
 }
 
+const ORDINAL = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+
+/** Cols this ride went over — first times stand out. */
+function ColsChips({ cols }: { cols: NonNullable<ActivityImpact["cols"]> }) {
+  return (
+    <div className="mt-4">
+      <span className="text-xs text-[#52525B] uppercase tracking-widest">Cols</span>
+      <div className="flex flex-wrap gap-1.5 mt-1.5">
+        {cols.map((c) => (
+          <Link key={c.osm_id} href="/omyra?tab=map"
+                className={`text-xs px-2.5 py-1 rounded-lg ${c.first_time ? "bg-[#F59E0B]/15 text-[#F59E0B]" : "bg-[#18181B] text-[#A1A1AA]"}`}>
+            ⛰ {c.name}{c.ele != null ? ` · ${Math.round(c.ele)} m` : ""}
+            <span className="text-[#71717A]"> · {c.first_time ? "first time" : `${ORDINAL(c.nth)} time`}</span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">{children}</p>
@@ -274,6 +294,7 @@ export default async function ActivityPage({ params }: Props) {
           </div>
         )}
         {impact?.strain && <StrainChip strain={impact.strain} />}
+        {impact?.cols && impact.cols.length > 0 && <ColsChips cols={impact.cols} />}
         <p className="text-xs text-[#71717A] mt-3 tabular-nums">
           {[
             hasDistance && activity.calories ? `${activity.calories} kcal` : null,

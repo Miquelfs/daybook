@@ -1574,6 +1574,16 @@ export interface FitnessSummary {
   strain: { today: number; today_label: string | null; avg: number; days: { date: string; value: number }[] } | null;
 }
 
+export type ColClimbed = {
+  osm_id: number; name: string; ele: number | null; lat: number; lng: number; kind: string; times: number;
+  first_date: string; last_date: string; last_activity_id: string; sports: string[]; in_mallorca: boolean; on_road: number | null;
+};
+export type ColsSummary = {
+  total: number; visits: number; this_year: number; highest: ColClimbed | null; climbed: ColClimbed[];
+  mallorca: { road_total: number; road_climbed: number;
+              todo: { osm_id: number; name: string; ele: number | null; lat: number; lng: number; km_from_home: number }[] } | null;
+};
+
 export type RouteRide = {
   id: string; date: string; name: string | null; secs: number; km: number; mps: number; hr: number | null; this: boolean;
   overlap_pct: number; same_direction: boolean;
@@ -1588,6 +1598,8 @@ export interface ActivityImpact {
     form_before?: number | null; form_next?: number; form_label?: string;
     week_tss: number | null; week_share_pct: number | null;
   } | null;
+  /** Cols / passes this activity went over, with how many times you've been there. */
+  cols?: { osm_id: number; name: string; ele: number | null; nth: number; total: number; first_time: boolean }[];
   /** Whoop-style 0–21 cardiovascular strain from time in HR zones. */
   strain?: { value: number; trimp: number; label: "light" | "moderate" | "high" | "all out" } | null;
   efficiency: {

@@ -184,6 +184,8 @@ step garmin_activity_detail_sync python -m domains.health.garmin.garmin_activity
 log "Computing per-activity metrics (last 7 days)..."
 step compute_activity_metrics python -m domains.health.compute_activity_metrics --days 7
 step activity_analysis python -m domains.health.activity_analysis --days 7
+# Cols climbed (OpenStreetMap passes along new rides/runs/hikes) — retries next night if OSM is down.
+step cols_sync python -m domains.locations.cols
 
 # CTL/ATL/TSB: update fitness & freshness for all sports.
 log "Computing training load (CTL/ATL/TSB)..."

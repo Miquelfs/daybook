@@ -19,19 +19,15 @@ from __future__ import annotations
 import gzip
 import json
 import math
-import subprocess
 import sys
-import time
 from datetime import date
 from pathlib import Path
 
 from domains.health.geo import dist_m, encode, sample
+from domains.locations import overpass
 
 OUT = Path(__file__).with_name("osm_mallorca.json.gz")
 BBOX = "39.25,2.30,39.97,3.49"          # Mallorca only (Cabrera, Menorca outside)
-UA = "daybook-personal/1.0 (personal data project)"
-MIRRORS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter",
-           "https://maps.mail.ru/osm/tools/overpass/api/interpreter"]
 CLASSES = ["primary", "secondary", "tertiary", "unclassified", "cycleway"]
 UNPAVED = {"unpaved", "gravel", "dirt", "ground", "compacted", "fine_gravel", "sand", "grass", "earth", "mud", "pebblestone"}
 PIECE_M = 500           # coverage granularity
@@ -39,16 +35,7 @@ DEDUP_M = 25            # a sample this close to a kept piece is "the same road"
 
 
 def _overpass(q: str) -> dict:
-    # curl, not urllib: uses the system certificate store (python.org builds on macOS ship without one)
-    for attempt in range(6):                     # Overpass throttles / is often busy → retry across mirrors
-        url = MIRRORS[attempt % len(MIRRORS)]
-        r = subprocess.run(["curl", "-sS", "--fail", "-m", "300", "-A", UA, url,
-                            "--data-urlencode", f"data={q}"], capture_output=True)
-        if r.returncode == 0:
-            return json.loads(r.stdout)
-        print(f"  {url}: {r.stderr.decode(errors='replace').strip()[:120]} — retrying", file=sys.stderr)
-        time.sleep(10 * (attempt + 1))
-    raise RuntimeError(f"Overpass failed: {r.stderr.decode(errors='replace')[:200]}")
+    return overpass.query(q)
 
 
 _m = dist_m
