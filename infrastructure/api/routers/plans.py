@@ -19,13 +19,16 @@ GET    /habits/{slug}        — one tag for a year (?year=): calendar, months, 
 GET    /companions/activity/{id}, /companions/trip/{start}/{end}  — who it was with (PUT {contact_ids})
 GET    /people               — everyone, with days together this year / all time (for search)
 GET    /people/{id}          — one person for a year (?year=): calendar, frequency, what you do together
-GET    /planned-trips        — trips ahead (POST to plan one; PATCH / DELETE /planned-trips/{id})
+GET    /planned-trips        — trips ahead (POST to plan one; GET / PATCH / DELETE /planned-trips/{id})
+PUT    /planned-trips/{id}/days/{date}       — the one-line outline for a day of the trip
+GET    /planned-trips/for-trip/{start}/{end} — the plan a detected trip came from
 GET    /calendar/marks       — ?month=YYYY-MM[&plan=1]: trips, events, achievements, birthdays per day
                                (+ tasks, notes, goal deadlines with plan=1 — Plan → Calendar)
 GET    /birthdays            — everyone with a birthday, soonest first
 GET    /agenda               — the Today strip: overdue / today / coming up / notes / birthdays / goals
 """
 
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, timedelta
@@ -54,6 +57,7 @@ router = APIRouter(tags=["plans"])
 DB = Annotated[sqlite3.Connection, Depends(get_db)]
 
 GOAL_STATUSES = ("active", "done", "dropped")
+_TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")              # task due_time, HH:MM
 FIRST_YEAR = 2026            # the daybook's first full year — no goals view before it
 _LOCATIONS_DB = Path(__file__).parents[2] / "db" / "locations.db"
 
@@ -133,6 +137,12 @@ def _check_task(fields: dict) -> None:
         raise HTTPException(status_code=422, detail="a repeating task needs a due date")
     if "title" in fields and not (fields["title"] or "").strip():
         raise HTTPException(status_code=422, detail="title cannot be empty")
+    t = fields.get("due_time")
+    if t is not None:
+        if not _TIME.match(t):
+            raise HTTPException(status_code=422, detail="due_time must be HH:MM")
+        if not fields.get("due_date", True):
+            raise HTTPException(status_code=422, detail="a time needs a due date")
 
 
 # ── Goals ────────────────────────────────────────────────────────────────────
@@ -227,7 +237,7 @@ def list_tasks(
         params.append(area)
     sql = "SELECT * FROM tasks" + (f" WHERE {' AND '.join(where)}" if where else "")
     order = " ORDER BY done_at DESC, id DESC" if status == "done" or done_on else \
-            " ORDER BY due_date IS NULL, due_date, id"
+            " ORDER BY due_date IS NULL, due_date, due_time IS NOT NULL, due_time, id"
     return [TaskOut(**dict(r)) for r in conn.execute(sql + order, params).fetchall()]
 
 
@@ -235,10 +245,10 @@ def list_tasks(
 def create_task(body: TaskIn, conn: DB):
     _check_task(body.model_dump())
     cur = conn.execute(
-        """INSERT INTO tasks (title, notes, kind, due_date, remind_days, repeat, area, goal_id)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (body.title.strip(), body.notes, body.kind, _iso(body.due_date, "due_date"),
-         body.remind_days, body.repeat, body.area, body.goal_id),
+        """INSERT INTO tasks (title, notes, kind, due_date, due_time, remind_days, repeat, area, goal_id, planned_trip_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (body.title.strip(), body.notes, body.kind, _iso(body.due_date, "due_date"), body.due_time,
+         body.remind_days, body.repeat, body.area, body.goal_id, body.planned_trip_id),
     )
     conn.commit()
     return _task_out(conn, cur.lastrowid)
@@ -352,7 +362,12 @@ class PlannedTripIn(BaseModel):
     start_date: str | None = None
     end_date: str | None = None
     notes: str | None = None
+    budget: float | None = None
     contact_ids: list[int] | None = None
+
+
+class DayNoteIn(BaseModel):
+    note: str | None = None
 
 
 def _check_trip(fields: dict) -> dict:
@@ -378,6 +393,30 @@ def create_planned_trip(body: PlannedTripIn, conn: DB):
         raise HTTPException(status_code=422, detail="name, start_date and end_date are required")
     pid = trips_mod.save(conn, fields, body.contact_ids)
     return trips_mod.get(conn, pid, date.today())
+
+
+@router.get("/planned-trips/for-trip/{start}/{end}")
+def planned_for_trip(start: str, end: str, conn: DB):
+    return trips_mod.for_trip(conn, _iso(start, "start"), _iso(end, "end"), date.today())
+
+
+@router.get("/planned-trips/{planned_id}")
+def planned_trip_detail(planned_id: int, conn: DB):
+    out = trips_mod.detail(conn, planned_id, date.today())
+    if out is None:
+        raise HTTPException(status_code=404, detail="Planned trip not found")
+    return out
+
+
+@router.put("/planned-trips/{planned_id}/days/{day}", status_code=204)
+def set_planned_day(planned_id: int, day: str, body: DayNoteIn, conn: DB):
+    trip = trips_mod.get(conn, planned_id, date.today())
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Planned trip not found")
+    d = _iso(day, "day")
+    if not trip["start_date"] <= d <= trip["end_date"]:
+        raise HTTPException(status_code=422, detail="day is outside the trip")
+    trips_mod.set_day(conn, planned_id, d, body.note)
 
 
 @router.patch("/planned-trips/{planned_id}")

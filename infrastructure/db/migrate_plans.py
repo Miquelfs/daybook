@@ -10,8 +10,10 @@ Plan ahead — the future side of the daybook.
                     is kept as its own row, so it shows on the day it was done).
   contacts.birthday 'YYYY-MM-DD', or '--MM-DD' when the year is unknown.
   tracked_habits    tags you chose to track as habits (goals / experiments track theirs too).
-  planned_trips     trips you're about to take — just name, dates, who. Once the trip
-                    happens and is detected, its name and companions carry over.
+  planned_trips     trips you're about to take — name, dates, who, a budget, a one-line
+                    outline per day (planned_trip_days) and a checklist (tasks with
+                    planned_trip_id). Once the trip happens and is detected, its name
+                    and companions carry over and its page shows the plan.
   activity_companions / trip_companions
                     who a training or a trip was *with* — explicit, so People can say
                     what you actually did together. Trips are keyed by their dates
@@ -68,6 +70,13 @@ def _goals_start_optional(conn) -> None:
         conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _add_columns(conn, table: str, cols: dict[str, str]) -> None:
+    have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    for col, typ in cols.items():
+        if col not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+
+
 def migrate(conn) -> None:
     conn.executescript(_GOALS_SQL + """
 
@@ -120,6 +129,13 @@ def migrate(conn) -> None:
             created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         );
 
+        CREATE TABLE IF NOT EXISTS planned_trip_days (
+            planned_id INTEGER NOT NULL REFERENCES planned_trips(id) ON DELETE CASCADE,
+            date       TEXT    NOT NULL,
+            note       TEXT    NOT NULL,
+            PRIMARY KEY (planned_id, date)
+        );
+
         CREATE TABLE IF NOT EXISTS planned_trip_companions (
             planned_id INTEGER NOT NULL REFERENCES planned_trips(id) ON DELETE CASCADE,
             contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
@@ -127,6 +143,11 @@ def migrate(conn) -> None:
         );
     """)
     _goals_start_optional(conn)
+    _add_columns(conn, "tasks", {
+        "due_time": "TEXT",                                   # HH:MM, optional
+        "planned_trip_id": "INTEGER REFERENCES planned_trips(id) ON DELETE SET NULL",  # trip checklist
+    })
+    _add_columns(conn, "planned_trips", {"budget": "REAL"})
     cols = {r[1] for r in conn.execute("PRAGMA table_info(contacts)")}
     if cols and "birthday" not in cols:
         conn.execute("ALTER TABLE contacts ADD COLUMN birthday TEXT")

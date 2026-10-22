@@ -44,14 +44,21 @@ function Composer({ kind, today, onMore }: { kind: TaskKind; today: string; onMo
   const [when, setWhen] = useState<When>(kind === "note" ? "next_week" : "today");
   const [areaKey, setAreaKey] = useState<string | null>(null);
   const [picked, setPicked] = useState("");
+  const [time, setTime] = useState("");
+  const [withTime, setWithTime] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function add() {
     if (!title.trim()) return;
     setBusy(true);
     try {
-      await plansApi.createTask({ title: title.trim(), kind, due_date: whenToDate(when, today, picked), area: areaKey });
+      const due = whenToDate(when, today, picked);
+      await plansApi.createTask({
+        title: title.trim(), kind, due_date: due, due_time: due && withTime && time ? time : null, area: areaKey,
+      });
       setTitle("");
+      setTime("");
+      setWithTime(false);
       refresh(qc);
     } finally {
       setBusy(false);
@@ -77,7 +84,14 @@ function Composer({ kind, today, onMore }: { kind: TaskKind; today: string; onMo
               : w.key === "date" && picked ? format(parseISO(picked), "EEE d MMM") : w.label}
           </Pill>
         ))}
+        {when !== "someday" && (
+          <Pill on={withTime} onClick={() => setWithTime((v) => !v)}>{withTime && time ? time : "+ time"}</Pill>
+        )}
       </div>
+      {withTime && when !== "someday" && (
+        <input type="time" value={time} onChange={(e) => setTime(e.target.value)} autoFocus
+               className="w-32 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] outline-none focus:border-[#F59E0B]" />
+      )}
       {when === "date" && (
         <input type="date" value={picked} min={today} onChange={(e) => setPicked(e.target.value)} autoFocus
                className="w-full bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-2 text-sm text-[#FAFAFA] outline-none focus:border-[#F59E0B]" />

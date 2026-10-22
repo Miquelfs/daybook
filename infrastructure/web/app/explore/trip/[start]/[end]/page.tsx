@@ -8,6 +8,7 @@ import { TripJourney } from "@/components/TripJourney";
 import { TripExpenses } from "@/components/TripExpenses";
 import { SectionLabel } from "@/components/MorningBrief";
 import { WithPicker } from "@/components/plan/WithPicker";
+import { TripPlan } from "@/components/plan/TripPlan";
 import { Flag } from "@/components/Flag";
 import { localISODate } from "@/lib/dates";
 
@@ -90,6 +91,8 @@ export default async function TripDetailPage({ params }: Props) {
           <SectionLabel>With</SectionLabel>
           <WithPicker trip={{ start: trip.start_date, end: trip.end_date }} />
         </section>
+
+        <TripPlan start={trip.start_date} end={trip.end_date} />
 
         {/* Interactive day-by-day journey */}
         <section>

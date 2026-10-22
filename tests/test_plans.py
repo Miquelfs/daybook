@@ -390,6 +390,31 @@ class PlannedTripsTest(unittest.TestCase):
         self.assertIsNone(pt.get(c, 999, TODAY))
         pt.delete(c, pid)
 
+    def test_trip_page_outline_checklist_flights(self):
+        from domains.plans import planned_trips as pt
+        c = db()
+        c.execute("CREATE TABLE passenger_flights(id INTEGER PRIMARY KEY, date TEXT, origin TEXT, destination TEXT, "
+                  "flight_number TEXT, airline TEXT, dep_time TEXT, arr_time TEXT)")
+        c.execute("INSERT INTO passenger_flights (date, origin, destination) VALUES ('2026-11-09', 'PMI', 'TPE'), "
+                  "('2026-12-01', 'PMI', 'BCN')")
+        pid = pt.save(c, {"name": "Taiwan", "start_date": "2026-11-10", "end_date": "2026-11-12", "budget": 2000}, [])
+        pt.set_day(c, pid, "2026-11-11", "Taipei → Hualien by train")
+        c.execute("INSERT INTO tasks (title, planned_trip_id) VALUES ('Book hotel', ?), ('Pack bike', ?)", (pid, pid))
+        c.execute("UPDATE tasks SET done_at='2026-07-01' WHERE title='Book hotel'")
+        d = pt.detail(c, pid, TODAY)
+        self.assertEqual([x["note"] for x in d["days"]], [None, "Taipei → Hualien by train", None])
+        self.assertEqual((d["checklist_total"], d["checklist_done"], d["budget"]), (2, 1, 2000))
+        self.assertEqual([x["checklist"][0]["title"] for x in [d]], ["Pack bike"])        # open first
+        self.assertEqual([f["destination"] for f in d["flights"]], ["TPE"])               # day before counts
+        pt.set_day(c, pid, "2026-11-11", "  ")
+        self.assertIsNone(pt.detail(c, pid, TODAY)["days"][1]["note"])
+
+    def test_task_time_orders_within_the_day(self):
+        c = db()
+        c.executemany("INSERT INTO tasks (title, due_date, due_time) VALUES (?, '2026-07-02', ?)",
+                      [("late", "18:00"), ("anytime", None), ("early", "08:30")])
+        self.assertEqual([t["title"] for t in ag.agenda(c, TODAY)["today"]], ["anytime", "early", "late"])
+
 
 class CalendarMarksTest(unittest.TestCase):
     def test_month_marks(self):

@@ -84,7 +84,7 @@ export function goalSummary(g: Goal): string {
 
 export function taskMeta(t: Task, today: string): string[] {
   const bits: string[] = [];
-  if (t.due_date) bits.push(dueLabel(t.due_date, today));
+  if (t.due_date) bits.push(t.due_time ? `${dueLabel(t.due_date, today)} · ${t.due_time}` : dueLabel(t.due_date, today));
   if (t.repeat) bits.push(`↻ ${t.repeat}`);
   if (t.remind_days && t.due_date && t.due_date > today) bits.push(`warns ${t.remind_days}d before`);
   return bits;

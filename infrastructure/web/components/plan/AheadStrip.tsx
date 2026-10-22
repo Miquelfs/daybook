@@ -60,14 +60,16 @@ function Ahead({ date }: { date: string }) {
     // Next 7 days for trips and tasks (tasks also once their heads-up starts).
     // Birthdays only on the day itself — the line at the top of the card.
     ...a.trips.filter((t) => t.ongoing || t.days_until <= 7).map((t) => ({
-      key: `p${t.id}`, on: t.start_date, icon: <Plane size={14} />, label: t.name,
-      when: t.ongoing ? "now" : `in ${t.days_until}d`, warn: t.days_until <= 7, href: "/plan?tab=calendar",
+      key: `p${t.id}`, on: t.start_date, icon: <Plane size={14} />,
+      label: t.checklist_total ? `${t.name} · ✓ ${t.checklist_done}/${t.checklist_total}` : t.name,
+      when: t.ongoing ? "now" : `in ${t.days_until}d`, warn: t.days_until <= 7, href: `/plan/trip/${t.id}`,
     })),
     ...a.upcoming.map((t) => {
       const Icon = area(t.area).icon;
       return {
         key: `t${t.id}`, on: t.due_date!, icon: <Icon size={14} strokeWidth={1.75} />, label: t.title,
-        when: dueLabel(t.due_date!, date), warn: !!t.remind_days, onClick: () => setEditing(t),
+        when: t.due_time ? `${dueLabel(t.due_date!, date)} ${t.due_time}` : dueLabel(t.due_date!, date),
+        warn: !!t.remind_days, onClick: () => setEditing(t),
       };
     }),
   ].sort((x, y) => x.on.localeCompare(y.on));

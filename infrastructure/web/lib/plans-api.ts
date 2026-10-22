@@ -68,17 +68,22 @@ export interface Task {
   notes: string | null;
   kind: TaskKind;
   due_date: string | null;
+  /** HH:MM, optional. */
+  due_time: string | null;
   remind_days: number | null;
   repeat: TaskRepeat | null;
   area: string | null;
   goal_id: number | null;
+  /** Part of a planned trip's checklist. */
+  planned_trip_id: number | null;
   done_at: string | null;
   created_at: string;
   days_until?: number | null;
 }
 
 export type TaskIn = Partial<Pick<Task,
-  "title" | "notes" | "kind" | "due_date" | "remind_days" | "repeat" | "area" | "goal_id" | "done_at">>;
+  "title" | "notes" | "kind" | "due_date" | "due_time" | "remind_days" | "repeat" | "area" | "goal_id" |
+  "planned_trip_id" | "done_at">>;
 
 export interface Birthday {
   contact_id: number;
@@ -242,13 +247,26 @@ export interface PlannedTrip {
   start_date: string;
   end_date: string;
   notes: string | null;
+  budget: number | null;
+  adopted_start: string | null;
+  adopted_end: string | null;
   nights: number;
   days_until: number;
   ongoing: boolean;
   with: Companion[];
+  checklist_total: number;
+  checklist_done: number;
 }
 
-export type PlannedTripIn = Partial<Pick<PlannedTrip, "name" | "destination" | "start_date" | "end_date" | "notes">> & {
+/** A planned trip's page. */
+export interface PlannedTripDetail extends PlannedTrip {
+  days: { date: string; note: string | null }[];
+  checklist: Task[];
+  flights: { id: number; date: string; origin: string | null; destination: string | null;
+             flight_number: string | null; airline: string | null; dep_time: string | null; arr_time: string | null }[];
+}
+
+export type PlannedTripIn = Partial<Pick<PlannedTrip, "name" | "destination" | "start_date" | "end_date" | "notes" | "budget">> & {
   contact_ids?: number[];
 };
 
@@ -273,6 +291,11 @@ export const plansApi = {
   birthdays: () => req<Birthday[]>("GET", "/api/birthdays"),
 
   plannedTrips: () => req<PlannedTrip[]>("GET", "/api/planned-trips"),
+  plannedTrip: (id: number) => req<PlannedTripDetail>("GET", `/api/planned-trips/${id}`),
+  setTripDay: (id: number, day: string, note: string | null) =>
+    req<void>("PUT", `/api/planned-trips/${id}/days/${day}`, { note }),
+  planForTrip: (start: string, end: string) =>
+    req<PlannedTripDetail | null>("GET", `/api/planned-trips/for-trip/${start}/${end}`),
   createPlannedTrip: (body: PlannedTripIn) => req<PlannedTrip>("POST", "/api/planned-trips", body),
   updatePlannedTrip: (id: number, body: PlannedTripIn) => req<PlannedTrip>("PATCH", `/api/planned-trips/${id}`, body),
   deletePlannedTrip: (id: number) => req<void>("DELETE", `/api/planned-trips/${id}`),
@@ -306,4 +329,4 @@ export const plansApi = {
 };
 
 /** Everything plan-related a mutation can change — invalidate these together. */
-export const PLAN_KEYS = [["agenda"], ["goals"], ["tasks"], ["birthdays"], ["area-plan"], ["habits"], ["habit"], ["habit-tags"], ["people"], ["person"], ["planned-trips"], ["plan-calendar"], ["calendar-marks"]] as const;
+export const PLAN_KEYS = [["agenda"], ["goals"], ["tasks"], ["birthdays"], ["area-plan"], ["habits"], ["habit"], ["habit-tags"], ["people"], ["person"], ["planned-trips"], ["planned-trip"], ["plan-calendar"], ["calendar-marks"]] as const;

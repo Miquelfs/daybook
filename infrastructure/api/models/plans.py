@@ -71,10 +71,12 @@ class TaskIn(BaseModel):
     notes: str | None = None
     kind: str = "task"                     # task | note
     due_date: str | None = None
+    due_time: str | None = None            # HH:MM, optional
     remind_days: int | None = Field(None, ge=0, le=365)
     repeat: str | None = None              # weekly | monthly | yearly
     area: str | None = None
     goal_id: int | None = None
+    planned_trip_id: int | None = None     # part of a trip's checklist
 
 
 class TaskPatch(BaseModel):
@@ -82,10 +84,12 @@ class TaskPatch(BaseModel):
     notes: str | None = None
     kind: str | None = None
     due_date: str | None = None
+    due_time: str | None = None
     remind_days: int | None = Field(None, ge=0, le=365)
     repeat: str | None = None
     area: str | None = None
     goal_id: int | None = None
+    planned_trip_id: int | None = None
     done_at: str | None = None             # null re-opens
 
 
@@ -95,10 +99,12 @@ class TaskOut(BaseModel):
     notes: str | None = None
     kind: str
     due_date: str | None = None
+    due_time: str | None = None
     remind_days: int | None = None
     repeat: str | None = None
     area: str | None = None
     goal_id: int | None = None
+    planned_trip_id: int | None = None
     done_at: str | None = None
     created_at: str
     days_until: int | None = None

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import { Plane, Plus } from "lucide-react";
@@ -24,7 +26,9 @@ export function PlannedTripSheet({ trip, defaultStart, onClose }: {
     start_date: trip?.start_date ?? defaultStart ?? "",
     end_date: trip?.end_date ?? defaultStart ?? "",
     notes: trip?.notes ?? "",
+    budget: trip?.budget != null ? String(trip.budget) : "",
   });
+  const router = useRouter();
   const [people, setPeople] = useState<Contact[]>((trip?.with ?? []) as Contact[]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +51,7 @@ export function PlannedTripSheet({ trip, defaultStart, onClose }: {
     name: f.name.trim(), destination: f.destination.trim() || null,
     start_date: f.start_date, end_date: f.end_date || f.start_date,
     notes: f.notes.trim() || null, contact_ids: people.map((p) => p.id),
+    budget: f.budget.trim() ? Number(f.budget.replace(",", ".")) : null,
   };
   const valid = f.name.trim() && f.start_date && (!f.end_date || f.end_date >= f.start_date);
 
@@ -68,6 +73,10 @@ export function PlannedTripSheet({ trip, defaultStart, onClose }: {
                  onChange={(e) => setF({ ...f, end_date: e.target.value })} />
         </Field>
       </div>
+      <Field label="Budget (€, optional)">
+        <input inputMode="decimal" className={inputCls} placeholder="2000" value={f.budget}
+               onChange={(e) => setF({ ...f, budget: e.target.value })} />
+      </Field>
       <Field label="With">
         <ContactsPicker selected={people} onChange={setPeople} placeholder="Who's coming?" />
       </Field>
@@ -79,14 +88,21 @@ export function PlannedTripSheet({ trip, defaultStart, onClose }: {
         When you&apos;re back and the trip is detected, its name and who came carry over automatically.
       </p>
       {error && <p className="text-rose-400 text-xs">{error}</p>}
-      <button onClick={() => run(() => (trip ? plansApi.updatePlannedTrip(trip.id, body) : plansApi.createPlannedTrip(body)))}
+      <button onClick={() => run(async () => {
+                if (trip) return plansApi.updatePlannedTrip(trip.id, body);
+                const created = await plansApi.createPlannedTrip(body);
+                router.push(`/plan/trip/${created.id}`);                 // straight to its page
+              })}
               disabled={busy || !valid}
               className="w-full bg-[#F59E0B] text-black font-semibold rounded-xl py-3 text-sm disabled:opacity-40">
         {busy ? "Saving…" : trip ? "Save" : "Plan trip"}
       </button>
       {trip && (
         <div className="flex justify-end text-xs">
-          <button disabled={busy} onClick={() => confirm(`Delete “${trip.name}”?`) && run(() => plansApi.deletePlannedTrip(trip.id))}
+          <button disabled={busy} onClick={() => confirm(`Delete “${trip.name}”?`) && run(async () => {
+                    await plansApi.deletePlannedTrip(trip.id);
+                    router.push("/plan?tab=calendar");
+                  })}
                   className="text-rose-400/80 hover:text-rose-400">Delete</button>
         </div>
       )}
@@ -114,7 +130,7 @@ export function TripsAhead() {
         }>
           <Panel className="px-4 py-1 divide-y divide-[#18181B]">
             {trips.map((t) => (
-              <button key={t.id} onClick={() => setEditing(t)} className="w-full flex items-center gap-3 py-3 text-left">
+              <Link key={t.id} href={`/plan/trip/${t.id}`} className="w-full flex items-center gap-3 py-3 text-left hover:opacity-90">
                 <span className="shrink-0 w-10 h-10 rounded-xl bg-[#18181B] flex items-center justify-center text-[#A1A1AA]">
                   <Plane size={18} strokeWidth={1.75} />
                 </span>
@@ -124,6 +140,7 @@ export function TripsAhead() {
                   </p>
                   <p className="text-xs text-[#52525B] tabular-nums">
                     {format(parseISO(t.start_date), "EEE d MMM")} – {format(parseISO(t.end_date), "d MMM")} · {t.nights} {t.nights === 1 ? "night" : "nights"}
+                    {t.checklist_total > 0 && ` · ✓ ${t.checklist_done}/${t.checklist_total}`}
                   </p>
                 </div>
                 {t.with.length > 0 && (
@@ -134,7 +151,7 @@ export function TripsAhead() {
                 <span className="shrink-0 text-xs text-[#F59E0B] tabular-nums w-12 text-right">
                   {t.ongoing ? "Now" : t.days_until === 1 ? "Tmrw" : `${t.days_until}d`}
                 </span>
-              </button>
+              </Link>
             ))}
           </Panel>
         </Block>

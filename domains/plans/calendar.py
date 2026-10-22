@@ -28,9 +28,9 @@ def month_marks(conn: sqlite3.Connection, year: int, month: int, plan: bool = Fa
     m0, m1 = first.isoformat(), last.isoformat()
     marks: dict[str, list[dict]] = {}
 
-    def add(d: str, kind: str, label: str | None = None, item_id=None) -> None:
+    def add(d: str, kind: str, label: str | None = None, item_id=None, time: str | None = None) -> None:
         if m0 <= d <= m1:
-            marks.setdefault(d, []).append({"kind": kind, "label": label, "id": item_id})
+            marks.setdefault(d, []).append({"kind": kind, "label": label, "id": item_id, "time": time})
 
     def span(start: str, end: str, kind: str, label: str | None, item_id=None) -> None:
         d, e = max(date.fromisoformat(start), first), min(date.fromisoformat(end), last)
@@ -70,10 +70,12 @@ def month_marks(conn: sqlite3.Connection, year: int, month: int, plan: bool = Fa
                 AND (mood IS NOT NULL OR (notes IS NOT NULL AND notes != ''))""", (m0, m1)):
             add(d, "logged")
     if plan and _has_table(conn, "tasks"):
-        for tid, d, title, kind in conn.execute("""
-                SELECT id, due_date, title, kind FROM tasks
-                WHERE done_at IS NULL AND due_date BETWEEN ? AND ?""", (m0, m1)):
-            add(d, "note" if kind == "note" else "task", title, tid)
+        time_col = "due_time" if _has_column(conn, "tasks", "due_time") else "NULL"
+        for tid, d, title, kind, t in conn.execute(f"""
+                SELECT id, due_date, title, kind, {time_col} FROM tasks
+                WHERE done_at IS NULL AND due_date BETWEEN ? AND ?
+                ORDER BY {time_col} IS NOT NULL, {time_col}""", (m0, m1)):
+            add(d, "note" if kind == "note" else "task", title, tid, t)
     if plan and _has_table(conn, "goals"):
         for gid, d, title in conn.execute("""
                 SELECT id, deadline, title FROM goals WHERE status = 'active' AND deadline BETWEEN ? AND ?""", (m0, m1)):

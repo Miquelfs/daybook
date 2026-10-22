@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { addDays, addMonths, format, getDaysInMonth, parseISO, startOfMonth, subMonths } from "date-fns";
 import { Cake, ChevronLeft, ChevronRight, Earth, ListChecks, Plane, Plus, StickyNote, Target, Trophy, Star } from "lucide-react";
@@ -11,7 +12,7 @@ import { Block, Panel } from "./ui";
 import { PlannedTripSheet, TripsAhead } from "./TripsAhead";
 
 type Kind = "trip" | "trip_planned" | "event" | "achievement" | "birthday" | "logged" | "task" | "note" | "deadline";
-type Mark = { kind: Kind; label: string | null; id: number | null };
+type Mark = { kind: Kind; label: string | null; id: number | null; time?: string | null };
 
 const DOT: Partial<Record<Kind, string>> = {
   task: "#A1A1AA", note: "#71717A", deadline: "#10B981", achievement: "#10B981", event: "#F59E0B", birthday: "#DB2777",
@@ -46,13 +47,13 @@ export function PlanCalendar({ onEditTask, onNewTask, onEditGoal }: {
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState(today);
   const [tripSheet, setTripSheet] = useState<{ trip?: PlannedTrip; start?: string } | null>(null);
+  const router = useRouter();
 
   const marks = useMarks(month);
   const thisMonth = useMarks(startOfMonth(new Date()));
   const nextMonth = useMarks(addMonths(startOfMonth(new Date()), 1));
   // Lookups so a mark's id opens the real thing.
   const { data: tasks = [] } = useQuery({ queryKey: ["tasks", "open", "all"], queryFn: () => plansApi.tasks({ status: "open" }) });
-  const { data: trips = [] } = useQuery({ queryKey: ["planned-trips"], queryFn: () => plansApi.plannedTrips() });
   const { data: goals = [] } = useQuery({
     queryKey: ["goals", new Date().getFullYear()], queryFn: () => plansApi.goals(new Date().getFullYear()),
   });
@@ -65,7 +66,7 @@ export function PlanCalendar({ onEditTask, onNewTask, onEditGoal }: {
       const g = goals.find((x) => x.id === m.id);
       if (g) onEditGoal(g);
     } else if (m.kind === "trip_planned" && m.id != null) {
-      setTripSheet({ trip: trips.find((x) => x.id === m.id) });
+      router.push(`/plan/trip/${m.id}`);
     }
   }
 
@@ -98,6 +99,7 @@ export function PlanCalendar({ onEditTask, onNewTask, onEditGoal }: {
       <>
         <Icon size={14} strokeWidth={1.75} className="shrink-0" style={{ color: DOT[m.kind] ?? (m.kind.startsWith("trip") ? "#0EA5E9" : "#71717A") }} />
         <span className="flex-1 min-w-0 truncate text-sm text-[#D4D4D8]">
+          {m.time && <span className="tabular-nums text-[#71717A] mr-2">{m.time}</span>}
           {m.kind === "birthday" ? `${m.label}'s birthday` : m.kind === "deadline" ? `${m.label} — deadline` : m.label}
         </span>
       </>

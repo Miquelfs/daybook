@@ -7,11 +7,13 @@ import { Sheet, Field, Chips, inputCls } from "./Sheet";
 import { AREA_LIST } from "./areas";
 import { Pill } from "./ui";
 
-export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClose }: {
+export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, defaultTripId, onClose }: {
   task?: Task;
   kind?: TaskKind;
   defaultDate?: string;
   defaultArea?: string;
+  /** Adding to a planned trip's checklist. */
+  defaultTripId?: number;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
@@ -20,6 +22,8 @@ export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClo
     notes: task?.notes ?? "",
     kind: task?.kind ?? kind,
     due_date: task?.due_date ?? defaultDate ?? "",
+    due_time: task?.due_time ?? "",
+    planned_trip_id: task?.planned_trip_id ?? defaultTripId ?? null,
     repeat: (task?.repeat ?? null) as TaskRepeat | null,
     remind_days: task?.remind_days ?? null,
     area: (task?.area ?? defaultArea ?? null) as string | null,
@@ -35,6 +39,7 @@ export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClo
     staleTime: 60_000,
   });
   const liveGoals = goals.filter((g) => g.status === "active");
+  const { data: trips = [] } = useQuery({ queryKey: ["planned-trips"], queryFn: () => plansApi.plannedTrips(), staleTime: 60_000 });
   const isNote = f.kind === "note";
 
   async function run(fn: () => Promise<unknown>) {
@@ -58,6 +63,8 @@ export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClo
       notes: f.notes.trim() || null,
       kind: f.kind,
       due_date: f.due_date || null,
+      due_time: f.due_date && f.due_time ? f.due_time : null,
+      planned_trip_id: f.planned_trip_id,
       repeat: f.due_date && !isNote ? f.repeat : null,
       remind_days: f.due_date && !isNote ? f.remind_days : null,
       area: f.area,
@@ -79,10 +86,16 @@ export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClo
                 placeholder={isNote ? "The thought, link or context you want back later" : "Details (optional)"}
                 value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} />
 
-      <Field label={isNote ? "Bring it back on" : "Due (leave empty for the inbox)"}>
-        <input type="date" className={inputCls} value={f.due_date}
-               onChange={(e) => setF({ ...f, due_date: e.target.value })} />
-      </Field>
+      <div className="grid grid-cols-[1fr_auto] gap-3">
+        <Field label={isNote ? "Bring it back on" : "Due (leave empty for the inbox)"}>
+          <input type="date" className={inputCls} value={f.due_date}
+                 onChange={(e) => setF({ ...f, due_date: e.target.value, due_time: e.target.value ? f.due_time : "" })} />
+        </Field>
+        <Field label="Time">
+          <input type="time" className={`${inputCls} w-28`} value={f.due_time} disabled={!f.due_date}
+                 onChange={(e) => setF({ ...f, due_time: e.target.value })} />
+        </Field>
+      </div>
 
       {f.due_date && !isNote && (
         <>
@@ -115,6 +128,16 @@ export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, onClo
                   onChange={(e) => setF({ ...f, goal_id: e.target.value ? Number(e.target.value) : null })}>
             <option value="">—</option>
             {liveGoals.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
+          </select>
+        </Field>
+      )}
+
+      {trips.length > 0 && !isNote && (
+        <Field label="Part of a trip">
+          <select className={inputCls} value={f.planned_trip_id ?? ""}
+                  onChange={(e) => setF({ ...f, planned_trip_id: e.target.value ? Number(e.target.value) : null })}>
+            <option value="">—</option>
+            {trips.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </Field>
       )}

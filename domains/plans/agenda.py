@@ -136,7 +136,7 @@ def agenda(conn: sqlite3.Connection, today: date, horizon_days: int = 7) -> dict
     """Open tasks bucketed for Today, notes due to resurface, upcoming birthdays."""
     t = today.isoformat()
     rows = [dict(r) for r in conn.execute(
-        "SELECT * FROM tasks WHERE done_at IS NULL ORDER BY due_date, id"
+        "SELECT * FROM tasks WHERE done_at IS NULL ORDER BY due_date, due_time IS NOT NULL, due_time, id"
     ).fetchall()]
     horizon = today + timedelta(days=horizon_days)
 
@@ -177,10 +177,10 @@ def complete(conn: sqlite3.Connection, task_id: int, on: date) -> dict | None:
     task = dict(row)
     if task["repeat"] in REPEATS and task["due_date"]:
         conn.execute(
-            """INSERT INTO tasks (title, notes, kind, due_date, area, goal_id, done_at)
-               VALUES (?,?,?,?,?,?,?)""",
-            (task["title"], task["notes"], task["kind"], task["due_date"],
-             task["area"], task["goal_id"], on.isoformat()),
+            """INSERT INTO tasks (title, notes, kind, due_date, due_time, area, goal_id, planned_trip_id, done_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (task["title"], task["notes"], task["kind"], task["due_date"], task.get("due_time"),
+             task["area"], task["goal_id"], task.get("planned_trip_id"), on.isoformat()),
         )
         nxt = next_occurrence(date.fromisoformat(task["due_date"]), task["repeat"])
         while nxt <= on:
