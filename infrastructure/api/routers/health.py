@@ -875,23 +875,9 @@ def health_correlation(conn: DB, days: int = Query(90)):
 
 # ── Fitness age (Daybook's own) ──────────────────────────────────────────────
 
-class FitnessAgeSex(BaseModel):
-    sex: str
-
-
 @router.get("/fitness-age")
 def fitness_age(conn: DB):
-    """VO2max-based age (HUNT norms) adjusted for resting HR, HRV, training, steps, sleep and BMI; 12-month trend."""
+    """VO2max-based age (HUNT men's norms) adjusted for resting HR, HRV, training, steps, sleep and BMI; how to bring it
+    down and the realistic floor; 12-month trend."""
     from domains.health.fitness_age import summary
-    return summary(conn)
-
-
-@router.put("/fitness-age/sex")
-def fitness_age_sex(body: FitnessAgeSex, conn: DB):
-    """Which population norms to compare VO2max with: male, female or both averaged."""
-    from domains.health.fitness_age import set_sex, summary
-    try:
-        set_sex(conn, body.sex)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
     return summary(conn)

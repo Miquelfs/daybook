@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { format, parseISO } from "date-fns";
 
@@ -9,9 +9,10 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 type Component = { key: string; label: string; value: number; unit: string; years: number; gain: number; good: string; why: string };
 type FitnessAge = {
   now: {
-    date: string; age: number; fitness_age: number; precise: number; delta: number; sex_norms: "male" | "female" | "both";
+    date: string; age: number; fitness_age: number; precise: number; delta: number;
     vo2max: number; vo2_age: number; adjust_years: number; raw_adjust_years: number; achievable: number; components: Component[];
-    biggest_gain: string | null;
+    biggest_gain: string | null; floor: number; vo2_goal: number;
+    plan: { key: string; title: string; now: number; unit: string; target: string; how: string; years: number }[];
   } | null;
   history: { date: string; fitness_age: number; vo2max: number }[];
   garmin: { date: string; fitness_age: number } | null;
@@ -22,7 +23,6 @@ const yrs = (y: number) => `${y > 0 ? "+" : y < 0 ? "−" : ""}${Math.abs(y).toF
 
 /** Daybook's fitness age: VO₂max sets the base, everyday health signals move it — every step shown. */
 export function FitnessAgeCard() {
-  const qc = useQueryClient();
   const { data } = useQuery<FitnessAge>({
     queryKey: ["fitness-age"],
     queryFn: () => fetch(`${BASE}/health/fitness-age`).then((r) => r.json()),
@@ -31,15 +31,7 @@ export function FitnessAgeCard() {
   const n = data?.now;
   if (!n) return null;
 
-  async function setNorms(sex: string) {
-    const r = await fetch("/api/health/fitness-age/sex", {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sex }),
-    });
-    if (r.ok) qc.setQueryData(["fitness-age"], await r.json());
-  }
-
   const maxAbs = Math.max(3, ...n.components.map((c) => Math.abs(c.years)));
-  const lever = n.components.find((c) => c.key === n.biggest_gain);
   const younger = n.delta < 0;
 
   return (
@@ -55,15 +47,9 @@ export function FitnessAgeCard() {
               </span>
             </p>
             <p className="text-xs text-[#71717A] mt-1">
-              Daybook&apos;s own · achievable <b className="text-[#A1A1AA]">{n.achievable}</b>
+              Daybook&apos;s own · lowest realistic <b className="text-[#A1A1AA]">{n.floor}</b>
               {data?.garmin ? <> · Garmin says {data.garmin.fitness_age}</> : null}
             </p>
-          </div>
-          <div className="flex rounded-lg bg-[#18181B] border border-[#27272A] p-0.5 text-[10px] shrink-0" title="Population norms VO₂max is compared with">
-            {([["male", "Men"], ["female", "Women"], ["both", "All"]] as const).map(([k, l]) => (
-              <button key={k} onClick={() => setNorms(k)}
-                      className={`px-2 py-1 rounded-md ${n.sex_norms === k ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#71717A] hover:text-[#A1A1AA]"}`}>{l}</button>
-            ))}
           </div>
         </div>
 
@@ -112,11 +98,32 @@ export function FitnessAgeCard() {
           </div>
         </div>
 
-        {lever && (
-          <p className="text-sm text-[#A1A1AA] mt-4 pt-4 border-t border-[#27272A]">
-            Biggest lever: <b className="text-[#FAFAFA]">{lever.label.toLowerCase()}</b> — now {fmtVal(lever)}, aim for {lever.good}.
-            That alone is worth about {lever.gain.toFixed(1)} years.
-          </p>
+        {n.plan.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-[#27272A]">
+            <div className="flex items-baseline justify-between gap-3 mb-2">
+              <p className="text-[10px] text-[#52525B] uppercase tracking-widest">How to bring it down</p>
+              <p className="text-xs text-[#71717A]">all of it: <b className="text-[#FAFAFA]">{n.floor}</b></p>
+            </div>
+            <div className="space-y-2.5">
+              {n.plan.map((p) => (
+                <div key={p.key} className="flex items-start gap-3">
+                  <span className="w-12 shrink-0 text-right tabular-nums text-sm font-semibold text-emerald-400">−{p.years.toFixed(1)}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm">
+                      {p.title} <span className="text-[#71717A] tabular-nums">
+                        · {p.key === "steps" ? p.now.toLocaleString("en-GB") : p.now}{p.unit ? ` ${p.unit}` : ""} → {p.target}
+                      </span>
+                    </p>
+                    <p className="text-xs text-[#71717A]">{p.how}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-[#71717A] mt-3">
+              Years each change is worth on its own — they overlap, so together they reach {n.floor}, not the sum.
+              {n.floor <= 20 ? " 20 is the bottom of the scale (the norms start at 20–29)." : ""}
+            </p>
+          </div>
         )}
 
         {data && data.history.length >= 3 && (
@@ -141,8 +148,8 @@ export function FitnessAgeCard() {
         <details className="mt-3">
           <summary className="text-xs text-[#71717A] cursor-pointer hover:text-[#A1A1AA] list-none">How is this worked out? →</summary>
           <p className="mt-2 text-xs text-[#A1A1AA] leading-relaxed">
-            The base is the age whose average VO₂max equals yours (HUNT study norms — the same research behind Garmin&apos;s
-            number). The last 28 days then move it: resting heart rate, overnight HRV against what&apos;s typical for your age,
+            The base is the age at which the average man has your VO₂max (HUNT study norms — the same research behind
+            Garmin&apos;s number). The last 28 days then move it: resting heart rate, overnight HRV against what&apos;s typical for your age,
             weekly training (WHO minutes, vigorous counting double), daily steps, sleep length and — lightly, because it
             misreads muscle — BMI. Each factor is capped so no single one dominates, and the bonuses overlap (a fit heart
             already shows in VO₂max, resting HR and HRV), so together they add with diminishing returns; penalties

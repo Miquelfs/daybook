@@ -2,7 +2,7 @@
 Daybook fitness age — Garmin's idea, with more of what matters and every step shown.
 
   base        the age whose *average* VO2max equals yours (HUNT3 / NTNU norms, the
-              same study behind Garmin's fitness age), by sex — or both averaged
+              same study behind Garmin's fitness age), men's norms
   adjusted    in years, each capped, from the last 28 days (bonuses overlap — the same
               strong heart shows in several of them — so they add with diminishing
               returns towards 8 years; penalties add in full):
@@ -25,23 +25,20 @@ import math
 import sqlite3
 from datetime import date, timedelta
 
-# HUNT3 mean VO2max (ml/kg/min) by age-band midpoint (Aspenes et al. 2011)
-NORMS = {
-    "male":   [(25, 54.4), (35, 49.2), (45, 47.2), (55, 42.6), (65, 39.0)],
-    "female": [(25, 43.0), (35, 40.0), (45, 38.4), (55, 34.4), (65, 31.1)],
-}
-NORMS["both"] = [(a, (m + f) / 2) for (a, m), (_, f) in zip(NORMS["male"], NORMS["female"])]
+# HUNT3 mean VO2max (ml/kg/min) for men, by age-band midpoint (Aspenes et al. 2011)
+NORMS = [(25, 54.4), (35, 49.2), (45, 47.2), (55, 42.6), (65, 39.0)]
+VO2_REALISTIC_GAIN = 4.0      # ml/kg/min a year of structured endurance training can add at your level
 WINDOW = 28
-MIN_AGE, MAX_AGE = 15, 95
+MIN_AGE, MAX_AGE = 20, 95          # the norms start at the 20–29 band (Garmin's scale stops at 20 too)
 
 
 def _tables(conn) -> set[str]:
     return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
 
 
-def vo2_age(vo2: float, sex: str = "both") -> float:
-    """Age at which the population average VO2max equals `vo2` (linear inside the bands, extended outside)."""
-    pts = NORMS.get(sex, NORMS["both"])
+def vo2_age(vo2: float) -> float:
+    """Age at which the average man's VO2max equals `vo2` (linear inside the bands, extended outside)."""
+    pts = NORMS
     for (a0, v0), (a1, v1) in zip(pts, pts[1:]):
         if v1 <= vo2 <= v0:
             return a0 + (v0 - vo2) / (v0 - v1) * (a1 - a0)
@@ -99,11 +96,27 @@ def years_bmi(bmi: float) -> float:
 OVERLAP_YEARS = 8.0     # bonuses saturate towards this: a strong heart shows in VO2max, RHR, HRV and training at once
 
 
+def final_age(base: float, years: list[float]) -> float:
+    return max(MIN_AGE, min(MAX_AGE, base + combine(years)))
+
+
 def combine(years: list[float]) -> float:
     """Penalties add up in full (separate risks); bonuses overlap, so they add with diminishing returns."""
     bonus = -sum(y for y in years if y < 0)
     penalty = sum(y for y in years if y > 0)
     return -OVERLAP_YEARS * (1 - math.exp(-bonus / OVERLAP_YEARS)) + min(10.0, penalty)
+
+
+# what to do, and the value that earns the best score
+ACTIONS = {
+    "rhr": ("Bring resting HR down", "≤ 45 bpm", "comes with aerobic volume, good sleep and little alcohol"),
+    "hrv": ("Raise overnight HRV", None, "regular sleep times, real recovery days, less alcohol and late eating"),
+    "activity": ("Train more (or harder)", "600 min/wk equivalent",
+                 "e.g. 6 h a week with ~1.5 h in Z3+ — vigorous minutes count double"),
+    "steps": ("Walk more", "12,000 steps/day", "a walk after meals or a walking commute on rest days"),
+    "sleep": ("Sleep 7.5–8.5 h", "7.5–8.5 h", "consistent bed time; it also lifts HRV"),
+    "bmi": ("Bring BMI under 25", None, "slowly — keep the power, lose the excess"),
+}
 
 
 BEST = {"rhr": -3.0, "hrv": -2.0, "activity": -2.5, "steps": -1.5, "sleep": -0.5, "bmi": 0.0}
@@ -127,22 +140,6 @@ def _age(conn, t, on: date) -> int | None:
         return None
     b = date.fromisoformat(r[0])
     return on.year - b.year - ((on.month, on.day) < (b.month, b.day))
-
-
-def sex_setting(conn) -> str:
-    try:
-        r = conn.execute("SELECT value FROM app_settings WHERE key='fitness_age_sex'").fetchone()
-        return r[0] if r and r[0] in NORMS else "both"
-    except sqlite3.OperationalError:
-        return "both"
-
-
-def set_sex(conn, sex: str) -> None:
-    if sex not in NORMS:
-        raise ValueError("sex must be male, female or both")
-    conn.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-    conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('fitness_age_sex', ?)", (sex,))
-    conn.commit()
 
 
 def _vo2(conn, t, on: date) -> float | None:
@@ -203,17 +200,16 @@ def _activity_eq_minutes(conn, t, start: str, end: str) -> tuple[float, float, f
 
 # ── the model ────────────────────────────────────────────────────────────────
 
-def compute(conn, on: date | None = None, sex: str | None = None) -> dict | None:
+def compute(conn, on: date | None = None) -> dict | None:
     on = on or date.today()
     t = _tables(conn)
     age = _age(conn, t, on)
     vo2 = _vo2(conn, t, on)
     if age is None or vo2 is None:
         return None
-    sex = sex or sex_setting(conn)
     start = (on - timedelta(days=WINDOW - 1)).isoformat()
     end = on.isoformat()
-    base = vo2_age(vo2, sex)
+    base = vo2_age(vo2)
     comps: list[dict] = []
 
     rhr = _avg(conn, "SELECT AVG(resting_hr) FROM daily_stats WHERE date BETWEEN ? AND ? AND resting_hr > 0", (start, end)) \
@@ -256,17 +252,38 @@ def compute(conn, on: date | None = None, sex: str | None = None) -> dict | None
                       "years": years_bmi(bmi), "good": "under 25",
                       "why": f"{w[0]:.1f} kg at {height:.2f} m — counts lightly: muscle weighs too"})
 
-    adj = combine([c["years"] for c in comps])
-    fa = max(MIN_AGE, min(MAX_AGE, base + adj))
-    best = max(MIN_AGE, base + combine([BEST[c["key"]] for c in comps]))
-    for c in comps:                                     # years still on the table if this factor were at its best
+    years = [c["years"] for c in comps]
+    adj = combine(years)
+    fa = final_age(base, years)
+    best = final_age(base, [BEST[c["key"]] for c in comps])
+    for c in comps:                    # what your fitness age would drop by if this factor alone were at its best
         others = [x["years"] for x in comps if x is not c]
-        c["gain"] = round(combine(others + [c["years"]]) - combine(others + [BEST[c["key"]]]), 1)
+        c["gain"] = round(fa - final_age(base, others + [BEST[c["key"]]]), 1)
+    # how to bring it down: each factor at its best (overlap-aware), plus VO2max — the biggest lever of all
+    plan = []
+    for c in comps:
+        if c["gain"] < 0.2:
+            continue
+        title, target, how = ACTIONS[c["key"]]
+        if c["key"] == "hrv":
+            target = f"≥ {round(hrv_norm(age) * 1.56)} ms"
+        if c["key"] == "bmi" and height:
+            target = f"≤ {24.9 * height ** 2:.0f} kg"
+        plan.append({"key": c["key"], "title": title, "now": c["value"], "unit": c["unit"], "target": target,
+                     "how": how, "years": c["gain"]})
+    vo2_goal = round(vo2 + VO2_REALISTIC_GAIN, 1)
+    vo2_years = round(fa - final_age(vo2_age(vo2_goal), years), 1)
+    plan.append({"key": "vo2max", "title": "Raise VO₂max", "now": round(vo2, 1), "unit": "",
+                 "target": f"{vo2_goal}", "how": "1–2 interval sessions a week (e.g. 4×4 min hard) on top of long Z2 — "
+                                                  "the Mallorca 312 build does most of this", "years": vo2_years})
+    plan.sort(key=lambda x: -x["years"])
+    floor = final_age(vo2_age(vo2_goal), [BEST[c["key"]] for c in comps])
+
     return {"date": end, "age": age, "fitness_age": round(fa), "precise": round(fa, 1),
-            "delta": round(fa - age), "sex_norms": sex, "vo2max": round(vo2, 1),
+            "delta": round(fa - age), "vo2max": round(vo2, 1),
             "vo2_age": round(base, 1), "adjust_years": round(adj, 1),
             "raw_adjust_years": round(sum(c["years"] for c in comps), 1),
-            "achievable": round(best), "components": comps,
+            "achievable": round(best), "floor": round(floor), "vo2_goal": vo2_goal, "plan": plan, "components": comps,
             "biggest_gain": max(comps, key=lambda c: c["gain"])["key"] if comps and max(c["gain"] for c in comps) >= 0.5
             else None}
 

@@ -40,14 +40,13 @@ def _db(rhr=41, hrv=68, steps=6500, sleep_h=7.2, train_min_day=60, vig_share=0.2
 
 class FitnessAgeTest(unittest.TestCase):
     def test_vo2_age(self):
-        self.assertAlmostEqual(fa.vo2_age(54.4, "male"), 25, delta=0.1)
-        self.assertAlmostEqual(fa.vo2_age(49.2, "male"), 35, delta=0.1)
-        self.assertLess(fa.vo2_age(60, "male"), 25)                 # fitter than the youngest band
-        self.assertLess(fa.vo2_age(45, "female"), fa.vo2_age(45, "male"))
+        self.assertAlmostEqual(fa.vo2_age(54.4), 25, delta=0.1)
+        self.assertAlmostEqual(fa.vo2_age(49.2), 35, delta=0.1)
+        self.assertLess(fa.vo2_age(60), 25)                         # fitter than the youngest band
 
     def test_your_profile(self):
         c, today = _db()
-        r = fa.compute(c, today, "male")
+        r = fa.compute(c, today)
         self.assertEqual(r["age"], 28)
         self.assertAlmostEqual(r["vo2_age"], 28.5, delta=0.3)       # VO2max 52.6 is average for a 28-year-old man
         k = {x["key"]: x for x in r["components"]}
@@ -62,14 +61,17 @@ class FitnessAgeTest(unittest.TestCase):
 
     def test_your_real_numbers(self):
         c, today = _db(rhr=42, hrv=84, steps=12482, sleep_h=7.2, train_min_day=36, vig_share=0.4)
-        r = fa.compute(c, today, "male")
+        r = fa.compute(c, today)
         self.assertEqual(r["raw_adjust_years"], -8.2)             # what simply adding them up gave (20)
         self.assertEqual(r["fitness_age"], 23)                     # overlap-aware
         self.assertGreaterEqual(r["achievable"], 21)
+        self.assertEqual(r["plan"][0]["key"], "vo2max")              # the biggest lever
+        self.assertLess(r["floor"], r["achievable"])
+        self.assertTrue(all(p["years"] > 0 for p in r["plan"]))
 
     def test_poor_habits_age_you(self):
         c, today = _db(rhr=72, hrv=30, steps=3000, sleep_h=5.5, train_min_day=5)
-        r = fa.compute(c, today, "male")
+        r = fa.compute(c, today)
         self.assertGreater(r["fitness_age"], r["vo2_age"] + 5)
 
     def test_needs_age_and_vo2(self):
