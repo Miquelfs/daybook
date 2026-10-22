@@ -186,6 +186,7 @@ step compute_activity_metrics python -m domains.health.compute_activity_metrics 
 step activity_analysis python -m domains.health.activity_analysis --days 7
 # Cols climbed (OpenStreetMap passes along new rides/runs/hikes) — retries next night if OSM is down.
 step cols_sync python -m domains.locations.cols
+step climbs_sync python -m domains.locations.climbs
 
 # CTL/ATL/TSB: update fitness & freshness for all sports.
 log "Computing training load (CTL/ATL/TSB)..."

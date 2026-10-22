@@ -119,8 +119,9 @@ def _detunnel(cum: list[float], eles: list[float]) -> tuple[list[float], list[di
     return e, tunnels
 
 
-def _climbs(prof: list[float]) -> list[dict]:
-    """Climbs on a 100 m profile: from a low point to the top, tolerating dips < 40 m."""
+def climb_spans(prof: list[float], min_gain: float = 80, min_grade: float = 0.02,
+                dip_m: float = 40) -> list[tuple[int, int]]:
+    """(start, top) indices of climbs on a 100 m profile: from the last low point to the top, tolerating dips."""
     out, i, n = [], 0, len(prof)
     while i < n - 1:
         start, top = i, i
@@ -129,22 +130,31 @@ def _climbs(prof: list[float]) -> list[dict]:
             j += 1
             if prof[j] > prof[top]:
                 top = j
-            elif prof[top] - prof[j] > 40:
+            elif prof[top] - prof[j] > dip_m:
                 break
         # the climb starts at the last low point before the top, not at the end of the flat before it
         low = min(prof[start:top + 1])
         start = max(k for k in range(start, top + 1) if prof[k] <= low + 3)
         gain = prof[top] - prof[start]
         length = (top - start) * STEP_M
-        if gain >= 80 and length > 0 and gain / length >= 0.02:
-            g200 = max(((prof[k + 2] - prof[k]) / 200 for k in range(start, top - 1)), default=gain / length)
-            out.append({"km": round(start * STEP_M / 1000), "length_km": round(length / 1000, 1),
-                        "gain_m": round(gain), "avg_pct": round(gain / length * 100, 1),
-                        "max_200m_pct": round(g200 * 100)})
+        if gain >= min_gain and length > 0 and gain / length >= min_grade:
+            out.append((start, top))
             i = top
         else:
             i = max(i + 1, top if top > i else i + 1)
     return out
+
+
+def climb_stats(prof: list[float], start: int, top: int) -> dict:
+    gain = prof[top] - prof[start]
+    length = (top - start) * STEP_M
+    g200 = max(((prof[k + 2] - prof[k]) / 200 for k in range(start, top - 1)), default=gain / length)
+    return {"km": round(start * STEP_M / 1000), "length_km": round(length / 1000, 1), "gain_m": round(gain),
+            "avg_pct": round(gain / length * 100, 1), "max_200m_pct": round(g200 * 100)}
+
+
+def _climbs(prof: list[float]) -> list[dict]:
+    return [climb_stats(prof, a, b) for a, b in climb_spans(prof)]
 
 
 def _speed(grade_pct: float) -> float:

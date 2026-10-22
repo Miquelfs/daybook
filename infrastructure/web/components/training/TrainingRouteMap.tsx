@@ -403,7 +403,12 @@ export function TrainingRouteMap() {
           <span className="ml-auto">Roads: OpenStreetMap ({coverage.built})</span>
         </div>
       )}
-      {cols && showCols && <ColsPanel c={cols} onPick={flyTo} />}
+      {cols && showCols && (
+        <Link href="/omyra?tab=cols" className="mt-3 flex items-center justify-between rounded-2xl border border-[#27272A] bg-[#0D0D0F] px-4 py-3 hover:border-[#3F3F46]">
+          <span className="text-sm">▲ {cols.total} cols climbed{cols.mallorca ? ` · Mallorca road cols ${cols.mallorca.road_climbed}/${cols.mallorca.road_total}` : ""}</span>
+          <span className="text-xs text-[#F59E0B]">Your cols →</span>
+        </Link>
+      )}
     </>
   );
 }
@@ -467,73 +472,6 @@ function CoveragePanel({ c, onPick }: { c: Coverage; onPick: (lat: number, lng: 
             </div>
           )}
         </div>
-      )}
-    </div>
-  );
-}
-
-/** Every col you've been over, and Mallorca's road cols still to climb. */
-function ColsPanel({ c, onPick }: { c: ColsSummary; onPick: (lat: number, lng: number) => void }) {
-  const [all, setAll] = useState(false);
-  const list = all ? c.climbed : c.climbed.slice(0, 10);
-  const m = c.mallorca;
-  return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 mt-4">
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Cols climbed</p>
-          <p className="text-2xl font-semibold tabular-nums">{c.total}<span className="text-sm font-normal text-[#71717A]"> · {c.visits} times</span></p>
-        </div>
-        <div className="min-w-0">
-          <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Highest</p>
-          <p className="text-sm font-semibold truncate">{c.highest ? c.highest.name : "—"}</p>
-          {c.highest?.ele != null && <p className="text-xs text-[#71717A] tabular-nums">{Math.round(c.highest.ele)} m</p>}
-        </div>
-        {m && m.road_total > 0 && (
-          <div>
-            <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Mallorca road cols</p>
-            <p className="text-2xl font-semibold tabular-nums">{m.road_climbed}<span className="text-sm font-normal text-[#71717A]"> / {m.road_total}</span></p>
-          </div>
-        )}
-      </div>
-      {m && m.road_total > 0 && (
-        <div className="h-1.5 rounded-full bg-[#18181B] overflow-hidden mt-2">
-          <div className="h-full rounded-full" style={{ width: `${(m.road_climbed / m.road_total) * 100}%`, background: COL }} />
-        </div>
-      )}
-      {m && m.todo.length > 0 && (
-        <div className="mt-4">
-          <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1.5">Mallorca road cols still to climb · highest first</p>
-          <div className="flex flex-wrap gap-1.5">
-            {m.todo.slice(0, 14).map((t) => (
-              <button key={t.osm_id} onClick={() => onPick(t.lat, t.lng)}
-                      className="text-xs px-2 py-1 rounded-lg bg-[#18181B] text-[#A1A1AA] hover:text-[#FAFAFA]">
-                △ {t.name}{t.ele != null ? <span className="text-[#71717A] tabular-nums"> {Math.round(t.ele)} m</span> : null}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {c.climbed.length > 0 ? (
-        <div className="mt-4 -mx-4 border-t border-[#18181B] divide-y divide-[#18181B]">
-          {list.map((x) => (
-            <div key={x.osm_id} className="flex items-center gap-3 px-4 py-2 text-xs tabular-nums">
-              <button onClick={() => onPick(x.lat, x.lng)} className="flex-1 min-w-0 text-left truncate text-[#D4D4D8] hover:text-[#FAFAFA]">
-                ▲ {x.name}
-              </button>
-              <span className="w-14 text-right text-[#71717A]">{x.ele != null ? `${Math.round(x.ele)} m` : "—"}</span>
-              <span className="w-8 text-right text-[#A1A1AA]">{x.times}×</span>
-              <Link href={`/activity/${encodeURIComponent(x.last_activity_id)}`} className="w-20 text-right text-[#71717A] hover:text-[#F59E0B]">{x.last_date}</Link>
-            </div>
-          ))}
-          {c.climbed.length > 10 && (
-            <button onClick={() => setAll((v) => !v)} className="w-full px-4 py-2 text-xs text-[#71717A] hover:text-[#A1A1AA] text-left">
-              {all ? "Show fewer" : `Show all ${c.climbed.length}`}
-            </button>
-          )}
-        </div>
-      ) : (
-        <p className="text-xs text-[#71717A] mt-3">No cols yet — they're picked up from your bike rides (Garmin GPS) after a sync.</p>
       )}
     </div>
   );

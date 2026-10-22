@@ -16,6 +16,7 @@ import { ActivitySplitsChart } from "@/components/ActivitySplitsChart";
 import { BestEffortsCard, SameRouteCard } from "@/components/activity/EffortsCards";
 import { PlannedVsActual } from "@/components/PlannedVsActual";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
+import { ColSign, hms, ordinal } from "@/components/training/ColSign";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -52,23 +53,48 @@ function StrainChip({ strain }: { strain: NonNullable<ActivityImpact["strain"]> 
   );
 }
 
-const ORDINAL = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
-
-/** Cols this ride went over — first times stand out. */
+/** Cols this ride went over, as summit signs — first times stand out. */
 function ColsChips({ cols }: { cols: NonNullable<ActivityImpact["cols"]> }) {
   return (
-    <div className="mt-4">
+    <div className="mt-5">
       <span className="text-xs text-[#52525B] uppercase tracking-widest">Cols</span>
-      <div className="flex flex-wrap gap-1.5 mt-1.5">
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5 mt-2">
         {cols.map((c) => (
-          <Link key={c.osm_id} href="/omyra?tab=map"
-                className={`text-xs px-2.5 py-1 rounded-lg ${c.first_time ? "bg-[#F59E0B]/15 text-[#F59E0B]" : "bg-[#18181B] text-[#A1A1AA]"}`}>
-            ⛰ {c.name}{c.ele != null ? ` · ${Math.round(c.ele)} m` : ""}
-            <span className="text-[#71717A]"> · {c.first_time ? "first time" : `${ORDINAL(c.nth)} time`}</span>
-          </Link>
+          <ColSign key={c.osm_id} size="sm" name={c.name} ele={c.ele} href="/omyra?tab=cols"
+                   footer={c.first_time ? <b style={{ color: "#B91C1C" }}>first time ✦</b> : <>{ordinal(c.nth)} time</>} />
         ))}
       </div>
     </div>
+  );
+}
+
+/** Each real climb in this ride: how long, how steep, how fast (VAM), and how it compares. */
+function ClimbsCard({ climbs }: { climbs: NonNullable<ActivityImpact["climbs"]> }) {
+  return (
+    <section className="mb-8">
+      <SectionLabel>Climbs</SectionLabel>
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl divide-y divide-[#18181B] overflow-hidden">
+        {climbs.map((c) => (
+          <div key={c.key + c.secs} className="flex items-center gap-3 px-4 py-3">
+            <div className="w-[4.5rem] shrink-0"><ColSign size="sm" name="" ele={c.top_ele} kind={c.kind} /></div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">
+                {c.name}
+                {c.first_time && <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#F59E0B]/15 text-[#F59E0B]">first time</span>}
+                {c.best_vam && <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#F59E0B]/15 text-[#F59E0B]">best VAM</span>}
+              </p>
+              <p className="text-xs text-[#71717A] tabular-nums">
+                {c.length_km} km · +{c.gain_m} m · {c.avg_pct}% (max {c.max_pct}%){c.side ? ` · from ${c.side}` : ""}
+              </p>
+            </div>
+            <div className="text-right shrink-0 tabular-nums">
+              <p className="text-sm font-semibold">{hms(c.secs)}</p>
+              <p className="text-[11px] text-[#71717A]">{c.vam ? `${c.vam} m/h` : ""}{!c.first_time ? ` · ${ordinal(c.nth)}` : ""}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -315,6 +341,9 @@ export default async function ActivityPage({ params }: Props) {
           <ActivityMap polyline={activity.polyline} />
         </section>
       )}
+
+      {/* Climbs in this ride (from its elevation) */}
+      {impact?.climbs && impact.climbs.length > 0 && <ClimbsCard climbs={impact.climbs} />}
 
       {/* Plan link: offer the day's sessions when unlinked; show + undo when linked */}
       {activity.plan_session ? (

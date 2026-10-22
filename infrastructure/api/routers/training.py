@@ -364,6 +364,13 @@ def cols_climbed(conn: DB):
     return summary(conn)
 
 
+@router.get("/climbs")
+def climbs_ridden(conn: DB):
+    """Every climb found in your rides' elevation (≥ 100 m at ≥ 3 %), named, with ascents and best VAM."""
+    from domains.locations.climbs import summary
+    return summary(conn)
+
+
 @router.get("/mallorca-coverage")
 def mallorca_coverage(conn: DB):
     """Bikeable roads and villages of Mallorca your rides have covered (cached until the next ride)."""

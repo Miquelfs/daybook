@@ -1574,6 +1574,17 @@ export interface FitnessSummary {
   strain: { today: number; today_label: string | null; avg: number; days: { date: string; value: number }[] } | null;
 }
 
+export type ClimbAscent = {
+  key: string; name: string; kind: string; side: string | null; length_km: number; gain_m: number; avg_pct: number;
+  max_pct: number; secs: number; vam: number | null; top_ele: number; nth: number; first_time: boolean; best_vam: boolean;
+};
+export type ClimbsSummary = {
+  total: number; ascents: number; metres: number;
+  climbs: { key: string; name: string; kind: string; lat: number; lng: number; ele: number; times: number;
+            first_date: string; last_date: string; last_activity_id: string; best_vam: number | null; gain_m: number;
+            length_km: number; avg_pct: number; sides: string[] }[];
+};
+
 export type ColClimbed = {
   osm_id: number; name: string; ele: number | null; lat: number; lng: number; kind: string; times: number;
   first_date: string; last_date: string; last_activity_id: string; sports: string[]; in_mallorca: boolean; on_road: number | null;
@@ -1598,6 +1609,8 @@ export interface ActivityImpact {
     form_before?: number | null; form_next?: number; form_label?: string;
     week_tss: number | null; week_share_pct: number | null;
   } | null;
+  /** Climbs found in this ride's elevation (≥ 100 m at ≥ 3 %), named after their summit. */
+  climbs?: ClimbAscent[];
   /** Cols / passes this activity went over, with how many times you've been there. */
   cols?: { osm_id: number; name: string; ele: number | null; nth: number; total: number; first_time: boolean }[];
   /** Whoop-style 0–21 cardiovascular strain from time in HR zones. */

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, Mountain, CalendarRange, List, Zap, TrendingUp, Map, Droplet, Flame, Plus } from "lucide-react";
+import { Activity, Mountain, MountainSnow, CalendarRange, List, Zap, TrendingUp, Map, Droplet, Flame, Plus } from "lucide-react";
 import { RaceCockpit } from "@/components/race/RaceCockpit";
 import OmyraTab from "@/components/training/OmyraTab";
 import FuelTab from "@/components/training/FuelTab";
@@ -11,6 +11,7 @@ import RelativeEffortChart from "@/components/training/RelativeEffortChart";
 import TrainingLogCalendar from "@/components/training/TrainingLogCalendar";
 import { VolumeChart, ProgressComparisonChart } from "@/components/training/ProgressChart";
 import { TrainingRouteMap } from "@/components/training/TrainingRouteMap";
+import { ColsTab } from "@/components/omyra/ColsTab";
 import { TrainingOverview } from "@/components/omyra/TrainingOverview";
 import { AddActivitySheet } from "@/components/omyra/AddActivitySheet";
 import { AreaPlan } from "@/components/plan/AreaPlan";
@@ -25,6 +26,7 @@ const TABS = [
   { key: "progress", label: "Progress", icon: TrendingUp },
   { key: "streaks", label: "Streaks", icon: Flame },
   { key: "map", label: "Map", icon: Map },
+  { key: "cols", label: "Cols", icon: MountainSnow },
   { key: "fuel", label: "Fuel", icon: Droplet },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
@@ -112,6 +114,7 @@ export function OmyraHub() {
         </section>
       )}
       {tab === "map" && <TrainingRouteMap />}
+      {tab === "cols" && <ColsTab />}
 
       {showAdd && (
         <AddActivitySheet onClose={() => setShowAdd(false)} onSaved={() => {
