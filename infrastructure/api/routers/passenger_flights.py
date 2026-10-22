@@ -25,7 +25,7 @@ CO2_KG_PER_KM = 0.133   # short-haul economy pax estimate (~matches FR24's figur
 _COLS = (
     "date, flight_number, origin, destination, dep_icao, arr_icao, airline, airline_code, "
     "aircraft, aircraft_code, registration, price_paid, reason, commuting, companion, seat, "
-    "seat_type, flight_class, dep_time, arr_time, duration_hours, distance_km, notes"
+    "seat_type, flight_class, dep_time, arr_time, duration_hours, distance_km, notes, standby"
 )
 
 
@@ -55,7 +55,7 @@ def _row(r: sqlite3.Row) -> PassengerFlightOut:
         airline=v("airline"), airline_code=v("airline_code"),
         aircraft=v("aircraft"), aircraft_code=v("aircraft_code"),
         registration=v("registration"), price_paid=v("price_paid"), reason=v("reason"),
-        commuting=bool(v("commuting")), companion=v("companion"), seat=v("seat"),
+        commuting=bool(v("commuting")), standby=bool(v("standby")), companion=v("companion"), seat=v("seat"),
         seat_type=v("seat_type"), flight_class=v("flight_class"),
         dep_time=v("dep_time"), arr_time=v("arr_time"),
         duration_hours=v("duration_hours"), distance_km=v("distance_km"),
@@ -180,7 +180,8 @@ def get_analytics(conn: DB):
                   COALESCE(SUM(duration_hours),0) AS hours,
                   COALESCE(SUM(price_paid),0)     AS spent,
                   COUNT(DISTINCT airline)         AS airlines,
-                  COUNT(DISTINCT COALESCE(aircraft_code, aircraft)) AS aircraft
+                  COUNT(DISTINCT COALESCE(aircraft_code, aircraft)) AS aircraft,
+                  COALESCE(SUM(standby), 0)       AS standby
            FROM passenger_flights"""
     ).fetchone()
 
@@ -250,6 +251,7 @@ def get_analytics(conn: DB):
             "domestic": (dom["domestic"] or 0) if dom else 0,
             "international": (dom["intl"] or 0) if dom else 0,
             "years_flying": years_flying,
+            "standby": tot["standby"] or 0,
         },
         "top_airports": top_airports,
         "top_airlines": top_airlines,
@@ -309,12 +311,12 @@ def create_flight(body: PassengerFlightIn, conn: DB):
     d = _enrich(conn, body.model_dump())
     cur = conn.execute(
         f"""INSERT INTO passenger_flights ({_COLS})
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (d["date"], d["flight_number"], d["origin"], d["destination"], d["dep_icao"], d["arr_icao"],
          d["airline"], d["airline_code"], d["aircraft"], d["aircraft_code"], d["registration"],
          d["price_paid"], d["reason"], int(d["commuting"]), d["companion"], d["seat"],
          d["seat_type"], d["flight_class"], d["dep_time"], d["arr_time"], d["duration_hours"],
-         d["distance_km"], d["notes"]),
+         d["distance_km"], d["notes"], int(d["standby"])),
     )
     ensure_traveling_tag(conn, d["date"])
     conn.commit()
@@ -338,8 +340,9 @@ def update_flight(flight_id: int, body: PassengerFlightPatch, conn: DB):
             g["dep_icao"], g["arr_icao"], g["distance_km"])
     if "aircraft" in updates and not updates.get("aircraft_code"):
         updates["aircraft_code"] = normalize_aircraft(updates["aircraft"])
-    if "commuting" in updates:
-        updates["commuting"] = int(updates["commuting"])
+    for flag in ("commuting", "standby"):
+        if flag in updates:
+            updates[flag] = int(updates[flag])
     if not updates:
         return _row(existing)
 

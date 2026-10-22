@@ -98,6 +98,7 @@ export function PassengerFlightForm({ date, initial, onSaved, submitLabel }: Pro
   const [price, setPrice] = useState(initial?.price_paid != null ? String(initial.price_paid) : "");
   const [reason, setReason] = useState(initial?.reason ?? "");
   const [flightClass, setFlightClass] = useState(initial?.flight_class ?? "");
+  const [standby, setStandby] = useState(initial?.standby ?? false);
   const [seatType, setSeatType] = useState(initial?.seat_type ?? "");
   const [seat, setSeat] = useState(initial?.seat ?? "");
   const [companion, setCompanion] = useState(initial?.companion ?? "");
@@ -122,6 +123,7 @@ export function PassengerFlightForm({ date, initial, onSaved, submitLabel }: Pro
         price_paid: price ? parseFloat(price) : undefined,
         reason: reason || undefined,
         commuting: reason === "Commuting",
+        standby,
         flight_class: flightClass || undefined,
         seat_type: seatType || undefined,
         seat: seat.trim() || undefined,
@@ -167,6 +169,14 @@ export function PassengerFlightForm({ date, initial, onSaved, submitLabel }: Pro
         <input value={price} onChange={(e) => setPrice(e.target.value)}
           type="number" min="0" step="0.01" placeholder="Price paid (€)" className={inputCls} />
       </div>
+      <button type="button" onClick={() => setStandby((v) => !v)} aria-pressed={standby}
+        className={`w-full flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors ${
+          standby ? "border-violet-400/50 bg-violet-500/10 text-violet-400" : "border-[#27272A] bg-[#18181B] text-[#71717A] hover:text-[#A1A1AA]"}`}>
+        <span>Flew standby</span>
+        <span className={`w-8 h-4 rounded-full relative transition-colors ${standby ? "bg-violet-400" : "bg-[#3F3F46]"}`}>
+          <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${standby ? "left-[18px]" : "left-0.5"}`} />
+        </span>
+      </button>
 
       {more ? (
         <div className="space-y-3 pt-1 border-t border-[#18181B]">

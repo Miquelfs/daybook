@@ -15,6 +15,7 @@ class PassengerFlightIn(BaseModel):
     price_paid: Optional[float] = None
     reason: Optional[str] = None
     commuting: bool = False
+    standby: bool = False                   # flew standby (staff / ID ticket)
     companion: Optional[str] = None
     seat: Optional[str] = None
     seat_type: Optional[str] = None
@@ -38,6 +39,7 @@ class PassengerFlightPatch(BaseModel):
     price_paid: Optional[float] = None
     reason: Optional[str] = None
     commuting: Optional[bool] = None
+    standby: Optional[bool] = None
     companion: Optional[str] = None
     seat: Optional[str] = None
     seat_type: Optional[str] = None
@@ -64,6 +66,7 @@ class PassengerFlightOut(BaseModel):
     price_paid: Optional[float]
     reason: Optional[str]
     commuting: bool
+    standby: bool = False
     companion: Optional[str]
     seat: Optional[str]
     seat_type: Optional[str]

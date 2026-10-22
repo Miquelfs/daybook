@@ -60,6 +60,8 @@ export interface PassengerFlight {
   price_paid: number | null;
   reason: string | null;
   commuting: boolean;
+  /** Flew standby (staff / ID ticket). */
+  standby: boolean;
   companion: string | null;
   seat: string | null;
   seat_type: string | null;
@@ -86,6 +88,7 @@ export interface PassengerFlightIn {
   price_paid?: number;
   reason?: string;
   commuting?: boolean;
+  standby?: boolean;
   companion?: string;
   seat?: string;
   seat_type?: string;
@@ -112,6 +115,7 @@ export interface FlightAnalytics {
     domestic: number;
     international: number;
     years_flying: number;
+    standby: number;
   };
   top_airports: { code: string; city: string | null; country: string | null; count: number }[];
   top_airlines: { code: string | null; airline: string; count: number }[];

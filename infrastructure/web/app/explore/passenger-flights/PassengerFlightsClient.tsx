@@ -198,6 +198,7 @@ function FlightRow({ f, onEdit, onDelete }: { f: PassengerFlight; onEdit: () => 
         {/* Badges */}
         <div className="hidden sm:flex flex-col items-end gap-1 shrink-0 text-right">
           <div className="flex items-center gap-1.5">
+            {f.standby && <Badge text="Standby" tone="#A78BFA" />}
             {f.commuting && <Badge text="Commute" tone="#F59E0B" />}
             {f.reason && !f.commuting && <Badge text={f.reason} tone="#71717A" />}
             {f.flight_class && <Badge text={f.flight_class} tone="#34D399" />}

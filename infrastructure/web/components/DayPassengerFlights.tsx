@@ -50,6 +50,7 @@ export function DayPassengerFlights({ date }: { date: string }) {
                 <p className="text-sm font-medium text-[#FAFAFA] truncate">
                   {route}
                   {f.flight_number && <span className="text-[#52525B] font-normal"> · {f.flight_number}</span>}
+                  {f.standby && <span className="ml-2 text-[10px] text-violet-400 uppercase tracking-wide">standby</span>}
                   {f.commuting && <span className="ml-2 text-[10px] text-[#F59E0B] uppercase tracking-wide">commute</span>}
                 </p>
                 {meta && <p className="text-xs text-[#52525B] truncate">{meta}</p>}

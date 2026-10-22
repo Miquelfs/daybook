@@ -78,6 +78,9 @@ export function FlightStats({ a, onSelect }: { a: FlightAnalytics; onSelect?: (f
         <Chip label="Aircraft" value={t.distinct_aircraft} />
         <Chip label="Countries" value={t.distinct_countries} />
         <Chip label="Routes" value={t.distinct_routes} />
+        {t.standby > 0 && (
+          <Chip label={`Standby · ${Math.round((t.standby / Math.max(1, t.flights)) * 100)}%`} value={t.standby} />
+        )}
         <Chip label="Years flying" value={t.years_flying} />
       </div>
 

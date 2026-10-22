@@ -51,6 +51,7 @@ def migrate(conn):
         "dep_time": "TEXT",           # HH:MM local
         "arr_time": "TEXT",
         "distance_km": "REAL",        # great-circle dep→arr
+        "standby": "INTEGER NOT NULL DEFAULT 0",   # 1 = flew standby (staff / ID travel)
     }
     existing = {r[1] for r in conn.execute("PRAGMA table_info(passenger_flights)")}
     for col, typ in _extra.items():
