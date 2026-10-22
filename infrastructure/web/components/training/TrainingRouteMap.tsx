@@ -19,6 +19,20 @@ type PolylinesResponse = {
   swim?: Route[];
 };
 
+type Coverage = {
+  rides: number; built: string;
+  roads: { total_km: number; ridden_km: number; pct: number;
+           classes: { key: string; label: string; total_km: number; ridden_km: number; pct: number }[] };
+  villages: { name: string; lat: number; lng: number; visited: boolean; first_date: string | null; km_from_home: number }[];
+  villages_visited: number;
+  gaps: { name: string; missing_km: number }[];
+  ridden: string[]; missing: string[];
+};
+
+// Mallorca, framed the same every time the map opens
+const MALLORCA: [[number, number], [number, number]] = [[39.27, 2.33], [39.96, 3.48]];
+const RIDDEN = "#16A34A", MISSING = "#EA580C";
+
 const SPORT_COLORS: Record<string, string> = {
   run: "#F59E0B",
   ride: "#3B82F6",
@@ -76,6 +90,7 @@ export function TrainingRouteMap() {
   const layersRef = useRef<any[]>([]);
   // Track whether we've ever fit bounds (only do it on first load)
   const hasFitRef = useRef(false);
+  const allCoordsRef = useRef<[number, number][]>([]);
 
   const [activeSports, setActiveSports] = useState<Record<string, boolean>>({ run: true, ride: true, swim: false });
   const [metric, setMetric] = useState<Metric>("none");
@@ -83,6 +98,11 @@ export function TrainingRouteMap() {
   const [data, setData] = useState<PolylinesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [count, setCount] = useState(0);
+  const [showRoads, setShowRoads] = useState(true);
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const coverageLayersRef = useRef<any[]>([]);
+  const [mapReady, setMapReady] = useState(false);
 
   const toggleSport = (s: string) =>
     setActiveSports((prev) => ({ ...prev, [s]: !prev[s] }));
@@ -119,16 +139,14 @@ export function TrainingRouteMap() {
       await import("leaflet/dist/leaflet.css");
       if (cancelled || !containerRef.current || mapRef.current) return;
 
-      mapRef.current = L.map(containerRef.current, {
-        zoomControl: true,
-        center: [40, 10],
-        zoom: 4,
-      });
+      mapRef.current = L.map(containerRef.current, { zoomControl: true });
+      mapRef.current.fitBounds(MALLORCA);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       }).addTo(mapRef.current);
+      setMapReady(true);
     })();
 
     return () => { cancelled = true; };
@@ -179,24 +197,60 @@ export function TrainingRouteMap() {
       }
     }
 
-    // Only auto-fit on the very first load with real data
-    if (!hasFitRef.current && allCoords.length > 0) {
-      hasFitRef.current = true;
-      const lats = allCoords.map((c) => c[0]);
-      const lngs = allCoords.map((c) => c[1]);
-      try {
-        mapRef.current.fitBounds(
-          [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]],
-          { padding: [30, 30], maxZoom: 14 }
-        );
-      } catch { /* */ }
-    }
+    allCoordsRef.current = allCoords;
   }, [data, activeSports, metric]);
+
+  // Mallorca road coverage — fetched once, cached on the Pi until the next ride
+  useEffect(() => {
+    fetch(`${API}/training/mallorca-coverage`).then((r) => (r.ok ? r.json() : null)).then(setCoverage).catch(() => {});
+  }, []);
+
+  // Draw ridden / missing roads + villages under the rides
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    coverageLayersRef.current.forEach((l) => { try { l.remove(); } catch { /* */ } });
+    coverageLayersRef.current = [];
+    if (!coverage || !showRoads) return;
+    let cancelled = false;
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const L = (window as any).L ?? (await import("leaflet")).default;
+      const poly = await import("polyline");
+      if (cancelled) return;
+      const dec = (xs: string[]) => xs.map((e) => poly.decode(e) as [number, number][]);
+      const missing = L.polyline(dec(coverage.missing), { color: MISSING, weight: 1.6, opacity: 0.75, dashArray: "4 4", interactive: false });
+      const ridden = L.polyline(dec(coverage.ridden), { color: RIDDEN, weight: 2.4, opacity: 0.8, interactive: false });
+      missing.addTo(mapRef.current); ridden.addTo(mapRef.current);
+      missing.bringToBack(); ridden.bringToBack();
+      const layers = [missing, ridden];
+      for (const v of coverage.villages) {
+        const m = L.circleMarker([v.lat, v.lng], {
+          radius: 5, weight: 2, color: v.visited ? RIDDEN : MISSING,
+          fillColor: v.visited ? RIDDEN : "#FFFFFF", fillOpacity: v.visited ? 0.9 : 0.6,
+        }).bindPopup(`<b>${v.name}</b><br/>${v.visited ? `first ridden ${v.first_date}` : `not yet · ${v.km_from_home} km from home`}`);
+        m.addTo(mapRef.current);
+        layers.push(m);
+      }
+      coverageLayersRef.current = layers;
+    })();
+    return () => { cancelled = true; };
+  }, [coverage, showRoads, mapReady]);
+
+  const flyTo = (lat: number, lng: number) => mapRef.current?.flyTo([lat, lng], 13);
+  const frameMallorca = () => mapRef.current?.fitBounds(MALLORCA);
+  const frameAll = () => {
+    const c = allCoordsRef.current;
+    if (!c.length) return;
+    const lats = c.map((x) => x[0]), lngs = c.map((x) => x[1]);
+    mapRef.current?.fitBounds([[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]],
+                              { padding: [30, 30], maxZoom: 14 });
+  };
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       layersRef.current.forEach((l) => { try { l.remove(); } catch { /* */ } });
+      coverageLayersRef.current.forEach((l) => { try { l.remove(); } catch { /* */ } });
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
       hasFitRef.current = false;
     };
@@ -251,6 +305,15 @@ export function TrainingRouteMap() {
           ))}
         </div>
 
+        <div className="flex gap-1">
+          <button onClick={frameMallorca} className="px-2.5 py-1 rounded text-xs text-[#71717A] hover:text-[#A1A1AA] border border-[#27272A]">Mallorca</button>
+          <button onClick={frameAll} className="px-2.5 py-1 rounded text-xs text-[#71717A] hover:text-[#A1A1AA] border border-[#27272A]">All</button>
+          <button onClick={() => setShowRoads((x) => !x)}
+                  className={`px-2.5 py-1 rounded text-xs transition-colors ${showRoads ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
+            Mallorca roads
+          </button>
+        </div>
+
         {!loading && count > 0 && (
           <span className="text-xs text-[#52525B]">{count} routes</span>
         )}
@@ -279,9 +342,84 @@ export function TrainingRouteMap() {
         </div>
       )}
 
-      <div className="rounded-xl overflow-hidden border border-[#27272A]">
-        <div ref={containerRef} style={{ height: 480, width: "100%" }} />
+      {coverage && showRoads && <CoveragePanel c={coverage} onPick={flyTo} />}
+
+      <div className="rounded-2xl overflow-hidden border border-[#27272A] isolate">
+        <div ref={containerRef} style={{ height: 520, width: "100%" }} />
       </div>
+      {coverage && showRoads && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[11px] text-[#71717A]">
+          <span className="flex items-center gap-1.5"><span className="w-4 h-0.5" style={{ background: RIDDEN }} />ridden</span>
+          <span className="flex items-center gap-1.5"><span className="w-4 border-t border-dashed" style={{ borderColor: MISSING }} />not yet</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: RIDDEN }} />village visited</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full border-2" style={{ borderColor: MISSING }} />village to visit</span>
+          <span className="ml-auto">Roads: OpenStreetMap ({coverage.built})</span>
+        </div>
+      )}
     </>
+  );
+}
+
+/** How much of Mallorca you've ridden: roads by type, villages, and where to go next. */
+function CoveragePanel({ c, onPick }: { c: Coverage; onPick: (lat: number, lng: number) => void }) {
+  const todo = c.villages.filter((v) => !v.visited).slice(0, 8);
+  return (
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 mb-3">
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Mallorca roads ridden</p>
+          <p className="text-2xl font-semibold tabular-nums">
+            {c.roads.pct}%<span className="text-sm font-normal text-[#71717A]"> · {c.roads.ridden_km.toLocaleString("en-GB")} / {c.roads.total_km.toLocaleString("en-GB")} km</span>
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Villages reached</p>
+          <p className="text-2xl font-semibold tabular-nums">
+            {c.villages_visited}<span className="text-sm font-normal text-[#71717A]"> / {c.villages.length}</span>
+          </p>
+        </div>
+      </div>
+      <div className="space-y-1.5 mt-3">
+        {c.roads.classes.map((k) => (
+          <div key={k.key} className="flex items-center gap-3 text-xs">
+            <span className="w-28 shrink-0 text-[#A1A1AA]">{k.label}</span>
+            <div className="flex-1 h-1.5 rounded-full bg-[#18181B] overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${k.pct}%`, background: RIDDEN }} />
+            </div>
+            <span className="w-24 shrink-0 text-right tabular-nums text-[#71717A]">{k.ridden_km} / {k.total_km} km</span>
+          </div>
+        ))}
+      </div>
+      {(todo.length > 0 || c.gaps.length > 0) && (
+        <div className="grid sm:grid-cols-2 gap-4 mt-4 pt-3 border-t border-[#27272A]">
+          {todo.length > 0 && (
+            <div>
+              <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1.5">Closest villages still to ride to</p>
+              <div className="flex flex-wrap gap-1.5">
+                {todo.map((v) => (
+                  <button key={v.name} onClick={() => onPick(v.lat, v.lng)}
+                          className="text-xs px-2 py-1 rounded-lg bg-[#18181B] text-[#A1A1AA] hover:text-[#FAFAFA]">
+                    {v.name} <span className="text-[#71717A] tabular-nums">{v.km_from_home} km</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {c.gaps.length > 0 && (
+            <div>
+              <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1.5">Biggest roads still to ride</p>
+              <div className="space-y-0.5">
+                {c.gaps.slice(0, 6).map((g) => (
+                  <p key={g.name} className="text-xs flex justify-between gap-3">
+                    <span className="text-[#A1A1AA] truncate">{g.name}</span>
+                    <span className="text-[#71717A] tabular-nums shrink-0">{g.missing_km} km</span>
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

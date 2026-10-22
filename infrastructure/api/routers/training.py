@@ -357,6 +357,13 @@ def training_load(
     return result
 
 
+@router.get("/mallorca-coverage")
+def mallorca_coverage(conn: DB):
+    """Bikeable roads and villages of Mallorca your rides have covered (cached until the next ride)."""
+    from domains.locations.mallorca.coverage import get
+    return get(conn)
+
+
 @router.get("/fitness-summary")
 def fitness_summary(conn: DB):
     """Fitness/fatigue/form now, the race-day fitness target and build rate needed, and fitness age."""

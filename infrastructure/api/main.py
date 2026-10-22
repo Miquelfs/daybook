@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 
@@ -74,6 +75,8 @@ app.add_middleware(
     allow_methods=["GET", "PATCH", "POST", "DELETE"],
     allow_headers=["*"],
 )
+# Big JSON (route maps, road coverage) over Tailscale to the phone: compress it.
+app.add_middleware(GZipMiddleware, minimum_size=2048)
 
 # ── Your timezone, process-wide ──────────────────────────────────────────────
 # Every date.today()/datetime.now() in the API follows where you are (set by

@@ -53,19 +53,23 @@ class EffortsTest(unittest.TestCase):
 
 
 class MatchedTest(unittest.TestCase):
-    def test_same_route(self):
+    def test_same_route_run(self):
+        from domains.health.geo import encode
         c = sqlite3.connect(":memory:")
         c.row_factory = sqlite3.Row
         c.execute("""CREATE TABLE activities (id TEXT, date TEXT, name TEXT, activity_type TEXT, distance_meters REAL,
-                     moving_time_seconds INTEGER, duration_seconds INTEGER, avg_heart_rate INTEGER, start_lat REAL, start_lng REAL)""")
-        rows = [("r1", "2026-08-01", 8000, 2700), ("r2", "2026-09-01", 8100, 2600), ("r3", "2026-10-01", 7950, 2520),
-                ("far", "2026-09-15", 8000, 2400), ("long", "2026-09-20", 12000, 3900)]
-        for aid, d, dist, t in rows:
-            lat = 40.0 if aid != "far" else 40.05
-            c.execute("INSERT INTO activities VALUES (?,?,?,?,?,?,?,140,?,2.6)", (aid, d, aid, "running", dist, t, t, lat))
+                     moving_time_seconds INTEGER, duration_seconds INTEGER, avg_heart_rate INTEGER, polyline TEXT)""")
+        out_back = [(40.0 + i * 0.0009, 2.6) for i in range(40)] + [(40.0 + i * 0.0009, 2.6) for i in range(39, -1, -1)]
+        elsewhere = [(40.0, 2.6 + i * 0.0012) for i in range(40)] + [(40.0, 2.6 + i * 0.0012) for i in range(39, -1, -1)]
+        rows = [("r1", "2026-08-01", 8000, 2700, out_back), ("r2", "2026-09-01", 8100, 2600, out_back),
+                ("r3", "2026-10-01", 7950, 2520, out_back), ("east", "2026-09-15", 8000, 2400, elsewhere),
+                ("long", "2026-09-20", 12000, 3900, out_back)]
+        for aid, d, dist, t, pts in rows:
+            c.execute("INSERT INTO activities VALUES (?,?,?,?,?,?,?,140,?)",
+                      (aid, d, aid, "running", dist, t, t, encode(pts)))
         act = c.execute("SELECT * FROM activities WHERE id='r3'").fetchone()
         m = _matched(c, act, "run")
-        self.assertEqual(m["n"], 3)                    # 'far' start and 'long' distance excluded
+        self.assertEqual(m["n"], 3)                    # other roads and a much longer run excluded
         self.assertEqual(m["rank"], 1)
         self.assertGreater(m["vs_last_pct"], 0)
 

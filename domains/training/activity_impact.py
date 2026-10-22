@@ -25,6 +25,7 @@ from datetime import date, timedelta
 from statistics import median
 
 from domains.health.activity_analysis import is_indoor, sport_of
+from domains.health.geo import Grid, activity_track, decode, sample
 
 RACE_KM = {"mallorca_312": 312.0}
 RACE_CLIMB_M = {"mallorca_312": 4750.0}
@@ -197,33 +198,150 @@ def _race(conn, act, sport, t, analysis, fuel_target_fn) -> dict | None:
     return out
 
 
+ROUTE_OVERLAP = 0.75     # share of each ride that must lie on the other
+ROUTE_STEP_M = 100
+
+
+def _json_col(conn, table: str, activity_id: str, t) -> dict:
+    if table not in t:
+        return {}
+    try:
+        r = conn.execute(f"SELECT result_json FROM {table} WHERE activity_id=?", (activity_id,)).fetchone()
+        return json.loads(r[0]) if r and r[0] else {}
+    except (sqlite3.OperationalError, ValueError):
+        return {}
+
+
+def _route_context(conn, aid: str, d: str, t) -> dict:
+    """What the conditions were: wind, temperature, form going into the day."""
+    w = _json_col(conn, "activity_wind", aid, t)
+    temp = (_json_col(conn, "activity_analysis", aid, t).get("temp_c") or {}).get("avg")
+    form = None
+    if "training_load_daily" in t:
+        r = conn.execute("SELECT tsb FROM training_load_daily WHERE sport='combined' AND date=?", (d,)).fetchone()
+        form = round(r[0]) if r and r[0] is not None else None
+    return {"headwind_kmh": w.get("avg_headwind_kmh"), "wind_kmh": w.get("wind_kmh"),
+            "head_pct": (w.get("pct") or {}).get("head"), "temp_c": temp, "form": form}
+
+
+def _overlap(mine_grid: Grid, mine: list, theirs: list) -> tuple[float, bool]:
+    """min(share of theirs near mine, share of mine near theirs) and whether ridden the same way round."""
+    hits = [mine_grid.near(p) for p in theirs]
+    a = sum(1 for h in hits if h is not None) / len(theirs)
+    tg = Grid(60, mine[0][0])
+    for p in theirs:
+        tg.add(p)
+    b = sum(1 for p in mine if tg.near(p)) / len(mine)
+    idx = [h for h in hits if h is not None]
+    inc = sum(1 for x, y in zip(idx, idx[1:]) if y > x)
+    dec = sum(1 for x, y in zip(idx, idx[1:]) if y < x)
+    return min(a, b), inc >= dec
+
+
+def _verdict(me: dict, prev: dict, run: bool) -> dict:
+    sp = (me["mps"] / prev["mps"] - 1) * 100
+    out: dict = {"speed_pct": round(sp, 1), "vs_date": prev["date"]}
+    parts = []
+    if run:
+        parts.append("same pace" if abs(sp) < 1 else f"{abs(sp):.0f}% {'faster' if sp > 0 else 'slower'}")
+    else:
+        dk = (me["mps"] - prev["mps"]) * 3.6
+        parts.append("same speed" if abs(dk) < 0.3 else f"{abs(dk):.1f} km/h {'faster' if dk > 0 else 'slower'}")
+    if me.get("hr") and prev.get("hr"):
+        dh = me["hr"] - prev["hr"]
+        out["hr_delta"] = round(dh)
+        parts.append("at the same heart rate" if abs(dh) < 3 else f"at {abs(dh):.0f} bpm {'higher' if dh > 0 else 'lower'} HR")
+        eff = ((me["mps"] / me["hr"]) / (prev["mps"] / prev["hr"]) - 1) * 100
+        out["efficiency_pct"] = round(eff, 1)
+    else:
+        eff = None
+    hw, phw = me.get("headwind_kmh"), prev.get("headwind_kmh")
+    wind_note = None
+    if hw is not None and phw is not None and abs(hw - phw) >= 2:
+        out["headwind_delta"] = round(hw - phw, 1)
+        wind_note = (f"{abs(hw - phw):.0f} km/h more headwind on average" if hw > phw
+                     else f"{abs(hw - phw):.0f} km/h more help from the wind")
+        parts.append(wind_note)
+    tc, ptc = me.get("temp_c"), prev.get("temp_c")
+    if tc is not None and ptc is not None and abs(tc - ptc) >= 6:
+        parts.append(f"{abs(tc - ptc):.0f}°C {'hotter' if tc > ptc else 'cooler'}")
+    if eff is None:
+        read = None
+    elif eff >= 3:
+        read = "more speed per heartbeat — fitter on this route"
+    elif eff <= -3:
+        read = ("less speed per heartbeat — the wind explains part of it" if wind_note and hw > phw
+                else "less speed per heartbeat than last time — tired, hot or under-fuelled?")
+    else:
+        read = ("same speed per heartbeat — an easier day, same fitness" if out.get("hr_delta", 0) <= -5
+                else "same speed per heartbeat — same fitness")
+    out["text"] = ", ".join(parts)
+    out["read"] = read
+    return out
+
+
 def _matched(conn, act, sport) -> dict | None:
-    """Same route: same sport, start within ~300 m, distance within 7 % — how this one compares."""
+    """Same route = the GPS tracks overlap (≥ 75 % each way), not just a nearby start and a similar distance."""
+    if is_indoor(act["activity_type"]) or not act["distance_meters"]:
+        return None
     cols = {r[1] for r in conn.execute("PRAGMA table_info(activities)")}
-    if not {"start_lat", "start_lng"} <= cols or act["start_lat"] is None or not act["distance_meters"]:
+    if "polyline" not in cols or not act["polyline"]:
         return None
-    if is_indoor(act["activity_type"]):
+    t = _tables(conn)
+    mine = sample(activity_track(conn, act["id"], act["polyline"]), ROUTE_STEP_M)
+    if len(mine) < 10:
         return None
+    grid = Grid(60, mine[0][0])                    # ~60–120 m tolerance; value = position along my ride
+    for i, p in enumerate(mine):
+        grid.add(p, i)
+    lat0, lat1 = min(p[0] for p in mine), max(p[0] for p in mine)
+    lng0, lng1 = min(p[1] for p in mine), max(p[1] for p in mine)
     d = act["distance_meters"]
-    dlat = 0.0027                                    # ~300 m
-    dlng = dlat / max(0.2, math.cos(math.radians(act["start_lat"])))
     rows = conn.execute(
         """SELECT id, date, name, activity_type, distance_meters, COALESCE(moving_time_seconds, duration_seconds) AS t,
-                  avg_heart_rate FROM activities
-           WHERE start_lat BETWEEN ? AND ? AND start_lng BETWEEN ? AND ? AND distance_meters BETWEEN ? AND ?
-             AND date >= ? ORDER BY date""",
-        (act["start_lat"] - dlat, act["start_lat"] + dlat, act["start_lng"] - dlng, act["start_lng"] + dlng,
-         d * 0.93, d * 1.07, (date.fromisoformat(act["date"]) - timedelta(days=730)).isoformat())).fetchall()
-    rows = [r for r in rows if sport_of(r["activity_type"]) == sport and not is_indoor(r["activity_type"]) and r["t"]]
-    if len(rows) < 2 or not any(r["id"] == act["id"] for r in rows):
+                  avg_heart_rate, polyline FROM activities
+           WHERE polyline IS NOT NULL AND polyline != '' AND distance_meters BETWEEN ? AND ? AND date >= ? AND id != ?
+           ORDER BY date""",
+        (d * 0.8, d * 1.25, (date.fromisoformat(act["date"]) - timedelta(days=730)).isoformat(), act["id"])).fetchall()
+    found = []
+    for r in rows:
+        if sport_of(r["activity_type"]) != sport or is_indoor(r["activity_type"]) or not r["t"]:
+            continue
+        theirs = sample(decode(r["polyline"]), ROUTE_STEP_M)
+        if len(theirs) < 10 or not any(lat0 - .01 <= p[0] <= lat1 + .01 and lng0 - .01 <= p[1] <= lng1 + .01
+                                       for p in theirs[:: max(1, len(theirs) // 20)]):
+            continue
+        ov, same_dir = _overlap(grid, mine, theirs)
+        if ov >= ROUTE_OVERLAP:
+            found.append((r, ov, same_dir))
+    if not found:
         return None
-    items = [{"id": r["id"], "date": r["date"], "name": r["name"], "secs": r["t"], "km": round(r["distance_meters"] / 1000, 2),
-              "mps": r["distance_meters"] / r["t"], "hr": r["avg_heart_rate"], "this": r["id"] == act["id"]} for r in rows]
-    mine = next(i for i in items if i["this"])
-    ranked = sorted(items, key=lambda i: -i["mps"])
-    prev = [i for i in items if i["date"] < mine["date"]]
-    return {"n": len(items), "rank": ranked.index(mine) + 1, "best": ranked[0],
-            "vs_last_pct": round((mine["mps"] / prev[-1]["mps"] - 1) * 100, 1) if prev else None,
+
+    def item(r, ov, same_dir, this=False):
+        x = {"id": r["id"], "date": r["date"], "name": r["name"], "secs": r["t"], "km": round(r["distance_meters"] / 1000, 2),
+             "mps": r["distance_meters"] / r["t"], "hr": r["avg_heart_rate"], "this": this,
+             "overlap_pct": round(ov * 100), "same_direction": same_dir}
+        x.update(_route_context(conn, r["id"], r["date"], t))
+        return x
+
+    me_row = {"id": act["id"], "date": act["date"], "name": act["name"] if "name" in act.keys() else None,
+              "t": act["moving_time_seconds"] or act["duration_seconds"], "distance_meters": d,
+              "avg_heart_rate": act["avg_heart_rate"] if "avg_heart_rate" in act.keys() else None}
+    if not me_row["t"]:
+        return None
+    items = sorted([item(r, ov, sd) for r, ov, sd in found] + [item(me_row, 1.0, True, this=True)],
+                   key=lambda i: (i["date"], i["this"]))
+    mine_i = next(i for i in items if i["this"])
+    same = [i for i in items if i["same_direction"]]
+    group = same if len(same) >= 2 else items
+    ranked = sorted(group, key=lambda i: -i["mps"])
+    prev = [i for i in group if not i["this"] and i["date"] <= mine_i["date"]]
+    with_hr = [i for i in group if i.get("hr")]
+    best_eff = max(with_hr, key=lambda i: i["mps"] / i["hr"]) if with_hr else None
+    return {"n": len(group), "n_reverse": len(items) - len(same), "rank": ranked.index(mine_i) + 1,
+            "best": ranked[0], "best_efficiency": best_eff,
+            "vs_last_pct": round((mine_i["mps"] / prev[-1]["mps"] - 1) * 100, 1) if prev else None,
+            "verdict": _verdict(mine_i, prev[-1], sport == "run") if prev else None,
             "items": items[-12:]}
 
 

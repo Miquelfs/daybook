@@ -1562,6 +1562,12 @@ export interface FitnessSummary {
   strain: { today: number; today_label: string | null; avg: number; days: { date: string; value: number }[] } | null;
 }
 
+export type RouteRide = {
+  id: string; date: string; name: string | null; secs: number; km: number; mps: number; hr: number | null; this: boolean;
+  overlap_pct: number; same_direction: boolean;
+  headwind_kmh: number | null; wind_kmh: number | null; head_pct: number | null; temp_c: number | null; form: number | null;
+};
+
 export interface ActivityImpact {
   tss: number | null;
   tss_source: "power" | "device" | "heart rate" | null;
@@ -1582,10 +1588,15 @@ export interface ActivityImpact {
     durability: { decoupling_pct: number; ok: boolean; note: string } | null;
     fuel: { carbs_g: number; carbs_g_h: number | null; target_g_h: number | null; items: string[]; ok: boolean } | null;
   } | null;
+  /** Same route = GPS tracks overlap ≥ 75 % both ways; compared with rides in the same direction. */
   matched: {
-    n: number; rank: number; vs_last_pct: number | null;
-    best: { id: string; date: string; secs: number; mps: number };
-    items: { id: string; date: string; name: string | null; secs: number; km: number; mps: number; hr: number | null; this: boolean }[];
+    n: number; n_reverse: number; rank: number; vs_last_pct: number | null;
+    best: RouteRide; best_efficiency: RouteRide | null;
+    verdict: {
+      text: string; read: string | null; vs_date: string; speed_pct: number;
+      hr_delta?: number; efficiency_pct?: number; headwind_delta?: number;
+    } | null;
+    items: RouteRide[];
   } | null;
 }
 
