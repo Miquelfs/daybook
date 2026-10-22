@@ -1,5 +1,6 @@
 """GPX courses (climbing, tunnel correction, time) and tour blocks built from them (structure, undo, projection)."""
 
+import json
 import sqlite3
 import unittest
 from datetime import date
@@ -98,6 +99,65 @@ class TourBlockTest(unittest.TestCase):
         self.assertEqual(c.execute("SELECT COUNT(*) FROM session_courses").fetchone()[0], 0)
         self.assertEqual(c.execute("SELECT status FROM plan_sessions WHERE session_date='2026-11-14'").fetchone()[0],
                          "pending")
+
+
+class AfterTheTripTest(unittest.TestCase):
+    def _block(self):
+        c = _db()
+        c.execute("ALTER TABLE training_load_daily ADD COLUMN daily_tss REAL")
+        gpx = _gpx("Taiwan Day1", 50, hill_and_tunnel)
+        b = blocks.create(c, 10, "Taiwan", "2026-11-11", "2026-11-17",
+                          [{"date": f"2026-11-{d}", "gpx": gpx} for d in (12, 13, 14, 15, 16, 17)])
+        return c, b
+
+    def _sweet_spot(self, c):
+        return c.execute("SELECT effective_duration_min, intensity_zone, schedule_note FROM plan_sessions "
+                         "WHERE session_date='2026-11-21'").fetchone()
+
+    def test_provisional_then_settled_on_real_load(self):
+        c, b = self._block()
+        self.assertEqual(b["recovery"]["level"], "provisional")
+        self.assertEqual(tuple(self._sweet_spot(c))[:2], (42, "Z2"))                # standard: 70 × 0.6
+        self.assertIsNone(blocks.settle(c, c.execute("SELECT * FROM training_blocks").fetchone(),
+                                        today=date(2026, 11, 17)))                 # not back yet
+        # rode much more than planned and came back at form −60
+        for i, d in enumerate(range(12, 18)):
+            c.execute("INSERT INTO training_load_daily VALUES (?, 'combined', ?, ?, 300)",
+                      (f"2026-11-{d}", 35 + i, 60 + 15 * i))
+        out = blocks.settle(c, c.execute("SELECT * FROM training_blocks").fetchone(), today=date(2026, 11, 18))
+        self.assertEqual(out["level"], "deep")
+        self.assertEqual(out["actual_tss"], 1800)
+        self.assertEqual(tuple(self._sweet_spot(c))[:2], (35, "Z2"))                # deep: 70 × 0.5
+        self.assertIn("Deep recovery", self._sweet_spot(c)[2])
+        self.assertIsNone(blocks.settle(c, c.execute("SELECT * FROM training_blocks").fetchone(),
+                                        today=date(2026, 11, 19)))                 # once only
+        blocks.delete(c, b["id"])
+        self.assertEqual(tuple(self._sweet_spot(c))[:2], (70, "Z3"))                # undo restores the plan
+
+    def test_light_when_the_trip_was_easy(self):
+        self.assertEqual(blocks.recovery_level(-12, 500, 1100), "light")
+        self.assertEqual(blocks.recovery_level(-30, 1000, 1100), "standard")
+        self.assertEqual(blocks.recovery_level(None, 1000, 1100), "standard")
+        self.assertEqual(blocks.recovery_level(-50, 1000, 1100), "deep")
+
+    def test_replace_route(self):
+        c, b = self._block()
+        sid = b["ride_days"][2]["session_id"]
+        flat = _gpx("Rest-ish loop", 30, lambda x: 10.0)
+        out = blocks.replace_course(c, sid, flat)
+        day = next(d for d in out["ride_days"] if d["session_id"] == sid)
+        self.assertEqual(day["course"]["name"], "Rest-ish loop")
+        self.assertEqual(day["course"]["climb_m"], 0)
+        s = c.execute("SELECT effective_duration_min, structure_json FROM plan_sessions WHERE id=?", (sid,)).fetchone()
+        self.assertAlmostEqual(s[0], 30 / 21.5 * 60, delta=2)
+        self.assertNotIn("Climb", s[1])
+        self.assertIn({"date": "2026-11-14", "km": day["course"]["km"], "climb_m": 0, "note": "Rest-ish loop",
+                       "optional": False}, out["days"])
+        self.assertLess(json.loads(c.execute("SELECT changes_json FROM training_blocks").fetchone()[0])["planned_tss"],
+                        6 * 120)
+        c.execute("UPDATE plan_sessions SET status='completed' WHERE id=?", (sid,))
+        with self.assertRaises(ValueError):
+            blocks.replace_course(c, sid, flat)
 
 
 if __name__ == "__main__":

@@ -1080,7 +1080,25 @@ def parse_courses(body: CourseParse):
 @router.get("/goals/{goal_id}/blocks")
 def list_training_blocks(goal_id: int, conn: DB):
     from domains.training import blocks
+    blocks.settle_finished(conn)
     return blocks.list_blocks(conn, goal_id)
+
+
+class CourseReplace(BaseModel):
+    gpx: str
+
+
+@router.post("/sessions/{session_id}/course")
+def replace_session_course(session_id: int, body: CourseReplace, conn: DB):
+    """New route for one tour day: its time, structure and load follow; the rest of the block stays."""
+    from domains.training import blocks
+    _row(conn, "plan_sessions", session_id)
+    try:
+        return blocks.replace_course(conn, session_id, body.gpx)
+    except ET.ParseError as e:
+        raise HTTPException(status_code=422, detail=f"GPX could not be read: {e}")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.post("/goals/{goal_id}/blocks", status_code=201)
@@ -1602,6 +1620,8 @@ def day_prescription(date_str: str, conn: DB):
     """
     # Auto-link any same-day real activity to a pending session before reading.
     autolink_sessions(conn, on_date=date_str)
+    from domains.training.blocks import settle_finished
+    settle_finished(conn)                       # back from a tour → size its recovery week on what was ridden
 
     # Readiness context — gather from multiple tables
     tl = conn.execute(

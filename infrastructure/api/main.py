@@ -282,6 +282,7 @@ _POST_ACTIVITY_STEPS = (
     ["-m", "domains.health.compute_activity_metrics", "--days", "2"],
     ["-m", "domains.health.activity_analysis", "--days", "2"],
     ["-m", "domains.health.compute_training_load"],
+    ["-m", "domains.training.blocks", "--settle"],
 )
 
 

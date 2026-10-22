@@ -14,6 +14,15 @@ type Block = {
   ride_days?: { session_id: number; date: string; status: string; minutes: number;
                 course: { name: string; km: number; climb_m: number; climb_raw_m: number; tss: number; tunnels: number } | null }[];
   projection?: { before?: Snap; after_block?: Snap; after_recovery?: Snap; fitness_gain?: number; block_tss: number } | null;
+  recovery?: { level: "provisional" | "light" | "standard" | "deep"; from: string; to: string;
+               settled: { on: string; actual_tss: number; planned_tss: number | null; form_end: number | null } | null };
+};
+
+const RECOVERY_TEXT: Record<string, string> = {
+  provisional: "Recovery week set provisionally — it's sized on what you actually ride once you're back",
+  light: "Light recovery week: hard sessions softened, the rest close to normal",
+  standard: "Standard recovery week: hard sessions turned easy, long rides capped at 2 h",
+  deep: "Deep recovery week: everything short and easy, long rides capped at 1 h 30",
 };
 type Parsed = { file: string; name?: string; km?: number; climb_m?: number; climb_raw_m?: number; minutes?: number;
                 tss?: number; tunnels?: unknown[]; climbs?: unknown[]; start?: [number, number]; end?: [number, number];
@@ -61,6 +70,21 @@ export function BlocksCard({ goalId }: { goalId: number }) {
   function refresh() {
     for (const k of ["training-blocks", "race-overview", "omyra-week", "race-today", "coach"]) qc.invalidateQueries({ queryKey: [k] });
   }
+  const [replacing, setReplacing] = useState<number | null>(null);
+  const [listErr, setListErr] = useState<string | null>(null);
+  async function replaceRoute(sessionId: number, file?: File) {
+    if (!file) return;
+    setReplacing(sessionId); setListErr(null);
+    try {
+      const r = await fetch(`${BASE}/race-plans/sessions/${sessionId}/course`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gpx: await file.text() }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? "Couldn't use that GPX");
+      refresh();
+      qc.invalidateQueries({ queryKey: ["race-day"] });
+    } catch (e) { setListErr(e instanceof Error ? e.message : "Couldn't use that GPX"); }
+    finally { setReplacing(null); }
+  }
   async function remove(b: Block) {
     if (!window.confirm(`Remove "${b.name}"? The plan for those dates comes back as it was.`)) return;
     await fetch(`${BASE}/race-plans/blocks/${b.id}`, { method: "DELETE" });
@@ -101,9 +125,24 @@ export function BlocksCard({ goalId }: { goalId: number }) {
                           {d.course?.tunnels ? " · ⚠ tunnel" : ""}
                         </span>
                         <span className="shrink-0 text-[#71717A]">{hm(d.minutes)}{d.course ? ` · ${d.course.tss}` : ""}</span>
+                        {d.status !== "completed" && (
+                          <label className="shrink-0 text-[#F59E0B] cursor-pointer hover:underline">
+                            {replacing === d.session_id ? "…" : d.course ? "replace" : "add route"}
+                            <input type="file" accept=".gpx,application/gpx+xml" className="hidden"
+                                   onChange={(e) => replaceRoute(d.session_id, e.target.files?.[0])} />
+                          </label>
+                        )}
                       </p>
                     ))}
                   </div>
+                )}
+                {b.recovery && (
+                  <p className="text-[11px] text-[#A1A1AA] mt-2">
+                    {RECOVERY_TEXT[b.recovery.level]} ({fmt(b.recovery.from)} – {fmt(b.recovery.to)})
+                    {b.recovery.settled ? <span className="text-[#71717A]">: you rode ~{b.recovery.settled.actual_tss.toLocaleString("en-GB")} TSS
+                      {b.recovery.settled.planned_tss ? ` of ${b.recovery.settled.planned_tss.toLocaleString("en-GB")} planned` : ""}
+                      {b.recovery.settled.form_end != null ? `, form ${b.recovery.settled.form_end} on the last day` : ""}.</span> : "."}
+                  </p>
                 )}
                 {b.projection?.before && b.projection.after_block && b.projection.after_recovery && (
                   <ProjectionNote p={b.projection as Required<Pick<NonNullable<Block["projection"]>, "before" | "after_block" | "after_recovery">> & NonNullable<Block["projection"]>} />
@@ -114,6 +153,7 @@ export function BlocksCard({ goalId }: { goalId: number }) {
           ))}
         </ul>
       )}
+      {listErr && <p className="text-xs text-[#F87171] mt-2">{listErr}</p>}
       {adding && <AddBlockSheet goalId={goalId} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); refresh(); }} />}
     </section>
   );

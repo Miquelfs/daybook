@@ -8,8 +8,10 @@ Creating a block:
   2. each riding day gets a pinned "Tour day" session (Z2), its duration
      estimated from the day's km and climbing (loaded touring: 24 km/h on the
      flat + 1 h per 800 m of climbing), so the real rides auto-link and count;
-  3. the week after the block becomes a recovery week: hard sessions turn into
-     easy Z2 at ~60 % duration, long rides are capped at 2 h.
+  3. the week after the block becomes a recovery week. A provisional (standard)
+     one is set straight away; once you're back, `settle` sizes it on what you
+     actually rode — form on the last day and real vs planned load — as light,
+     standard or deep.
 Riding days can carry a GPX course: the session then takes its time, load,
 climbs and step-by-step structure from the route (see gpx_course), and the
 course is kept in `session_courses` for the session sheet, the map and the
@@ -32,6 +34,51 @@ FLAT_KMH = 24.0
 CLIMB_M_PER_H = 800.0
 RECOVERY_FACTOR = 0.6
 RECOVERY_LONG_CAP = 120
+# level → (duration factor, long-ride cap min, zones turned into Z2)
+RECOVERY = {
+    "light":    (0.8, 150, ("Z4", "Z5")),
+    "standard": (RECOVERY_FACTOR, RECOVERY_LONG_CAP, ("Z3", "Z4", "Z5")),
+    "deep":     (0.5, 90, ("Z3", "Z4", "Z5")),
+}
+RECOVERY_NOTE = {
+    "light": "Easier week after {name}: the tour was lighter than planned, so only the hard work is softened",
+    "standard": "Recovery after {name} — easy, let it absorb",
+    "deep": "Deep recovery after {name}: you came back very tired — keep everything short and easy",
+}
+
+
+def _apply_recovery(conn, goal_id: int, name: str, end: str, level: str, from_date: str | None = None) -> list[dict]:
+    """Soften the 7 days after `end` (from `from_date` on); returns what to restore."""
+    factor, cap, demote = RECOVERY[level]
+    r_start = (date.fromisoformat(end) + timedelta(days=1)).isoformat()
+    if from_date and from_date > r_start:
+        r_start = from_date
+    r_end = (date.fromisoformat(end) + timedelta(days=7)).isoformat()
+    done = []
+    for r in conn.execute(
+            """SELECT id, session_type, intensity_zone, effective_duration_min, duration_min, role FROM plan_sessions
+               WHERE goal_id=? AND status='pending' AND session_date BETWEEN ? AND ?
+                 AND lower(session_type) != 'race day'""", (goal_id, r_start, r_end)).fetchall():
+        eff = r["effective_duration_min"] or r["duration_min"] or 0
+        stype = (r["session_type"] or "").lower()
+        if stype.startswith("strength"):
+            new_eff, new_zone = max(25, round(eff * (0.7 if level != "light" else 0.9))), r["intensity_zone"]
+        elif r["intensity_zone"] in demote or stype.startswith("test"):
+            new_eff, new_zone = max(30, round(eff * factor)), "Z2"
+        elif (r["role"] or "") in ("long", "long2") or eff >= 150:
+            new_eff, new_zone = min(eff, cap), "Z2"
+        else:
+            new_eff, new_zone = max(20, round(eff * factor)), r["intensity_zone"]
+        done.append({"id": r["id"], "eff": eff, "zone": r["intensity_zone"]})
+        conn.execute("UPDATE plan_sessions SET effective_duration_min=?, intensity_zone=?, schedule_note=? WHERE id=?",
+                     (new_eff, new_zone, RECOVERY_NOTE[level].format(name=name), r["id"]))
+    return done
+
+
+def _restore_recovery(conn, entries: list[dict]) -> None:
+    for r in entries:
+        conn.execute("UPDATE plan_sessions SET effective_duration_min=?, intensity_zone=?, schedule_note=NULL "
+                     "WHERE id=? AND status='pending'", (r["eff"], r["zone"], r["id"]))
 
 
 def ensure_table(conn) -> None:
@@ -141,26 +188,12 @@ def create(conn, goal_id: int, name: str, start: str, end: str, days: list[dict]
                          (cur.lastrowid, course["name"], json.dumps(course)))
         d.pop("gpx", None)                       # the course lives in session_courses, not in days_json
 
-    # 3. the week after: recovery
-    r_start = (date.fromisoformat(end) + timedelta(days=1)).isoformat()
-    r_end = (date.fromisoformat(end) + timedelta(days=7)).isoformat()
-    for r in conn.execute(
-            """SELECT id, session_type, intensity_zone, effective_duration_min, duration_min, role FROM plan_sessions
-               WHERE goal_id=? AND status='pending' AND session_date BETWEEN ? AND ?
-                 AND lower(session_type) != 'race day'""", (goal_id, r_start, r_end)).fetchall():
-        eff = r["effective_duration_min"] or r["duration_min"] or 0
-        stype = (r["session_type"] or "").lower()
-        if stype.startswith("strength"):
-            new_eff, new_zone = max(25, round(eff * 0.7)), r["intensity_zone"]       # light gym
-        elif r["intensity_zone"] in ("Z3", "Z4", "Z5") or stype.startswith("test"):
-            new_eff, new_zone = max(30, round(eff * RECOVERY_FACTOR)), "Z2"
-        elif (r["role"] or "") in ("long", "long2") or eff >= 150:
-            new_eff, new_zone = min(eff, RECOVERY_LONG_CAP), "Z2"
-        else:
-            new_eff, new_zone = max(20, round(eff * RECOVERY_FACTOR)), r["intensity_zone"]
-        changes["recovery"].append({"id": r["id"], "eff": eff, "zone": r["intensity_zone"]})
-        conn.execute("""UPDATE plan_sessions SET effective_duration_min=?, intensity_zone=?, schedule_note=?
-                        WHERE id=?""", (new_eff, new_zone, f"Recovery after {name} — easy, let it absorb", r["id"]))
+    # 3. the week after: a provisional standard recovery, sized for real once you're back (settle)
+    changes["recovery"] = _apply_recovery(conn, goal_id, name, end, "standard")
+    changes["recovery_level"] = "provisional"
+    changes["planned_tss"] = round(sum(session_tss(conn, r) for r in conn.execute(
+        "SELECT * FROM plan_sessions WHERE id IN ({})".format(",".join("?" * len(changes["tour_sessions"]))),
+        changes["tour_sessions"]).fetchall())) if changes["tour_sessions"] else 0
 
     cur = conn.execute(
         """INSERT INTO training_blocks (goal_id, kind, name, start_date, end_date, days_json, changes_json)
@@ -185,9 +218,7 @@ def delete(conn, block_id: int) -> None:
     for sid in ch.get("displaced", []):
         conn.execute("UPDATE plan_sessions SET status='pending', schedule_note=NULL WHERE id=? AND status='displaced'",
                      (sid,))
-    for r in ch.get("recovery", []):
-        conn.execute("UPDATE plan_sessions SET effective_duration_min=?, intensity_zone=?, schedule_note=NULL "
-                     "WHERE id=? AND status='pending'", (r["eff"], r["zone"], r["id"]))
+    _restore_recovery(conn, ch.get("recovery", []))
     conn.execute("DELETE FROM training_blocks WHERE id=?", (block_id,))
     conn.commit()
 
@@ -217,6 +248,7 @@ def _out(conn, b) -> dict:
             "total_km": round(sum(float(d.get("km") or 0) for d in days)),
             "total_climb_m": int(sum(float(d.get("climb_m") or 0) for d in days)),
             "planned_hours": round(sum(s["effective_duration_min"] or 0 for s in sessions) / 60, 1),
+            "recovery": _recovery_out(b),
             "projection": projection(conn, b)}
 
 
@@ -293,3 +325,104 @@ def projection(conn, b, today: date | None = None) -> dict | None:
         snap["fitness_gain"] = snap["after_block"]["fitness"] - snap["before"]["fitness"]
     snap["block_tss"] = round(block_tss)
     return snap
+
+
+# ── after the trip: size the recovery week on what was actually ridden ───────
+
+def _recovery_out(b) -> dict:
+    ch = json.loads(b["changes_json"] or "{}")
+    end = date.fromisoformat(b["end_date"])
+    return {"level": ch.get("recovery_level", "provisional"), "settled": ch.get("settled"),
+            "from": (end + timedelta(days=1)).isoformat(), "to": (end + timedelta(days=7)).isoformat()}
+
+
+def recovery_level(form_end: float | None, actual_tss: float, planned_tss: float) -> str:
+    over = planned_tss and actual_tss >= 1.15 * planned_tss
+    if (form_end is not None and form_end <= -45) or over:
+        return "deep"
+    if form_end is None or form_end <= -20:
+        return "standard"
+    return "light"
+
+
+def settle(conn, b, today: date | None = None) -> dict | None:
+    """Once the block is over and its rides are in: replace the provisional recovery with the right-sized one."""
+    today = today or date.today()
+    ch = json.loads(b["changes_json"] or "{}")
+    if ch.get("settled") or date.fromisoformat(b["end_date"]) >= today:
+        return None
+    rows = conn.execute("SELECT date, daily_tss, ctl, atl FROM training_load_daily WHERE sport='combined' "
+                        "AND date BETWEEN ? AND ? ORDER BY date", (b["start_date"], b["end_date"])).fetchall()
+    last = rows[-1] if rows else None
+    synced = last is not None and last["date"] == b["end_date"]
+    if not synced and today < date.fromisoformat(b["end_date"]) + timedelta(days=2):
+        return None                                   # give the last rides a day to sync
+    actual = round(sum(r["daily_tss"] or 0 for r in rows))
+    form_end = round(last["ctl"] - last["atl"]) if synced and last["ctl"] is not None else None
+    level = recovery_level(form_end, actual, ch.get("planned_tss") or 0)
+    _restore_recovery(conn, ch.get("recovery", []))
+    ch["recovery"] = _apply_recovery(conn, b["goal_id"], b["name"], b["end_date"], level, today.isoformat())
+    ch["recovery_level"] = level
+    ch["settled"] = {"on": today.isoformat(), "actual_tss": actual, "planned_tss": ch.get("planned_tss"),
+                     "form_end": form_end}
+    conn.execute("UPDATE training_blocks SET changes_json=? WHERE id=?", (json.dumps(ch), b["id"]))
+    conn.commit()
+    return ch["settled"] | {"level": level}
+
+
+def settle_finished(conn, today: date | None = None) -> int:
+    """Settle every block that has ended. Cheap; safe to call on reads and nightly."""
+    try:
+        ensure_table(conn)
+        return sum(1 for b in conn.execute("SELECT * FROM training_blocks WHERE end_date < ?",
+                                           ((today or date.today()).isoformat(),)).fetchall()
+                   if settle(conn, b, today))
+    except sqlite3.OperationalError:
+        return 0
+
+
+# ── change a riding day's route ──────────────────────────────────────────────
+
+def replace_course(conn, session_id: int, gpx: str) -> dict:
+    """New GPX for one tour day: its time, structure, load and course follow; the rest of the block stays."""
+    from domains.training import gpx_course
+    s = conn.execute("SELECT * FROM plan_sessions WHERE id=?", (session_id,)).fetchone()
+    if s is None or not (s["session_type"] or "").endswith((" Tour day", " Camp day")):
+        raise ValueError("not a tour day")
+    if s["status"] == "completed":
+        raise ValueError("this day has been ridden already")
+    b = block_for(conn, s["session_date"])
+    course = gpx_course.parse(gpx)
+    name = b["name"] if b else "Tour"
+    structure = gpx_course.structure(course, f"{name}: {course['name']}")
+    mins = course["minutes"]
+    ensure_courses(conn)
+    conn.execute("""UPDATE plan_sessions SET duration_min=?, effective_duration_min=?, structure_json=?, role=?,
+                    schedule_note=? WHERE id=?""",
+                 (mins, mins, json.dumps(structure), "long" if mins >= 150 else "easy",
+                  f"{(b['kind'] if b else 'tour').title()}: {name} — {course['name']}", session_id))
+    conn.execute("INSERT OR REPLACE INTO session_courses (session_id, name, course_json) VALUES (?,?,?)",
+                 (session_id, course["name"], json.dumps(course)))
+    if b:
+        days = json.loads(b["days_json"] or "[]")
+        days = [d for d in days if d.get("date") != s["session_date"]] + [
+            {"date": s["session_date"], "km": course["km"], "climb_m": course["climb_m"], "note": course["name"],
+             "optional": bool(s["is_optional"])}]
+        ch = json.loads(b["changes_json"] or "{}")
+        if not ch.get("settled"):
+            ch["planned_tss"] = round(sum(session_tss(conn, r) for r in conn.execute(
+                "SELECT * FROM plan_sessions WHERE id IN ({})".format(",".join("?" * len(ch.get("tour_sessions", [])))),
+                ch.get("tour_sessions", [])).fetchall())) if ch.get("tour_sessions") else 0
+        conn.execute("UPDATE training_blocks SET days_json=?, changes_json=? WHERE id=?",
+                     (json.dumps(sorted(days, key=lambda d: d["date"])), json.dumps(ch), b["id"]))
+    conn.commit()
+    return get(conn, b["id"]) if b else {"session_id": session_id, "course": course["name"]}
+
+
+if __name__ == "__main__":
+    import sys
+    from infrastructure.db.connection import get_connection
+    if "--settle" in sys.argv:
+        c = get_connection()
+        print(f"blocks settled: {settle_finished(c)}", file=sys.stderr)
+        c.close()

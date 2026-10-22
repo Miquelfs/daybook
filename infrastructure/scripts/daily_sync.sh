@@ -188,6 +188,8 @@ step activity_analysis python -m domains.health.activity_analysis --days 7
 # CTL/ATL/TSB: update fitness & freshness for all sports.
 log "Computing training load (CTL/ATL/TSB)..."
 step compute_training_load python -m domains.health.compute_training_load
+# Back from a tour/camp: size its recovery week on the real load (no-op otherwise).
+step tour_recovery python -m domains.training.blocks --settle
 
 # Correlations: recompute snapshot so the Discover tab stays fresh.
 log "Computing correlation snapshot..."
