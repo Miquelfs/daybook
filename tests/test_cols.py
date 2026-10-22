@@ -83,6 +83,32 @@ class ColsTest(unittest.TestCase):
              mock.patch.object(cols, "_road_grid", return_value=None):
             self.assertEqual(cols.sync(c, None)["scanned"], 2)
 
+    def test_rides_in_downloaded_areas_dont_wait_for_new_ones(self):
+        c = _db()
+        alps = [(45.90 + i * 0.001, 6.90) for i in range(60)]               # a ride in a tile not downloaded yet
+        c.execute("INSERT INTO activities VALUES ('alps','2024-04-10','road_biking',?)", (encode(alps),))
+
+        # Mallorca downloads fine, then the server starts saying 429 for the new area
+        with mock.patch.object(cols.overpass, "query", side_effect=[FAKE, RuntimeError("429")]), \
+             mock.patch.object(cols, "_road_grid", return_value=None), mock.patch.object(cols.time, "sleep"):
+            out = cols.sync(c, None)
+        self.assertEqual((out["scanned"], out["waiting"]), (2, 1))          # Mallorca rides done, the Alps one waits
+        self.assertIn("429", out["error"])
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM col_scan WHERE activity_id='alps'").fetchone()[0], 0)
+        with mock.patch.object(cols.overpass, "query", return_value={"elements": []}), \
+             mock.patch.object(cols, "_road_grid", return_value=None):
+            self.assertEqual(cols.sync(c, None)["scanned"], 1)              # next run picks it up
+
+    def test_batched_downloads(self):
+        tiles = {f"{y}:{x}" for y in range(90, 95) for x in range(0, 5)}    # 25 tiles
+        c = _db()
+        cols.ensure_tables(c)
+        with mock.patch.object(cols.overpass, "query", return_value={"elements": []}) as q, \
+             mock.patch.object(cols.time, "sleep") as sl:
+            cols.fetch_tiles(c, tiles)
+        self.assertEqual(q.call_count, 3)                                   # 12 + 12 + 1
+        self.assertEqual(sl.call_count, 2)                                  # a pause between queries
+
 
 if __name__ == "__main__":
     unittest.main()

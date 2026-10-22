@@ -23,13 +23,16 @@ import math
 import re
 import sqlite3
 import sys
+import time
 from datetime import date, timedelta
 
 from domains.health.activity_analysis import is_indoor, sport_of
-from domains.health.geo import Grid, activity_track, dist_m, sample
+from domains.health.geo import Grid, activity_track, decode, dist_m, sample
 from domains.locations import overpass
 
 TILE = 0.5
+BATCH = 12           # tiles per Overpass query
+PAUSE_S = 8          # between queries — the public servers rate-limit bursts (HTTP 429)
 def counts(activity_type: str | None) -> bool:
     """Outdoor bike rides only."""
     t = (activity_type or "").lower()
@@ -90,21 +93,22 @@ def _road_grid():
 
 
 def fetch_tiles(conn, tiles: set[str]) -> int:
-    """Download passes + named saddles for tiles not cached yet (a few tiles per Overpass query)."""
+    """Download passes + named saddles for tiles not cached yet: a few tiles per Overpass query, with a pause
+    between queries so the public servers don't rate-limit us. Raises on failure; tiles already in stay cached."""
     have = {r[0] for r in conn.execute("SELECT tile FROM col_tiles")}
     todo = sorted(tiles - have)
-    if not todo:
-        return 0
     roads = None
     added = 0
-    for i in range(0, len(todo), 6):
-        batch = todo[i:i + 6]
+    for i in range(0, len(todo), BATCH):
+        if i:
+            time.sleep(PAUSE_S)
+        batch = todo[i:i + BATCH]
         parts = []
         for t in batch:
-            s, w, n, e = _tile_bbox(t)
-            parts.append(f'node["mountain_pass"="yes"]["name"]({s},{w},{n},{e});'
-                         f'node["natural"="saddle"]["name"]({s},{w},{n},{e});')
-        data = overpass.query(f"[out:json][timeout:90];({''.join(parts)});out;", attempts=3, timeout_s=100, backoff_s=5)
+            s_, w, n, e = _tile_bbox(t)
+            parts.append(f'node["mountain_pass"="yes"]["name"]({s_},{w},{n},{e});'
+                         f'node["natural"="saddle"]["name"]({s_},{w},{n},{e});')
+        data = overpass.query(f"[out:json][timeout:120];({''.join(parts)});out;", attempts=4, timeout_s=130, backoff_s=5)
         for el in data.get("elements", []):
             tg = el.get("tags", {})
             lat, lng = el["lat"], el["lon"]
@@ -123,6 +127,11 @@ def fetch_tiles(conn, tiles: set[str]) -> int:
     return added
 
 
+def _tiles_of(track) -> set[str]:
+    pts = sample(track, 2000) if len(track) > 1 else track      # 0.5° tiles: a point every 2 km is plenty
+    return {_tile(*p) for p in pts} | ({_tile(*track[-1])} if track else set())
+
+
 def scan_activity(conn, act) -> list[int]:
     """Cols this activity went over (and record them)."""
     track = activity_track(conn, act["id"], act["polyline"])
@@ -133,7 +142,6 @@ def scan_activity(conn, act) -> list[int]:
     pts = sample(track, 20)
     for p in pts:
         grid.add(p)
-    fetch_tiles(conn, {_tile(*p) for p in pts[:: max(1, len(pts) // 400)]} | {_tile(*track[-1])})
     lat0, lat1 = min(p[0] for p in pts) - .01, max(p[0] for p in pts) + .01
     lng0, lng1 = min(p[1] for p in pts) - .01, max(p[1] for p in pts) + .01
     hit = []
@@ -149,33 +157,43 @@ def scan_activity(conn, act) -> list[int]:
 
 
 def sync(conn, days: int | None = 7, verbose: bool = False) -> dict:
-    """Scan unscanned activities. If Overpass is down, stop and leave the rest for the next run."""
+    """1. work out every map tile the pending rides need; 2. download the missing ones politely (stop at the
+    first Overpass failure, keep what came in); 3. scan every ride whose tiles are all here — the rest wait
+    for the next run."""
     ensure_tables(conn)
-    try:
-        fetch_tiles(conn, _mallorca_tiles())
-    except RuntimeError as e:
-        print(f"  cols: OpenStreetMap unavailable ({e}) — will retry next run", file=sys.stderr)
-        return {"scanned": 0, "visits": 0, "error": str(e)}
     q = """SELECT id, date, activity_type, polyline FROM activities
            WHERE polyline IS NOT NULL AND polyline != '' AND id NOT IN (SELECT activity_id FROM col_scan)"""
     params: tuple = ()
     if days is not None:
         q += " AND date >= ?"
         params = ((date.today() - timedelta(days=days)).isoformat(),)
-    acts = [a for a in conn.execute(q + " ORDER BY date", params).fetchall()
-            if counts(a["activity_type"])]
-    found = scanned = 0
+    acts = [a for a in conn.execute(q + " ORDER BY date", params).fetchall() if counts(a["activity_type"])]
+    need = {a["id"]: _tiles_of(decode(a["polyline"])) for a in acts}
+
+    error = None
+    try:
+        fetch_tiles(conn, _mallorca_tiles())                      # home first: most rides only need these
+        fetch_tiles(conn, set().union(*need.values()))
+    except RuntimeError as e:                        # OSM busy / down: use what we have, retry the rest next run
+        error = str(e)
+        print(f"  cols: OpenStreetMap unavailable ({error[:120]}) — rides in areas not downloaded yet wait "
+              f"for the next run", file=sys.stderr)
+    have = {r[0] for r in conn.execute("SELECT tile FROM col_tiles")}
+
+    found = scanned = waiting = 0
     for a in acts:
-        try:
-            hits = scan_activity(conn, a)
-        except RuntimeError as e:                    # Overpass down — stop; the rest stay unscanned for next run
-            print(f"  cols: OpenStreetMap unavailable at {a['id']} ({e}) — will retry next run", file=sys.stderr)
-            return {"scanned": scanned, "visits": found, "error": str(e)}
+        if not need[a["id"]] <= have:
+            waiting += 1
+            continue
+        hits = scan_activity(conn, a)
         scanned += 1
         found += len(hits)
         if verbose and hits:
             print(f"  {a['date']} {a['id']}: {len(hits)} col(s)", file=sys.stderr)
-    return {"scanned": scanned, "visits": found}
+    out = {"scanned": scanned, "visits": found, "waiting": waiting}
+    if error:
+        out["error"] = error
+    return out
 
 
 # ── read side ────────────────────────────────────────────────────────────────
@@ -233,5 +251,6 @@ if __name__ == "__main__":
     from infrastructure.db.connection import get_connection
     c = get_connection()
     out = sync(c, None if "--all" in sys.argv else 7, verbose=True)
-    print(f"cols: scanned {out['scanned']} activities, {out['visits']} col visits", file=sys.stderr)
+    print(f"cols: scanned {out['scanned']} rides, {out['visits']} col visits"
+          + (f", {out['waiting']} rides waiting for map data (next run)" if out.get("waiting") else ""), file=sys.stderr)
     c.close()

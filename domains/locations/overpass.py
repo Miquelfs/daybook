@@ -26,5 +26,6 @@ def query(q: str, attempts: int = 6, timeout_s: int = 300, backoff_s: int = 10) 
         err = r.stderr.decode(errors="replace").strip()[:200]
         print(f"  overpass {url}: {err[:120]} — retrying", file=sys.stderr)
         if attempt < attempts - 1:
-            time.sleep(backoff_s * (attempt + 1))
+            # 429 = "too many requests": that server wants us to slow down, not to hammer a mirror right away
+            time.sleep(max(backoff_s * (attempt + 1), 60 if "429" in err else 0))
     raise RuntimeError(f"Overpass failed: {err}")
