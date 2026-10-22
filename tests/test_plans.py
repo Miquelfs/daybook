@@ -398,7 +398,9 @@ class PlannedTripsTest(unittest.TestCase):
         c.execute("INSERT INTO passenger_flights (date, origin, destination) VALUES ('2026-11-09', 'PMI', 'TPE'), "
                   "('2026-12-01', 'PMI', 'BCN')")
         pid = pt.save(c, {"name": "Taiwan", "start_date": "2026-11-10", "end_date": "2026-11-12", "budget": 2000}, [])
-        pt.set_day(c, pid, "2026-11-11", "Taipei → Hualien by train")
+        pt.set_day(c, pid, "2026-11-11", {"note": "Taipei → Hualien by train", "kind": "ride"})
+        pt.set_day(c, pid, "2026-11-11", {"sleep": "Hualien", "sleep_cost": 2200})          # merges
+        pt.set_day(c, pid, "2026-11-10", {"sleep": "Taipei", "sleep_cost": 2300, "booked": True, "booking_ref": "ABC"})
         c.execute("INSERT INTO tasks (title, planned_trip_id) VALUES ('Book hotel', ?), ('Pack bike', ?)", (pid, pid))
         c.execute("UPDATE tasks SET done_at='2026-07-01' WHERE title='Book hotel'")
         d = pt.detail(c, pid, TODAY)
@@ -406,8 +408,43 @@ class PlannedTripsTest(unittest.TestCase):
         self.assertEqual((d["checklist_total"], d["checklist_done"], d["budget"]), (2, 1, 2000))
         self.assertEqual([x["checklist"][0]["title"] for x in [d]], ["Pack bike"])        # open first
         self.assertEqual([f["destination"] for f in d["flights"]], ["TPE"])               # day before counts
-        pt.set_day(c, pid, "2026-11-11", "  ")
-        self.assertIsNone(pt.detail(c, pid, TODAY)["days"][1]["note"])
+        day = d["days"][1]
+        self.assertEqual((day["kind"], day["sleep"], day["booked"]), ("ride", "Hualien", False))
+        self.assertEqual((d["sleep_total"], d["nights_booked"], d["nights_to_book"]), (4500, 1, 1))
+        pt.set_day(c, pid, "2026-11-11", {"note": "  ", "kind": None, "sleep": None, "sleep_cost": None})
+        self.assertIsNone(pt.detail(c, pid, TODAY)["days"][1]["note"])                       # row gone
+
+        c.execute("UPDATE planned_trips SET fx_rate=36 WHERE id=?", (pid,))
+        a = pt.add_budget_line(c, pid, {"line": "Bike rental", "low": 4000, "mid": 5600, "high": 8000})
+        pt.add_budget_line(c, pid, {"line": "Food", "mid": 9600})
+        pt.update_budget_line(c, a, {"actual": 5000})
+        i = pt.add_item(c, pid, "pack", "Helmet", "Bike and safety")
+        pt.add_item(c, pid, "decision", "Tunnels allow bikes?")
+        pt.update_item(c, i, {"done": True})
+        d = pt.detail(c, pid, TODAY)
+        self.assertEqual(d["budget_totals"]["mid"], 15200)
+        self.assertEqual(d["budget_totals_eur"]["mid"], 422.22)
+        self.assertEqual(d["budget_totals"]["actual"], 5000)
+        self.assertEqual([(x["kind"], x["done"]) for x in d["items"]], [("decision", False), ("pack", True)])
+        self.assertFalse(pt.update_item(c, 999, {"done": True}))
+
+    def test_taiwan_import_is_idempotent_and_keeps_edits(self):
+        from domains.plans import planned_trips as pt
+        from domains.plans.trip_imports import taiwan_2026 as tw
+        c = db()
+        pid = pt.save(c, {"name": "Taiwan Cycling Trip", "start_date": "2026-11-10", "end_date": "2026-11-18"}, [])
+        pt.set_day(c, pid, "2026-11-12", {"sleep": "Toucheng"})                  # your edit
+        first = tw.run(c)
+        self.assertEqual(first["planned_id"], pid)
+        self.assertEqual((first["budget"], first["tasks"]), (7, 15))
+        self.assertEqual(tw.run(c), {"planned_id": pid, "days": 0, "items": 0, "budget": 0, "tasks": 0})
+        d = pt.detail(c, pid, TODAY)
+        self.assertEqual(d["days"][2]["sleep"], "Toucheng")                       # kept
+        self.assertEqual(d["days"][2]["sleep_cost"], 1800)                        # filled
+        self.assertEqual(d["budget_totals"]["mid"], 33900)                        # = the PDF's total
+        self.assertEqual(round(d["budget_totals_eur"]["mid"]), 942)
+        self.assertEqual(sum(1 for i in d["items"] if i["kind"] == "decision"), 3)
+        self.assertEqual(d["nights_to_book"], 7)                                   # the PDF's 7 nights, not the flight
 
     def test_task_time_orders_within_the_day(self):
         c = db()

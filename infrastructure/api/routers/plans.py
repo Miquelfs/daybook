@@ -20,7 +20,9 @@ GET    /companions/activity/{id}, /companions/trip/{start}/{end}  — who it was
 GET    /people               — everyone, with days together this year / all time (for search)
 GET    /people/{id}          — one person for a year (?year=): calendar, frequency, what you do together
 GET    /planned-trips        — trips ahead (POST to plan one; GET / PATCH / DELETE /planned-trips/{id})
-PUT    /planned-trips/{id}/days/{date}       — the one-line outline for a day of the trip
+PUT    /planned-trips/{id}/days/{date}       — a day: plan, kind, where you sleep, price, booked + ref
+POST   /planned-trips/{id}/items             — packing / decision / risk / info (PATCH, DELETE /planned-trip-items/{id})
+POST   /planned-trips/{id}/budget            — a budget line (PATCH, DELETE /planned-trip-budget/{id})
 GET    /planned-trips/for-trip/{start}/{end} — the plan a detected trip came from
 GET    /calendar/marks       — ?month=YYYY-MM[&plan=1]: trips, events, achievements, birthdays per day
                                (+ tasks, notes, goal deadlines with plan=1 — Plan → Calendar)
@@ -363,11 +365,35 @@ class PlannedTripIn(BaseModel):
     end_date: str | None = None
     notes: str | None = None
     budget: float | None = None
+    currency: str | None = None
+    fx_rate: float | None = None
+    flights_eur: float | None = None
     contact_ids: list[int] | None = None
 
 
-class DayNoteIn(BaseModel):
+class DayIn(BaseModel):
     note: str | None = None
+    kind: str | None = None                 # travel | rest | ride
+    sleep: str | None = None
+    sleep_cost: float | None = None
+    booked: bool | None = None
+    booking_ref: str | None = None
+
+
+class TripItemIn(BaseModel):
+    kind: str | None = None                 # pack | decision | risk | info
+    section: str | None = None
+    title: str | None = None
+    detail: str | None = None
+    done: bool | None = None
+
+
+class BudgetLineIn(BaseModel):
+    line: str | None = None
+    low: float | None = None
+    mid: float | None = None
+    high: float | None = None
+    actual: float | None = None
 
 
 def _check_trip(fields: dict) -> dict:
@@ -409,14 +435,64 @@ def planned_trip_detail(planned_id: int, conn: DB):
 
 
 @router.put("/planned-trips/{planned_id}/days/{day}", status_code=204)
-def set_planned_day(planned_id: int, day: str, body: DayNoteIn, conn: DB):
+def set_planned_day(planned_id: int, day: str, body: DayIn, conn: DB):
     trip = trips_mod.get(conn, planned_id, date.today())
     if trip is None:
         raise HTTPException(status_code=404, detail="Planned trip not found")
     d = _iso(day, "day")
     if not trip["start_date"] <= d <= trip["end_date"]:
         raise HTTPException(status_code=422, detail="day is outside the trip")
-    trips_mod.set_day(conn, planned_id, d, body.note)
+    fields = body.model_dump(exclude_unset=True)
+    if fields.get("kind") not in (None, "travel", "rest", "ride"):
+        raise HTTPException(status_code=422, detail="kind must be travel, rest or ride")
+    trips_mod.set_day(conn, planned_id, d, fields)
+
+
+def _trip_or_404(conn: sqlite3.Connection, planned_id: int) -> dict:
+    trip = trips_mod.get(conn, planned_id, date.today())
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Planned trip not found")
+    return trip
+
+
+@router.post("/planned-trips/{planned_id}/items", status_code=201)
+def add_trip_item(planned_id: int, body: TripItemIn, conn: DB):
+    _trip_or_404(conn, planned_id)
+    if body.kind not in trips_mod.ITEM_KINDS:
+        raise HTTPException(status_code=422, detail=f"kind must be one of {', '.join(trips_mod.ITEM_KINDS)}")
+    if not (body.title or "").strip():
+        raise HTTPException(status_code=422, detail="title cannot be empty")
+    return {"id": trips_mod.add_item(conn, planned_id, body.kind, body.title.strip(), body.section, body.detail)}
+
+
+@router.patch("/planned-trip-items/{item_id}", status_code=204)
+def update_trip_item(item_id: int, body: TripItemIn, conn: DB):
+    if not trips_mod.update_item(conn, item_id, body.model_dump(exclude_unset=True)):
+        raise HTTPException(status_code=404, detail="Item not found")
+
+
+@router.delete("/planned-trip-items/{item_id}", status_code=204)
+def delete_trip_item(item_id: int, conn: DB):
+    trips_mod.delete_item(conn, item_id)
+
+
+@router.post("/planned-trips/{planned_id}/budget", status_code=201)
+def add_budget_line(planned_id: int, body: BudgetLineIn, conn: DB):
+    _trip_or_404(conn, planned_id)
+    if not (body.line or "").strip():
+        raise HTTPException(status_code=422, detail="line cannot be empty")
+    return {"id": trips_mod.add_budget_line(conn, planned_id, body.model_dump())}
+
+
+@router.patch("/planned-trip-budget/{line_id}", status_code=204)
+def update_budget_line(line_id: int, body: BudgetLineIn, conn: DB):
+    if not trips_mod.update_budget_line(conn, line_id, body.model_dump(exclude_unset=True)):
+        raise HTTPException(status_code=404, detail="Budget line not found")
+
+
+@router.delete("/planned-trip-budget/{line_id}", status_code=204)
+def delete_budget_line(line_id: int, conn: DB):
+    trips_mod.delete_budget_line(conn, line_id)
 
 
 @router.patch("/planned-trips/{planned_id}")

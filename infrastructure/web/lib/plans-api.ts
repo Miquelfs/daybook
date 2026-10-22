@@ -248,6 +248,10 @@ export interface PlannedTrip {
   end_date: string;
   notes: string | null;
   budget: number | null;
+  /** Local currency (e.g. TWD) and how many units per €. */
+  currency: string | null;
+  fx_rate: number | null;
+  flights_eur: number | null;
   adopted_start: string | null;
   adopted_end: string | null;
   nights: number;
@@ -258,15 +262,45 @@ export interface PlannedTrip {
   checklist_done: number;
 }
 
+export type TripDayKind = "travel" | "rest" | "ride";
+export interface TripDay {
+  date: string;
+  note: string | null;
+  kind: TripDayKind | null;
+  sleep: string | null;
+  sleep_cost: number | null;
+  booked: boolean;
+  booking_ref: string | null;
+}
+export type TripItemKind = "pack" | "decision" | "risk" | "info";
+export interface TripItem {
+  id: number;
+  kind: TripItemKind;
+  section: string | null;
+  title: string;
+  detail: string | null;
+  done: boolean;
+}
+export interface BudgetLine { id: number; line: string; low: number | null; mid: number | null; high: number | null; actual: number | null }
+type Totals = { low: number; mid: number; high: number; actual: number };
+
 /** A planned trip's page. */
 export interface PlannedTripDetail extends PlannedTrip {
-  days: { date: string; note: string | null }[];
+  days: TripDay[];
+  items: TripItem[];
+  budget_lines: BudgetLine[];
+  budget_totals: Totals;
+  budget_totals_eur: { low: number | null; mid: number | null; high: number | null; actual: number | null };
+  sleep_total: number;
+  nights_booked: number;
+  nights_to_book: number;
   checklist: Task[];
   flights: { id: number; date: string; origin: string | null; destination: string | null;
              flight_number: string | null; airline: string | null; dep_time: string | null; arr_time: string | null }[];
 }
 
-export type PlannedTripIn = Partial<Pick<PlannedTrip, "name" | "destination" | "start_date" | "end_date" | "notes" | "budget">> & {
+export type PlannedTripIn = Partial<Pick<PlannedTrip,
+  "name" | "destination" | "start_date" | "end_date" | "notes" | "budget" | "currency" | "fx_rate" | "flights_eur">> & {
   contact_ids?: number[];
 };
 
@@ -292,8 +326,17 @@ export const plansApi = {
 
   plannedTrips: () => req<PlannedTrip[]>("GET", "/api/planned-trips"),
   plannedTrip: (id: number) => req<PlannedTripDetail>("GET", `/api/planned-trips/${id}`),
-  setTripDay: (id: number, day: string, note: string | null) =>
-    req<void>("PUT", `/api/planned-trips/${id}/days/${day}`, { note }),
+  setTripDay: (id: number, day: string, fields: Partial<Omit<TripDay, "date">>) =>
+    req<void>("PUT", `/api/planned-trips/${id}/days/${day}`, fields),
+  addTripItem: (id: number, body: { kind: TripItemKind; title: string; section?: string | null; detail?: string | null }) =>
+    req<{ id: number }>("POST", `/api/planned-trips/${id}/items`, body),
+  updateTripItem: (itemId: number, body: Partial<Omit<TripItem, "id" | "kind">>) =>
+    req<void>("PATCH", `/api/planned-trip-items/${itemId}`, body),
+  deleteTripItem: (itemId: number) => req<void>("DELETE", `/api/planned-trip-items/${itemId}`),
+  addBudgetLine: (id: number, body: Omit<BudgetLine, "id">) => req<{ id: number }>("POST", `/api/planned-trips/${id}/budget`, body),
+  updateBudgetLine: (lineId: number, body: Partial<Omit<BudgetLine, "id">>) =>
+    req<void>("PATCH", `/api/planned-trip-budget/${lineId}`, body),
+  deleteBudgetLine: (lineId: number) => req<void>("DELETE", `/api/planned-trip-budget/${lineId}`),
   planForTrip: (start: string, end: string) =>
     req<PlannedTripDetail | null>("GET", `/api/planned-trips/for-trip/${start}/${end}`),
   createPlannedTrip: (body: PlannedTripIn) => req<PlannedTrip>("POST", "/api/planned-trips", body),
