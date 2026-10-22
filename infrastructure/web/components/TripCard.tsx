@@ -16,7 +16,7 @@ function photoProxy(path: string): string {
   return `/api/photos/${path.split("/").pop()}`;
 }
 
-export function TripCard({ trip, flag }: { trip: Trip; flag: React.ReactNode }) {
+export function TripCard({ trip, flag }: { trip: Trip; flag?: React.ReactNode }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(trip.name);
@@ -81,7 +81,7 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: React.ReactNode }) 
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === "Enter") go(); }}
-      className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3 hover:border-[#3F3F46] hover:bg-[#111113] transition-colors group flex items-center gap-3 cursor-pointer"
+      className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3 hover:border-[#3F3F46] hover:bg-[#111113] transition-colors group flex items-start gap-3 cursor-pointer"
     >
       {trip.cover_photo_path && (
         <div className="shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-[#27272A]">
@@ -89,20 +89,13 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: React.ReactNode }) 
           <img src={photoProxy(trip.cover_photo_path)} alt="" className="w-full h-full object-cover" />
         </div>
       )}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm text-[#D4D4D8] group-hover:text-[#FAFAFA] font-medium truncate transition-colors flex-1">
-            {flag} {name}
+      <div className="flex-1 min-w-0 space-y-1">
+        {/* Title on its own line — room to read it */}
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-sm text-[#D4D4D8] group-hover:text-[#FAFAFA] font-medium leading-snug line-clamp-2 transition-colors flex-1 min-w-0">
+            {flag && <span className="mr-1.5 align-middle">{flag}</span>}{name}
           </p>
-          <div className="flex items-center gap-2 shrink-0">
-            {trip.passenger_flight_count > 0 && (
-              <span className="text-[10px] text-sky-400 tabular-nums">
-                ✈ {trip.passenger_flight_count} flight{trip.passenger_flight_count > 1 ? "s" : ""}
-              </span>
-            )}
-            {trip.max_distance_from_home_km != null && (
-              <span className="text-[10px] text-[#3F3F46] tabular-nums">{Math.round(trip.max_distance_from_home_km)} km out</span>
-            )}
+          <div className="flex items-center gap-2 shrink-0 pt-0.5">
             {confirmDelete ? (
               <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                 <span className="text-[10px] text-[#71717A]">Delete?</span>
@@ -129,13 +122,18 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: React.ReactNode }) 
             )}
           </div>
         </div>
-        <div className="text-xs text-[#52525B] mt-0.5 flex flex-wrap items-baseline gap-x-1">
-          <span>
-            {fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}
-          </span>
+        <div className="text-xs text-[#71717A] flex flex-wrap items-baseline gap-x-2 tabular-nums">
+          <span>{fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}</span>
+          {trip.passenger_flight_count > 0 && (
+            <span className="text-sky-400">✈ {trip.passenger_flight_count} flight{trip.passenger_flight_count > 1 ? "s" : ""}</span>
+          )}
+          {trip.max_distance_from_home_km != null && (
+            <span className="text-[#52525B]">{Math.round(trip.max_distance_from_home_km)} km out</span>
+          )}
+        </div>
+        <div className="text-xs text-[#52525B] flex flex-wrap items-baseline gap-x-1">
           {trip.cities.length > 0 && (
-            <span className="text-[#3F3F46]">
-              {" "}·{" "}
+            <span className="text-[#52525B]">
               {trip.cities.slice(0, 3).map((city, i) => (
                 <Fragment key={city}>
                   {i > 0 && ", "}
@@ -150,7 +148,7 @@ export function TripCard({ trip, flag }: { trip: Trip; flag: React.ReactNode }) 
               ))}
             </span>
           )}
-          {trip.home_at_start && <span className="text-[#3F3F46]"> · from {trip.home_at_start}</span>}
+          {trip.home_at_start && <span className="text-[#3F3F46]">{trip.cities.length ? " · " : ""}from {trip.home_at_start}</span>}
         </div>
       </div>
     </div>

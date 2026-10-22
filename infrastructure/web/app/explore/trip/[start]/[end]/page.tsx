@@ -69,7 +69,7 @@ export default async function TripDetailPage({ params }: Props) {
 
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Flag country={trip.primary_country} region={trip.region} size={24} /> {trip.name}
+          {trip.primary_country !== "Spain" && <Flag country={trip.primary_country} size={24} />} {trip.name}
         </h1>
         <p className="text-sm text-[#71717A] mt-1">
           {fmtRange(trip.start_date, rangeEnd)} · {trip.n_nights} night{trip.n_nights === 1 ? "" : "s"}

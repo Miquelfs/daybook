@@ -32,14 +32,6 @@ class CataloniaTest(unittest.TestCase):
         self.assertEqual(cat, {"Barcelona", "Gelida", "Sabadell"})                      # Google-history city too
         self.assertEqual(regions.region_for("Spain", ["Barcelona", "Gelida"], cat), "Catalonia")
         self.assertIsNone(regions.region_for("Spain", ["Barcelona", "Palma"], cat))       # a city list: all must be
-        pts = regions.city_points(c)
-        palma = (2.64, 39.57)                                                             # home: Mallorca
-        self.assertEqual(regions.trip_region("Spain", ["Barcelona", "Palma", "Gelida"], cat, pts, palma), "Catalonia")
-        self.assertEqual(regions.trip_region("Spain", ["Barcelona", "Palma"], cat, pts, palma), "Catalonia")
-        self.assertIsNone(regions.trip_region("Spain", ["Arona", "Palma"], cat, pts, palma))       # Tenerife trip
-        self.assertIsNone(regions.trip_region("Spain", ["Palma"], cat, pts, palma))               # nothing away
-        self.assertIsNone(regions.trip_region("Spain", ["Barcelona", "Arona"], cat, pts, palma))  # Spain beyond Catalonia
-        self.assertEqual(regions.trip_region("Spain", ["Barcelona", "Gelida", "Palma"], cat, pts, None), "Catalonia")
         self.assertIsNone(regions.region_for("France", ["Barcelona"], cat))
 
 

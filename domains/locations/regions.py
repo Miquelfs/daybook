@@ -9,7 +9,6 @@ point per Spanish city is enough to know which cities are Catalan.
 from __future__ import annotations
 
 import json
-import math
 import sqlite3
 import time
 
@@ -79,31 +78,8 @@ def catalan_cities(con: sqlite3.Connection) -> set[str]:
     return {c for c, (lng, lat) in city_points(con).items() if in_catalonia(lng, lat)}
 
 
-def km(a: tuple[float, float], b: tuple[float, float]) -> float:
-    """Great-circle distance between two (lng, lat) points."""
-    lng1, lat1, lng2, lat2 = map(math.radians, (*a, *b))
-    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lng2 - lng1) / 2) ** 2
-    return 6371 * 2 * math.asin(math.sqrt(h))
-
-
 def region_for(country: str | None, cities: list[str], catalan: set[str]) -> str | None:
     """'Catalonia' when every one of the cities is in Catalonia."""
     if country not in SPAIN or not cities:
         return None
     return "Catalonia" if all(c in catalan for c in cities) else None
-
-
-HOME_RADIUS_KM = 80     # the home island / area — Palma while in Mallorca, Tenerife before
-
-
-def trip_region(country: str | None, cities: list[str], catalan: set[str],
-                points: dict[str, tuple[float, float]], home: tuple[float, float] | None) -> str | None:
-    """A trip is Catalan when every city it went to *away from home* is. The home
-    end (flying out of Palma) doesn't count; without a known home, most cities must be."""
-    if country not in SPAIN or not cities:
-        return None
-    if home is None:
-        n = sum(1 for c in cities if c in catalan)
-        return "Catalonia" if n * 2 > len(cities) else None
-    away = [c for c in cities if c not in points or km(points[c], home) > HOME_RADIUS_KM]
-    return region_for(country, away, catalan)

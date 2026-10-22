@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from domains.locations.country_names import to_english
 from domains.locations.flight_filter import cleanup_flight_points, is_airborne
 from domains.locations.locations_query import tracks_for_date
-from domains.locations.regions import catalan_cities, city_points, region_for, trip_region
+from domains.locations.regions import catalan_cities, region_for
 from domains.locations.tz_lookup import local_date_for_point
 
 router = APIRouter(prefix="/locations", tags=["locations"])
@@ -1539,30 +1539,12 @@ def _catalan() -> set[str]:
     return raw | {_norm_city(c) or c for c in raw}
 
 
-def _trip_region(t: dict, con: sqlite3.Connection) -> str | None:
-    """Catalonia when every city visited away from the home of the time is Catalan
-    (a trip from Mallorca to Barcelona isn't 'Spain' because it starts in Palma)."""
-    home = None
-    has_homes = con.execute("SELECT 1 FROM sqlite_master WHERE name='home_places'").fetchone()
-    if t.get("home_at_start") and has_homes:
-        row = con.execute("SELECT lng, lat FROM home_places WHERE label LIKE ? LIMIT 1",
-                          (f"%{t['home_at_start']}%",)).fetchone()
-        home = (row[0], row[1]) if row else None
-    loc = _conn()
-    try:
-        points = city_points(loc)
-    finally:
-        loc.close()
-    return trip_region(t["primary_country"], t["cities"], _catalan(), points, home)
-
-
 def _trip_row_to_dict(r: sqlite3.Row, con: sqlite3.Connection) -> dict:
     t = dict(r)
     t["countries"] = [_en(c) for c in json.loads(t.pop("countries_json") or "[]")]
     t["cities"] = json.loads(t.pop("cities_json") or "[]")
     t["name"] = t["user_name"] or t["auto_name"]
     t["primary_country"] = _en(t["primary_country"])
-    t["region"] = _trip_region(t, con)                                       # Catalonia → senyera
     n_nights = 1 + (
         datetime.fromisoformat(t["end_date"]) - datetime.fromisoformat(t["start_date"])
     ).days

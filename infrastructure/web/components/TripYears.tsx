@@ -47,7 +47,8 @@ export function TripYears({
             {isOpen && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {trips.map((t) => (
-                  <TripCard key={t.id} trip={t} flag={<Flag country={t.primary_country} region={t.region} />} />
+                  <TripCard key={t.id} trip={t}
+                            flag={t.primary_country === "Spain" ? null : <Flag country={t.primary_country} />} />
                 ))}
               </div>
             )}
