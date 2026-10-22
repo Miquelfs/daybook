@@ -47,7 +47,7 @@ export function SessionActualStats({
   }
 
   const dist = fmtDist(actual.distance_m, actual.activity_type);
-  const dur = fmtDur(actual.moving_time_s ?? actual.duration_s);
+  const dur = fmtDur(actual.moving_time_s || actual.duration_s);
 
   return (
     <div className="bg-[#0D0D0F] border border-[#14532D] rounded-xl px-4 py-3 space-y-2">

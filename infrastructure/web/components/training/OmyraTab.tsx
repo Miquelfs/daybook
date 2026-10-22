@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { CourseCard } from "@/components/training/CourseCard";
+import { useFitnessSummary } from "@/components/activity/TrainingImpactCard";
 import type { PlanCourse } from "@/lib/api";
 import { sessionIcon } from "@/lib/sport";
 import { WeekPlanner } from "@/components/training/WeekPlanner";
@@ -408,22 +409,22 @@ function WeekCalendar({ goalId, onSelectSession }: {
   );
 }
 
-// ── Compliance ring ────────────────────────────────────────────────────────
+// ── Goal ring: progress toward the goal itself (race-day fitness), not this week's checkmarks ─────
 
-function ComplianceRing({ rate }: { rate: number }) {
+function GoalRing({ pct, caption, title }: { pct: number; caption: string; title: string }) {
   const r = 18;
   const circ = 2 * Math.PI * r;
-  const dash = circ * Math.min(1, rate);
-  const color = rate >= 0.8 ? "#4ADE80" : rate >= 0.6 ? "#FB923C" : "#F87171";
+  const dash = circ * Math.min(1, Math.max(0, pct / 100));
   return (
-    <svg width={44} height={44} viewBox="0 0 44 44">
-      <circle cx={22} cy={22} r={r} fill="none" stroke="#27272A" strokeWidth={4} />
-      <circle cx={22} cy={22} r={r} fill="none" stroke={color} strokeWidth={4}
-        strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" transform="rotate(-90 22 22)" />
-      <text x={22} y={26} textAnchor="middle" fontSize={9} fill={color} fontWeight="600">
-        {Math.round(rate * 100)}%
-      </text>
-    </svg>
+    <div className="flex flex-col items-center shrink-0" title={title}>
+      <svg width={44} height={44} viewBox="0 0 44 44">
+        <circle cx={22} cy={22} r={r} fill="none" stroke="var(--viz-grid)" strokeWidth={4} />
+        <circle cx={22} cy={22} r={r} fill="none" stroke="var(--viz-i4)" strokeWidth={4}
+          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" transform="rotate(-90 22 22)" />
+        <text x={22} y={26} textAnchor="middle" fontSize={9} fill="var(--viz-i4)" fontWeight="600">{Math.round(pct)}%</text>
+      </svg>
+      <span className="text-[9px] uppercase tracking-widest text-[#71717A] -mt-0.5">{caption}</span>
+    </div>
   );
 }
 
@@ -761,7 +762,13 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
   const isAbandoned = goal.status === "abandoned";
   const isCompleted = goal.status === "completed";
   const dim = isAbandoned || isCompleted;
-  const overallRate = compliance?.overall_compliance ?? 0;
+  const { data: fitness } = useFitnessSummary();
+  const fitGoal = fitness?.goal && fitness.goal.name === goal.name ? fitness.goal : null;
+  // the ring is the goal: race-day fitness when we have it, else how far through the plan we are
+  const ring = fitGoal
+    ? { pct: fitGoal.pct, caption: "fitness", title: `Fitness ${Math.round(fitness!.load!.fitness)} of ~${fitGoal.target_fitness} needed on race day` }
+    : { pct: goal.total_weeks ? (Math.max(0, goal.current_week - 1) / goal.total_weeks) * 100 : 0, caption: "plan",
+        title: `Week ${goal.current_week} of ${goal.total_weeks}` };
 
   // Group upcoming by week number
   const byWeek: Record<number, PlanSession[]> = {};
@@ -775,7 +782,7 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
         <div className="px-4 py-4">
           {/* Header row */}
           <div className="flex items-start gap-3">
-            {!goal.waiting && !dim && <ComplianceRing rate={overallRate} />}
+            {!goal.waiting && !dim && <GoalRing {...ring} />}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="text-sm font-semibold text-[#FAFAFA] truncate">{goal.name}</p>
@@ -791,6 +798,11 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
                 {!goal.waiting && (
                   <span className="text-xs text-[#52525B]">
                     Wk {goal.current_week}/{goal.total_weeks} · {PHASE_LABEL[goal.current_phase] ?? goal.current_phase}
+                  </span>
+                )}
+                {!goal.waiting && compliance?.total_planned > 0 && (
+                  <span className="text-xs text-[#71717A]">
+                    {compliance.total_completed}/{compliance.total_planned} sessions done so far
                   </span>
                 )}
                 {goal.waiting && goal.plan_start_display && (

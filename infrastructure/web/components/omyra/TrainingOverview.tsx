@@ -365,14 +365,14 @@ function ThisWeek() {
     queryFn: () => json(`${BASE}/training/activities?start=${start}&end=${end}&limit=50`),
   });
   const acts = Array.isArray(data) ? data : [];
-  const totalMin = acts.reduce((a, x) => a + (x.moving_time_seconds ?? x.duration_seconds ?? 0) / 60, 0);
+  const totalMin = acts.reduce((a, x) => a + ((x.moving_time_seconds || x.duration_seconds || 0)) / 60, 0);
   return (
     <Section title="This week" action={<span className="text-xs text-[#71717A] tabular-nums">{fmtH(totalMin)} · {acts.length} sessions</span>}>
       <div className="grid grid-cols-7 gap-1.5">
         {days.map((d) => {
           const iso = localISODate(d);
           const mine = acts.filter((a) => a.date === iso);
-          const mins = mine.reduce((a, x) => a + (x.moving_time_seconds ?? x.duration_seconds ?? 0) / 60, 0);
+          const mins = mine.reduce((a, x) => a + ((x.moving_time_seconds || x.duration_seconds || 0)) / 60, 0);
           const isToday = iso === today, future = iso > today;
           return (
             <Link key={iso} href={`/day/${iso}`}
@@ -419,7 +419,7 @@ function ActivityRow({ a }: { a: Act }) {
         <p className="text-xs text-[#71717A] tabular-nums truncate">
           {format(parseISO(a.date), "EEE d MMM")}
           {a.distance_meters ? ` · ${fmtDistance(a.distance_meters)}` : ""}
-          {` · ${fmtDuration(a.moving_time_seconds ?? a.duration_seconds)}`}
+          {` · ${fmtDuration(a.moving_time_seconds || a.duration_seconds)}`}
           {pace ? ` · ${pace}` : ""}
           {a.elevation_gain_meters && a.elevation_gain_meters > 50 ? ` · ↑${Math.round(a.elevation_gain_meters)} m` : ""}
         </p>

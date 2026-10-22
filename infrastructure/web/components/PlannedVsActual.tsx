@@ -80,7 +80,7 @@ export function PlannedVsActual({ planSession, splits, activity }: {
     ? resolveStructure(planSession.structure, dz, planSession.discipline)
     : [];
   const plannedMin = planSession.effective_duration_min ?? planSession.duration_min;
-  const actualMin = Math.round((activity.moving_time_seconds ?? activity.duration_seconds ?? 0) / 60);
+  const actualMin = Math.round(((activity.moving_time_seconds || activity.duration_seconds || 0)) / 60);
   const durDelta = actualMin - plannedMin;
   const durPct = plannedMin ? Math.round((durDelta / plannedMin) * 100) : 0;
   const verdict = hrVerdict(activity.avg_heart_rate, planSession.intensity_zone, dz, planSession.discipline);

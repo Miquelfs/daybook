@@ -108,7 +108,8 @@ def _parse_activity(raw: dict) -> dict:
         "name": raw.get("activityName"),
         "start_time": start,
         "duration_seconds": int(raw.get("duration", 0) or 0),
-        "moving_time_seconds": int(raw.get("movingDuration", 0) or 0),
+        # Garmin reports 0 moving time for stopwatch / gym activities: store "unknown" so duration is used
+        "moving_time_seconds": int(raw["movingDuration"]) if raw.get("movingDuration") else None,
         "distance_meters": raw.get("distance"),
         "elevation_gain_meters": raw.get("elevationGain"),
         "avg_heart_rate": raw.get("averageHR"),

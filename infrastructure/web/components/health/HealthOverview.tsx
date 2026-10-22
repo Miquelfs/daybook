@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import { format, parseISO, subDays } from "date-fns";
 import { HRContext } from "@/components/HRContext";
+import { FitnessAgeCard } from "@/components/health/FitnessAgeCard";
 import { injuriesApi, type ActiveSummaryItem, ZONE_LABELS } from "@/lib/injuries-api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -181,6 +182,7 @@ export function HealthOverview({ days: n }: { days: number }) {
   return (
     <>
       <RecoveryHero days={all} />
+      <FitnessAgeCard />
 
       {injuries.length > 0 && (
         <Link href="/health/injuries" className="block mb-8">

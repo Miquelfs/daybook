@@ -223,6 +223,10 @@ def _run_migrations() -> None:
     _conn12 = _get_conn()
     _migrate_plans(_conn12)
     _conn12.close()
+    from infrastructure.db.migrate_zero_moving_time import migrate as _migrate_zero_moving
+    _conn13 = _get_conn()
+    _migrate_zero_moving(_conn13)
+    _conn13.close()
 
 
 class ThemeIn(BaseModel):
