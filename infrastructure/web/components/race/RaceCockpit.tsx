@@ -8,6 +8,7 @@ import { SectionLabel } from "@/components/MorningBrief";
 import { WeekPlanner } from "@/components/training/WeekPlanner";
 import RaceReadinessPanel from "@/components/training/RaceReadinessPanel";
 import { BlocksCard } from "@/components/race/BlocksCard";
+import { BRacesCard } from "@/components/race/BRacesCard";
 import { localISODate } from "@/lib/dates";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -643,7 +644,10 @@ export function RaceCockpit() {
         <WeekStrip goalId={goal.id} onPlan={(d) => setPlanner(d)} />
       </div>
       <CoachCard goalId={goal.id} />
-      <BlocksCard goalId={goal.id} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 [&>*]:min-w-0">
+        <BlocksCard goalId={goal.id} />
+        <BRacesCard goalId={goal.id} />
+      </div>
       {ov && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 [&>*]:min-w-0">
           <EngineCard ov={ov} />

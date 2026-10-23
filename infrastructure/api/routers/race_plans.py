@@ -1061,6 +1061,40 @@ class BlockCreate(BaseModel):
     days: list[BlockDay] = []
 
 
+class BRaceCreate(BaseModel):
+    name: str
+    race_date: str
+    race_type: str = "half_marathon"
+
+
+@router.get("/goals/{goal_id}/b-races")
+def list_b_races(goal_id: int, conn: DB):
+    from domains.training import b_race
+    return b_race.list_for(conn, goal_id)
+
+
+@router.post("/goals/{goal_id}/b-races", status_code=201)
+def create_b_race(goal_id: int, body: BRaceCreate, conn: DB):
+    """A B race on the way (e.g. a half marathon): its runs swapped into the plan, a short taper, easy days after."""
+    from domains.training import b_race
+    _row(conn, "race_goals", goal_id)
+    try:
+        return b_race.create(conn, goal_id, body.name.strip() or "Half marathon", body.race_date, body.race_type)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.delete("/b-races/{b_id}", status_code=200)
+def delete_b_race(b_id: int, conn: DB):
+    """Remove a B race — its runs go, the swapped bike sessions come back."""
+    from domains.training import b_race
+    try:
+        b_race.delete(conn, b_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"deleted": b_id}
+
+
 @router.post("/courses/parse")
 def parse_courses(body: CourseParse):
     """Preview GPX courses before adding a tour: distance, tunnel-corrected climbing, climbs, time, load."""
