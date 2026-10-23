@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2, Pencil, Check, X } from "lucide-react";
+import { Trash2, Pencil, Check, X, Receipt } from "lucide-react";
 import { moneyApi, fmtAmount, type Transaction, type TransactionPatch } from "@/lib/money-api";
 import { CATEGORY_EMOJI, EXPENSE_CATEGORIES, accountBadgeClass } from "./CategoryPills";
+import { ReceiptPanel } from "./ReceiptPanel";
 
 const ALL_CATEGORIES = [
   ...EXPENSE_CATEGORIES,
@@ -150,6 +151,9 @@ function TransactionRow({
     category: t.category ?? "",
   });
   const [confirming, setConfirming] = useState(false);
+  const [showReceipt, setShowReceipt] = useState(false);
+  // Grocery expenses can carry their supermarket ticket
+  const canHaveReceipt = t.category === "Groceries" || !!t.has_receipt;
 
   const patch = useMutation({
     mutationFn: (body: TransactionPatch) => moneyApi.patchTransaction(t.id, body),
@@ -274,64 +278,79 @@ function TransactionRow({
   }
 
   return (
-    <div className={`group flex items-center gap-3 py-2 ${isTransfer ? "opacity-50" : ""}`}>
-      <span className="text-base w-6 text-center shrink-0">{emoji}</span>
-      <div className="flex-1 min-w-0">
-        <p className={`text-sm truncate ${isTransfer ? "text-[#71717A]" : "text-[#D4D4D8]"}`}>{t.name}</p>
-        <p className="text-xs text-[#52525B] truncate">
-          {[showDate ? t.date : null, t.subcategory, isTransfer ? (t.transaction_type === "Finance" ? "portfolio" : "internal transfer") : null].filter(Boolean).join(" · ")}
-        </p>
-      </div>
-      {/* Account pill */}
-      {t.account && (() => {
-        const { bg, text } = accountBadgeClass(t.account);
-        return (
-          <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 hidden sm:inline ${bg} ${text}`}>
-            {t.account}
-          </span>
-        );
-      })()}
-      <span className={`text-sm tabular-nums shrink-0 ${
-        isTransfer ? "text-[#3F3F46]" : isPositive ? "text-[#22C55E]" : "text-[#A1A1AA]"
-      }`}>
-        {isPositive ? "+" : "-"}{fmtAmount(t.amount)}
-      </span>
-      <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
-        <button
-          onClick={() => setEditing(true)}
-          className="text-[#3F3F46] hover:text-[#A1A1AA] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
-          aria-label="Edit"
-        >
-          <Pencil size={14} />
-        </button>
-        {confirming ? (
-          <>
-            <button
-              onClick={() => del.mutate()}
-              className="text-[#EF4444] hover:text-[#FCA5A5] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
-              disabled={del.isPending}
-              aria-label="Confirm delete"
-            >
-              <Check size={14} />
-            </button>
-            <button
-              onClick={() => setConfirming(false)}
-              className="text-[#52525B] hover:text-[#A1A1AA] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
-              aria-label="Cancel"
-            >
-              <X size={14} />
-            </button>
-          </>
-        ) : (
+    <div>
+      <div className={`group flex items-center gap-3 py-2 ${isTransfer ? "opacity-50" : ""}`}>
+        <span className="text-base w-6 text-center shrink-0">{emoji}</span>
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm truncate ${isTransfer ? "text-[#71717A]" : "text-[#D4D4D8]"}`}>{t.name}</p>
+          <p className="text-xs text-[#52525B] truncate">
+            {[showDate ? t.date : null, t.subcategory, isTransfer ? (t.transaction_type === "Finance" ? "portfolio" : "internal transfer") : null].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+        {/* Account pill */}
+        {t.account && (() => {
+          const { bg, text } = accountBadgeClass(t.account);
+          return (
+            <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 hidden sm:inline ${bg} ${text}`}>
+              {t.account}
+            </span>
+          );
+        })()}
+        <span className={`text-sm tabular-nums shrink-0 ${
+          isTransfer ? "text-[#3F3F46]" : isPositive ? "text-[#22C55E]" : "text-[#A1A1AA]"
+        }`}>
+          {isPositive ? "+" : "-"}{fmtAmount(t.amount)}
+        </span>
+        {canHaveReceipt && (
           <button
-            onClick={() => setConfirming(true)}
-            className="text-[#3F3F46] hover:text-[#EF4444] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
-            aria-label="Delete"
+            onClick={() => setShowReceipt((v) => !v)}
+            className={`p-1.5 rounded-lg transition-colors active:bg-[#27272A] shrink-0 ${
+              t.has_receipt ? "text-[#F59E0B] hover:text-[#FCD34D]" : "text-[#3F3F46] hover:text-[#A1A1AA]"
+            }`}
+            aria-label={t.has_receipt ? "Show ticket" : "Attach ticket"}
+            title={t.has_receipt ? "Show ticket" : "Attach ticket"}
           >
-            <Trash2 size={14} />
+            <Receipt size={14} />
           </button>
         )}
+        <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+          <button
+            onClick={() => setEditing(true)}
+            className="text-[#3F3F46] hover:text-[#A1A1AA] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
+            aria-label="Edit"
+          >
+            <Pencil size={14} />
+          </button>
+          {confirming ? (
+            <>
+              <button
+                onClick={() => del.mutate()}
+                className="text-[#EF4444] hover:text-[#FCA5A5] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
+                disabled={del.isPending}
+                aria-label="Confirm delete"
+              >
+                <Check size={14} />
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                className="text-[#52525B] hover:text-[#A1A1AA] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
+                aria-label="Cancel"
+              >
+                <X size={14} />
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirming(true)}
+              className="text-[#3F3F46] hover:text-[#EF4444] transition-colors p-1.5 rounded-lg active:bg-[#27272A]"
+              aria-label="Delete"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
       </div>
+      {showReceipt && <ReceiptPanel t={t} />}
     </div>
   );
 }

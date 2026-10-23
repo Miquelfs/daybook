@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, Check, Loader } from "lucide-react";
+import { X, Check, Loader, Paperclip } from "lucide-react";
 import { moneyApi, type MoneyMeta, type MerchantSuggestion } from "@/lib/money-api";
 import { CATEGORY_EMOJI, accountBadgeClass } from "./CategoryPills";
 import { useVisualViewport, sheetViewportStyle } from "@/lib/useVisualViewport";
@@ -28,12 +28,16 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
   const [account, setAccount] = useState(meta.defaults.account || "");
   const [txDate, setTxDate] = useState(date);
   const [notes, setNotes] = useState("");
+  // Supermarket ticket (Groceries only) — optional, can also be attached later from the list
+  const [ticket, setTicket] = useState<File | null>(null);
+  const [ticketError, setTicketError] = useState<string | null>(null);
   const [autocompleteQ, setAutocompleteQ] = useState("");
   const [subcatQ, setSubcatQ] = useState("");
   // Once the user picks a category by hand, stop auto-guessing it from the merchant.
   const [categoryTouched, setCategoryTouched] = useState(false);
   const [autoCategory, setAutoCategory] = useState<string | null>(null);
   const amountRef = useRef<HTMLInputElement>(null);
+  const ticketRef = useRef<HTMLInputElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const vv = useVisualViewport(isOpen);
 
@@ -102,6 +106,8 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
       setAccount(meta.defaults.account || "");
       setTxDate(date);
       setNotes("");
+      setTicket(null);
+      setTicketError(null);
       setCategoryTouched(false);
       setAutoCategory(null);
       setTimeout(() => amountRef.current?.focus(), 80);
@@ -122,9 +128,11 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
     setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
   }
 
+  const isGroceries = (customCategory.trim() || category) === "Groceries";
+
   const { mutate: save, isPending, error } = useMutation({
-    mutationFn: () =>
-      moneyApi.addTransaction({
+    mutationFn: async () => {
+      const txn = await moneyApi.addTransaction({
         date: txDate,
         name: merchant.trim() || (customCategory.trim() || category),
         amount: parseFloat(amount),
@@ -133,14 +141,26 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
         subcategory: subcategory.trim() || undefined,
         account: account || undefined,
         notes: notes.trim() || undefined,
-      }),
-    onSuccess: () => {
+      });
+      // The expense is saved either way; a ticket that can't be read is reported, not fatal.
+      if (ticket && isGroceries) {
+        try {
+          await moneyApi.attachReceipt(txn.id, ticket);
+        } catch (e) {
+          return { ticketError: e instanceof Error ? e.message : "Couldn't read that ticket" };
+        }
+      }
+      return { ticketError: null };
+    },
+    onSuccess: ({ ticketError }) => {
       qc.invalidateQueries({ queryKey: ["money"] });
-      onClose();
+      qc.invalidateQueries({ queryKey: ["groceries"] });
+      if (ticketError) setTicketError(ticketError);
+      else onClose();
     },
   });
 
-  const canSave = !isPending && !!merchant.trim() && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0;
+  const canSave = !isPending && !ticketError && !!merchant.trim() && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0;
 
   if (!isOpen) return null;
 
@@ -360,6 +380,47 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
             </div>
           </div>
 
+          {/* Ticket — Groceries only */}
+          {isGroceries && (
+            <div>
+              <label className="text-xs text-[#52525B] uppercase tracking-widest mb-2 block">
+                Ticket <span className="normal-case text-[#3F3F46]">(optional — or attach it later)</span>
+              </label>
+              <input
+                ref={ticketRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                onChange={(e) => setTicket(e.target.files?.[0] ?? null)}
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => ticketRef.current?.click()}
+                  className={`flex-1 min-w-0 flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm border transition-colors ${
+                    ticket
+                      ? "bg-[#F59E0B]/10 border-[#F59E0B]/40 text-[#F59E0B]"
+                      : "bg-[#18181B] border-[#27272A] text-[#71717A] hover:border-[#3F3F46]"
+                  }`}
+                >
+                  <Paperclip size={14} className="shrink-0" />
+                  <span className="truncate">{ticket ? ticket.name : "Attach Mercadona PDF"}</span>
+                </button>
+                {ticket && (
+                  <button type="button" onClick={() => setTicket(null)} className="text-[#52525B] hover:text-[#A1A1AA] p-1">
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {ticketError && (
+            <p className="text-xs text-[#F59E0B] text-center">
+              Transaction saved, but the ticket wasn&apos;t attached: {ticketError}. You can attach it from the transaction list.
+            </p>
+          )}
+
           {/* Error */}
           {error && (
             <p className="text-xs text-[#EF4444] text-center">
@@ -368,15 +429,25 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
           )}
 
           {/* Save */}
-          <button
-            type="button"
-            onClick={() => save()}
-            disabled={!canSave}
-            className="w-full py-3.5 rounded-xl bg-[#F59E0B] text-[#09090B] font-semibold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
-          >
-            {isPending ? <Loader size={18} className="animate-spin" /> : <Check size={18} />}
-            Save transaction
-          </button>
+          {ticketError ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-3.5 rounded-xl bg-[#27272A] text-[#FAFAFA] font-semibold"
+            >
+              Done
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => save()}
+              disabled={!canSave}
+              className="w-full py-3.5 rounded-xl bg-[#F59E0B] text-[#09090B] font-semibold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+            >
+              {isPending ? <Loader size={18} className="animate-spin" /> : <Check size={18} />}
+              Save transaction
+            </button>
+          )}
         </div>
       </div>
     </>

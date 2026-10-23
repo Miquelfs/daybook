@@ -90,6 +90,7 @@ def _row_to_txn(row: sqlite3.Row) -> TransactionOut:
         transaction_type=row["transaction_type"],
         notes=row["notes"],
         created_at=row["created_at"],
+        has_receipt=bool(row["has_receipt"]) if "has_receipt" in row.keys() else False,
     )
 
 
@@ -175,7 +176,8 @@ def list_transactions(
     params += [limit, offset]
 
     rows = conn.execute(
-        f"SELECT * FROM transactions WHERE {where} ORDER BY date DESC, created_at DESC LIMIT ? OFFSET ?",
+        f"""SELECT t.*, EXISTS(SELECT 1 FROM receipts r WHERE r.transaction_id = t.id) AS has_receipt
+            FROM transactions t WHERE {where} ORDER BY date DESC, created_at DESC LIMIT ? OFFSET ?""",
         params,
     ).fetchall()
     return [_row_to_txn(r) for r in rows]

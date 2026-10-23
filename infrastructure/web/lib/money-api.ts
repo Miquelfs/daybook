@@ -101,6 +101,75 @@ export type Transaction = {
   transaction_type: string;
   notes: string | null;
   created_at: string;
+  has_receipt?: boolean;   // a supermarket ticket is attached
+};
+
+// ── Supermarket tickets (Groceries) ──────────────────────────────────────────
+
+export const GROCERY_GROUPS = [
+  "Fruit & veg", "Meat & fish", "Dairy & eggs", "Bakery", "Pantry",
+  "Frozen & ready", "Sweets & snacks", "Drinks", "Household", "Personal care", "Other",
+] as const;
+
+export type ReceiptItem = {
+  line_no: number;
+  product: string;         // as printed: "QUESO GRANA PADANO"
+  display: string;         // "Queso grana padano"
+  quantity: number;
+  weight_kg: number | null;
+  unit_price: number | null; // € per unit, or €/kg when weight_kg is set
+  amount: number;
+  group: string;
+  avoid: boolean;
+};
+
+export type Receipt = {
+  id: number;
+  transaction_id: string;
+  store: string;
+  purchased_at: string | null;
+  invoice_no: string | null;
+  total: number;
+  matches_transaction: boolean;
+  pdf_url: string;         // API path, e.g. /money/receipts/3/pdf
+  items: ReceiptItem[];
+};
+
+export type GrocerySummary = {
+  start: string;
+  receipts: number;
+  total: number;
+  groups: { group: string; amount: number; share: number }[];
+  avoid_total: number;
+  avoid_share: number;
+  avoid_items: { product: string; display: string; group: string; times: number; amount: number; last_date: string }[];
+  months: { month: string; total: number; avoid: number }[];
+};
+
+export type GroceryProduct = {
+  product: string;
+  display: string;
+  group: string;
+  avoid: boolean;
+  per_kg: boolean;
+  times: number;
+  spent: number;
+  last_date: string;
+  first_price: number;
+  last_price: number;
+  change_pct: number;
+  history: { date: string; price: number }[];
+};
+
+export type GroceryProductPatch = { product: string; group?: string; avoid?: boolean; reset?: boolean };
+
+export type RecentGrocery = {
+  product: string;
+  display: string;
+  group: string;
+  avoid: boolean;
+  times: number;
+  last_date: string;
 };
 
 export type TransactionCreate = {
@@ -692,6 +761,33 @@ export const moneyApi = {
   deleteTransaction: (id: string) =>
     proxyDel(`/api/money/transactions/${id}`),
 
+  receipt: (txnId: string) =>
+    get<Receipt>(`/money/transactions/${encodeURIComponent(txnId)}/receipt`),
+
+  attachReceipt: async (txnId: string, file: File): Promise<Receipt> => {
+    const fd = new FormData();
+    fd.set("file", file);
+    const path = `/api/money/transactions/${encodeURIComponent(txnId)}/receipt`;
+    const res = await fetch(`${PROXY_BASE}${path}`, { method: "POST", body: fd, cache: "no-store" });
+    if (!res.ok) throw new Error(await errorMessage(res, "Couldn't read that ticket"));
+    return res.json();
+  },
+
+  removeReceipt: (txnId: string) =>
+    proxyDel(`/api/money/transactions/${encodeURIComponent(txnId)}/receipt`),
+
+  grocerySummary: (months: number) =>
+    get<GrocerySummary>(`/money/groceries/summary?months=${months}`),
+
+  groceryProducts: () =>
+    get<GroceryProduct[]>("/money/groceries/products"),
+
+  patchGroceryProduct: (body: GroceryProductPatch) =>
+    proxyPatch<GroceryProduct>("/api/money/groceries/products", body),
+
+  recentGroceries: (days = 10) =>
+    get<RecentGrocery[]>(`/money/groceries/recent?days=${days}`),
+
   merchants: (q: string) =>
     get<MerchantSuggestion[]>(`/money/autocomplete/merchants?q=${encodeURIComponent(q)}`),
 
@@ -836,6 +932,11 @@ export const moneyApi = {
 
 export function fmtAmount(amount: number): string {
   return `€${Math.abs(amount).toFixed(2)}`;
+}
+
+/** Same-origin URL for a ticket PDF (the API path proxied under /api). */
+export function receiptPdfHref(r: Receipt): string {
+  return `/api${r.pdf_url}`;
 }
 
 export function isExpense(t: Transaction): boolean {

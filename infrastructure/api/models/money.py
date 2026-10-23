@@ -27,6 +27,7 @@ class TransactionOut(BaseModel):
     transaction_type: str
     notes: Optional[str]
     created_at: str
+    has_receipt: bool = False   # a supermarket ticket is attached
 
 
 class TransactionPatch(BaseModel):

@@ -142,3 +142,41 @@ CREATE TABLE IF NOT EXISTS investment_plan_executions (
 CREATE INDEX IF NOT EXISTS idx_investment_plans_active ON investment_plans(is_active, next_execution_date);
 CREATE INDEX IF NOT EXISTS idx_investment_plans_holding ON investment_plans(holding_id);
 CREATE INDEX IF NOT EXISTS idx_plan_exec_plan ON investment_plan_executions(plan_id, execution_date);
+
+-- ─── Supermarket tickets ─────────────────────────────────────────────────────
+-- A grocery expense can carry the ticket it paid for (one per transaction). The
+-- PDF lives on the Pi in data/receipts/; its lines are parsed into receipt_items
+-- (product exactly as printed — Mercadona's names are stable across tickets).
+
+CREATE TABLE IF NOT EXISTS receipts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id  TEXT NOT NULL UNIQUE REFERENCES transactions(id) ON DELETE CASCADE,
+    store           TEXT NOT NULL,
+    purchased_at    TEXT,                   -- 'YYYY-MM-DD HH:MM' as printed on the ticket
+    invoice_no      TEXT,
+    total           REAL NOT NULL,
+    pdf_path        TEXT NOT NULL,          -- relative to data/receipts/
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS receipt_items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    receipt_id  INTEGER NOT NULL REFERENCES receipts(id) ON DELETE CASCADE,
+    line_no     INTEGER NOT NULL,
+    product     TEXT NOT NULL,              -- 'QUESO GRANA PADANO'
+    quantity    REAL NOT NULL DEFAULT 1,
+    weight_kg   REAL,                       -- loose produce only
+    unit_price  REAL,                       -- € per unit, or €/kg when weight_kg is set
+    amount      REAL NOT NULL
+);
+
+-- Per-product overrides of the keyword rules in domains/money/groceries.py
+CREATE TABLE IF NOT EXISTS grocery_products (
+    product     TEXT PRIMARY KEY,
+    grp         TEXT,                       -- NULL = use the rule
+    avoid       INTEGER,                    -- NULL = use the rule
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipt_items_receipt ON receipt_items(receipt_id);
+CREATE INDEX IF NOT EXISTS idx_receipt_items_product ON receipt_items(product);

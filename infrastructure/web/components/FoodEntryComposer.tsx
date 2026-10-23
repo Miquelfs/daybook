@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Sparkles, X } from "lucide-react";
 import { foodApi, type AnalyzeItem, type RecentFood, type HeartRating } from "@/lib/food-api";
 import { HeartRatingBadge, HeartDot } from "@/components/HeartRatingBadge";
+import { moneyApi, type RecentGrocery } from "@/lib/money-api";
 
 const MEAL_TYPES = MEAL_ORDER;
 
@@ -44,6 +45,17 @@ export function FoodEntryComposer({ date, onDone, initialMealType = "" }: {
     queryFn: () => foodApi.recent(8),
     staleTime: 60_000,
   });
+
+  // Off the supermarket tickets — tap one to add it as an item to log
+  const { data: bought = [] } = useQuery<RecentGrocery[]>({
+    queryKey: ["groceries", "recent"],
+    queryFn: () => moneyApi.recentGroceries(10),
+    staleTime: 5 * 60_000,
+  });
+
+  function pickBought(g: RecentGrocery) {
+    setItems((prev) => [...(prev ?? []), { ...blankItem(), name: g.display }]);
+  }
 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ["day-food", date] });
@@ -169,6 +181,28 @@ export function FoodEntryComposer({ date, onDone, initialMealType = "" }: {
                 <span className="text-[#52525B] tabular-nums">{Math.round(r.kcal)}</span>
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {bought.length > 0 && (
+        <div>
+          <p className="text-[11px] text-[#52525B] mb-1.5">Recently bought</p>
+          <div className="flex flex-wrap gap-1.5">
+            {bought
+              .filter((g) => !(items ?? []).some((it) => it.name === g.display))
+              .map((g) => (
+                <button
+                  key={g.product}
+                  type="button"
+                  onClick={() => pickBought(g)}
+                  title={`Bought ${g.last_date}${g.avoid ? " · on your avoid list" : ""}`}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-[#18181B] border border-[#27272A] text-[#D4D4D8] hover:border-[#3F3F46] hover:bg-[#1F1F23] transition-colors"
+                >
+                  {g.avoid && <span className="w-1.5 h-1.5 rounded-full bg-[#EC4899]" />}
+                  <span className="truncate max-w-[140px]">{g.display}</span>
+                </button>
+              ))}
           </div>
         </div>
       )}

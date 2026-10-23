@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from infrastructure.api.routers import days, insights, questionnaire
 from infrastructure.api.routers import locations
 from infrastructure.api.routers import money
+from infrastructure.api.routers import groceries as groceries_module
 from infrastructure.api.routers import contacts
 from infrastructure.api.routers import activities
 from infrastructure.api.routers import health
@@ -122,6 +123,7 @@ app.include_router(insights.router)
 app.include_router(questionnaire.router)
 app.include_router(locations.router)
 app.include_router(money.router)
+app.include_router(groceries_module.router)
 app.include_router(contacts.router)
 app.include_router(activities.router)
 app.include_router(health.router)
@@ -227,6 +229,9 @@ def _run_migrations() -> None:
     _conn13 = _get_conn()
     _migrate_zero_moving(_conn13)
     _conn13.close()
+    # money.db: all CREATE ... IF NOT EXISTS (receipts tables etc.) — idempotent
+    from domains.money.money_db import init_money_db as _init_money_db
+    _init_money_db()
 
 
 class ThemeIn(BaseModel):
