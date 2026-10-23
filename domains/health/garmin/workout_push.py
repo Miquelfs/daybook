@@ -6,7 +6,9 @@ smart trainer, ERG holds the watts by itself.
   - Trainer sessions (type "(trainer)" / tests): POWER targets from FTP
     (athlete_zones.ftp_w) — the road bike has no power meter.
   - Outdoor rides: HEART-RATE targets from the ride HR zones.
-  - Gym sessions and race day are not pushed.
+  - Runs: easy/long (Z1–Z2) by HEART RATE from the run threshold HR, tempo /
+    threshold / intervals / race pace (Z3+) by PACE from the run threshold pace.
+  - Gym sessions, tour days and race days are not pushed.
 
 Idempotent and self-healing: garmin_workout_push remembers what was sent per
 session (workout id, schedule id, payload hash, date). A session that moved
@@ -33,6 +35,10 @@ from datetime import date, timedelta
 WINDOW_DAYS = 9            # today … next Sunday after the weekend planning
 
 CYCLING = {"sportTypeId": 2, "sportTypeKey": "cycling"}
+RUNNING = {"sportTypeId": 1, "sportTypeKey": "running"}
+# running: %LTHR (Friel run zones) for the easy work, pace bands as × threshold pace (s/km) for the quality work
+RUN_LTHR_PCT = {"Z1": (70, 84), "Z2": (85, 89), "Z3": (90, 94), "Z4": (95, 99), "Z5": (100, 106)}
+RUN_PACE_X = {"Z3": (1.10, 1.04), "Z4": (1.03, 0.97), "Z5": (0.95, 0.88)}     # (slow end, fast end)
 STEP = {"warmup": (1, "warmup"), "cooldown": (2, "cooldown"), "interval": (3, "interval"),
         "recovery": (4, "recovery"), "repeat": (6, "repeat")}
 FTP_PCT = {"Z1": (40, 55), "Z2": (56, 75), "Z3": (88, 94), "Z4": (95, 105), "Z5": (106, 120)}
@@ -44,19 +50,32 @@ LTHR_PCT = {"Z1": (60, 80), "Z2": (81, 89), "Z3": (90, 93), "Z4": (94, 99), "Z5"
 
 def _targets(conn: sqlite3.Connection) -> dict:
     """{'ftp': W|None, 'hr': {Z: (lo, hi)}} from the latest ride zones."""
-    out: dict = {"ftp": None, "hr": {}}
+    out: dict = {"ftp": None, "hr": {}, "run_hr": {}, "run_pace": {}}
     try:
         z = conn.execute("SELECT ftp_w, threshold_hr, zones_json FROM athlete_zones WHERE sport='ride' "
                          "ORDER BY valid_from DESC LIMIT 1").fetchone()
     except sqlite3.OperationalError:
         return out
-    if not z:
-        return out
-    out["ftp"] = z["ftp_w"]
-    if z["threshold_hr"]:
+    if z:
+        out["ftp"] = z["ftp_w"]
+    try:
+        r = conn.execute("SELECT threshold_hr, threshold_pace_s_per_km FROM athlete_zones WHERE sport='run' "
+                         "ORDER BY valid_from DESC LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        r = None
+    if r and r["threshold_hr"]:
+        out["run_hr"] = {k: (round(r["threshold_hr"] * lo / 100), round(r["threshold_hr"] * hi / 100))
+                         for k, (lo, hi) in RUN_LTHR_PCT.items()}
+    if r and r["threshold_pace_s_per_km"]:
+        t = r["threshold_pace_s_per_km"]
+        # Garmin pace targets are speeds in m/s: slower bound first
+        out["run_pace"] = {k: (round(1000 / (t * slow), 3), round(1000 / (t * fast), 3))
+                           for k, (slow, fast) in RUN_PACE_X.items()}
+        out["run_threshold_pace"] = t
+    if z and z["threshold_hr"]:
         for k, (lo, hi) in LTHR_PCT.items():
             out["hr"][k] = (round(z["threshold_hr"] * lo / 100), round(z["threshold_hr"] * hi / 100))
-    else:
+    elif z:
         try:
             for b in json.loads(z["zones_json"] or "[]"):
                 if b.get("name") in FTP_PCT and b.get("min_hr"):
@@ -69,6 +88,18 @@ def _targets(conn: sqlite3.Connection) -> dict:
 def is_indoor(session_type: str) -> bool:
     t = (session_type or "").lower()
     return "(trainer)" in t or t.startswith("test - bike")
+
+
+def _run_target(zone: str, tg: dict) -> dict:
+    if zone in tg.get("run_pace", {}):
+        lo, hi = tg["run_pace"][zone]
+        return {"targetType": {"workoutTargetTypeId": 6, "workoutTargetTypeKey": "pace.zone"},
+                "targetValueOne": lo, "targetValueTwo": hi}
+    if zone in tg.get("run_hr", {}):
+        lo, hi = tg["run_hr"][zone]
+        return {"targetType": {"workoutTargetTypeId": 4, "workoutTargetTypeKey": "heart.rate.zone"},
+                "targetValueOne": lo, "targetValueTwo": hi}
+    return {"targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}}
 
 
 def _target(zone: str, indoor: bool, tg: dict) -> dict:
@@ -86,10 +117,11 @@ def _target(zone: str, indoor: bool, tg: dict) -> dict:
 def build_workout(session: dict, tg: dict) -> dict | None:
     """Garmin workout JSON for one plan session, or None if it shouldn't be pushed."""
     stype = session["session_type"] or ""
-    if (stype.lower().startswith("strength") or stype.lower() == "race day" or session["discipline"] != "cycling"
+    run = session["discipline"] == "running"
+    if (stype.lower().startswith(("strength", "race")) or session["discipline"] not in ("cycling", "running")
             or stype.lower() in ("cycling - tour day", "cycling - camp day")):   # tours: just ride, no workout
         return None
-    indoor = is_indoor(stype)
+    indoor = not run and is_indoor(stype)
     structure = json.loads(session["structure_json"]) if session.get("structure_json") else None
     if not structure:
         structure = [{"kind": "steady", "label": stype, "duration_min": session["effective_duration_min"]
@@ -117,7 +149,7 @@ def build_workout(session: dict, tg: dict) -> dict | None:
         sid, skey = STEP[kind]
         # free=True: no target — the FTP test effort must not be ERG-capped
         target = {"targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}} if free \
-            else _target(zone, indoor, tg)
+            else _run_target(zone, tg) if run else _target(zone, indoor, tg)
         d = {"type": "ExecutableStepDTO", "stepOrder": order,
              "stepType": {"stepTypeId": sid, "stepTypeKey": skey},
              "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
@@ -157,6 +189,14 @@ def build_workout(session: dict, tg: dict) -> dict | None:
     if not steps:
         return None
 
+    if run:
+        name = f"Run · {stype.replace('Running - ', '')} {eff}′"[:60]
+        tp = tg.get("run_threshold_pace")
+        how = ("Run — easy by heart rate, quality by pace" +
+               (f" (threshold {int(tp // 60)}:{int(tp % 60):02d}/km)" if tp else ""))
+        return {"workoutName": name, "description": f"{how} · Daybook plan session #{session['id']}",
+                "sportType": RUNNING, "estimatedDurationInSecs": int(eff * 60),
+                "workoutSegments": [{"segmentOrder": 1, "sportType": RUNNING, "workoutSteps": steps}]}
     name = stype.replace("Cycling - ", "").replace("Test - ", "Test ").replace(" (trainer)", "")
     name = f"312 · {name} {eff}′"[:60]
     if indoor and tg["ftp"]:

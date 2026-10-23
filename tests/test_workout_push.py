@@ -147,5 +147,40 @@ class SyncTest(unittest.TestCase):
         self.assertIn(("POST", "/workout-service/schedule/101"), g.client.calls)
 
 
+class RunWorkoutTest(unittest.TestCase):
+    TGR = {"ftp": None, "hr": {}, "run_hr": {"Z1": (128, 154), "Z2": (156, 163), "Z5": (183, 194)},
+           "run_pace": {"Z5": (round(1000 / (274 * 0.95), 3), round(1000 / (274 * 0.88), 3))},
+           "run_threshold_pace": 274}
+
+    def _run(self, kind):
+        from domains.training import b_race
+        p = {"easy": 349, "tempo": 293, "threshold": 274, "vo2": 255, "race": 285, "race_time_s": 6000}
+        s = b_race.easy_run(p, 40) if kind == "easy" else b_race.quality_run(p, 0, False)
+        return {"id": 7, "session_type": s["type"], "discipline": "running", "intensity_zone": s["zone"],
+                "duration_min": s["duration"], "effective_duration_min": s["duration"],
+                "structure_json": json.dumps(s["structure"])}
+
+    def test_easy_run_by_heart_rate(self):
+        w = wp.build_workout(self._run("easy"), self.TGR)
+        self.assertEqual(w["sportType"]["sportTypeKey"], "running")
+        step = w["workoutSegments"][0]["workoutSteps"][0]
+        self.assertEqual(step["targetType"]["workoutTargetTypeKey"], "heart.rate.zone")
+        self.assertEqual((step["targetValueOne"], step["targetValueTwo"]), (156, 163))
+
+    def test_intervals_by_pace(self):
+        w = wp.build_workout(self._run("intervals"), self.TGR)
+        rep = next(s for s in w["workoutSegments"][0]["workoutSteps"] if s["type"] == "RepeatGroupDTO")
+        work = rep["workoutSteps"][0]
+        self.assertEqual(rep["numberOfIterations"], 5)
+        self.assertEqual(work["targetType"]["workoutTargetTypeKey"], "pace.zone")
+        self.assertLess(work["targetValueOne"], work["targetValueTwo"])          # slower → faster, in m/s
+        self.assertTrue(w["workoutName"].startswith("Run · Intervals"))
+
+    def test_race_not_pushed(self):
+        self.assertIsNone(wp.build_workout({"id": 9, "session_type": "Race - Half marathon", "discipline": "running",
+                                            "intensity_zone": "Z4", "duration_min": 100,
+                                            "effective_duration_min": 100, "structure_json": None}, self.TGR))
+
+
 if __name__ == "__main__":
     unittest.main()
