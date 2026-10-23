@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from typing import Annotated, Optional
 
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from infrastructure.api.db import get_db
 from infrastructure.api.models.activity import (
@@ -502,6 +502,42 @@ def get_activity_wind(
     return {"wind": compute(conn, activity_id, force=refresh)}
 
 
+@router.post("/{activity_id}/fit")
+async def attach_fit(
+    activity_id: str,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+    file: UploadFile = File(...),
+):
+    """Merge a trainer-app .fit file (power, cadence, speed, distance) into this activity."""
+    from domains.health import fit_import
+    from domains.health.fit_file import FitError
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="FIT file too large")
+    try:
+        return {"fit_import": fit_import.attach(conn, activity_id, data, file.filename)}
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except (FitError, ValueError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.delete("/{activity_id}/fit", status_code=204)
+def detach_fit(activity_id: str, conn: Annotated[sqlite3.Connection, Depends(get_db)]):
+    """Remove the merged .fit file and restore the watch's own recording."""
+    from domains.health import fit_import
+    if not fit_import.detach(conn, activity_id):
+        raise HTTPException(status_code=404, detail="No .fit file attached")
+
+
+@router.post("/{activity_id}/fit/recompute")
+def recompute_fit(activity_id: str, conn: Annotated[sqlite3.Connection, Depends(get_db)]):
+    """Re-run metrics after the FTP changed (TSS / IF / zones follow the new FTP)."""
+    from domains.health import fit_import
+    fit_import.recompute(conn, activity_id)
+    return {"fit_import": fit_import.status(conn, activity_id)}
+
+
 @router.get("/{activity_id}/streams")
 def get_activity_streams(
     activity_id: str,
@@ -785,6 +821,7 @@ def get_activity(
     splits = _splits(conn, activity_id)
     computed = _computed_metrics(conn, activity_id)
     plan_session, fueling_log = _linked_plan_session(conn, activity_id)
+    from domains.health.fit_import import status as fit_import_status
 
     return ActivityDetail(
         **_row_to_summary(row).__dict__,
@@ -797,4 +834,5 @@ def get_activity(
         tennis=_tennis_session(conn, activity_id),
         plan_session=plan_session,
         fueling_log=fueling_log,
+        fit_import=fit_import_status(conn, activity_id),
     )

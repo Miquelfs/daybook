@@ -126,6 +126,7 @@ class ActivityDetail(ActivitySummary):
     tennis: TennisSession | None = None
     plan_session: dict | None = None      # linked training session (structure + fueling) if any
     fueling_log: dict | None = None       # what was actually fuelled, if logged
+    fit_import: dict | None = None        # trainer .fit file merged into this activity, if any
 
 
 class SyncStatusOut(BaseModel):

@@ -207,6 +207,28 @@ export type ActivityDetail = Activity & {
   tennis: TennisSession | null;
   plan_session: LinkedPlanSession | null;
   fueling_log: FuelingLog | null;
+  fit_import?: FitImport | null;
+};
+
+/** A trainer-app .fit file merged into a watch activity (power, cadence, speed, distance). */
+export type FitImport = {
+  filename: string | null;
+  device: string | null;
+  imported_at: string;
+  offset_s: number;
+  align_method: "hr" | "clock" | "start";
+  align_corr: number | null;
+  clock_skew_s: number | null;
+  channels: string[];
+  ftp_w: number | null;
+  seconds?: number;
+  covered_s?: number;
+  distance_m?: number | null;
+  avg_power_w?: number | null;
+  max_power_w?: number | null;
+  avg_cadence?: number | null;
+  ascent_m?: number | null;
+  best_20min?: { start_s: number; avg_power_w: number; avg_hr: number | null } | null;
 };
 
 export type SegmentEffort = {

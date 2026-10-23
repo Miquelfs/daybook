@@ -380,6 +380,10 @@ def sync_activities(client, conn, start: str, end: str, force: bool, fetch_strea
                 _fetch_and_store_streams(client, conn, activity_id, native_id)
                 time.sleep(RATE_LIMIT_SLEEP)
 
+            # A trainer .fit merged into this activity survives a forced re-sync
+            from domains.health.fit_import import reapply_if_attached
+            reapply_if_attached(conn, activity_id)
+
             count += 1
 
         _log(conn, "garmin", "activities", "ok", count)

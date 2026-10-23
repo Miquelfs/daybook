@@ -165,6 +165,9 @@ def _parse_streams_from_raw(conn, activity_id: str, raw: dict) -> int:
                 (activity_id, stream_type, json.dumps(values)),
             )
             count += 1
+        # Re-fetched watch streams must not undo a merged trainer .fit file
+        from domains.health.fit_import import reapply_if_attached
+        reapply_if_attached(conn, activity_id)
         return count
     except Exception as e:
         print(f"  WARN streams {activity_id}: {e}", file=sys.stderr)

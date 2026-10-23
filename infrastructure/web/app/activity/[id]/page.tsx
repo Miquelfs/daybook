@@ -15,6 +15,7 @@ import { WithPicker } from "@/components/plan/WithPicker";
 import { ActivitySplitsChart } from "@/components/ActivitySplitsChart";
 import { BestEffortsCard, SameRouteCard } from "@/components/activity/EffortsCards";
 import { PlannedVsActual } from "@/components/PlannedVsActual";
+import { FitFileCard } from "@/components/activity/FitFileCard";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
 import { ColSign, hms, ordinal } from "@/components/training/ColSign";
 
@@ -333,6 +334,13 @@ export default async function ActivityPage({ params }: Props) {
           ].filter(Boolean).join(" · ")}
         </p>
       </section>
+
+      {/* Trainer rides: merge the trainer app's .fit (power, cadence, distance) into the watch recording */}
+      {(activity.fit_import || (sport === "ride" && /indoor|virtual|trainer/.test(at))) && (
+        <FitFileCard activityId={decodedId} date={activity.date} fit={activity.fit_import ?? null}
+                     isTest={/ftp|20\s*min/i.test(`${activity.plan_session?.session_type ?? ""} ${activity.name ?? ""}`)}
+                     sessionId={activity.plan_session?.id ?? null} />
+      )}
 
       {/* Map */}
       {activity.polyline && (

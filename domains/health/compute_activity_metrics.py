@@ -388,6 +388,18 @@ def compute_for_activity(conn, activity_id: str, date_str: str,
             if moving_time_s and intensity_factor:
                 power_tss = (moving_time_s * np_w * intensity_factor) / (ftp * 3600) * 100
 
+    # Power TSS → activities.training_stress_score (what training load reads first),
+    # unless Garmin measured its own — power from a merged trainer .fit file has none.
+    if power_tss:
+        raw = conn.execute("SELECT raw_payload FROM activities WHERE id=?", (activity_id,)).fetchone()
+        try:
+            native = json.loads(raw[0] or "{}").get("trainingStressScore") if raw else None
+        except (TypeError, ValueError, AttributeError):
+            native = None
+        if not native:
+            conn.execute("UPDATE activities SET training_stress_score=? WHERE id=?",
+                         (round(power_tss, 1), activity_id))
+
     # hrTSS fallback
     hr_tss = None
     if not power_tss and hr_stream:
