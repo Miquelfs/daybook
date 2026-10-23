@@ -63,7 +63,7 @@ The user will paste back the output for Claude to review.
 The Pi holds the only copy of:
 - `days` table mood/energy/notes (entered via phone questionnaire)
 - `data/photos/` (uploaded from phone)
-- `money.db` transactions (synced from Notion on Pi)
+- `money.db` transactions (entered manually in Daybook; Notion is no longer used)
 
 The rsync already excludes `*.db` files — DBs are never overwritten by normal deploys.
 

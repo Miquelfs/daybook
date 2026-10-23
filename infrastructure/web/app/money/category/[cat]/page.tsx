@@ -35,15 +35,10 @@ export default async function CategoryPage({ params, searchParams }: Props) {
             href={`/money?month=${month}`}
             className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest"
           >
-            ← Finance
+            ← This month
           </Link>
           <div className="flex items-center gap-4">
             <span className="text-xs text-[#52525B] uppercase tracking-widest">{monthLabel}</span>
-            {category === "Groceries" && (
-              <Link href="/money/groceries" className="text-xs text-[#F59E0B] hover:text-[#FCD34D] transition-colors uppercase tracking-widest">
-                Basket →
-              </Link>
-            )}
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -127,6 +122,21 @@ export default async function CategoryPage({ params, searchParams }: Props) {
       )}
 
       {/* Transactions */}
+      {/* Groceries: what's in the basket, from the attached Mercadona tickets */}
+      {category === "Groceries" && (
+        <Link
+          href="/money/groceries"
+          className="flex items-center gap-3 mb-8 bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 hover:border-[#3F3F46] transition-colors"
+        >
+          <span className="text-xl">🧾</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-[#D4D4D8]">Basket insights</p>
+            <p className="text-xs text-[#52525B]">Prices, spend by type and what to avoid, from your tickets</p>
+          </div>
+          <span className="text-xs text-[#52525B]">→</span>
+        </Link>
+      )}
+
       <section>
         <h2 className="text-xs text-[#71717A] uppercase tracking-widest mb-3">
           Transactions

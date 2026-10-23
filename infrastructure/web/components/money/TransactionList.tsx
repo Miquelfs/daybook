@@ -145,6 +145,7 @@ function TransactionRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({
     name: t.name,
+    date: t.date,
     amount: Math.abs(t.amount),
     sign: t.amount >= 0 ? "+" as const : "-" as const,
     account: t.account ?? "",
@@ -207,6 +208,7 @@ function TransactionRow({
           <button
             onClick={() => patch.mutate({
               name: draft.name,
+              date: draft.date,
               amount: draft.amount,
               sign: draft.sign,
               account: draft.account || undefined,
@@ -222,7 +224,18 @@ function TransactionRow({
           </button>
         </div>
 
-        {/* Row 2: category pills */}
+        {/* Row 2: date */}
+        <div className="pl-8">
+          <input
+            type="date"
+            value={draft.date}
+            onChange={(e) => e.target.value && setDraft((d) => ({ ...d, date: e.target.value }))}
+            className="bg-[#18181B] border border-[#27272A] rounded px-2 py-1.5 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#F59E0B]"
+            aria-label="Date"
+          />
+        </div>
+
+        {/* Row 3: category pills */}
         <div className="flex flex-wrap gap-1.5 pl-8">
           {ALL_CATEGORIES.map((cat) => (
             <button
@@ -241,7 +254,7 @@ function TransactionRow({
           ))}
         </div>
 
-        {/* Row 3: account pills */}
+        {/* Row 4: account pills */}
         {accounts.length > 0 && (
           <div className="flex flex-wrap gap-1.5 pl-8">
             {accounts.map((acc) => {

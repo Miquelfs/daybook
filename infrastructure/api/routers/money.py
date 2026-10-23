@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from infrastructure.api.db_money import get_money_db
+from domains.money import budgets, income as income_projection
 from infrastructure.api.models.money import (
     AccountBalance, AccountCreate, AccountInfo, AccountPatch,
     TransferHoldingsBody, TransferHoldingsResult,
@@ -38,7 +39,7 @@ from infrastructure.api.models.money import (
     WeekSpend,
 )
 from domains.money.money_config import (
-    CATEGORY_EMOJI, EXPENSE_CATEGORIES, classify, get_budget_for_month,
+    CATEGORY_EMOJI, EXPENSE_CATEGORIES, classify,
     FIXED_RECURRING_CATEGORIES,
     INCOME_CATEGORIES, LIQUID_ACCOUNTS, INVESTMENT_ACCOUNTS,
     ACCOUNT_TYPES, INVESTMENT_TYPES, LIQUID_TYPES,
@@ -350,7 +351,7 @@ def get_meta(conn: DB):
     ]
 
     return MoneyMeta(categories=categories, accounts=accounts, defaults=defaults,
-                     savings_goal=MONTHLY_SAVINGS_GOAL)
+                     savings_goal=budgets.savings_goal(conn))
 
 
 # ── Month summary / budget ─────────────────────────────────────────────────────
@@ -402,7 +403,7 @@ def month_summary(
         (month,),
     ).fetchall()
 
-    budget = get_budget_for_month(month)
+    budget = budgets.budget_for_month(conn, month)
     total_budget = sum(budget.values())
     pct_time = days_elapsed / dim if dim > 0 else 1
 
@@ -439,7 +440,6 @@ def month_summary(
 
 # ── Trends ────────────────────────────────────────────────────────────────────
 
-from domains.money.money_config import MONTHLY_SAVINGS_GOAL  # noqa: E402
 
 
 @router.get("/trends", response_model=TrendsData)
@@ -468,15 +468,16 @@ def get_trends(
     ).fetchall()
 
     history: list[MonthHistory] = []
+    goal = budgets.savings_goal(conn)
     for r in month_rows:
         m = r["month"]
         spent = round(r["spent"], 2)
         income = round(r["income"], 2)
         savings = round(income - spent, 2)
         savings_rate = round(savings / income, 4) if income > 0 else 0.0
-        budget = get_budget_for_month(m)
+        budget = budgets.budget_for_month(conn, m)
         total_budget = sum(budget.values())
-        on_budget = savings >= MONTHLY_SAVINGS_GOAL
+        on_budget = savings >= goal
         history.append(MonthHistory(
             month=m,
             total_spent=spent,
@@ -605,7 +606,7 @@ def month_overview(
         (month,)
     ).fetchall()
 
-    budget = get_budget_for_month(month)
+    budget = budgets.budget_for_month(conn, month)
     total_budget = sum(budget.values())
     pct_time = days_elapsed / dim if dim > 0 else 1
 
@@ -647,7 +648,10 @@ def month_overview(
     adj_vel = (disc_spent / disc_budget / pct_time) if disc_budget > 0 and pct_time > 0 else 0.0
     daily_burn = total_spent / days_elapsed if days_elapsed > 0 else 0.0
     projected = daily_burn * dim
-    projected_savings = total_income - projected
+    # Income the month will end with (this month's salary from the roster
+    # estimate if it hasn't landed yet), so savings aren't read off spending alone.
+    inc = income_projection.project(conn, month, total_income)
+    projected_savings = inc["projected_income"] - projected
 
     # Adjusted projection: fixed bills count as the full monthly amount; the
     # discretionary part is paced forward — but a large one-off purchase that
@@ -671,7 +675,7 @@ def month_overview(
     remaining_days = max(0, dim - days_elapsed)
     recurring_daily = recurring_disc / days_elapsed if days_elapsed > 0 else 0.0
     projected_adj = disc_spent + recurring_daily * remaining_days + max(fixed_spent, fixed_budget)
-    projected_savings_adj = total_income - projected_adj
+    projected_savings_adj = inc["projected_income"] - projected_adj
 
     return MonthOverview(
         month=month,
@@ -693,6 +697,7 @@ def month_overview(
         discretionary_budget=round(disc_budget, 2),
         projected_month_end_adjusted=round(projected_adj, 2),
         projected_savings_adjusted=round(projected_savings_adj, 2),
+        **inc,
     )
 
 
@@ -904,6 +909,15 @@ def list_accounts(conn: DB, active_only: bool = Query(False)):
         out = [a for a in out if a.is_active]
     out.sort(key=lambda a: (a.account_type in INVESTMENT_TYPES, a.name.lower()))
     return out
+
+
+@router.get("/accounts/{name}/balance")
+def account_balance(name: str, conn: DB):
+    """Daybook's balance for one cash account (same rule as the portfolio's Cash list),
+    to reconcile against the bank app. null for investment accounts."""
+    match = next((a for a in _compute_liquid_accounts(conn) if a.name == name), None)
+    return {"name": name, "balance": match.balance if match else None,
+            "account_type": match.account_type if match else None}
 
 
 @router.post("/accounts", response_model=AccountInfo, status_code=201)
@@ -1248,11 +1262,13 @@ def get_anomalies(
     if not month:
         month = date.today().strftime("%Y-%m")
 
-    # --- Per-category avg transaction size over last 12 completed months ---
+    # --- Per-category avg purchase size over last 12 completed months ---
+    # Outflows only: a refund is money coming back, never an "unusually large purchase".
     cat_avg_rows = conn.execute(
-        """SELECT category, AVG(ABS(amount)) as avg_amt
+        """SELECT category, AVG(-amount) as avg_amt
            FROM transactions
            WHERE transaction_type = 'Expense'
+             AND amount < 0
              AND deleted_at IS NULL
              AND strftime('%Y-%m', date) < ?
            GROUP BY category""",
@@ -1260,11 +1276,13 @@ def get_anomalies(
     ).fetchall()
     cat_avg: dict[str, float] = {r["category"]: r["avg_amt"] for r in cat_avg_rows if r["category"]}
 
-    # --- Flag large transactions in target month (> 3× category avg) ---
+    # --- Flag large purchases in target month (> 3× category avg) ---
+    # Fixed bills (rent) are expected to dwarf the category's small purchases.
     txn_rows = conn.execute(
         """SELECT id, date, name, amount, category, account
            FROM transactions
            WHERE transaction_type = 'Expense'
+             AND amount < 0
              AND deleted_at IS NULL
              AND strftime('%Y-%m', date) = ?""",
         (month,),
@@ -1273,6 +1291,8 @@ def get_anomalies(
     large_txns: list[LargeTxAnomaly] = []
     for r in txn_rows:
         cat = r["category"]
+        if cat in FIXED_RECURRING_CATEGORIES:
+            continue
         avg = cat_avg.get(cat, 0.0)
         if avg > 0 and abs(r["amount"]) > 3 * avg:
             large_txns.append(LargeTxAnomaly(
@@ -1423,7 +1443,7 @@ def get_efficiency(
     (25th percentile of historical monthly spend)."""
     current_month = date.today().strftime("%Y-%m")
     start = _month_shift(current_month, -window)
-    budget = get_budget_for_month(current_month)
+    budget = budgets.budget_for_month(conn, current_month)
 
     rows = conn.execute(
         """SELECT category, strftime('%Y-%m', date) AS mon, -SUM(amount) AS spent

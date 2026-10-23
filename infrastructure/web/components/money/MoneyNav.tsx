@@ -2,44 +2,45 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CalendarDays, Lightbulb, TrendingUp, PieChart } from "lucide-react";
 
 const TABS = [
-  { href: "/money", label: "This month" },
-  { href: "/money/insights", label: "Insights" },
-  { href: "/money/trends", label: "Trends" },
-  { href: "/money/portfolio", label: "Portfolio" },
-  { href: "/money/groceries", label: "Groceries" },
+  { href: "/money", label: "This month", icon: CalendarDays },
+  { href: "/money/insights", label: "Insights", icon: Lightbulb },
+  { href: "/money/trends", label: "Trends", icon: TrendingUp },
+  { href: "/money/portfolio", label: "Portfolio", icon: PieChart },
 ];
 
-// One tab bar for the whole Money section. Drill-down pages (a category, an
-// account, a holding) light up the tab they belong to.
+// Drill-downs light up the tab they belong to: a holding → Portfolio; a
+// category, an account, the grocery basket or the budget planner → This month.
 function activeTab(pathname: string): string {
   if (pathname.startsWith("/money/portfolio")) return "/money/portfolio";
-  if (pathname.startsWith("/money/groceries")) return "/money/groceries";
   if (pathname.startsWith("/money/insights")) return "/money/insights";
   if (pathname.startsWith("/money/trends")) return "/money/trends";
   return "/money";
 }
 
+// Same header + segmented tabs as Omyra.
 export function MoneyNav() {
   const active = activeTab(usePathname());
   return (
-    <nav className="max-w-2xl mx-auto px-4 pt-6">
-      <div className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b border-[#18181B]">
-        {TABS.map((t) => (
+    <div className="max-w-2xl mx-auto px-4 pt-8">
+      <h1 className="text-2xl font-semibold tracking-tight">Money</h1>
+      <p className="text-sm text-[#71717A] mt-0.5 mb-4">Spending, savings &amp; what you own</p>
+      <nav className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-xl p-1 w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {TABS.map(({ href, label, icon: Icon }) => (
           <Link
-            key={t.href}
-            href={t.href}
-            className={`shrink-0 px-3 py-2 text-sm -mb-px border-b-2 transition-colors ${
-              active === t.href
-                ? "border-[#F59E0B] text-[#FAFAFA] font-medium"
-                : "border-transparent text-[#71717A] hover:text-[#D4D4D8]"
+            key={href}
+            href={href}
+            className={`flex-1 shrink-0 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+              active === href ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"
             }`}
           >
-            {t.label}
+            <Icon size={13} />
+            {label}
           </Link>
         ))}
-      </div>
-    </nav>
+      </nav>
+    </div>
   );
 }

@@ -82,6 +82,17 @@ async function proxyPatch<T>(proxyPath: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+async function proxyPut<T>(proxyPath: string, body: unknown): Promise<T> {
+  const res = await fetch(`${PROXY_BASE}${proxyPath}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await errorMessage(res, `PUT ${proxyPath} failed ${res.status}`));
+  return res.json();
+}
+
 async function proxyDel(proxyPath: string): Promise<void> {
   const res = await fetch(`${PROXY_BASE}${proxyPath}`, { method: "DELETE", cache: "no-store" });
   if (!res.ok) throw new Error(await errorMessage(res, `DELETE ${proxyPath} failed ${res.status}`));
@@ -133,6 +144,29 @@ export type Receipt = {
   matches_transaction: boolean;
   pdf_url: string;         // API path, e.g. /money/receipts/3/pdf
   items: ReceiptItem[];
+};
+
+export type BudgetPlanRow = {
+  category: string;
+  emoji: string;
+  fixed: boolean;          // a bill (rent) — kept as is
+  current: number;         // this month's budget
+  typical: number;         // median month, last 12 complete months
+  average: number;
+  last: number;
+  months_active: number;
+  suggested: number;
+  history: number[];       // last 12 complete months, oldest first
+};
+
+export type BudgetPlan = {
+  effective_month: string;
+  months: string[];
+  goal: number;
+  avg_income: number;
+  current_total: number;
+  suggested_total: number;
+  rows: BudgetPlanRow[];
 };
 
 export type GroceryWindow = "ticket" | "week" | "month" | "3m" | "12m";
@@ -285,6 +319,11 @@ export type MonthOverview = MonthSummary & {
   discretionary_budget: number;
   projected_month_end_adjusted: number;
   projected_savings_adjusted: number;
+  // Income the month will end with (salary from the roster estimate if not in yet)
+  projected_income: number;
+  expected_salary: number | null;
+  salary_received: boolean;
+  income_source: "roster" | "average" | "actual";
 };
 
 export type MonthDetail = {
@@ -791,6 +830,19 @@ export const moneyApi = {
   recentGroceries: (days = 10) =>
     get<RecentGrocery[]>(`/money/groceries/recent?days=${days}`),
 
+  accountBalance: (name: string) =>
+    get<{ name: string; balance: number | null; account_type: string | null }>(
+      `/money/accounts/${encodeURIComponent(name)}/balance`,
+    ),
+
+  budgetPlan: () => get<BudgetPlan>("/money/budget/plan"),
+
+  saveBudget: (effective_month: string, amounts: Record<string, number>) =>
+    proxyPut<BudgetPlan>("/api/money/budget", { effective_month, amounts }),
+
+  saveMoneySettings: (body: { savings_goal: number }) =>
+    proxyPut<{ savings_goal: number }>("/api/money/settings", body),
+
   merchants: (q: string) =>
     get<MerchantSuggestion[]>(`/money/autocomplete/merchants?q=${encodeURIComponent(q)}`),
 
@@ -805,9 +857,6 @@ export const moneyApi = {
 
   categoryTrends: (months?: number) =>
     get<CategoryTrendsData>(`/money/trends/categories${months ? `?months=${months}` : ""}`),
-
-  syncNotion: () =>
-    post<{ status: string }>("/sync/notion", {}),
 
   monthOverview: (month?: string) =>
     get<MonthOverview>(`/money/overview${month ? `?month=${month}` : ""}`),

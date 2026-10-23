@@ -8,7 +8,7 @@ VENV  := $(ROOT)/.venv
 PY    := $(VENV)/bin/python
 WEB   := $(ROOT)/infrastructure/web
 
-.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-notion sync-notion-full sync-strava sync-strava-full strava-auth import-tracks geocode-tracks aviation-init import-full-csv import-aerolink api web dev prod kill cron-install cron-remove verify backup backup-cron-install backup-pull backup-pull-install backup-pull-remove storage-report clean-pyc deploy deploy-api deploy-deps _ship-code _health test help
+.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-strava sync-strava-full strava-auth import-tracks geocode-tracks aviation-init import-full-csv import-aerolink api web dev prod kill cron-install cron-remove verify backup backup-cron-install backup-pull backup-pull-install backup-pull-remove storage-report clean-pyc deploy deploy-api deploy-deps _ship-code _health test help
 
 PI_HOST ?= pi@daybook-pi
 PI_DIR  ?= ~/daybook
@@ -44,7 +44,7 @@ db-init:
 money-db-init:
 	@echo "==> Initialising money.db..."
 	$(PY) -m domains.money.money_db
-	@echo "==> money.db ready. Run: make sync-notion-full"
+	@echo "==> money.db ready."
 
 # ── Sync ──────────────────────────────────────────────────────────────────────
 
@@ -57,16 +57,6 @@ sync-garmin-full:
 	@echo "==> Syncing Garmin full history (this takes a while)..."
 	$(PY) -m domains.health.garmin.garmin_sync --full-history
 	@echo "==> Full Garmin sync done"
-
-sync-notion:
-	@echo "==> Syncing Notion finance (last 90 days)..."
-	$(PY) -m domains.money.notion_sync
-	@echo "==> Notion sync done"
-
-sync-notion-full:
-	@echo "==> Syncing Notion finance full history..."
-	$(PY) -m domains.money.notion_sync --full-history
-	@echo "==> Full Notion sync done"
 
 sync-strava:
 	@echo "==> Syncing Strava enrichment (last 30 days)..."
@@ -346,15 +336,13 @@ help:
 	@echo "  make sync-garmin       Pull yesterday + today from Garmin Connect"
 	@echo "  make sync-garmin-full  Pull full Garmin history (first run only)"
 	@echo "  make money-db-init     Create money.db and seed budgets"
-	@echo "  make sync-notion       Pull last 90 days of Notion finance data"
-	@echo "  make sync-notion-full  Pull full Notion finance history (first run only)"
 	@echo "  make strava-auth       Print Strava OAuth URL for first-time setup"
 	@echo "  make sync-strava       Pull last 30 days of Strava enrichment"
 	@echo "  make sync-strava-full  Pull full Strava history (first run only)"
 	@echo "  make aviation-init     Create aviation tables and seed airports (first run only)"
 	@echo "  make import-full-csv   Import Full.csv from previous airline"
 	@echo "  make import-aerolink   Import Aerolink.xls (training + early career)"
-	@echo "  make cron-install      Install hourly cron job (Garmin + Notion sync)"
+	@echo "  make cron-install      Install hourly cron job (Garmin sync)"
 	@echo "  make cron-remove       Remove the hourly sync cron job"
 	@echo "  make import-tracks     Import a location-history JSON: make import-tracks JSON=path/to/file.json"
 	@echo "  make geocode-tracks    Geocode un-geocoded tracks (Nominatim, 1 req/sec)"

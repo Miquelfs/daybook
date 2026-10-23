@@ -180,3 +180,9 @@ CREATE TABLE IF NOT EXISTS grocery_products (
 
 CREATE INDEX IF NOT EXISTS idx_receipt_items_receipt ON receipt_items(receipt_id);
 CREATE INDEX IF NOT EXISTS idx_receipt_items_product ON receipt_items(product);
+
+-- App-editable money settings (e.g. savings_goal); defaults live in money_config.py
+CREATE TABLE IF NOT EXISTS money_settings (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
+);

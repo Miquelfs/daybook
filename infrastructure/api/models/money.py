@@ -146,6 +146,11 @@ class MonthOverview(BaseModel):
     discretionary_budget: float = 0.0
     projected_month_end_adjusted: float = 0.0
     projected_savings_adjusted: float = 0.0
+    # Income the month will end with — see domains/money/income.py
+    projected_income: float = 0.0
+    expected_salary: Optional[float] = None
+    salary_received: bool = True
+    income_source: str = "actual"     # roster | average | actual
 
 
 class MonthDetail(BaseModel):

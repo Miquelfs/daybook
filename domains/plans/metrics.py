@@ -209,7 +209,7 @@ def _saved(ctx: Ctx, start: date, end: date, _p) -> float | None:
 
 def _budget_months(ctx: Ctx, start: date, end: date, _p) -> float | None:
     """Completed months in the window that stayed within the total monthly budget."""
-    from domains.money.money_config import get_budget_for_month
+    from domains.money.budgets import budget_for_month
     money = ctx.money()
     if money is None:
         return None
@@ -218,7 +218,7 @@ def _budget_months(ctx: Ctx, start: date, end: date, _p) -> float | None:
     for m, spent, _ in _month_flows(money, start, end):
         if m == this_month and end.month == (end + timedelta(days=1)).month:
             continue                                        # month still running
-        if spent <= sum(get_budget_for_month(m).values()):
+        if spent <= sum(budget_for_month(money, m).values()):
             n += 1
     return n
 

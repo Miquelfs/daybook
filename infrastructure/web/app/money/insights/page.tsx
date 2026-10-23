@@ -91,15 +91,20 @@ export default async function InsightsPage({ searchParams }: Props) {
   );
 }
 
-// One projection everywhere: fixed bills spread over the month (the "adjusted"
-// numbers), so rent landing on the 1st doesn't read as overspending.
+// One projection everywhere: income the month will end with (the salary from the
+// roster estimate if it hasn't landed yet) minus spending with fixed bills spread
+// over the month, so rent on the 1st doesn't read as overspending.
 function Landing({ ov, goal }: { ov: MonthOverview; goal: number }) {
   const savings = ov.projected_savings_adjusted;
   const tone = savings < 0 ? "bad" : goal && savings < goal ? "warn" : "good";
   const verdict =
     savings < 0 ? "Heading for a negative month"
-    : goal && savings < goal ? `${fmtAmount(goal - savings)} short of the ${fmtAmount(goal)} goal`
-    : goal ? `On track for the ${fmtAmount(goal)} goal` : "Projected savings";
+    : goal && savings < goal ? `${fmtAmount(goal - savings)} short of your ${fmtAmount(goal)} goal`
+    : goal ? `On track for your ${fmtAmount(goal)} goal` : "Projected savings";
+  const incomeNote =
+    ov.income_source === "roster"
+      ? ov.salary_received ? "salary in" : `incl. ${fmtAmount(ov.expected_salary ?? 0)} salary · roster`
+      : ov.income_source === "average" ? "3-month average" : "received";
   return (
     <Section title="Where you'll land">
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-5 py-5 mb-3">
@@ -107,22 +112,27 @@ function Landing({ ov, goal }: { ov: MonthOverview; goal: number }) {
         <p className={`text-4xl font-semibold tabular-nums ${
           tone === "bad" ? "text-[#EF4444]" : tone === "warn" ? "text-[#F59E0B]" : "text-[#22C55E]"
         }`}>
-          {savings < 0 ? "−" : ""}{fmtAmount(savings)}
+          {savings < 0 ? "−" : "+"}{fmtAmount(savings)}
         </p>
-        <p className="text-sm text-[#A1A1AA] mt-1">{verdict}</p>
+        <p className="text-sm text-[#A1A1AA] mt-1">
+          {verdict}{" "}
+          <Link href="/money/budget" className="text-xs text-[#71717A] hover:text-[#A1A1AA] underline underline-offset-2">
+            {goal ? "change goal" : "set a goal"}
+          </Link>
+        </p>
         <div className="mt-4 pt-4 border-t border-[#18181B]">
           <VelocityGauge overview={ov} bare />
         </div>
       </div>
       <div className="grid grid-cols-3 gap-3">
-        <StatTile label="Spent" value={fmtAmount(ov.total_spent)} sub={`of ${fmtAmount(ov.total_budget)}`} />
-        <StatTile label="Per day" value={fmtAmount(ov.daily_burn_rate)} sub="so far" />
+        <StatTile label="Income" value={fmtAmount(ov.projected_income)} sub={incomeNote} tone="good" />
         <StatTile
-          label="Month end"
+          label="Spending"
           value={fmtAmount(ov.projected_month_end_adjusted)}
-          sub="projected spend"
+          sub={`${fmtAmount(ov.total_spent)} so far`}
           tone={ov.projected_month_end_adjusted > ov.total_budget ? "bad" : "plain"}
         />
+        <StatTile label="Budget" value={fmtAmount(ov.total_budget)} sub={`${fmtAmount(ov.daily_burn_rate)}/day so far`} />
       </div>
     </Section>
   );

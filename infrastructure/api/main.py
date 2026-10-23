@@ -18,6 +18,7 @@ from infrastructure.api.routers import days, insights, questionnaire
 from infrastructure.api.routers import locations
 from infrastructure.api.routers import money
 from infrastructure.api.routers import groceries as groceries_module
+from infrastructure.api.routers import budget as budget_module
 from infrastructure.api.routers import contacts
 from infrastructure.api.routers import activities
 from infrastructure.api.routers import health
@@ -124,6 +125,7 @@ app.include_router(questionnaire.router)
 app.include_router(locations.router)
 app.include_router(money.router)
 app.include_router(groceries_module.router)
+app.include_router(budget_module.router)
 app.include_router(contacts.router)
 app.include_router(activities.router)
 app.include_router(health.router)

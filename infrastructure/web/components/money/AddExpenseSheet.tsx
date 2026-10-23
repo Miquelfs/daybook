@@ -14,9 +14,11 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   meta: MoneyMeta;
+  /** Preselect this account (e.g. adding from an account's page to reconcile it) */
+  account?: string;
 }
 
-export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
+export function AddExpenseSheet({ date, isOpen, onClose, meta, account: presetAccount }: Props) {
   const qc = useQueryClient();
 
   const [sign, setSign] = useState<"+" | "-">("-");
@@ -25,7 +27,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
   const [customCategory, setCustomCategory] = useState("");
   const [subcategory, setSubcategory] = useState("");
   const [merchant, setMerchant] = useState("");
-  const [account, setAccount] = useState(meta.defaults.account || "");
+  const [account, setAccount] = useState(presetAccount ?? (meta.defaults.account || ""));
   const [txDate, setTxDate] = useState(date);
   const [notes, setNotes] = useState("");
   // Supermarket ticket (Groceries only) — optional, can also be attached later from the list
@@ -103,7 +105,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
       setCustomCategory("");
       setSubcategory("");
       setMerchant("");
-      setAccount(meta.defaults.account || "");
+      setAccount(presetAccount ?? (meta.defaults.account || ""));
       setTxDate(date);
       setNotes("");
       setTicket(null);
@@ -112,7 +114,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta }: Props) {
       setAutoCategory(null);
       setTimeout(() => amountRef.current?.focus(), 80);
     }
-  }, [isOpen, date, meta.defaults.category, meta.defaults.account]);
+  }, [isOpen, date, meta.defaults.category, meta.defaults.account, presetAccount]);
 
   useEffect(() => {
     if (!isOpen) return;

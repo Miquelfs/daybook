@@ -66,14 +66,8 @@ export default async function MoneyPage({ searchParams }: Props) {
 
       {!summary ? (
         <div className="border border-dashed border-[#27272A] rounded-lg px-4 py-8 text-center">
-          <p className="text-sm text-[#52525B]">No finance data yet.</p>
-          <p className="text-xs text-[#3F3F46] mt-1">
-            Run{" "}
-            <code className="bg-[#18181B] px-1 rounded">
-              make sync-notion
-            </code>{" "}
-            to import your Notion history.
-          </p>
+          <p className="text-sm text-[#52525B]">No transactions this month yet.</p>
+          <p className="text-xs text-[#3F3F46] mt-1">Tap + to add one.</p>
         </div>
       ) : (
         <>
@@ -170,7 +164,12 @@ export default async function MoneyPage({ searchParams }: Props) {
 
           {/* Category budget bars */}
           <section className="mb-8">
-            <h2 className="text-xs text-[#71717A] uppercase tracking-widest mb-4">By category</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xs text-[#71717A] uppercase tracking-widest">By category</h2>
+              <Link href="/money/budget" className="text-xs text-[#F59E0B] hover:text-[#FCD34D] transition-colors">
+                Plan budget →
+              </Link>
+            </div>
             <div className="flex flex-col gap-4">
               {summary.categories.map((cat) => (
                 <MonthBudgetBar key={cat.category} item={cat} />

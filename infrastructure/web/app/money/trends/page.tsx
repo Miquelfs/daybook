@@ -1,10 +1,9 @@
+import Link from "next/link";
 import { moneyApi, fmtAmount } from "@/lib/money-api";
-import { SyncNotionButton } from "@/components/money/SyncNotionButton";
 import { CategoryTrendsChart } from "@/components/money/CategoryTrendsChart";
-import { MonthlyChart } from "@/components/money/MonthlyChart";
+import { MonthsExplorer } from "@/components/money/MonthsExplorer";
 import { ForecastCard } from "@/components/money/ForecastCard";
 import { CategoryStatsTable } from "@/components/money/CategoryStatsTable";
-import { SavingsChart } from "@/components/money/SavingsChart";
 import { MonthlyAnomalies } from "@/components/money/MonthlyAnomalies";
 import { SeasonalChart } from "@/components/money/SeasonalChart";
 import { Section, StatTile } from "@/components/money/ui";
@@ -20,14 +19,11 @@ export default async function TrendsPage() {
   ]);
 
   const header = (
-    <div className="flex items-start justify-between gap-3 mb-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Trends</h1>
-        <p className="text-xs text-[#52525B] mt-0.5">
-          {data ? `Last ${data.months.length} months` : "Your money over time"}
-        </p>
-      </div>
-      <div className="flex items-center gap-3 pt-1">
+    <div className="flex items-center justify-between gap-3 mb-8">
+      <p className="text-xs text-[#52525B]">
+        {data ? `Your last ${data.months.length} months` : "Your money over time"}
+      </p>
+      <div className="flex items-center gap-3">
         <a
           href="/api/money/export"
           download="transactions.csv"
@@ -35,7 +31,6 @@ export default async function TrendsPage() {
         >
           ↓ CSV
         </a>
-        <SyncNotionButton />
       </div>
     </div>
   );
@@ -49,8 +44,7 @@ export default async function TrendsPage() {
     );
   }
 
-  const { months, savings_streak: streak } = data;
-  const avgSavings = months.length ? months.reduce((s, m) => s + m.savings, 0) / months.length : 0;
+  const { savings_streak: streak } = data;
   const goal = meta?.savings_goal ?? 0;
 
   return (
@@ -61,7 +55,7 @@ export default async function TrendsPage() {
         title="Savings"
         hint={goal ? `A month counts as a win when you save at least ${fmtAmount(goal)}.` : undefined}
       >
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-3 gap-3">
           <StatTile
             label="Streak"
             value={`${streak.current_streak} mo`}
@@ -69,21 +63,18 @@ export default async function TrendsPage() {
             tone={streak.current_streak > 0 ? "good" : "plain"}
           />
           <StatTile label="Goal hit" value={`${Math.round(streak.success_rate * 100)}%`} sub="of months" />
-          <StatTile
-            label="Avg saved"
-            value={`${avgSavings < 0 ? "−" : ""}${fmtAmount(avgSavings)}`}
-            sub={`${Math.round(data.avg_savings_rate * 100)}% of income`}
-            tone={avgSavings < 0 ? "bad" : goal && avgSavings < goal ? "warn" : "good"}
-          />
+          <Link href="/money/budget" className="block">
+            <StatTile label="Goal" value={fmtAmount(goal)} sub="per month · change" />
+          </Link>
         </div>
-        <SavingsChart />
       </Section>
 
-      <Section title="Income vs spending" hint="Month by month, with next month's forecast.">
-        <div className="space-y-4">
-          <MonthlyChart />
-          <ForecastCard />
-        </div>
+      <Section title="Month by month" hint="Tap any month to see it in full.">
+        <MonthsExplorer goal={goal} />
+      </Section>
+
+      <Section title="Next month" hint="Forecast from your roster pay and recent spending.">
+        <ForecastCard />
       </Section>
 
       <Section title="Categories over time">

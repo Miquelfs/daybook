@@ -17,7 +17,7 @@ Running on a Raspberry Pi, accessible from any device via Tailscale.
 | **App** | `http://100.67.252.76:3000` |
 | **API** | `http://100.67.252.76:8000` |
 | **Services** | systemd (`daybook-api` + `daybook-web`) — auto-start on boot |
-| **Sync** | hourly cron: Garmin + Notion + Overland |
+| **Sync** | hourly cron: Garmin + Overland |
 | **Deploy** | `make deploy` from Mac |
 
 ---
@@ -37,7 +37,7 @@ Running on a Raspberry Pi, accessible from any device via Tailscale.
 - `/explore` page: world heatmap, country/city stats, year filter
 
 **Finance**
-- 363 transactions synced from Notion; incremental sync hourly
+- Transactions entered manually in Daybook (Notion is no longer used)
 - `/money` — budget overview, category progress bars, recent transactions
 - `/money/overview` — daily burn rate, projections, budget alerts
 - `/money/trends` — savings streak, income vs expenses chart, forecast, anomaly detection, CSV export
@@ -55,7 +55,6 @@ make setup          # venv, npm deps, .env template
 make db-init        # daybook.db (health + questionnaire)
 make money-db-init  # money.db (finance)
 make sync-garmin    # yesterday's Garmin data
-make sync-notion    # last 90 days of Notion finance
 make dev            # API → :8000  Web → :3000
 ```
 
@@ -67,7 +66,6 @@ Open `http://localhost:3000`.
 
 **Automated (hourly cron on Pi)**
 - Garmin sync: today's steps/sleep always fresh
-- Notion sync: new transactions appear automatically
 - Overland: live GPS points processed
 
 **Evening (manual)**
@@ -87,8 +85,6 @@ Open `http://localhost:3000`.
 | `make dev` | Start API + Web locally (Mac dev) |
 | `make sync-garmin` | Incremental Garmin sync |
 | `make sync-garmin-full` | Full Garmin history (first run only) |
-| `make sync-notion` | Last 90 days of Notion finance |
-| `make sync-notion-full` | Full Notion history (first run only) |
 | `make import-tracks JSON=path` | Import Google Maps Timeline JSON |
 | `make geocode-tracks` | Geocode GPS tracks via Nominatim (run overnight) |
 | `make backup` | Snapshot all databases to `data/backups/` |
@@ -104,7 +100,7 @@ daybook/
 ├── domains/
 │   ├── health/garmin/      Garmin sync, verify
 │   ├── locations/          GPS import, geocoding, Overland processing
-│   └── money/              Notion sync, classification, config, DB init
+│   └── money/              classification, config, tickets, DB init
 ├── infrastructure/
 │   ├── db/                 SQLite schemas + connections (daybook.db, money.db, locations.db)
 │   ├── api/
@@ -134,7 +130,7 @@ daybook/
 
 ## Architecture
 
-Three SQLite databases (`daybook.db`, `locations.db`, `money.db`) joined by `date`. FastAPI backend exposes domain routers. Python sync scripts pull from Garmin Connect (cron + on-demand), Notion (incremental), and Overland iOS (live GPS). Next.js frontend is a PWA accessible via Tailscale from any device.
+Three SQLite databases (`daybook.db`, `locations.db`, `money.db`) joined by `date`. FastAPI backend exposes domain routers. Python sync scripts pull from Garmin Connect (cron + on-demand) and Overland iOS (live GPS). Next.js frontend is a PWA accessible via Tailscale from any device.
 
 The key architectural constraint: `NEXT_PUBLIC_API_URL` is baked into the Next.js bundle at build time. Always access the app from `http://100.67.252.76:3000` (the Tailscale IP) — other URLs cause client-side fetch failures even with correct CORS headers.
 

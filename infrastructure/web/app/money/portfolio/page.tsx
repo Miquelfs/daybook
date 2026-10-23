@@ -5,6 +5,7 @@ import { AccountsManager } from "@/components/money/AccountsManager";
 import { PortfolioHistoryChart } from "@/components/money/PortfolioHistoryChart";
 import { RecurringPlansSection } from "@/components/money/RecurringPlansSection";
 import { HoldingsTable } from "@/components/money/HoldingsTable";
+import { accountBadgeClass } from "@/components/money/account-colors";
 
 export default async function PortfolioPage() {
   const [overview, holdings, history, plans, realized] = await Promise.all([
@@ -20,11 +21,10 @@ export default async function PortfolioPage() {
   const liquidNames = (overview?.liquid_accounts ?? []).map(a => a.name);
 
   return (
-    <main className="max-w-3xl mx-auto px-4 pb-24 pt-6">
-      <div className="mb-8 flex items-start justify-between gap-3">
+    <main className="max-w-2xl mx-auto px-4 pb-24 pt-6">
+      <div className="mb-6 flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Portfolio</h1>
-          <p className="text-xs text-[#52525B] mt-0.5">
+          <p className="text-xs text-[#52525B]">
             {overview ? `${overview.holdings_count} holdings · updated ${overview.as_of}` : "Investor dashboard"}
           </p>
         </div>
@@ -292,8 +292,12 @@ function LiquidStrip({ accounts }: { accounts: AccountBalance[] }) {
             href={`/money/account/${encodeURIComponent(a.name)}`}
             className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#131316] transition-colors"
           >
-            <span className="text-sm text-[#D4D4D8] flex-1 truncate">{a.name}</span>
-            <span className="text-[10px] text-[#52525B] uppercase">{a.account_type}</span>
+            <span className="flex-1 min-w-0">
+              <span className={`text-xs px-2 py-0.5 rounded-full truncate inline-block max-w-full ${accountBadgeClass(a.name).bg} ${accountBadgeClass(a.name).text}`}>
+                {a.name}
+              </span>
+            </span>
+            <span className="text-[10px] text-[#52525B] uppercase">{a.account_type === "Unknown" ? "" : a.account_type}</span>
             <span className={`text-sm tabular-nums ${a.balance < 0 ? "text-[#EF4444]" : "text-[#FAFAFA]"}`}>
               {a.balance < 0 ? "-" : ""}{fmtAmount(Math.abs(a.balance))}
             </span>
