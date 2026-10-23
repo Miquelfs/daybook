@@ -410,20 +410,20 @@ def relative_effort(
     weeks_back = range + 3  # need 3 extra weeks for band seed
     start = (date.today() - timedelta(weeks=weeks_back)).isoformat()
 
-    _ad = _table_exists(conn, "activity_detail")
-    # Use garmin_activity_load (native, always available) falling back to computed relative_effort
-    _re_expr = (
-        "ROUND(SUM(COALESCE(ad.garmin_activity_load, ad.relative_effort, 0)), 1)"
-        if _ad else "0.0"
-    )
+    # Garmin's own activity load, else Daybook's computed relative effort — only columns that exist on this DB,
+    # and every column table-qualified (a bare date / source is ambiguous once activity_detail is joined)
+    _ad_cols = ({r[1] for r in conn.execute("PRAGMA table_info(activity_detail)")}
+                if _table_exists(conn, "activity_detail") else set())
+    _parts = [f"ad.{c}" for c in ("garmin_activity_load", "relative_effort") if c in _ad_cols]
+    _re_expr = f"ROUND(SUM(COALESCE({', '.join(_parts + ['0'])})), 1)" if _parts else "0.0"
+    _join = "LEFT JOIN activity_detail ad ON ad.activity_id = a.id" if _parts else ""
     rows = conn.execute(
-        f"""SELECT
-               strftime('%Y-W%W', date) AS week,
-               MIN(date) AS week_start,
-               {_re_expr} AS weekly_re
-            FROM activities
-            {'LEFT JOIN activity_detail ad ON ad.activity_id = activities.id' if _ad else ''}
-            WHERE activities.date >= ? {_DEDUP}
+        f"""SELECT strftime('%Y-W%W', a.date) AS week, MIN(a.date) AS week_start, {_re_expr} AS weekly_re
+            FROM activities a {_join}
+            WHERE a.date >= ?
+              AND NOT (a.source = 'strava' AND EXISTS (
+                    SELECT 1 FROM activities g WHERE g.date = a.date AND g.source = 'garmin'
+                      AND g.strava_id = CAST(SUBSTR(a.id, 8) AS TEXT)))
             GROUP BY week
             ORDER BY week ASC""",
         (start,)
