@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { format, parseISO } from "date-fns";
 import { moneyApi, fmtAmount, type Holding, type AllocationSlice, type Mover, type AccountBalance, type RealizedTrade } from "@/lib/money-api";
 import { AddHoldingDrawer } from "@/components/money/AddHoldingDrawer";
 import { AccountsManager } from "@/components/money/AccountsManager";
@@ -53,6 +54,7 @@ export default async function PortfolioPage() {
           {/* Worth and how it's growing first; then what makes it up; then activity. */}
           <NetWorthHeader ov={overview!} />
           <PortfolioHistoryChart data={history} />
+          <InvestedSection ov={overview!} />
           <MoversStrip ov={overview!} />
           <HoldingsTable holdings={holdings} liquidAccounts={liquidNames} />
           {overview!.liquid_accounts.length > 0 && (
@@ -98,10 +100,63 @@ function NetWorthHeader({ ov }: { ov: NonNullable<Awaited<ReturnType<typeof mone
       </div>
       <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-[#18181B]">
         <PnlCell label="Today" eur={ov.day_change_eur} pct={ov.day_change_pct} />
-        <PnlCell label="This year" eur={ov.ytd_pnl_eur} pct={ov.ytd_pnl_pct} />
+        <PnlCell
+          label={ov.ytd_since && ov.ytd_since.slice(5) !== "01-01" ? `Since ${format(parseISO(ov.ytd_since), "d MMM")}` : "This year"}
+          eur={ov.ytd_pnl_eur}
+          pct={ov.ytd_pnl_pct}
+        />
         <PnlCell label="All time" eur={ov.total_pnl_eur} pct={ov.total_pnl_pct} />
       </div>
     </div>
+  );
+}
+
+// What you put in vs what it grew into. Growth excludes new money: buying more
+// raises "put in", not "growth" (domains/money/invested.py).
+function InvestedSection({ ov }: { ov: NonNullable<Awaited<ReturnType<typeof moneyApi.portfolioOverview>>> }) {
+  const putIn = ov.invested_eur;
+  if (!putIn) return null;
+  const growth = ov.total_value_eur - putIn;
+  const totalGain = growth + (ov.realized_pnl_total_eur ?? 0);
+  const grownShare = ov.total_value_eur > 0 ? Math.max(0, Math.min(1, putIn / ov.total_value_eur)) : 1;
+  return (
+    <section className="mb-6">
+      <h2 className="text-xs text-[#71717A] uppercase tracking-widest mb-3">Money in vs growth</h2>
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-5 py-4">
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest">You put in</p>
+            <p className="text-lg font-semibold tabular-nums text-[#FAFAFA]">{fmtAmount(putIn)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest">It&apos;s worth</p>
+            <p className="text-lg font-semibold tabular-nums text-[#FAFAFA]">{fmtAmount(ov.total_value_eur)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Growth</p>
+            <p className={`text-lg font-semibold tabular-nums ${growth >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{signed(growth)}</p>
+            <p className="text-xs text-[#52525B] tabular-nums">{growth >= 0 ? "+" : "−"}{Math.abs((growth / putIn) * 100).toFixed(1)}%</p>
+          </div>
+        </div>
+        {/* One bar: the part you put in, and the part the market added on top */}
+        <div className="flex h-2 rounded-full overflow-hidden mt-4 bg-[#18181B]" aria-hidden>
+          <span className="bg-[#71717A]" style={{ width: `${grownShare * 100}%` }} />
+          {growth > 0 && <span className="bg-[#22C55E] ml-[2px]" style={{ width: `${(1 - grownShare) * 100}%` }} />}
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs text-[#71717A]">
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#71717A]" />Put in</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#22C55E]" />Growth</span>
+          {ov.contributed_ytd_eur !== 0 && (
+            <span className="tabular-nums">
+              Added {ov.ytd_since && ov.ytd_since.slice(5) !== "01-01" ? `since ${format(parseISO(ov.ytd_since), "d MMM")}` : "this year"}: {signed(ov.contributed_ytd_eur)}
+            </span>
+          )}
+          {ov.realized_pnl_total_eur ? (
+            <span className="tabular-nums">Sold for a gain: {signed(ov.realized_pnl_total_eur)} · total gain {signed(totalGain)}</span>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
 }
 

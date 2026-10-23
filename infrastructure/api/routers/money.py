@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from infrastructure.api.db_money import get_money_db
-from domains.money import budgets, income as income_projection
+from domains.money import budgets, income as income_projection, invested
 from infrastructure.api.models.money import (
     AccountBalance, AccountCreate, AccountInfo, AccountPatch,
     TransferHoldingsBody, TransferHoldingsResult,
@@ -2358,8 +2358,15 @@ def portfolio_overview(conn: DB):
 
     # Aggregate totals
     total_cost_basis = sum((h.cost_basis_eur or 0.0) for h in holdings if h.cost_basis_eur)
-    total_pnl = total_value - total_cost_basis if total_cost_basis > 0 else 0.0
-    total_pnl_pct = (total_value / total_cost_basis - 1.0) * 100.0 if total_cost_basis > 0 else 0.0
+    # Money in: what was paid, with unknown-cost holdings at market value (no
+    # invented gain) — the same rule as the history chart's invested line.
+    # Unpriced holdings are left out of both sides, so a missing price isn't a loss.
+    invested_now = sum(
+        (h.cost_basis_eur if h.cost_basis_eur else h.market_value_eur)
+        for h in holdings if h.market_value_eur is not None
+    )
+    total_pnl = total_value - invested_now if invested_now > 0 else 0.0
+    total_pnl_pct = (total_value / invested_now - 1.0) * 100.0 if invested_now > 0 else 0.0
 
     day_change = sum((h.day_change_eur or 0.0) for h in holdings)
     prev_value = total_value - day_change
@@ -2371,18 +2378,20 @@ def portfolio_overview(conn: DB):
     else:
         as_of = date.today().isoformat()
 
+    # This year's growth, not this year's change in value: money added since the
+    # first snapshot of the year is a contribution, not a gain.
     ytd_start = as_of[:4] + "-01-01"
-    ytd_snapshot = conn.execute(
-        """SELECT SUM(value_eur) AS v FROM holding_snapshots
-           WHERE date >= ? AND date = (SELECT MIN(date) FROM holding_snapshots WHERE date >= ?)""",
-        (ytd_start, ytd_start),
-    ).fetchone()
-    ytd_pnl = 0.0
-    ytd_pnl_pct = 0.0
-    if ytd_snapshot and ytd_snapshot["v"]:
-        ytd_start_value = ytd_snapshot["v"]
-        ytd_pnl = total_value - ytd_start_value
-        ytd_pnl_pct = (total_value / ytd_start_value - 1.0) * 100.0 if ytd_start_value > 0 else 0.0
+    start_points = invested.by_date(conn, ytd_start)
+    ytd_pnl = ytd_pnl_pct = contributed_ytd = 0.0
+    ytd_since = None
+    if start_points:
+        ytd_since = min(start_points)
+        start_worth, start_invested = start_points[ytd_since]
+        contributed_ytd = invested_now - start_invested
+        ytd_pnl = (total_value - invested_now) - (start_worth - start_invested)
+        # Modified Dietz: money added during the period counts at half weight
+        base = start_worth + contributed_ytd / 2
+        ytd_pnl_pct = ytd_pnl / base * 100.0 if base > 0 else 0.0
 
     def _slice(bucket_fn, holdings_list):
         totals: dict[str, float] = {}
@@ -2436,6 +2445,9 @@ def portfolio_overview(conn: DB):
         day_change_pct=round(day_change_pct, 2),
         ytd_pnl_eur=round(ytd_pnl, 2),
         ytd_pnl_pct=round(ytd_pnl_pct, 2),
+        ytd_since=ytd_since,
+        invested_eur=round(invested_now, 2),
+        contributed_ytd_eur=round(contributed_ytd, 2),
         allocation_by_class=alloc_class,
         allocation_by_account=alloc_account,
         allocation_by_currency=alloc_currency,
@@ -2511,44 +2523,13 @@ def portfolio_history(
     else:
         cutoff = "1900-01-01"
 
-    rows = conn.execute(
-        """SELECT date, SUM(value_eur) AS total FROM holding_snapshots
-           WHERE date >= ? GROUP BY date ORDER BY date""",
-        (cutoff,),
-    ).fetchall()
-
-    # Cumulative invested proxy: sum of Account Setup + Finance transactions into investment accounts up to that date
-    # (simple approximation — refined later if needed)
-    invested_by_date: dict[str, float] = {}
-    inv_accts = _investment_account_names(conn)
-    if inv_accts:
-        placeholders = ",".join("?" * len(inv_accts))
-        cum_rows = conn.execute(
-            f"""SELECT date, SUM(amount) AS inflow FROM transactions
-                WHERE account IN ({placeholders})
-                  AND (category IN ('Account Setup', 'Finance') OR transaction_type = 'Transfer')
-                  AND deleted_at IS NULL
-                GROUP BY date ORDER BY date""",
-            tuple(inv_accts),
-        ).fetchall()
-        running = 0.0
-        for r in cum_rows:
-            running += r["inflow"] or 0.0
-            invested_by_date[r["date"]] = running
-
-    result: list[PortfolioHistoryPoint] = []
-    running_inv = 0.0
-    for r in rows:
-        # find the most recent invested value <= r["date"]
-        for k in sorted(invested_by_date.keys()):
-            if k <= r["date"]:
-                running_inv = invested_by_date[k]
-        result.append(PortfolioHistoryPoint(
-            date=r["date"],
-            total_value_eur=round(r["total"] or 0.0, 2),
-            invested_eur=round(running_inv, 2),
-        ))
-    return result
+    # Money in = units held that day × average cost paid (domains/money/invested.py),
+    # so the gap to the value line is market growth, not new contributions.
+    points = invested.by_date(conn, cutoff)
+    return [
+        PortfolioHistoryPoint(date=d, total_value_eur=w, invested_eur=inv)
+        for d, (w, inv) in sorted(points.items())
+    ]
 
 
 @router.get("/portfolio/holding/{holding_id}/history", response_model=list[HoldingHistoryPoint])

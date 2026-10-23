@@ -608,6 +608,9 @@ export type PortfolioOverview = {
   day_change_pct: number;
   ytd_pnl_eur: number;
   ytd_pnl_pct: number;
+  ytd_since: string | null;      // first snapshot of the year
+  contributed_ytd_eur: number;   // money added since ytd_since
+  invested_eur: number;          // money in (cost paid; unknown-cost holdings at value)
   allocation_by_class: AllocationSlice[];
   allocation_by_account: AllocationSlice[];
   allocation_by_currency: AllocationSlice[];

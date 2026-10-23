@@ -488,6 +488,9 @@ class PortfolioOverview(BaseModel):
     day_change_pct: float
     ytd_pnl_eur: float
     ytd_pnl_pct: float
+    ytd_since: Optional[str] = None         # first snapshot of the year (history may start later than Jan 1)
+    contributed_ytd_eur: float = 0.0        # money added to the portfolio since ytd_since
+    invested_eur: float = 0.0               # money in: cost paid, unknown-cost holdings at value
     allocation_by_class: list[AllocationSlice]
     allocation_by_account: list[AllocationSlice]
     allocation_by_currency: list[AllocationSlice]
