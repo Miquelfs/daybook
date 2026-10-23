@@ -204,6 +204,7 @@ export type MoneyMeta = {
   categories: CategoryMeta[];
   accounts: string[];
   defaults: { account: string; category: string };
+  savings_goal: number;  // monthly savings target
 };
 
 export type CategoryBudget = {

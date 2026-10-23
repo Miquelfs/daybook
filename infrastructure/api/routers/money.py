@@ -349,7 +349,8 @@ def get_meta(conn: DB):
         for c in all_cats
     ]
 
-    return MoneyMeta(categories=categories, accounts=accounts, defaults=defaults)
+    return MoneyMeta(categories=categories, accounts=accounts, defaults=defaults,
+                     savings_goal=MONTHLY_SAVINGS_GOAL)
 
 
 # ── Month summary / budget ─────────────────────────────────────────────────────

@@ -20,12 +20,9 @@ export default async function PortfolioPage() {
   const liquidNames = (overview?.liquid_accounts ?? []).map(a => a.name);
 
   return (
-    <main className="max-w-3xl mx-auto px-4 pb-24 pt-8">
+    <main className="max-w-3xl mx-auto px-4 pb-24 pt-6">
       <div className="mb-8 flex items-start justify-between gap-3">
         <div>
-          <Link href="/money" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest mb-2 inline-block">
-            ← Finance
-          </Link>
           <h1 className="text-2xl font-semibold tracking-tight">Portfolio</h1>
           <p className="text-xs text-[#52525B] mt-0.5">
             {overview ? `${overview.holdings_count} holdings · updated ${overview.as_of}` : "Investor dashboard"}
@@ -53,16 +50,17 @@ export default async function PortfolioPage() {
         </>
       ) : (
         <>
+          {/* Worth and how it's growing first; then what makes it up; then activity. */}
           <NetWorthHeader ov={overview!} />
           <PortfolioHistoryChart data={history} />
-          <AllocationSection ov={overview!} />
-          <RecurringPlansSection plans={plans} holdings={holdings} liquidAccounts={liquidNames} />
-          <MoversSection ov={overview!} />
+          <MoversStrip ov={overview!} />
           <HoldingsTable holdings={holdings} liquidAccounts={liquidNames} />
-          <RealizedSection trades={realized} totalAllTime={overview!.realized_pnl_total_eur} totalYtd={overview!.realized_pnl_ytd_eur} />
           {overview!.liquid_accounts.length > 0 && (
             <LiquidStrip accounts={overview!.liquid_accounts} />
           )}
+          <AllocationSection ov={overview!} />
+          <RecurringPlansSection plans={plans} holdings={holdings} liquidAccounts={liquidNames} />
+          <RealizedSection trades={realized} totalAllTime={overview!.realized_pnl_total_eur} totalYtd={overview!.realized_pnl_ytd_eur} />
         </>
       )}
     </main>
@@ -86,9 +84,6 @@ function EmptyState({ liquid }: { liquid: AccountBalance[] }) {
 }
 
 function NetWorthHeader({ ov }: { ov: NonNullable<Awaited<ReturnType<typeof moneyApi.portfolioOverview>>> }) {
-  const dayPositive = ov.day_change_eur >= 0;
-  const ytdPositive = ov.ytd_pnl_eur >= 0;
-  const totalPositive = ov.total_pnl_eur >= 0;
   return (
     <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-6 py-6 mb-4">
       <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Total worth</p>
@@ -102,46 +97,36 @@ function NetWorthHeader({ ov }: { ov: NonNullable<Awaited<ReturnType<typeof mone
         </span>
       </div>
       <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-[#18181B]">
-        <div>
-          <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Today</p>
-          <p className={`text-sm font-semibold tabular-nums ${dayPositive ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
-            {dayPositive ? "+" : ""}{ov.day_change_eur.toFixed(2)}€
-          </p>
-          <p className={`text-xs tabular-nums ${dayPositive ? "text-[#22C55E]/70" : "text-[#EF4444]/70"}`}>
-            {dayPositive ? "+" : ""}{ov.day_change_pct.toFixed(2)}%
-          </p>
-        </div>
-        <div>
-          <p className="text-[10px] text-[#52525B] uppercase tracking-widest">YTD</p>
-          <p className={`text-sm font-semibold tabular-nums ${ytdPositive ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
-            {ytdPositive ? "+" : ""}{ov.ytd_pnl_eur.toFixed(2)}€
-          </p>
-          <p className={`text-xs tabular-nums ${ytdPositive ? "text-[#22C55E]/70" : "text-[#EF4444]/70"}`}>
-            {ytdPositive ? "+" : ""}{ov.ytd_pnl_pct.toFixed(2)}%
-          </p>
-        </div>
-        <div>
-          <p className="text-[10px] text-[#52525B] uppercase tracking-widest">All-time</p>
-          <p className={`text-sm font-semibold tabular-nums ${totalPositive ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
-            {totalPositive ? "+" : ""}{ov.total_pnl_eur.toFixed(2)}€
-          </p>
-          <p className={`text-xs tabular-nums ${totalPositive ? "text-[#22C55E]/70" : "text-[#EF4444]/70"}`}>
-            {totalPositive ? "+" : ""}{ov.total_pnl_pct.toFixed(2)}%
-          </p>
-        </div>
+        <PnlCell label="Today" eur={ov.day_change_eur} pct={ov.day_change_pct} />
+        <PnlCell label="This year" eur={ov.ytd_pnl_eur} pct={ov.ytd_pnl_pct} />
+        <PnlCell label="All time" eur={ov.total_pnl_eur} pct={ov.total_pnl_pct} />
       </div>
     </div>
   );
 }
 
-const CLASS_COLORS = [
-  "#22C55E", "#3B82F6", "#F59E0B", "#8B5CF6", "#06B6D4", "#EC4899", "#EF4444",
-];
+function signed(eur: number): string {
+  return `${eur >= 0 ? "+" : "−"}${fmtAmount(eur)}`;
+}
+
+function PnlCell({ label, eur, pct }: { label: string; eur: number; pct: number }) {
+  const color = eur >= 0 ? "text-[#22C55E]" : "text-[#EF4444]";
+  return (
+    <div>
+      <p className="text-[10px] text-[#52525B] uppercase tracking-widest">{label}</p>
+      <p className={`text-sm font-semibold tabular-nums ${color}`}>{signed(eur)}</p>
+      <p className={`text-xs tabular-nums ${color} opacity-70`}>{pct >= 0 ? "+" : "−"}{Math.abs(pct).toFixed(2)}%</p>
+    </div>
+  );
+}
+
+// Validated for colour-blind separation on both themes; no red/green, which mean gain/loss here.
+const CLASS_COLORS = ["#3B82F6", "#D97706", "#8B5CF6", "#0891B2", "#EC4899"];
 
 function AllocationSection({ ov }: { ov: NonNullable<Awaited<ReturnType<typeof moneyApi.portfolioOverview>>> }) {
   return (
     <section className="mb-6">
-      <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Allocation</h2>
+      <h2 className="text-xs text-[#71717A] uppercase tracking-widest mb-3">Allocation</h2>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <AllocationCard title="Asset class" slices={ov.allocation_by_class} />
         <AllocationCard title="Account" slices={ov.allocation_by_account} />
@@ -151,31 +136,43 @@ function AllocationSection({ ov }: { ov: NonNullable<Awaited<ReturnType<typeof m
   );
 }
 
-function AllocationCard({ title, slices }: { title: string; slices: AllocationSlice[] }) {
-  if (slices.length === 0) return null;
+const OTHER_COLOR = "#52525B";
+
+// Up to 5 named slices, the rest folded into a gray "Other", so a colour never
+// stands for two things and the legend lists every slice the donut draws.
+function foldSlices(slices: AllocationSlice[]): (AllocationSlice & { color: string })[] {
+  const head = slices.slice(0, 5).map((s, i) => ({ ...s, color: CLASS_COLORS[i] }));
+  const tail = slices.slice(5);
+  if (tail.length === 0) return head;
+  const other = tail.reduce((acc, s) => ({ ...acc, value_eur: acc.value_eur + s.value_eur, pct: acc.pct + s.pct }), {
+    ...tail[0], label: `Other (${tail.length})`, value_eur: 0, pct: 0,
+  });
+  return [...head, { ...other, color: OTHER_COLOR }];
+}
+
+function AllocationCard({ title, slices: raw }: { title: string; slices: AllocationSlice[] }) {
+  if (raw.length === 0) return null;
+  const slices = foldSlices(raw);
   return (
     <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
       <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-3">{title}</p>
       <div className="flex items-center gap-3 mb-3">
         <Donut slices={slices} />
         <ul className="flex-1 space-y-1.5 min-w-0">
-          {slices.slice(0, 4).map((s, i) => (
-            <li key={s.label} className="flex items-center gap-2 text-xs">
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: CLASS_COLORS[i % CLASS_COLORS.length] }} />
+          {slices.map((s) => (
+            <li key={s.label} className="flex items-center gap-2 text-xs" title={`${s.label}: ${fmtAmount(s.value_eur)}`}>
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
               <span className="text-[#D4D4D8] truncate">{s.label}</span>
               <span className="text-[#71717A] tabular-nums ml-auto">{s.pct.toFixed(1)}%</span>
             </li>
           ))}
-          {slices.length > 4 && (
-            <li className="text-[10px] text-[#52525B]">+ {slices.length - 4} more</li>
-          )}
         </ul>
       </div>
     </div>
   );
 }
 
-function Donut({ slices }: { slices: AllocationSlice[] }) {
+function Donut({ slices }: { slices: (AllocationSlice & { color: string })[] }) {
   const size = 72;
   const r = 30;
   const c = 2 * Math.PI * r;
@@ -184,7 +181,7 @@ function Donut({ slices }: { slices: AllocationSlice[] }) {
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#18181B" strokeWidth="10" />
-      {slices.map((s, i) => {
+      {slices.map((s) => {
         const len = (s.pct / 100) * c;
         const dash = `${len} ${c - len}`;
         const rot = (offset / c) * 360;
@@ -194,7 +191,7 @@ function Donut({ slices }: { slices: AllocationSlice[] }) {
             key={s.label}
             cx={size / 2} cy={size / 2} r={r}
             fill="none"
-            stroke={CLASS_COLORS[i % CLASS_COLORS.length]}
+            stroke={s.color}
             strokeWidth="10"
             strokeDasharray={dash}
             transform={`rotate(${rot - 90} ${size / 2} ${size / 2})`}
@@ -205,40 +202,28 @@ function Donut({ slices }: { slices: AllocationSlice[] }) {
   );
 }
 
-function MoversSection({ ov }: { ov: NonNullable<Awaited<ReturnType<typeof moneyApi.portfolioOverview>>> }) {
-  if (ov.top_movers_up.length === 0 && ov.top_movers_down.length === 0) return null;
+// Daily moves are noise for long-term holdings — one quiet line, not a section.
+function MoversStrip({ ov }: { ov: NonNullable<Awaited<ReturnType<typeof moneyApi.portfolioOverview>>> }) {
+  const movers: (Mover & { up: boolean })[] = [
+    ...ov.top_movers_up.slice(0, 3).map((m) => ({ ...m, up: true })),
+    ...ov.top_movers_down.slice(0, 3).map((m) => ({ ...m, up: false })),
+  ];
+  if (movers.length === 0) return null;
   return (
-    <section className="mb-6">
-      <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Today&apos;s movers</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <MoverList title="Winners" movers={ov.top_movers_up} positive />
-        <MoverList title="Losers" movers={ov.top_movers_down} positive={false} />
-      </div>
-    </section>
-  );
-}
-
-function MoverList({ title, movers, positive }: { title: string; movers: Mover[]; positive: boolean }) {
-  const color = positive ? "text-[#22C55E]" : "text-[#EF4444]";
-  return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
-      <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-2">{title}</p>
-      {movers.length === 0 ? (
-        <p className="text-xs text-[#3F3F46]">—</p>
-      ) : (
-        <ul className="space-y-1.5">
-          {movers.map(m => (
-            <li key={m.holding_id} className="flex items-center gap-2 text-xs">
-              <Link href={`/money/portfolio/holding/${encodeURIComponent(m.holding_id)}`} className="text-[#D4D4D8] hover:text-[#FAFAFA] truncate flex-1">
-                {m.name}
-              </Link>
-              <span className={`tabular-nums ${color}`}>
-                {positive ? "+" : ""}{m.day_change_pct.toFixed(2)}%
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="flex items-center gap-2 mb-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <span className="text-[10px] text-[#52525B] uppercase tracking-widest shrink-0">Today</span>
+      {movers.map((m) => (
+        <Link
+          key={m.holding_id}
+          href={`/money/portfolio/holding/${encodeURIComponent(m.holding_id)}`}
+          className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[#27272A] text-xs hover:border-[#3F3F46]"
+        >
+          <span className="text-[#D4D4D8] max-w-[120px] truncate">{m.name}</span>
+          <span className={`tabular-nums ${m.up ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
+            {m.day_change_pct >= 0 ? "+" : "−"}{Math.abs(m.day_change_pct).toFixed(1)}%
+          </span>
+        </Link>
+      ))}
     </div>
   );
 }
@@ -249,7 +234,7 @@ function RealizedSection({ trades, totalAllTime, totalYtd }: { trades: RealizedT
   return (
     <section className="mb-6">
       <div className="flex items-baseline justify-between mb-3">
-        <h2 className="text-xs text-[#52525B] uppercase tracking-widest">Realized gains</h2>
+        <h2 className="text-xs text-[#71717A] uppercase tracking-widest">Realized gains</h2>
         <span className="text-xs tabular-nums">
           <span className={totalPos ? "text-[#22C55E]" : "text-[#EF4444]"}>
             {totalPos ? "+" : ""}{fmtAmount(totalAllTime)}
@@ -297,7 +282,7 @@ function LiquidStrip({ accounts }: { accounts: AccountBalance[] }) {
   return (
     <section className="mt-6">
       <div className="flex items-baseline justify-between mb-2">
-        <h2 className="text-xs text-[#52525B] uppercase tracking-widest">Cash &amp; liquid</h2>
+        <h2 className="text-xs text-[#71717A] uppercase tracking-widest">Cash &amp; liquid</h2>
         <span className="text-xs text-[#71717A] tabular-nums">{fmtAmount(total)}</span>
       </div>
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl divide-y divide-[#18181B]">

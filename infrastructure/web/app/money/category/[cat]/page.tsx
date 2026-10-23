@@ -27,7 +27,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   const emoji = CATEGORY_EMOJI[category] ?? "💳";
 
   return (
-    <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
+    <main className="max-w-2xl mx-auto px-4 pb-20 pt-6">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-2">
@@ -128,7 +128,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
 
       {/* Transactions */}
       <section>
-        <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">
+        <h2 className="text-xs text-[#71717A] uppercase tracking-widest mb-3">
           Transactions
         </h2>
         <TransactionList start={start} end={end} category={category} limit={100} showDate={true} />

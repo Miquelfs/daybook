@@ -19,7 +19,7 @@ const WINDOWS: { key: GroceryWindow; label: string }[] = [
 const AVOID = "#EC4899";
 const REST = "#3F3F46";
 const card = "bg-[#0D0D0F] border border-[#27272A] rounded-xl";
-const h2 = "text-xs text-[#52525B] uppercase tracking-widest mb-3";
+const h2 = "text-xs text-[#71717A] uppercase tracking-widest mb-3";
 
 export function GroceriesDashboard() {
   const [win, setWin] = useState<GroceryWindow>("3m");
@@ -200,7 +200,7 @@ function Prices({ products }: { products: GroceryProduct[] }) {
   return (
     <section>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs text-[#52525B] uppercase tracking-widest">Prices</h2>
+        <h2 className="text-xs text-[#71717A] uppercase tracking-widest">Prices</h2>
         {repeat.length > 0 && repeat.length < products.length && (
           <button type="button" onClick={() => setShowAll((v) => !v)} className="text-xs text-[#71717A] hover:text-[#A1A1AA]">
             {showAll ? "Bought more than once" : `All ${products.length} products`}

@@ -1,170 +1,163 @@
 import Link from "next/link";
 import { format } from "date-fns";
-import { moneyApi, fmtAmount } from "@/lib/money-api";
+import { moneyApi, fmtAmount, type MonthOverview } from "@/lib/money-api";
 import { VelocityGauge } from "@/components/money/VelocityGauge";
 import { WaterfallChart } from "@/components/money/WaterfallChart";
-import { SeasonalChart } from "@/components/money/SeasonalChart";
 import { EfficiencyTable } from "@/components/money/EfficiencyTable";
-import { MonthlyAnomalies } from "@/components/money/MonthlyAnomalies";
 import { MonthHeatGrid } from "@/components/money/MonthHeatGrid";
-import { MonthlyChart } from "@/components/money/MonthlyChart";
-import { ForecastCard } from "@/components/money/ForecastCard";
+import { SpendingPatternsChart } from "@/components/money/SpendingPatternsChart";
+import { AnomalyReport } from "@/components/money/AnomalyReport";
 import { AINarrative } from "@/components/AINarrative";
+import { MonthSwitcher, Section, StatTile } from "@/components/money/ui";
 
 interface Props {
   searchParams: Promise<{ month?: string }>;
 }
 
+// Insights = this month, explained: where you'll land, what needs attention,
+// where the money went and when. Long-term views live on Trends.
 export default async function InsightsPage({ searchParams }: Props) {
   const { month: monthParam } = await searchParams;
-  const today = new Date();
-  const month = monthParam ?? format(today, "yyyy-MM");
+  const month = monthParam ?? format(new Date(), "yyyy-MM");
 
   const [year, mon] = month.split("-").map((v) => parseInt(v));
   const monthStart = `${month}-01`;
   const monthEnd = format(new Date(year, mon, 0), "yyyy-MM-dd");
   const monthLabel = format(new Date(year, mon - 1, 1), "MMMM yyyy");
 
-  const [overview, waterfall, efficiency, monthlyAnomalies, seasonal, trends, dailyTotals] =
-    await Promise.all([
-      moneyApi.monthOverview(month).catch(() => null),
-      moneyApi.waterfall(month).catch(() => null),
-      moneyApi.efficiency(12).catch(() => null),
-      moneyApi.monthlyAnomalies(24).catch(() => null),
-      moneyApi.seasonal().catch(() => null),
-      moneyApi.trends(12).catch(() => null),
-      moneyApi.dailyTotals(monthStart, monthEnd).catch(() => null),
-    ]);
-
-  const streak = trends?.savings_streak;
-  const last12 = trends?.months.slice(-12) ?? [];
+  const [overview, waterfall, efficiency, dailyTotals, meta] = await Promise.all([
+    moneyApi.monthOverview(month).catch(() => null),
+    moneyApi.waterfall(month).catch(() => null),
+    moneyApi.efficiency(12).catch(() => null),
+    moneyApi.dailyTotals(monthStart, monthEnd).catch(() => null),
+    moneyApi.meta().catch(() => null),
+  ]);
+  const goal = meta?.savings_goal ?? 0;
 
   return (
-    <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-2">
-          <Link href="/money" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest">
-            ← Finance
-          </Link>
-          <Link href={`/money/overview?month=${month}`} className="text-xs text-[#F59E0B] hover:text-[#FCD34D] transition-colors uppercase tracking-widest">
-            Overview →
-          </Link>
-        </div>
-        <h1 className="text-2xl font-semibold tracking-tight">Insights</h1>
-        <p className="text-xs text-[#52525B] mt-0.5">{monthLabel}</p>
-      </div>
+    <main className="max-w-2xl mx-auto px-4 pb-20 pt-6">
+      <MonthSwitcher
+        basePath="/money/insights"
+        month={month}
+        subtitle={overview ? `Day ${overview.days_elapsed} of ${overview.days_in_month}` : undefined}
+      />
 
-      <div className="mb-8">
-        <AINarrative
-          topic="money"
-          days={7}
-          label="AI Recommendations"
-          blurb="Get a plain-English read on this week's spending — what's on track, what to watch, and one practical action."
-          cta="Analyse my spending"
+      {!overview ? (
+        <div className="border border-dashed border-[#27272A] rounded-xl px-4 py-8 text-center">
+          <p className="text-sm text-[#52525B]">No data for this month.</p>
+        </div>
+      ) : (
+        <>
+          <Landing ov={overview} goal={goal} />
+
+          <Section title="Needs attention" hint="Categories ahead of their budget pace, and spending that's out of the ordinary.">
+            <Alerts ov={overview} month={month} />
+            <div className="mt-3">
+              <AnomalyReport month={month} />
+            </div>
+          </Section>
+        </>
+      )}
+
+      {waterfall && waterfall.categories.length > 0 && (
+        <Section title="Where the money went" hint="Income, minus each category, down to what's left.">
+          <WaterfallChart data={waterfall} />
+        </Section>
+      )}
+
+      <Section title="When you spent" hint={`Day by day and by weekday, ${monthLabel}.`}>
+        {dailyTotals && dailyTotals.length > 0 && (
+          <div className="mb-6">
+            <MonthHeatGrid days={dailyTotals} month={monthLabel} />
+          </div>
+        )}
+        <SpendingPatternsChart month={month} />
+      </Section>
+
+      {efficiency && (
+        <Section title="Recoverable savings" hint="Where the last 12 months ran above a typical month.">
+          <EfficiencyTable data={efficiency} />
+        </Section>
+      )}
+
+      <AINarrative
+        topic="money"
+        days={7}
+        label="AI read on this week"
+        blurb="A plain-English read on this week's spending: what's on track, what to watch, and one practical action."
+        cta="Analyse my spending"
+      />
+    </main>
+  );
+}
+
+// One projection everywhere: fixed bills spread over the month (the "adjusted"
+// numbers), so rent landing on the 1st doesn't read as overspending.
+function Landing({ ov, goal }: { ov: MonthOverview; goal: number }) {
+  const savings = ov.projected_savings_adjusted;
+  const tone = savings < 0 ? "bad" : goal && savings < goal ? "warn" : "good";
+  const verdict =
+    savings < 0 ? "Heading for a negative month"
+    : goal && savings < goal ? `${fmtAmount(goal - savings)} short of the ${fmtAmount(goal)} goal`
+    : goal ? `On track for the ${fmtAmount(goal)} goal` : "Projected savings";
+  return (
+    <Section title="Where you'll land">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-5 py-5 mb-3">
+        <p className="text-[11px] text-[#52525B] uppercase tracking-widest mb-1">Projected savings</p>
+        <p className={`text-4xl font-semibold tabular-nums ${
+          tone === "bad" ? "text-[#EF4444]" : tone === "warn" ? "text-[#F59E0B]" : "text-[#22C55E]"
+        }`}>
+          {savings < 0 ? "−" : ""}{fmtAmount(savings)}
+        </p>
+        <p className="text-sm text-[#A1A1AA] mt-1">{verdict}</p>
+        <div className="mt-4 pt-4 border-t border-[#18181B]">
+          <VelocityGauge overview={ov} bare />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <StatTile label="Spent" value={fmtAmount(ov.total_spent)} sub={`of ${fmtAmount(ov.total_budget)}`} />
+        <StatTile label="Per day" value={fmtAmount(ov.daily_burn_rate)} sub="so far" />
+        <StatTile
+          label="Month end"
+          value={fmtAmount(ov.projected_month_end_adjusted)}
+          sub="projected spend"
+          tone={ov.projected_month_end_adjusted > ov.total_budget ? "bad" : "plain"}
         />
       </div>
+    </Section>
+  );
+}
 
-      {/* 1 · This month at a glance */}
-      {overview && (
-        <section className="mb-8">
-          <VelocityGauge overview={overview} />
-          <div className="grid grid-cols-2 gap-3 mt-3">
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
-              <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Proj. month end</p>
-              <p className="text-lg font-semibold text-[#FAFAFA] tabular-nums">
-                {fmtAmount(overview.projected_month_end_adjusted)}
-              </p>
-              <p className="text-[10px] text-[#3F3F46]">fixed bills amortised</p>
-            </div>
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
-              <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Proj. savings</p>
-              <p className={`text-lg font-semibold tabular-nums ${
-                overview.projected_savings_adjusted < 0 ? "text-[#EF4444]" :
-                overview.projected_savings_adjusted < 1300 ? "text-[#F59E0B]" : "text-[#22C55E]"
-              }`}>
-                {overview.projected_savings_adjusted < 0 ? "−" : ""}{fmtAmount(Math.abs(overview.projected_savings_adjusted))}
-              </p>
-              <p className="text-[10px] text-[#3F3F46]">goal: €1,300</p>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* 2 · Savings streak */}
-      {streak && (
-        <section className="mb-8">
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 flex items-center justify-between">
+function Alerts({ ov, month }: { ov: MonthOverview; month: string }) {
+  if (ov.alerts.length === 0) {
+    return (
+      <div className="bg-[#0D0D0F] border border-[#22C55E]/30 rounded-xl px-4 py-3">
+        <p className="text-sm text-[#22C55E]">✓ Every category is within its budget pace</p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {ov.alerts.map((a) => {
+        const over = a.status === "Over Budget";
+        return (
+          <Link
+            key={a.category}
+            href={`/money/category/${encodeURIComponent(a.category)}?month=${month}`}
+            className="flex items-center justify-between bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 hover:border-[#3F3F46] transition-colors"
+          >
             <div>
-              <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Savings streak</p>
-              <p className="text-3xl font-semibold text-[#FAFAFA] tabular-nums">
-                {streak.current_streak}
-                <span className="text-sm text-[#52525B] font-normal ml-1.5">
-                  mo · best {streak.best_streak}
-                </span>
+              <p className={`text-sm font-medium ${over ? "text-[#EF4444]" : "text-[#F59E0B]"}`}>
+                {over ? "Over budget" : "Over pace"} · {a.category}
+              </p>
+              <p className="text-xs text-[#52525B] mt-0.5">
+                {fmtAmount(a.spent)} spent · {a.velocity.toFixed(1)}× the pace its budget allows
               </p>
             </div>
-            <div className="flex gap-1" title="last 12 months: green = savings goal hit">
-              {last12.map((m) => (
-                <span
-                  key={m.month}
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: m.on_budget ? "#22C55E" : "#3F3F46" }}
-                  title={`${m.month}: ${m.on_budget ? "goal hit" : "missed"} (${fmtAmount(m.savings)})`}
-                />
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* 3 · Cash-flow waterfall */}
-      {waterfall && waterfall.categories.length > 0 && (
-        <section className="mb-8">
-          <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Where the money went</h2>
-          <WaterfallChart data={waterfall} />
-        </section>
-      )}
-
-      {/* 4 · Month-level anomalies */}
-      {monthlyAnomalies && (
-        <section className="mb-8">
-          <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Unusual months</h2>
-          <MonthlyAnomalies data={monthlyAnomalies} />
-        </section>
-      )}
-
-      {/* 5 · Seasonal pattern */}
-      {seasonal && (
-        <section className="mb-8">
-          <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Seasonal pattern</h2>
-          <SeasonalChart data={seasonal} />
-        </section>
-      )}
-
-      {/* 6 · Behavioural pattern (this month) */}
-      {dailyTotals && dailyTotals.length > 0 && (
-        <section className="mb-8">
-          <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Daily rhythm</h2>
-          <MonthHeatGrid days={dailyTotals} month={monthLabel} />
-        </section>
-      )}
-
-      {/* 7 · Efficiency & recoverable savings */}
-      {efficiency && (
-        <section className="mb-8">
-          <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Recoverable savings</h2>
-          <EfficiencyTable data={efficiency} />
-        </section>
-      )}
-
-      {/* 8 · History & forecast */}
-      <section className="mb-8">
-        <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">History & forecast</h2>
-        <div className="space-y-4">
-          <MonthlyChart />
-          <ForecastCard />
-        </div>
-      </section>
-    </main>
+            <span className="text-xs text-[#3F3F46]">→</span>
+          </Link>
+        );
+      })}
+    </div>
   );
 }

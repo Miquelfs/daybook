@@ -32,26 +32,9 @@ export default async function MoneyPage({ searchParams }: Props) {
     : 0;
 
   return (
-    <main className="max-w-2xl mx-auto px-4 pb-28 pt-8">
+    <main className="max-w-2xl mx-auto px-4 pb-28 pt-6">
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest">
-            ← Today
-          </Link>
-          <div className="flex gap-4">
-            <Link href="/money/portfolio" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest">
-              Portfolio →
-            </Link>
-            <Link href="/money/insights" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest">
-              Insights →
-            </Link>
-            <Link href="/money/trends" className="text-xs text-[#F59E0B] hover:text-[#FCD34D] transition-colors uppercase tracking-widest">
-              Trends →
-            </Link>
-          </div>
-        </div>
-
         {/* Month navigation */}
         <div className="flex items-center justify-between">
           <Link
@@ -187,7 +170,7 @@ export default async function MoneyPage({ searchParams }: Props) {
 
           {/* Category budget bars */}
           <section className="mb-8">
-            <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-4">By category</h2>
+            <h2 className="text-xs text-[#71717A] uppercase tracking-widest mb-4">By category</h2>
             <div className="flex flex-col gap-4">
               {summary.categories.map((cat) => (
                 <MonthBudgetBar key={cat.category} item={cat} />
@@ -202,7 +185,7 @@ export default async function MoneyPage({ searchParams }: Props) {
       {/* Transactions explorer */}
       <section>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xs text-[#52525B] uppercase tracking-widest">Transactions</h2>
+          <h2 className="text-xs text-[#71717A] uppercase tracking-widest">Transactions</h2>
           <div className="flex items-center gap-2">
             <a
               href={`/api/money/export?start=${month}-01&end=${format(endOfMonth(monthDate), "yyyy-MM-dd")}`}

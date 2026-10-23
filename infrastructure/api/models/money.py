@@ -78,6 +78,7 @@ class MoneyMeta(BaseModel):
     categories: list[CategoryMeta]
     accounts: list[str]
     defaults: dict[str, str]    # {"account": "...", "category": "..."}
+    savings_goal: float = 0     # monthly savings target (money_config.MONTHLY_SAVINGS_GOAL)
 
 
 class MonthHistory(BaseModel):

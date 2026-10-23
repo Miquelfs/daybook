@@ -15,6 +15,12 @@ export function ForecastCard() {
     queryKey: ["money", "forecast"],
     queryFn: () => moneyApi.forecast(),
   });
+  const { data: meta } = useQuery({
+    queryKey: ["money", "meta"],
+    queryFn: () => moneyApi.meta(),
+    staleTime: Infinity,
+  });
+  const goal = meta?.savings_goal ?? 0;
 
   // Next month's payslip: its fixed pay + the variable pay earned this month
   // (category/level/IRPF/jornada come from the pay settings saved on the roster page)
@@ -56,7 +62,7 @@ export function ForecastCard() {
         </div>
         <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Pred. save</p>
-          <p className={`text-lg font-semibold tabular-nums ${predictedSavings >= 1300 ? "text-[#22C55E]" : predictedSavings >= 0 ? "text-[#F59E0B]" : "text-[#EF4444]"}`}>
+          <p className={`text-lg font-semibold tabular-nums ${predictedSavings >= goal ? "text-[#22C55E]" : predictedSavings >= 0 ? "text-[#F59E0B]" : "text-[#EF4444]"}`}>
             {predictedSavings >= 0 ? "" : "−"}{fmtAmount(Math.abs(predictedSavings))}
           </p>
         </div>

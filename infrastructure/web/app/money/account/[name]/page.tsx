@@ -11,7 +11,7 @@ export default function AccountTransactionsPage() {
   const badge = accountBadgeClass(name);
 
   return (
-    <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
+    <main className="max-w-2xl mx-auto px-4 pb-20 pt-6">
       <Link
         href="/money/portfolio"
         className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest mb-3 inline-block"

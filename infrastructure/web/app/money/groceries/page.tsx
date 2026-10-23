@@ -3,12 +3,9 @@ import { GroceriesDashboard } from "@/components/money/GroceriesDashboard";
 
 export default function GroceriesPage() {
   return (
-    <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
+    <main className="max-w-2xl mx-auto px-4 pb-20 pt-6">
       <div className="mb-6">
-        <div className="flex items-center justify-between mb-2">
-          <Link href="/money" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest">
-            ← Finance
-          </Link>
+        <div className="flex items-center justify-end mb-2">
           <Link
             href="/money/category/Groceries"
             className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest"

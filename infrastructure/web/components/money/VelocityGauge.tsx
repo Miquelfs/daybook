@@ -29,7 +29,8 @@ function arcPath(from: number, to: number, r: number, cx: number, cy: number) {
   return `M ${a.x.toFixed(2)} ${a.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
 }
 
-export function VelocityGauge({ overview }: { overview: MonthOverview }) {
+/** `bare` drops the card chrome, for use inside another card. */
+export function VelocityGauge({ overview, bare = false }: { overview: MonthOverview; bare?: boolean }) {
   const [mode, setMode] = useState<"adjusted" | "raw">("adjusted");
 
   const velocity = mode === "adjusted" ? overview.adjusted_velocity : overview.velocity;
@@ -39,9 +40,9 @@ export function VelocityGauge({ overview }: { overview: MonthOverview }) {
   const CX = 100, CY = 92, R = 80;
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+    <div className={bare ? "" : "bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4"}>
       <div className="flex items-center justify-between mb-1">
-        <p className="text-xs text-[#52525B] uppercase tracking-widest">Budget velocity</p>
+        <p className="text-xs text-[#52525B] uppercase tracking-widest">Spending pace</p>
         <div className="flex rounded-full border border-[#27272A] overflow-hidden text-[10px]">
           {(["adjusted", "raw"] as const).map((m) => (
             <button

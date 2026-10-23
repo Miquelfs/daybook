@@ -5,10 +5,11 @@ import { moneyApi, fmtAmount } from "@/lib/money-api";
 
 const MAX_BAR_PX = 72;
 
-export function SpendingPatternsChart() {
+// One month's spending by weekday and by week (defaults to the current month).
+export function SpendingPatternsChart({ month }: { month?: string }) {
   const { data, isLoading } = useQuery({
-    queryKey: ["money", "spending-patterns"],
-    queryFn: () => moneyApi.spendingPatterns(),
+    queryKey: ["money", "spending-patterns", month],
+    queryFn: () => moneyApi.spendingPatterns(month),
   });
 
   if (isLoading) return <div className="h-32 bg-[#0D0D0F] rounded-xl animate-pulse" />;
@@ -41,7 +42,7 @@ export function SpendingPatternsChart() {
       {/* Week totals */}
       {data.by_week.length > 0 && (
         <div>
-          <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">By week this month</p>
+          <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">By week</p>
           <div className="flex flex-col divide-y divide-[#18181B]">
             {data.by_week.map((w) => (
               <div key={w.week_num} className="flex items-center justify-between py-2 text-xs">

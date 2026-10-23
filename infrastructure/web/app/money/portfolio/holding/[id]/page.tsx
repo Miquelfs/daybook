@@ -20,7 +20,7 @@ export default async function HoldingDetailPage({ params }: Props) {
   const pnlPos = (h.unrealized_pnl_pct ?? 0) >= 0;
 
   return (
-    <main className="max-w-2xl mx-auto px-4 pb-24 pt-8">
+    <main className="max-w-2xl mx-auto px-4 pb-24 pt-6">
       <Link href="/money/portfolio" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest mb-2 inline-block">
         ← Portfolio
       </Link>
