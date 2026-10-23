@@ -191,11 +191,14 @@ class AnalyticsTest(unittest.TestCase):
         self.assertEqual(groceries.products(self.c)[0]["product"], "AGUACATE")      # biggest move first
 
     def test_summary(self):
-        s = groceries.summary(self.c, 1, today=self.today)                           # October only
+        s = groceries.summary(self.c, "month", today=self.today)                     # October only
         self.assertEqual(s["receipts"], 1)
         self.assertEqual(s["total"], 5.85)
         self.assertEqual(s["avoid_total"], 0)
-        s = groceries.summary(self.c, 3, today=self.today)
+        self.assertEqual(groceries.summary(self.c, "week", today=self.today)["receipts"], 0)
+        last = groceries.summary(self.c, "ticket", today=self.today)                 # deleted one skipped
+        self.assertEqual((last["receipts"], last["start"], last["total"]), (1, "2026-10-13", 5.85))
+        s = groceries.summary(self.c, "3m", today=self.today)
         self.assertEqual(s["start"], "2026-08-01")
         self.assertEqual(s["avoid_items"][0]["product"], "DOCHI CHEESECAKE")
         self.assertEqual({g["group"] for g in s["groups"]},

@@ -135,6 +135,8 @@ export type Receipt = {
   items: ReceiptItem[];
 };
 
+export type GroceryWindow = "ticket" | "week" | "month" | "3m" | "12m";
+
 export type GrocerySummary = {
   start: string;
   receipts: number;
@@ -776,8 +778,8 @@ export const moneyApi = {
   removeReceipt: (txnId: string) =>
     proxyDel(`/api/money/transactions/${encodeURIComponent(txnId)}/receipt`),
 
-  grocerySummary: (months: number) =>
-    get<GrocerySummary>(`/money/groceries/summary?months=${months}`),
+  grocerySummary: (window: GroceryWindow) =>
+    get<GrocerySummary>(`/money/groceries/summary?window=${window}`),
 
   groceryProducts: () =>
     get<GroceryProduct[]>("/money/groceries/products"),

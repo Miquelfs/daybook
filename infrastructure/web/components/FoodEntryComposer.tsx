@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MEAL_ORDER, MEAL_LABEL, MEAL_EMOJI } from "@/lib/food-meals";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Sparkles, X } from "lucide-react";
@@ -53,8 +53,33 @@ export function FoodEntryComposer({ date, onDone, initialMealType = "" }: {
     staleTime: 5 * 60_000,
   });
 
-  function pickBought(g: RecentGrocery) {
-    setItems((prev) => [...(prev ?? []), { ...blankItem(), name: g.display }]);
+  // Picked chips (by product) so they drop out of the row until the meal is logged
+  const [picked, setPicked] = useState<string[]>([]);
+  const [picking, setPicking] = useState<string | null>(null);
+  useEffect(() => { if (!items) setPicked([]); }, [items]);
+
+  // A ticket name is terse ("GRIEGO AZUCAR CAÑA"), so tell the analyzer what it is
+  // and estimate one serving; the result is appended to whatever is being logged.
+  async function pickBought(g: RecentGrocery) {
+    setPicking(g.product);
+    setPicked((p) => [...p, g.product]);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.set("text", `${g.display} — Mercadona product, one typical serving`);
+      const res = await foodApi.analyze(fd);
+      setItems((prev) => [
+        ...(prev ?? []),
+        ...res.items.map((it) => ({ ...it, _key: Math.random().toString(36).slice(2) })),
+      ]);
+      setConfidence((c) => c ?? res.confidence ?? null);
+      setHeart((h) => h ?? (res.heart_rating ? { rating: res.heart_rating, note: res.heart_note ?? null } : null));
+    } catch {
+      setError(`Couldn't estimate ${g.display} — fill in its macros.`);
+      setItems((prev) => [...(prev ?? []), { ...blankItem(), name: g.display }]);
+    } finally {
+      setPicking(null);
+    }
   }
 
   function invalidate() {
@@ -190,17 +215,18 @@ export function FoodEntryComposer({ date, onDone, initialMealType = "" }: {
           <p className="text-[11px] text-[#52525B] mb-1.5">Recently bought</p>
           <div className="flex flex-wrap gap-1.5">
             {bought
-              .filter((g) => !(items ?? []).some((it) => it.name === g.display))
+              .filter((g) => !picked.includes(g.product) || picking === g.product)
               .map((g) => (
                 <button
                   key={g.product}
                   type="button"
                   onClick={() => pickBought(g)}
+                  disabled={!!picking || analyzing}
                   title={`Bought ${g.last_date}${g.avoid ? " · on your avoid list" : ""}`}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-[#18181B] border border-[#27272A] text-[#D4D4D8] hover:border-[#3F3F46] hover:bg-[#1F1F23] transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-[#18181B] border border-[#27272A] text-[#D4D4D8] hover:border-[#3F3F46] hover:bg-[#1F1F23] transition-colors disabled:opacity-50"
                 >
                   {g.avoid && <span className="w-1.5 h-1.5 rounded-full bg-[#EC4899]" />}
-                  <span className="truncate max-w-[140px]">{g.display}</span>
+                  <span className="truncate max-w-[140px]">{picking === g.product ? "Estimating…" : g.display}</span>
                 </button>
               ))}
           </div>

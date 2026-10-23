@@ -121,8 +121,8 @@ def receipt_pdf(receipt_id: int, conn: DB):
 # ── What the tickets tell us ─────────────────────────────────────────────────
 
 @router.get("/groceries/summary", response_model=GrocerySummary)
-def grocery_summary(conn: DB, months: int = Query(3, ge=1, le=36)):
-    return groceries.summary(conn, months)
+def grocery_summary(conn: DB, window: str = Query("3m", pattern="^(ticket|week|month|3m|12m)$")):
+    return groceries.summary(conn, window)
 
 
 @router.get("/groceries/products", response_model=list[GroceryProduct])

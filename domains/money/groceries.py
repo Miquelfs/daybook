@@ -93,7 +93,7 @@ def classify(product: str, overrides: dict) -> tuple[str, bool]:
     return group, avoid
 
 
-def _items(conn: sqlite3.Connection, start: str | None = None) -> list[sqlite3.Row]:
+def _items(conn: sqlite3.Connection, start: str | None = None, receipt_id: int | None = None) -> list[sqlite3.Row]:
     """Every item on a live (not deleted) transaction's ticket, oldest first."""
     sql = """
         SELECT i.product, i.quantity, i.weight_kg, i.unit_price, i.amount,
@@ -102,10 +102,15 @@ def _items(conn: sqlite3.Connection, start: str | None = None) -> list[sqlite3.R
         JOIN receipts r     ON r.id = i.receipt_id
         JOIN transactions t ON t.id = r.transaction_id AND t.deleted_at IS NULL
     """
-    params: list = []
+    where, params = [], []
     if start:
-        sql += " WHERE t.date >= ?"
+        where.append("t.date >= ?")
         params.append(start)
+    if receipt_id is not None:
+        where.append("r.id = ?")
+        params.append(receipt_id)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
     return conn.execute(sql + " ORDER BY t.date, r.id, i.line_no", params).fetchall()
 
 
@@ -116,16 +121,35 @@ def unit_price(row) -> float:
     return row["unit_price"] if row["unit_price"] is not None else row["amount"] / (row["quantity"] or 1)
 
 
-def summary(conn: sqlite3.Connection, months: int, today: date | None = None) -> dict:
-    """Spend by type and the avoid-list over the last `months` calendar months."""
-    today = today or date.today()
+WINDOWS = ("ticket", "week", "month", "3m", "12m")
+
+
+def _months_start(today: date, months: int) -> str:
     y, m = today.year, today.month - (months - 1)
     while m < 1:
         y, m = y - 1, m + 12
-    start = f"{y:04d}-{m:02d}-01"
+    return f"{y:04d}-{m:02d}-01"
+
+
+def summary(conn: sqlite3.Connection, window: str = "3m", today: date | None = None) -> dict:
+    """Spend by type and the avoid-list over a window: the last ticket, the last
+    7 days, or the last 1 / 3 / 12 calendar months."""
+    today = today or date.today()
+    receipt_id = None
+    if window == "ticket":
+        last = conn.execute("""
+            SELECT r.id, t.date FROM receipts r
+            JOIN transactions t ON t.id = r.transaction_id AND t.deleted_at IS NULL
+            ORDER BY t.date DESC, r.id DESC LIMIT 1
+        """).fetchone()
+        receipt_id, start = (last["id"], last["date"]) if last else (-1, today.isoformat())
+    elif window == "week":
+        start = (today - timedelta(days=6)).isoformat()
+    else:
+        start = _months_start(today, {"month": 1, "3m": 3, "12m": 12}[window])
 
     ov = overrides(conn)
-    rows = _items(conn, start)
+    rows = _items(conn, start, receipt_id)
     total = sum(r["amount"] for r in rows)
     by_group: dict[str, float] = {}
     avoid: dict[str, dict] = {}

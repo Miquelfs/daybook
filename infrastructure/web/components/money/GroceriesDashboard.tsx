@@ -4,14 +4,16 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
-  moneyApi, fmtAmount, GROCERY_GROUPS, type GroceryProduct, type GrocerySummary,
+  moneyApi, fmtAmount, GROCERY_GROUPS, type GroceryProduct, type GrocerySummary, type GroceryWindow,
 } from "@/lib/money-api";
 import { groupStyle } from "./grocery-groups";
 
-const WINDOWS = [
-  { months: 1, label: "This month" },
-  { months: 3, label: "3 months" },
-  { months: 12, label: "12 months" },
+const WINDOWS: { key: GroceryWindow; label: string }[] = [
+  { key: "ticket", label: "Last ticket" },
+  { key: "week", label: "Last week" },
+  { key: "month", label: "This month" },
+  { key: "3m", label: "3 months" },
+  { key: "12m", label: "12 months" },
 ];
 
 const AVOID = "#EC4899";
@@ -20,11 +22,12 @@ const card = "bg-[#0D0D0F] border border-[#27272A] rounded-xl";
 const h2 = "text-xs text-[#52525B] uppercase tracking-widest mb-3";
 
 export function GroceriesDashboard() {
-  const [months, setMonths] = useState(3);
+  const [win, setWin] = useState<GroceryWindow>("3m");
 
   const { data: summary, isLoading } = useQuery({
-    queryKey: ["groceries", "summary", months],
-    queryFn: () => moneyApi.grocerySummary(months),
+    queryKey: ["groceries", "summary", win],
+    queryFn: () => moneyApi.grocerySummary(win),
+    placeholderData: (prev) => prev, // keep the page up while switching windows
   });
   const { data: products = [] } = useQuery({
     queryKey: ["groceries", "products"],
@@ -47,14 +50,14 @@ export function GroceriesDashboard() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex gap-1.5">
+      <div className="flex flex-wrap gap-1.5">
         {WINDOWS.map((w) => (
           <button
-            key={w.months}
+            key={w.key}
             type="button"
-            onClick={() => setMonths(w.months)}
+            onClick={() => setWin(w.key)}
             className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-              months === w.months
+              win === w.key
                 ? "bg-[#F59E0B]/15 border-[#F59E0B]/50 text-[#F59E0B]"
                 : "border-[#27272A] text-[#71717A] hover:text-[#A1A1AA]"
             }`}
@@ -68,7 +71,11 @@ export function GroceriesDashboard() {
         <>
           <div className="grid grid-cols-3 gap-3">
             <Stat label="On tickets" value={fmtAmount(summary.total)} />
-            <Stat label="Tickets" value={String(summary.receipts)} />
+            {win === "ticket" ? (
+              <Stat label="Ticket" value={format(parseISO(summary.start), "d MMM")} />
+            ) : (
+              <Stat label="Tickets" value={String(summary.receipts)} />
+            )}
             <Stat label="To avoid" value={`${Math.round(summary.avoid_share * 100)}%`} accent={summary.avoid_share > 0} />
           </div>
           <ByType summary={summary} />
