@@ -233,6 +233,10 @@ def _run_migrations() -> None:
     _conn14 = _get_conn()
     _drop_old_groceries(_conn14)
     _conn14.close()
+    from infrastructure.db.migrate_race_targets import migrate as _migrate_race_targets
+    _conn15 = _get_conn()
+    _migrate_race_targets(_conn15)
+    _conn15.close()
     # money.db: all CREATE ... IF NOT EXISTS (receipts tables etc.) — idempotent
     from domains.money.money_db import init_money_db as _init_money_db
     _init_money_db()

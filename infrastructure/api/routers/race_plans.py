@@ -603,6 +603,9 @@ class GoalPatch(BaseModel):
     intensity_factor: Optional[float] = None
     target_time: Optional[str] = None
     plan_start_date: Optional[str] = None  # restart the plan from a new (Monday) date
+    target_ftp_w: Optional[float] = None   # engine targets (0 clears)
+    target_weight_kg: Optional[float] = None
+    targets_date: Optional[str] = None
 
 
 class SessionPatch(BaseModel):
@@ -709,6 +712,11 @@ def patch_goal(goal_id: int, body: GoalPatch, conn: DB):
     if body.target_time is not None:
         updates.append("target_time=?")
         params.append(body.target_time)
+    for col in ("target_ftp_w", "target_weight_kg", "targets_date"):
+        v = getattr(body, col)
+        if v is not None:
+            updates.append(f"{col}=?")
+            params.append(v or None)
 
     regenerate = False
     restart = False
@@ -948,7 +956,16 @@ def goal_overview(goal_id: int, conn: DB):
             "compliance_4w": round(comp["done"] / comp["due"], 2) if comp and comp["due"] else None,
             "longest_ride_min": longest_done,
         },
+        "waypoints": _waypoints(conn, goal_id),
     }
+
+
+def _waypoints(conn, goal_id: int):
+    from domains.training.waypoints import waypoints
+    try:
+        return waypoints(conn, goal_id)
+    except sqlite3.OperationalError:
+        return None
 
 
 # ── AI coach: weekly review with one-tap adjustments ─────────────────────────

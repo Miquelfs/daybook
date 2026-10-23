@@ -338,7 +338,9 @@ export default async function ActivityPage({ params }: Props) {
       {/* Trainer rides: merge the trainer app's .fit (power, cadence, distance) into the watch recording */}
       {(activity.fit_import || (sport === "ride" && /indoor|virtual|trainer/.test(at))) && (
         <FitFileCard activityId={decodedId} date={activity.date} fit={activity.fit_import ?? null}
-                     isTest={/ftp|20\s*min/i.test(`${activity.plan_session?.session_type ?? ""} ${activity.name ?? ""}`)}
+                     isTest={activity.plan_session
+                       ? /^test.*ftp/i.test(activity.plan_session.session_type)
+                       : /ftp|20\s*min/i.test(activity.name ?? "")}
                      sessionId={activity.plan_session?.id ?? null} />
       )}
 

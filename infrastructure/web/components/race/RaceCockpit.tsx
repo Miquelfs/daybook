@@ -35,6 +35,17 @@ type Overview = {
   milestones: { date: string; kind: string; label: string; status: string }[];
   engine: { ftp_w: number | null; weight_kg: number | null; w_per_kg: number | null; threshold_hr: number | null;
             zones_from: string | null; compliance_4w: number | null; longest_ride_min: number };
+  waypoints?: Waypoints | null;
+};
+type Waypoint = {
+  date: string; session_id: number | null; status: string; kind: "test" | "goal";
+  target_ftp_w: number | null; target_kg: number | null; target_wkg: number | null;
+  ftp_w: number | null; kg: number | null; wkg: number | null;
+};
+type Waypoints = {
+  targets: { target_ftp_w: number | null; target_kg: number | null; target_date: string;
+             start_ftp_w: number | null; start_kg: number | null };
+  points: Waypoint[];
 };
 
 // An API error (Pi hiccup, 404) must not crash the cockpit: treat it as "no data".
@@ -443,6 +454,106 @@ function EngineCard({ ov }: { ov: Overview }) {
   );
 }
 
+/** FTP + weight targets at every FTP test on the way to race shape, and what each test actually showed. */
+function WaypointsCard({ ov }: { ov: Overview }) {
+  const qc = useQueryClient();
+  const wp = ov.waypoints;
+  const [edit, setEdit] = useState(false);
+  const [ftp, setFtp] = useState(wp?.targets.target_ftp_w ? String(wp.targets.target_ftp_w) : "220");
+  const [kg, setKg] = useState(wp?.targets.target_kg ? String(wp.targets.target_kg) : "79.5");
+  const [date, setDate] = useState(wp?.targets.target_date ?? "");
+  async function save() {
+    const r = await fetch(`/api/race-plans/goals/${ov.goal.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_ftp_w: parseFloat(ftp) || 0, target_weight_kg: parseFloat(kg.replace(",", ".")) || 0,
+                             ...(date ? { targets_date: date } : {}) }),
+    });
+    if (r.ok) {
+      setEdit(false);
+      qc.invalidateQueries({ queryKey: ["race-overview", ov.goal.id] });
+      qc.invalidateQueries({ queryKey: ["weight"] });
+    }
+  }
+  const t = wp?.targets;
+  const input = "bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-sm outline-none focus:border-[#F59E0B]";
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between">
+        <SectionLabel>Waypoints</SectionLabel>
+        {!edit && (
+          <button onClick={() => setEdit(true)} className="text-[11px] text-[#71717A] hover:text-white">
+            {t ? "Edit targets" : "Set targets"}
+          </button>
+        )}
+      </div>
+      {edit && (
+        <div className="flex flex-wrap items-center gap-2 mt-3 text-xs text-[#71717A]">
+          <input value={ftp} onChange={(e) => setFtp(e.target.value)} inputMode="numeric" className={`${input} w-16`} /> W
+          <input value={kg} onChange={(e) => setKg(e.target.value)} inputMode="decimal" className={`${input} w-16`} /> kg by
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={input} />
+          <button onClick={save} className="px-3 py-1 rounded-lg bg-[#F59E0B] text-[#09090B] font-semibold">Save</button>
+          <button onClick={() => setEdit(false)} className="hover:text-white">Cancel</button>
+        </div>
+      )}
+      {!wp ? (
+        !edit && <p className="text-sm text-[#71717A] mt-3">Set an FTP and weight target to see where each FTP test should land.</p>
+      ) : (
+        <>
+          <p className="text-xs text-[#71717A] mt-2 tabular-nums">
+            {t!.start_ftp_w ? `${Math.round(t!.start_ftp_w)} W` : "—"}{t!.start_kg ? ` · ${t!.start_kg} kg` : ""}
+            {" → "}<span className="text-[#E4E4E7]">{t!.target_ftp_w ?? "—"} W · {t!.target_kg ?? "—"} kg</span> by {fmtDay(t!.target_date)}
+            {" "}— a straight line; a test above it early on is normal.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm tabular-nums">
+              <thead>
+                <tr className="text-[10px] uppercase tracking-widest text-[#52525B] text-left">
+                  <th className="font-normal pb-2">When</th>
+                  <th className="font-normal pb-2 text-right">FTP</th>
+                  <th className="font-normal pb-2 text-right">Weight</th>
+                  <th className="font-normal pb-2 text-right">W/kg</th>
+                </tr>
+              </thead>
+              <tbody>
+                {wp.points.map((p) => {
+                  const hit = p.wkg != null && p.target_wkg != null ? p.wkg >= p.target_wkg : null;
+                  const cell = (actual: number | null, target: number | null, unit: string, digits = 0, lowerIsBetter = false) => (
+                    <td className="py-2 text-right whitespace-nowrap">
+                      {actual != null ? (
+                        <>
+                          <span className={(lowerIsBetter ? actual <= (target ?? Infinity) : actual >= (target ?? 0)) ? "text-[#4ADE80]" : "text-[#F59E0B]"}>
+                            {actual.toFixed(digits)}{unit}
+                          </span>
+                          {target != null && <span className="text-[#52525B] text-xs"> / {target.toFixed(digits)}</span>}
+                        </>
+                      ) : (
+                        <span className="text-[#A1A1AA]">{target != null ? `${target.toFixed(digits)}${unit}` : "—"}</span>
+                      )}
+                    </td>
+                  );
+                  return (
+                    <tr key={`${p.kind}-${p.date}`} className="border-t border-[#18181B]">
+                      <td className="py-2">
+                        <span className="text-[#E4E4E7]">{p.kind === "goal" ? "Target" : "FTP test"}</span>
+                        <span className="text-[11px] text-[#71717A] ml-2">{fmtDay(p.date)}</span>
+                        {hit != null && <span className={`text-[11px] ml-1.5 ${hit ? "text-[#4ADE80]" : "text-[#F59E0B]"}`}>{hit ? "✓" : "below line"}</span>}
+                        {p.status === "skipped" && <span className="text-[11px] text-[#52525B] ml-1.5">skipped</span>}
+                      </td>
+                      {cell(p.ftp_w, p.target_ftp_w, " W")}
+                      {cell(p.kg, p.target_kg, " kg", 1, true)}
+                      {cell(p.wkg, p.target_wkg, "", 2)}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 const MS_ICON: Record<string, React.ReactNode> = {
   test: <Timer size={13} />, long: <Mountain size={13} />, b2b: <Mountain size={13} />,
   rehearsal: <Timer size={13} />, race: <Flag size={13} />,
@@ -654,6 +765,7 @@ export function RaceCockpit() {
           <Milestones ov={ov} />
         </div>
       )}
+      {ov && <WaypointsCard ov={ov} />}
       <RideQualityCard goalId={goal.id} />
       <RaceFacts />
       {ov && (

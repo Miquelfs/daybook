@@ -68,7 +68,22 @@ def get_weight(conn: DB, days: int = Query(365)):
             "max": max(weights),
             "count": len(entries),
         }
-    return {"entries": entries, "stats": stats}
+    # Trend under the daily noise, loss rate, the race goal's glide path and W/kg
+    from domains.health.weight_trend import analyse
+    from domains.training.waypoints import active_goal_targets
+    goal = active_goal_targets(conn)
+    if goal and not goal.get("start_kg"):
+        goal = None
+    try:
+        z = conn.execute("SELECT ftp_w FROM athlete_zones WHERE sport='ride' AND ftp_w IS NOT NULL "
+                         "ORDER BY valid_from DESC LIMIT 1").fetchone()
+        ftp = z["ftp_w"] if z else None
+    except sqlite3.OperationalError:
+        ftp = None
+    analysis = analyse(entries, goal, ftp)
+    for e, t in zip(entries, analysis.pop("trend")):
+        e["trend_kg"] = t
+    return {"entries": entries, "stats": stats, "analysis": analysis}
 
 
 @router.post("/weight")

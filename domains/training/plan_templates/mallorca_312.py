@@ -147,11 +147,17 @@ def vo2(reps, work, mins=90):
 
 
 def ftp_test():
-    return _sess("Test - Bike 20min FTP test (trainer)", 55, "Z4", [
-        _steady("Warm-up", 20, "Z1", "Build with 3× 1min efforts"),
+    # Calibrate after the trainer is warm — a cold belt/flywheel reads differently —
+    # so every test is measured on the same scale.
+    return _sess("Test - Bike 20min FTP test (trainer)", 62, "Z4", [
+        _steady("Trainer warm-up", 10, "Z1", "Easy spin — warms the trainer so the calibration is true. Fan on"),
+        _steady("Calibrate", 2, "Z1",
+                "Stop pedalling → spindown calibration in the Elite app / MyWhoosh. Wheel-on: same tyre "
+                "pressure + roller tension as last test"),
+        _steady("Warm-up", 15, "Z1", "Build with 3× 1min efforts, last 5 min easy"),
         _intervals("20min all-out steady", 1, 20, 0, "Z4", "Z1",
-                   "ERG off, steady max effort — log avg power AND avg HR: FTP = 95% of the "
-                   "power, outdoor HR zones come from the HR"),
+                   "ERG off. Start at your last 20-min power +5 W and hold it — don't chase spikes; "
+                   "only empty the tank in the last 5 min. FTP = 95% of the average"),
         _steady("Cool-down", 15, "Z1"),
     ], role="key")
 
