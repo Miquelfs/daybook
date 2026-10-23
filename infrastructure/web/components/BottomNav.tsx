@@ -7,8 +7,8 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 const tabs = [
   { href: "/",             label: "Today",    icon: CalendarDays },
-  { href: "/plan",         label: "Plan",     icon: Target },
   { href: "/timeline",     label: "Timeline", icon: List },
+  { href: "/plan",         label: "Plan",     icon: Target },
   { href: "/moments",      label: "Moments",  icon: Camera },
   { href: "/money",        label: "Finance",  icon: Wallet },
   { href: "/omyra",        label: "Omyra · Training", icon: Hammer },
