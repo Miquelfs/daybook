@@ -306,11 +306,16 @@ function TotalsCard({ months, goal }: { months: MonthDetail[]; goal: number }) {
 
 const ROW = "grid grid-cols-[1fr_repeat(3,minmax(0,5.5rem))] gap-2 px-4 tabular-nums";
 
-function SumRow({ label, months, strong = false }: { label: string; months: MonthDetail[]; strong?: boolean }) {
+// Solid theme colours only — the light theme remaps bg-[#18181B] but not its /60 variant.
+function SumRow({ label, months, total = false }: { label: string; months: MonthDetail[]; total?: boolean }) {
   const t = sums(months);
   return (
-    <div className={`${ROW} py-2 text-sm bg-[#18181B]/60 border-b border-[#18181B] ${strong ? "font-semibold" : "font-medium"}`}>
-      <span className="text-[#D4D4D8]">{label}</span>
+    <div
+      className={`${ROW} items-baseline ${
+        total ? "py-3 text-sm font-semibold border-t-2 border-[#3F3F46]" : "py-2 text-sm font-semibold bg-[#18181B] border-b border-[#27272A]"
+      }`}
+    >
+      <span className={total ? "text-[#FAFAFA]" : "text-[11px] text-[#71717A] uppercase tracking-widest"}>{label}</span>
       <span className="text-right text-[#D4D4D8]">{fmtAmount(t.income)}</span>
       <span className="text-right text-[#D4D4D8]">{fmtAmount(t.spent)}</span>
       <span className={`text-right ${t.net < 0 ? "text-[#EF4444]" : "text-[#22C55E]"}`}>{signed(t.net)}</span>
@@ -333,7 +338,7 @@ function MonthTable({ months, selected, onPick }: { months: MonthDetail[]; selec
         const inYear = months.filter((m) => m.month.startsWith(y));
         return (
           <div key={y}>
-            <SumRow label={`${y}${inYear.length < 12 ? ` · ${inYear.length} mo` : ""}`} months={inYear} />
+            <SumRow label={`${y}${inYear.length < 12 ? ` · ${inYear.length} months` : ""}`} months={inYear} />
             {inYear.map((m) => {
               const net = m.income - m.spent;
               return (
@@ -357,7 +362,7 @@ function MonthTable({ months, selected, onPick }: { months: MonthDetail[]; selec
           </div>
         );
       })}
-      <SumRow label={`Total · ${months.length} mo`} months={months} strong />
+      <SumRow label={`Total · ${months.length} months`} months={months} total />
     </div>
   );
 }

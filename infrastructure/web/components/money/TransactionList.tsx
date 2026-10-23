@@ -298,6 +298,20 @@ function TransactionRow({
           <p className={`text-sm truncate ${isTransfer ? "text-[#71717A]" : "text-[#D4D4D8]"}`}>{t.name}</p>
           <p className="text-xs text-[#52525B] truncate">
             {[showDate ? t.date : null, t.subcategory, isTransfer ? (t.transaction_type === "Finance" ? "portfolio" : "internal transfer") : null].filter(Boolean).join(" · ")}
+            {/* Ticket lives on this line, not beside the amount, so every row's amount lines up */}
+            {canHaveReceipt && (
+              <button
+                type="button"
+                onClick={() => setShowReceipt((v) => !v)}
+                className={`ml-2 inline-flex items-center gap-0.5 align-middle transition-colors ${
+                  t.has_receipt ? "text-[#F59E0B] hover:text-[#FCD34D]" : "text-[#52525B] hover:text-[#A1A1AA]"
+                }`}
+                aria-label={t.has_receipt ? "Show ticket" : "Attach ticket"}
+              >
+                <Receipt size={11} />
+                {t.has_receipt ? "Ticket" : "+ ticket"}
+              </button>
+            )}
           </p>
         </div>
         {/* Account pill */}
@@ -314,18 +328,6 @@ function TransactionRow({
         }`}>
           {isPositive ? "+" : "-"}{fmtAmount(t.amount)}
         </span>
-        {canHaveReceipt && (
-          <button
-            onClick={() => setShowReceipt((v) => !v)}
-            className={`p-1.5 rounded-lg transition-colors active:bg-[#27272A] shrink-0 ${
-              t.has_receipt ? "text-[#F59E0B] hover:text-[#FCD34D]" : "text-[#3F3F46] hover:text-[#A1A1AA]"
-            }`}
-            aria-label={t.has_receipt ? "Show ticket" : "Attach ticket"}
-            title={t.has_receipt ? "Show ticket" : "Attach ticket"}
-          >
-            <Receipt size={14} />
-          </button>
-        )}
         <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
           <button
             onClick={() => setEditing(true)}

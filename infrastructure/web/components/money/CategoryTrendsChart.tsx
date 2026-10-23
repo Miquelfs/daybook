@@ -110,7 +110,7 @@ function CategoryRow({ r, share, months, open, onToggle }: {
   const max = Math.max(...r.series, 1);
   return (
     <div>
-      <button type="button" onClick={onToggle} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[#18181B]/60 transition-colors">
+      <button type="button" onClick={onToggle} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[#18181B] transition-colors">
         <span className="text-base w-6 text-center shrink-0">{CATEGORY_EMOJI[r.category] ?? "💳"}</span>
         <div className="flex-1 min-w-0">
           <p className="text-sm text-[#D4D4D8] truncate">{r.category}</p>
