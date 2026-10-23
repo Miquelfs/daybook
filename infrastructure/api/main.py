@@ -175,8 +175,6 @@ def _run_migrations() -> None:
     _conn.close()
     from infrastructure.db.migrate_ai import migrate as _migrate_ai
     _migrate_ai()
-    from infrastructure.db.migrate_groceries import migrate as _migrate_groceries
-    _migrate_groceries()
     from infrastructure.db.migrate_race_plans import migrate as _migrate_race_plans
     _conn2 = _get_conn()
     _migrate_race_plans(_conn2)
@@ -229,6 +227,10 @@ def _run_migrations() -> None:
     _conn13 = _get_conn()
     _migrate_zero_moving(_conn13)
     _conn13.close()
+    from infrastructure.db.migrate_drop_old_groceries import migrate as _drop_old_groceries
+    _conn14 = _get_conn()
+    _drop_old_groceries(_conn14)
+    _conn14.close()
     # money.db: all CREATE ... IF NOT EXISTS (receipts tables etc.) — idempotent
     from domains.money.money_db import init_money_db as _init_money_db
     _init_money_db()
