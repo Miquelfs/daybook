@@ -531,8 +531,9 @@ def get_category_trends(
     months: int = Query(12, ge=1, le=60),
 ):
     """Historical per-category spending for the last N completed months."""
-    today = date.today()
-    current_month = today.strftime("%Y-%m")
+    current_month = date.today().strftime("%Y-%m")
+    start = _month_shift(current_month, -months)
+    # A date range, not a row LIMIT: with many categories a LIMIT dropped the oldest months' tail.
     rows = conn.execute("""
         SELECT strftime('%Y-%m', date) AS month,
                category,
@@ -540,19 +541,11 @@ def get_category_trends(
         FROM transactions
         WHERE deleted_at IS NULL
           AND transaction_type = 'Expense'
+          AND strftime('%Y-%m', date) >= ?
           AND strftime('%Y-%m', date) < ?
         GROUP BY month, category
-        ORDER BY month DESC
-        LIMIT ?
-    """, (current_month, months * 20)).fetchall()  # * 20 for multiple categories per month
-
-    # Collect distinct months in DESC order, up to `months` count
-    seen_months: list[str] = []
-    for r in rows:
-        if r["month"] not in seen_months:
-            seen_months.append(r["month"])
-        if len(seen_months) >= months:
-            break
+    """, (start, current_month)).fetchall()
+    seen_months = sorted({r["month"] for r in rows})
 
     month_set = set(seen_months)
     items = [
