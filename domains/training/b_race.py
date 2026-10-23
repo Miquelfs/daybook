@@ -10,10 +10,14 @@ gets a short taper, not a plan of its own (two full plans would double the load)
                 weeks finishing at race pace;
                 recovery weeks: one short easy run;
                 tours/camps and their recovery week: nothing added.
-  swaps         runs replace, in order: recovery spins, then (from January,
-                when bike volume is high) the shortest Zone 2 rides. Long rides,
-                back-to-backs, bike key sessions and gym are never swapped.
-                Anything with no swap available is added.
+  on top        the runs are added on top of the bike plan (training volume and the
+                running habit matter — an Ironman follows), up to a weekly extra of
+                ~2.5 h while the week is under 12 h, ~1.5 h above; only what goes past
+                that swaps a Zone 2 ride (shortest first). In build weeks (12 h+) there's
+                no running quality session (the bike brings the intensity) and the long
+                run always takes a Zone 2 ride's day. Recovery spins, long rides,
+                back-to-backs, bike key sessions and gym are never swapped. Easy runs
+                may share a day with an easy ride or gym (reflow role "run").
   race week     sharpener (3 × 1 km at race pace), easy + shake-out runs; bike
                 key work set aside, long rides capped short and easy; the race
                 pinned on its day.
@@ -33,8 +37,8 @@ from datetime import date, timedelta
 DISTANCES_KM = {"half_marathon": 21.0975, "10k": 10.0, "marathon": 42.195}
 RACE_PACE_FACTOR = {"half_marathon": 1.04, "10k": 0.99, "marathon": 1.10}   # × threshold pace
 PHASE2 = "01-04"                       # month-day the long-run phase starts (first Monday of January-ish)
-SWAP_TYPES_EARLY = ("cycling - recovery spin",)
-SWAP_TYPES_LATE = ("cycling - recovery spin", "cycling - zone 2 ride")
+SWAP_TYPES = ("cycling - zone 2 ride",)
+EXTRA_MIN_LIGHT, EXTRA_MIN_HEAVY, HEAVY_WEEK_MIN = 150, 90, 12 * 60   # extra running on top, per week
 NOTE_SWAP = "Swapped for a run ({name} build)"
 
 
@@ -95,7 +99,7 @@ def easy_run(p, mins, strides=False) -> dict:
     st = [_steady("Easy run", mins - (5 if strides else 0), "Z2", f"conversational, ~{fmt_pace(p['easy'])}")]
     if strides:
         st.append(_steady("6 × 20 s strides", 5, "Z1", "relaxed and fast, full recovery between"))
-    return {"type": "Running - Easy Run", "duration": mins, "zone": "Z2", "structure": st, "role": "easy"}
+    return {"type": "Running - Easy Run", "duration": mins, "zone": "Z2", "structure": st, "role": "run"}
 
 
 def quality_run(p, week_i: int, late: bool) -> dict:
@@ -193,20 +197,24 @@ def create(conn, goal_id: int, name: str, race_date: str, race_type: str = "half
     phase2 = date(race.year if race.month < 7 else race.year + 1, int(PHASE2[:2]), int(PHASE2[3:]))
     first = _monday(today) + timedelta(days=7)            # from next week: this week is already planned
 
-    def swap_or_add(week_sessions: list, run: dict, d_default: date, swap_types) -> None:
-        cand = [s for s in week_sessions if (s["session_type"] or "").lower() in swap_types
+    def swap_or_add(week_sessions: list, run: dict, d_default: date, room: list[int], prefer_swap=False) -> None:
+        """On top while the week's extra allowance lasts; past it (or when asked), the run takes a Zone 2 ride's place."""
+        if not prefer_swap and run["duration"] <= room[0]:
+            room[0] -= run["duration"]
+            ch["inserted"].append(_insert(conn, goal_id, d_default, run, f"{name} build — on top of the bike"))
+            return
+        cand = [s for s in week_sessions if (s["session_type"] or "").lower() in SWAP_TYPES
                 and s["id"] not in {x["id"] for x in ch["swapped"]}]
-        cand.sort(key=lambda s: ((s["session_type"] or "").lower() != "cycling - recovery spin",
-                                 s["effective_duration_min"] or s["duration_min"]))
+        cand.sort(key=lambda s: s["effective_duration_min"] or s["duration_min"])
         if cand:
             old = cand[0]
             ch["swapped"].append({"id": old["id"], "note": old["schedule_note"]})
             conn.execute("UPDATE plan_sessions SET status='displaced', schedule_note=? WHERE id=?",
                          (NOTE_SWAP.format(name=name), old["id"]))
-            d = date.fromisoformat(old["session_date"])
+            ch["inserted"].append(_insert(conn, goal_id, date.fromisoformat(old["session_date"]), run,
+                                          f"{name} build — instead of a Zone 2 ride"))
         else:
-            d = d_default
-        ch["inserted"].append(_insert(conn, goal_id, d, run, f"{name} build"))
+            ch["inserted"].append(_insert(conn, goal_id, d_default, run, f"{name} build — on top of the bike"))
 
     week_i = 0
     monday = first
@@ -220,36 +228,41 @@ def create(conn, goal_id: int, name: str, race_date: str, race_type: str = "half
         neighbours = [_week_minutes(conn, goal_id, monday + timedelta(days=k)) for k in (-7, 7)]
         recovery = mins < 0.7 * max(neighbours + [1])
         late = monday >= phase2
-        swaps = SWAP_TYPES_LATE if late else SWAP_TYPES_EARLY
+        room = [EXTRA_MIN_HEAVY if mins >= HEAVY_WEEK_MIN else EXTRA_MIN_LIGHT]
         fri = monday + timedelta(days=4)
         if recovery:
-            swap_or_add(week, easy_run(p, 30), fri, swaps)
+            swap_or_add(week, easy_run(p, 30), fri, room)
         else:
-            swap_or_add(week, easy_run(p, 40, strides=late), fri, swaps)
-            swap_or_add(week, quality_run(p, week_i, late), monday + timedelta(days=1), swaps)
+            heavy = mins >= HEAVY_WEEK_MIN                # build weeks: the bike already brings the intensity
+            swap_or_add(week, easy_run(p, 40, strides=late), fri, room)
+            if not heavy:
+                swap_or_add(week, quality_run(p, week_i, late), monday + timedelta(days=1), room)
             if late:
                 weeks_left = (race_monday - monday).days // 7
                 finish = 15 if weeks_left <= 4 else 0
-                swap_or_add(week, long_run(p, long_mins, finish), monday + timedelta(days=6), swaps)
+                swap_or_add(week, long_run(p, long_mins, finish), monday + timedelta(days=6), room, prefer_swap=heavy)
                 long_mins = min(100, long_mins + 5)
             week_i += 1
         monday += timedelta(days=7)
 
     # race week: bike key work set aside, long rides short and easy; runs to sharpen; the race pinned
-    for s in _pending(conn, goal_id, race_monday, race - timedelta(days=1)):
+    from domains.training.reflow import _ensure_columns
+    _ensure_columns(conn)
+    for s in _pending(conn, goal_id, race_monday, race):
         if s["discipline"] == "running":
             continue
         t = (s["session_type"] or "").lower()
         eff = s["effective_duration_min"] or s["duration_min"]
         legs_too_close = t.startswith("strength") and date.fromisoformat(s["session_date"]) >= race - timedelta(days=3)
-        if s["intensity_zone"] in ("Z3", "Z4", "Z5") or t.startswith("test") or legs_too_close:
+        if (s["intensity_zone"] in ("Z3", "Z4", "Z5") or t.startswith("test") or legs_too_close
+                or s["session_date"] == race.isoformat()):
             ch["swapped"].append({"id": s["id"], "note": s["schedule_note"]})
             conn.execute("UPDATE plan_sessions SET status='displaced', schedule_note=? WHERE id=?",
                          (f"Set aside: {name} week", s["id"]))
         elif "long" in t or "back-to-back" in t or eff > 60:
             ch["modified"].append({"id": s["id"], "eff": eff, "zone": s["intensity_zone"], "note": s["schedule_note"]})
-            conn.execute("UPDATE plan_sessions SET effective_duration_min=?, intensity_zone='Z2', schedule_note=? "
-                         "WHERE id=?", (60, f"{name} week — short and easy", s["id"]))
+            conn.execute("UPDATE plan_sessions SET effective_duration_min=?, eff_override=?, intensity_zone='Z2', "
+                         "schedule_note=? WHERE id=?", (60, 60, f"{name} week — short and easy", s["id"]))
     sharpener = {"type": "Running - Sharpener", "duration": 40, "zone": "Z4", "role": "key", "structure": [
         _steady("Warm-up", 15, "Z2"), _intervals("3 × 1 km at race pace", 3, 5, 2, "Z4", f"~{fmt_pace(p['race'])}"),
         _steady("Cool-down", 10, "Z1")]}
@@ -275,8 +288,9 @@ def create(conn, goal_id: int, name: str, race_date: str, race_type: str = "half
         eff = s["effective_duration_min"] or s["duration_min"]
         if s["intensity_zone"] in ("Z3", "Z4", "Z5") or "long" in t or "back-to-back" in t or t.startswith("test"):
             ch["modified"].append({"id": s["id"], "eff": eff, "zone": s["intensity_zone"], "note": s["schedule_note"]})
-            conn.execute("UPDATE plan_sessions SET effective_duration_min=?, intensity_zone='Z2', schedule_note=? "
-                         "WHERE id=?", (min(eff, max(30, round(eff * 0.6)), 90), f"Easy after {name}", s["id"]))
+            short = min(eff, max(30, round(eff * 0.6)), 90)
+            conn.execute("UPDATE plan_sessions SET effective_duration_min=?, eff_override=?, intensity_zone='Z2', "
+                         "schedule_note=? WHERE id=?", (short, short, f"Easy after {name}", s["id"]))
 
     cur = conn.execute("INSERT INTO b_races (goal_id, name, race_type, race_date, start_date, changes_json) "
                        "VALUES (?,?,?,?,?,?)", (goal_id, name, race_type, race_date, first.isoformat(), json.dumps(ch)))
@@ -301,8 +315,8 @@ def delete(conn, b_id: int) -> None:
         conn.execute("UPDATE plan_sessions SET status='pending', schedule_note=? WHERE id=? AND status='displaced'",
                      (s.get("note"), s["id"]))
     for s in ch.get("modified", []):
-        conn.execute("UPDATE plan_sessions SET effective_duration_min=?, intensity_zone=?, schedule_note=? "
-                     "WHERE id=? AND status='pending'", (s["eff"], s["zone"], s.get("note"), s["id"]))
+        conn.execute("UPDATE plan_sessions SET effective_duration_min=?, eff_override=NULL, intensity_zone=?, "
+                     "schedule_note=? WHERE id=? AND status='pending'", (s["eff"], s["zone"], s.get("note"), s["id"]))
     conn.execute("DELETE FROM b_races WHERE id=?", (b_id,))
     conn.commit()
 

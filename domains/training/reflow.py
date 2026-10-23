@@ -11,6 +11,10 @@ Per week, sessions are placed by role, most constrained first:
   4. gym → a free day, else doubled with an easy ride (if the window holds
      both); never on a key/long day or the day before a long ride; gym days
      spread ≥ 2 days apart
+  5. run (easy runs added on top of the bike plan) → a free day, else doubled
+     with an easy ride or gym if the window holds both; never on a key/long
+     day, never a third session; the day before a long ride only alone
+A session with eff_override (a recovery week, a taper) keeps that length.
 A session that fits nowhere is marked 'displaced' with a note; one that only
 fits shortened gets a shorter effective duration + a note. Each placement
 writes `schedule_note` so the UI can say why a ride sits where it does.
@@ -34,7 +38,7 @@ from datetime import date, timedelta
 
 from domains.training.day_context import DayContextReader
 
-ROLE_ORDER = {"long": 0, "long2": 1, "key": 2, "easy": 3, "gym": 4}
+ROLE_ORDER = {"long": 0, "long2": 1, "key": 2, "easy": 3, "gym": 4, "run": 5}
 
 
 def _ensure_columns(conn: sqlite3.Connection) -> None:
@@ -43,6 +47,8 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE plan_sessions ADD COLUMN schedule_note TEXT")
     if "role" not in cols:
         conn.execute("ALTER TABLE plan_sessions ADD COLUMN role TEXT")
+    if "eff_override" not in cols:          # a deliberate length (recovery week, taper) reflow must keep
+        conn.execute("ALTER TABLE plan_sessions ADD COLUMN eff_override INTEGER")
     conn.execute("""CREATE TABLE IF NOT EXISTS training_day_blocks (
                         date TEXT PRIMARY KEY, note TEXT,
                         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')))""")
@@ -139,6 +145,8 @@ def _reflow_week(conn, monday, sessions, reader, today, race, vf) -> list[dict]:
             taken[fd] = True
 
     def base_eff(s) -> int:
+        if "eff_override" in s.keys() and s["eff_override"]:
+            return s["eff_override"]
         return max(10, round(s["duration_min"] * vf))
 
     def role(s) -> str:
@@ -185,6 +193,7 @@ def _reflow_week(conn, monday, sessions, reader, today, race, vf) -> list[dict]:
     keys = [s for s in movable if role(s) == "key"]
     easies = [s for s in movable if role(s) == "easy"]
     gyms = [s for s in movable if role(s) == "gym"]
+    runs = [s for s in movable if role(s) == "run"]
 
     # ── long rides (with back-to-back pairing) ───────────────────────────────
     for i, lg in enumerate(longs):
@@ -293,6 +302,29 @@ def _reflow_week(conn, monday, sessions, reader, today, race, vf) -> list[dict]:
         note = "Gym — after the easy ride" if on_day[d] else ctx[d]["label"]
         put(g, d, need, note)
         gym_days.add(d)
+
+    # ── easy runs on top: a free day, else doubled with an easy ride / gym ───
+    for rn in runs:
+        need = base_eff(rn)
+        best = None
+        for d in days:
+            if cap[d] - used[d] < need or ctx[d]["window_min"] == 0:
+                continue
+            roles_here = on_day[d]
+            if any(r in ("key", "long", "long2", "run") for r in roles_here) or len(roles_here) >= 2:
+                continue
+            before_long = d + timedelta(days=1) in long_days
+            if before_long and roles_here:
+                continue                       # an easy jog alone the day before a long ride is fine, not doubled
+            pen = (0.0 if not roles_here else 2.0 + len(roles_here)) + (3.0 if before_long else 0.0)
+            if best is None or pen < best[0]:
+                best = (pen, d)
+        if best is None:
+            unplaced.append(rn)
+            continue
+        d = best[1]
+        put(rn, d, need, "Run off the bike — same day as the easy ride" if "easy" in on_day[d]
+            else "Run — after the gym" if on_day[d] else ctx[d]["label"])
 
     return _write(conn, movable, placed, unplaced, ctx)
 

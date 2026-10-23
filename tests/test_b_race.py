@@ -63,14 +63,18 @@ class BRaceTest(unittest.TestCase):
         self.assertEqual(self.b["race_pace"], "4:45/km")         # 274 s × 1.04
         self.assertEqual(self.b["target_time"], "1:40")
 
-    def test_early_weeks_swap_recovery_spins_only(self):
+    def test_runs_on_top_until_the_allowance_runs_out(self):
         wk = self.runs("2026-10-26", "2026-11-01")
         self.assertEqual(sorted(r["session_type"] for r in wk), ["Running - Easy Run", "Running - Intervals"])
-        spin = self.c.execute("SELECT status FROM plan_sessions WHERE session_type='Cycling - Recovery Spin' "
-                              "AND session_date='2026-10-29'").fetchone()[0]
-        z2 = self.c.execute("SELECT status FROM plan_sessions WHERE session_type='Cycling - Zone 2 Ride' "
-                            "AND session_date='2026-10-28'").fetchone()[0]
-        self.assertEqual((spin, z2), ("displaced", "pending"))   # bike Z2 kept before New Year
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM plan_sessions WHERE status='displaced' "
+                                        "AND session_date BETWEEN '2026-10-26' AND '2026-11-01'").fetchone()[0], 0)
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM plan_sessions WHERE status='displaced' "
+                                        "AND session_type='Cycling - Recovery Spin'").fetchone()[0], 0)
+        # January: easy + quality on top, the long run takes a Zone 2 ride's place (past the 2.5 h extra)
+        jan = self.c.execute("SELECT session_type FROM plan_sessions WHERE status='displaced' "
+                             "AND session_date BETWEEN '2027-01-04' AND '2027-01-10'").fetchall()
+        self.assertEqual([r[0] for r in jan], ["Cycling - Zone 2 Ride"])
+        self.assertEqual({r["role"] for r in wk}, {"run", "key"})        # easy runs can share a day
 
     def test_nothing_around_the_tour(self):
         self.assertEqual(self.runs("2026-11-09", "2026-11-29"), [])
@@ -107,3 +111,67 @@ class BRaceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealPlanReflowTest(unittest.TestCase):
+    """The half on the real Mallorca 312 template, placed by the real reflow."""
+
+    def setUp(self):
+        import domains.training.reflow as rf
+        from domains.training.plan_templates import TEMPLATES
+        from domains.training.scheduler import generate_plan, get_discipline
+        from tests.helpers import fake_date, plan_db
+        self.rf, self._d = rf, rf.date
+        rf.date = fake_date(2026, 10, 23)
+        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        c = plan_db()
+        c.execute("INSERT INTO race_goals(name, race_type, race_date, plan_start_date, available_days) "
+                  "VALUES('M312','mallorca_312','2027-04-24','2026-10-19',?)", (",".join(days),))
+        rf._ensure_columns(c)
+        plan = generate_plan(TEMPLATES["mallorca_312"], "2027-04-24", days, start_from="2026-10-19",
+                             schedule_all_weeks=True)
+        for w in plan["plan"]:
+            for s in w["training_sessions"]:
+                d = "2027-04-24" if s["type"] == "Race Day" else s["date"]
+                c.execute("""INSERT INTO plan_sessions(goal_id, session_date, original_date, week_number, session_type,
+                             discipline, duration_min, intensity_zone, is_optional, effective_duration_min, role)
+                             VALUES(1,?,?,?,?,?,?,?,?,?,?)""",
+                          (d, d, w["week"], s["type"], get_discipline(s["type"]), s["duration"], s["intensity_zone"],
+                           1 if s.get("optional") else 0, s["duration"], s.get("role")))
+        c.execute("CREATE TABLE IF NOT EXISTS athlete_zones (sport TEXT, valid_from TEXT, threshold_pace_s_per_km REAL)")
+        c.execute("INSERT INTO athlete_zones VALUES ('run','2026-01-01',274)")
+        self.c = c
+        b_race.create(c, 1, "Half marathon", "2027-03-21", today=date(2026, 10, 23))
+
+    def tearDown(self):
+        self.rf.date = self._d
+
+    def test_runs_fit_without_pushing_bike_sessions_out(self):
+        pushed = self.c.execute("SELECT COUNT(*) FROM plan_sessions WHERE status='displaced' "
+                                "AND schedule_note LIKE 'No free slot%'").fetchone()[0]
+        self.assertEqual(pushed, 0)
+
+    def test_race_week_lengths_survive_reflow(self):
+        self.rf.reflow_goal(self.c, 1)                                      # nightly reflow again
+        long_ride = self.c.execute("SELECT effective_duration_min FROM plan_sessions WHERE session_type='Cycling - Long Ride' "
+                                   "AND session_date BETWEEN '2027-03-15' AND '2027-03-20'").fetchall()
+        self.assertTrue(long_ride and all(r[0] == 60 for r in long_ride))
+
+    def test_easy_runs_never_on_hard_days_or_before_a_long_ride(self):
+        rows = self.c.execute("SELECT * FROM plan_sessions WHERE status='pending'").fetchall()
+        by_day = {}
+        for r in rows:
+            by_day.setdefault(r["session_date"], []).append(r)
+        doubled = 0
+        for d, ss in by_day.items():
+            runs = [s for s in ss if s["role"] == "run"]
+            if not runs:
+                continue
+            others = [s for s in ss if s["role"] != "run"]
+            self.assertFalse(any(s["role"] in ("key", "long", "long2") for s in others), d)
+            nxt = (date.fromisoformat(d) + timedelta(days=1)).isoformat()
+            if others:                                   # doubled: never the day before a long ride
+                self.assertFalse(any(s["role"] == "long" for s in by_day.get(nxt, [])), d)
+            self.assertLessEqual(len(ss), 2, d)
+            doubled += bool(others)
+        self.assertGreater(doubled, 0)                   # some runs share a day with an easy ride or gym

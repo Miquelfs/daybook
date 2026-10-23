@@ -49,6 +49,8 @@ RECOVERY_NOTE = {
 
 def _apply_recovery(conn, goal_id: int, name: str, end: str, level: str, from_date: str | None = None) -> list[dict]:
     """Soften the 7 days after `end` (from `from_date` on); returns what to restore."""
+    from domains.training.reflow import _ensure_columns
+    _ensure_columns(conn)
     factor, cap, demote = RECOVERY[level]
     r_start = (date.fromisoformat(end) + timedelta(days=1)).isoformat()
     if from_date and from_date > r_start:
@@ -70,15 +72,17 @@ def _apply_recovery(conn, goal_id: int, name: str, end: str, level: str, from_da
         else:
             new_eff, new_zone = max(20, round(eff * factor)), r["intensity_zone"]
         done.append({"id": r["id"], "eff": eff, "zone": r["intensity_zone"]})
-        conn.execute("UPDATE plan_sessions SET effective_duration_min=?, intensity_zone=?, schedule_note=? WHERE id=?",
-                     (new_eff, new_zone, RECOVERY_NOTE[level].format(name=name), r["id"]))
+        conn.execute("UPDATE plan_sessions SET effective_duration_min=?, eff_override=?, intensity_zone=?, schedule_note=? "
+                     "WHERE id=?", (new_eff, new_eff, new_zone, RECOVERY_NOTE[level].format(name=name), r["id"]))
     return done
 
 
 def _restore_recovery(conn, entries: list[dict]) -> None:
+    from domains.training.reflow import _ensure_columns
+    _ensure_columns(conn)
     for r in entries:
-        conn.execute("UPDATE plan_sessions SET effective_duration_min=?, intensity_zone=?, schedule_note=NULL "
-                     "WHERE id=? AND status='pending'", (r["eff"], r["zone"], r["id"]))
+        conn.execute("UPDATE plan_sessions SET effective_duration_min=?, eff_override=NULL, intensity_zone=?, "
+                     "schedule_note=NULL WHERE id=? AND status='pending'", (r["eff"], r["zone"], r["id"]))
 
 
 def ensure_table(conn) -> None:
