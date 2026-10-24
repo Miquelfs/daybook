@@ -34,7 +34,7 @@ JOB_MAX_AGE_H = {
     "garmin_sync": 26, "overland_process": 26, "trip_detection": 26, "weather_sync": 26,
     "wellness_sync": 26, "intraday_hr_sync": 26, "compute_load_index": 26, "reflow": 26,
     "garmin_activity_detail_sync": 26, "compute_activity_metrics": 26, "compute_training_load": 26,
-    "price_sync": 50, "morning_brief": 30, "garmin_workout_push": 26,
+    "price_sync": 50, "morning_brief": 30, "garmin_workout_push": 26, "mywhoosh_workout_push": 26,
 }
 JOB_LABEL = {
     "garmin_sync": "Garmin sync", "overland_process": "GPS processing", "trip_detection": "Trip detection",
@@ -42,7 +42,7 @@ JOB_LABEL = {
     "compute_load_index": "Load index", "reflow": "Training re-plan", "coach": "AI coach",
     "garmin_activity_detail_sync": "Activity details", "compute_activity_metrics": "Activity metrics",
     "compute_training_load": "Fitness / form", "price_sync": "Portfolio prices", "morning_brief": "Morning brief",
-    "garmin_workout_push": "Workouts → Garmin", "metar": "METARs", "runways": "Landing runways", "life_review": "Weekly review", "plan_executor": "Investment plans",
+    "garmin_workout_push": "Workouts → Garmin", "mywhoosh_workout_push": "Workouts → MyWhoosh", "metar": "METARs", "runways": "Landing runways", "life_review": "Weekly review", "plan_executor": "Investment plans",
     "compute_correlations": "Correlations", "roster_tag_sync": "Roster tags", "strava_sync": "Strava", "planned_trips": "Planned trips",
 }
 

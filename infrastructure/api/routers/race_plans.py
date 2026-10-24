@@ -1038,16 +1038,29 @@ def ride_quality(goal_id: int, conn: DB):
 
 @router.post("/garmin/push")
 def garmin_push(conn: DB, days: int = Query(9, ge=1, le=21)):
-    """Send upcoming sessions to Garmin Connect now (also runs nightly)."""
+    """Send upcoming sessions to Garmin Connect now (also runs nightly) — and the
+    trainer ones to Intervals.icu for MyWhoosh, when that's set up."""
     from domains.health.garmin import workout_push as wp
     if not wp.enabled():
         raise HTTPException(status_code=409, detail="Garmin workout push is disabled (GARMIN_WORKOUT_PUSH=0)")
+    mywhoosh = _push_mywhoosh(conn, days)
     try:
-        return wp.push_upcoming(conn, days=days, verbose=False)
+        return {**wp.push_upcoming(conn, days=days, verbose=False), "mywhoosh": mywhoosh}
     except SystemExit as e:          # get_client() exits when no Garmin session/credentials
         raise HTTPException(status_code=503, detail=f"Garmin login unavailable: {e}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Garmin push failed: {e}")
+
+
+def _push_mywhoosh(conn, days: int = 9) -> dict | None:
+    """Trainer sessions → Intervals.icu → MyWhoosh. Best effort; None when not set up."""
+    from domains.health import intervals_push as ip
+    if not ip.enabled():
+        return None
+    try:
+        return ip.push_upcoming(conn, days=days, verbose=False)
+    except Exception as e:
+        return {"errors": [str(e)]}
 
 
 # ── Camp / tour blocks ───────────────────────────────────────────────────────
@@ -1233,7 +1246,8 @@ def confirm_week(goal_id: int, body: WeekConfirm, conn: DB):
             garmin = wp.push_upcoming(conn, verbose=False)
     except (Exception, SystemExit) as e:   # SystemExit: no Garmin session on the Pi
         garmin = {"errors": [str(e)]}
-    return {"goal_id": goal_id, "week_start": mon, "confirmed": True, "garmin": garmin}
+    return {"goal_id": goal_id, "week_start": mon, "confirmed": True, "garmin": garmin,
+            "mywhoosh": _push_mywhoosh(conn)}
 
 
 @router.get("/planning-status")
@@ -2031,12 +2045,16 @@ def goal_week(goal_id: int, conn: DB, date: Optional[str] = Query(None)):
         d += timedelta(days=1)
 
     from domains.health.garmin import workout_push as wp
+    from domains.health import intervals_push as ip
     pushed = wp.push_status(conn)
+    on_icu = ip.push_status(conn)
     for day in days_out:
         for s_ in day["sessions"]:
             p_ = pushed.get(s_["id"])
             s_["on_garmin"] = bool(p_ and p_["workout_id"] and p_["date"] == s_["session_date"])
             s_["garmin_error"] = p_["error"] if p_ else None
+            q_ = on_icu.get(s_["id"])
+            s_["on_mywhoosh"] = bool(q_ and q_["event_id"] and q_["date"] == s_["session_date"] and not q_["error"])
 
     confirmed = conn.execute(
         "SELECT confirmed_at FROM training_week_plans WHERE goal_id=? AND week_start=?", (goal_id, mon)

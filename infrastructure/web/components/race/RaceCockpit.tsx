@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Sparkles, RefreshCw, Check, Plane, BedDouble, Ban, Dumbbell, Flag, Mountain, Timer, Watch } from "lucide-react";
+import { ArrowRight, Sparkles, RefreshCw, Check, Plane, BedDouble, Ban, Dumbbell, Flag, Mountain, Timer, Watch, Bike } from "lucide-react";
 import { SectionLabel } from "@/components/MorningBrief";
 import { WeekPlanner } from "@/components/training/WeekPlanner";
 import RaceReadinessPanel from "@/components/training/RaceReadinessPanel";
@@ -224,7 +224,7 @@ function TodayCard() {
 type WeekDayT = {
   date: string; day_name: string;
   sessions: { id: number; session_type: string; effective_duration_min: number; intensity_zone: string; status: string;
-              on_garmin?: boolean; garmin_error?: string | null }[];
+              on_garmin?: boolean; garmin_error?: string | null; on_mywhoosh?: boolean }[];
   context: { label: string; window_min: number; blocked: boolean; woke_away: boolean };
   roster: string | null;
 };
@@ -241,7 +241,10 @@ function WeekStrip({ goalId, onPlan }: { goalId: number; onPlan: (d: string) => 
       const d = await r.json();
       if (!r.ok) throw new Error(d?.detail ?? "Garmin push failed");
       const n = (d.created ?? 0) + (d.updated ?? 0);
-      setSent(d.errors?.length ? `${d.errors.length} failed — see Status` : n ? `${n} sent to Garmin ✓` : "Already on Garmin ✓");
+      const mw = d.mywhoosh;
+      const mwText = !mw ? "" : mw.errors?.length ? " · MyWhoosh failed"
+        : (mw.created ?? 0) + (mw.updated ?? 0) ? ` · ${(mw.created ?? 0) + (mw.updated ?? 0)} to MyWhoosh` : "";
+      setSent((d.errors?.length ? `${d.errors.length} failed — see Status` : n ? `${n} sent to Garmin ✓` : "Already on Garmin ✓") + mwText);
       qc.invalidateQueries({ queryKey: ["omyra-week", goalId] });
     } catch (e) { setSent(e instanceof Error ? e.message : "Garmin push failed"); }
     finally { setSending(false); }
@@ -288,6 +291,7 @@ function WeekStrip({ goalId, onPlan }: { goalId: number; onPlan: (d: string) => 
                     }}>
                     {s.session_type.startsWith("Strength") ? <Dumbbell size={9} /> : null}
                     {s.on_garmin && s.status !== "completed" ? <Watch size={9} className="text-[#71717A]" /> : null}
+                    {s.on_mywhoosh && s.status !== "completed" ? <Bike size={9} className="text-[#71717A]" /> : null}
                     <span className={s.status === "completed" ? "" : "text-[#D4D4D8]"}>{s.status === "completed" ? "✓" : fmtH(s.effective_duration_min)}</span>
                   </div>
                 ))}
@@ -299,6 +303,9 @@ function WeekStrip({ goalId, onPlan }: { goalId: number; onPlan: (d: string) => 
       <div className="flex items-center justify-between mt-3">
         <span className="text-[10px] text-[#52525B] flex items-center gap-1">
           <Watch size={10} /> {live.filter((s) => s.on_garmin && s.status === "pending").length} on your Garmin
+          {live.some((s) => s.on_mywhoosh) && (
+            <><span className="mx-1">·</span><Bike size={10} /> {live.filter((s) => s.on_mywhoosh && s.status === "pending").length} in MyWhoosh</>
+          )}
         </span>
         <button onClick={sendToGarmin} disabled={sending}
           className="text-[11px] text-[#71717A] hover:text-[#F59E0B] disabled:opacity-50">

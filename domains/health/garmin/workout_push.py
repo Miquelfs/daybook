@@ -114,6 +114,39 @@ def _target(zone: str, indoor: bool, tg: dict) -> dict:
     return {"targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}}
 
 
+def trimmed_structure(session: dict) -> tuple[list[dict], int]:
+    """(steps, effective minutes): the session's structure, with a shortened session
+    (coach / roster / volume factor) trimming its main steady block. Shared with
+    the Intervals.icu → MyWhoosh push."""
+    structure = json.loads(session["structure_json"]) if session.get("structure_json") else None
+    if not structure:
+        structure = [{"kind": "steady", "label": session["session_type"], "duration_min": session["effective_duration_min"]
+                      or session["duration_min"], "zone": session["intensity_zone"]}]
+    def rep_min(s: dict) -> int:
+        return (s.get("work_min") or 0) + (s.get("rest_min") or 0)
+
+    planned = sum(s.get("duration_min") or (s.get("reps", 1) * rep_min(s))
+                  for s in structure if s.get("kind") in ("steady", "intervals"))
+    eff = session["effective_duration_min"] or session["duration_min"] or planned
+    cut = max(0, planned - eff)
+    if cut:
+        structure = list(structure)
+        steady_idx = [i for i, s in enumerate(structure) if s.get("kind") == "steady"]
+        if steady_idx:
+            i = max(steady_idx, key=lambda i: structure[i].get("duration_min") or 0)
+            before = structure[i].get("duration_min") or 0
+            structure[i] = dict(structure[i], duration_min=max(5, before - cut))
+            cut -= before - structure[i]["duration_min"]
+        # Still too long (warm-up already at its floor): drop whole repeats of the main set
+        reps_idx = [i for i, s in enumerate(structure) if s.get("kind") == "intervals" and (s.get("reps") or 1) > 1]
+        if cut > 0 and reps_idx:
+            i = max(reps_idx, key=lambda i: structure[i]["reps"] * rep_min(structure[i]))
+            # nearest whole number of repeats; a tie keeps the extra repeat
+            drop = min(structure[i]["reps"] - 1, round(cut / max(1, rep_min(structure[i])) - 0.01))
+            structure[i] = dict(structure[i], reps=structure[i]["reps"] - drop)
+    return structure, eff
+
+
 def build_workout(session: dict, tg: dict) -> dict | None:
     """Garmin workout JSON for one plan session, or None if it shouldn't be pushed."""
     stype = session["session_type"] or ""
@@ -122,22 +155,7 @@ def build_workout(session: dict, tg: dict) -> dict | None:
             or stype.lower() in ("cycling - tour day", "cycling - camp day")):   # tours: just ride, no workout
         return None
     indoor = not run and is_indoor(stype)
-    structure = json.loads(session["structure_json"]) if session.get("structure_json") else None
-    if not structure:
-        structure = [{"kind": "steady", "label": stype, "duration_min": session["effective_duration_min"]
-                      or session["duration_min"], "zone": session["intensity_zone"]}]
-
-    # A shortened session (coach / roster / volume factor) trims the main steady block.
-    planned = sum(s.get("duration_min") or (s.get("reps", 1) * ((s.get("work_min") or 0) + (s.get("rest_min") or 0)))
-                  for s in structure if s.get("kind") in ("steady", "intervals"))
-    eff = session["effective_duration_min"] or session["duration_min"] or planned
-    cut = max(0, planned - eff)
-    if cut:
-        steady_idx = [i for i, s in enumerate(structure) if s.get("kind") == "steady"]
-        if steady_idx:
-            i = max(steady_idx, key=lambda i: structure[i].get("duration_min") or 0)
-            structure = list(structure)
-            structure[i] = dict(structure[i], duration_min=max(5, (structure[i].get("duration_min") or 0) - cut))
+    structure, eff = trimmed_structure(session)
     is_test = stype.lower().startswith("test")
 
     order = 0

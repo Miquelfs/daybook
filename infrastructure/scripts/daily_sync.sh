@@ -175,6 +175,8 @@ step coach python -m domains.training.coach --auto
 # Garmin: send the next ~9 days of sessions as structured workouts (trainer =
 # ERG watts, outdoor = HR), re-sending anything the re-plan moved or changed.
 step garmin_workout_push python -m domains.health.garmin.workout_push
+# Trainer sessions → Intervals.icu → MyWhoosh calendar (skips itself without INTERVALS_API_KEY).
+step mywhoosh_workout_push python -m domains.health.intervals_push
 
 # Activity detail sync: fetch splits, Garmin TE, physio metrics for new activities.
 log "Syncing Garmin activity details + physio (last 7 days)..."
