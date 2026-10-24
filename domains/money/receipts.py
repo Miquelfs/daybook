@@ -1,9 +1,11 @@
 """
 Supermarket tickets → line items.
 
-Only Mercadona's digital ticket (the PDF they email) is supported for now. It has
-a real text layer, so parsing is deterministic — no OCR, no AI. The text comes
-out one column cell per line:
+Mercadona's digital ticket (the PDF they email) has a real text layer, so it is
+parsed here deterministically — no OCR, no AI. (El Corte Inglés only sends an
+HTML email, so its tickets arrive as phone screenshots and are read by
+receipt_vision; both end in check_total below.) The Mercadona text comes out one
+column cell per line:
 
     1 GRIEGO LIGERO NAT        ← "<qty> <description>"
     2,10                       ← amount (qty > 1 prints the unit price first)
@@ -31,6 +33,16 @@ _TRAILING_MONEY = re.compile(r"\s+(-?\d+,\d{2})$")
 
 class ReceiptParseError(ValueError):
     pass
+
+
+def check_total(items: list[dict], total: float, hint: str = "") -> None:
+    """Refuse a ticket whose lines don't add up to its printed total — better no
+    ticket than wrong prices."""
+    if not items:
+        raise ReceiptParseError("No items found on this ticket")
+    got = sum(i["amount"] for i in items)
+    if abs(got - total) > 0.011:
+        raise ReceiptParseError(f"Items add up to {got:.2f} € but the ticket total is {total:.2f} €{hint}")
 
 
 def _num(s: str) -> float:
@@ -111,12 +123,7 @@ def parse_mercadona(text: str) -> dict:
             cur["_money"].append(_num(ln))
     close(cur)
 
-    if not items:
-        raise ReceiptParseError("No items found on this ticket")
-    if abs(sum(i["amount"] for i in items) - total) > 0.011:
-        raise ReceiptParseError(
-            f"Items add up to {sum(i['amount'] for i in items):.2f} € but the ticket total is {total:.2f} €"
-        )
+    check_total(items, total)
     return {
         "store": "Mercadona", "purchased_at": purchased_at, "invoice_no": invoice_no,
         "total": total, "items": items,

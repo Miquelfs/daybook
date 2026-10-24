@@ -155,7 +155,8 @@ CREATE TABLE IF NOT EXISTS receipts (
     purchased_at    TEXT,                   -- 'YYYY-MM-DD HH:MM' as printed on the ticket
     invoice_no      TEXT,
     total           REAL NOT NULL,
-    pdf_path        TEXT NOT NULL,          -- relative to data/receipts/
+    pdf_path        TEXT NOT NULL,          -- relative to data/receipts/ ('' for screenshot tickets)
+    files_json      TEXT,                   -- screenshot tickets: ["12-1.png", "12-2.png"]
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
@@ -175,6 +176,8 @@ CREATE TABLE IF NOT EXISTS grocery_products (
     product     TEXT PRIMARY KEY,
     grp         TEXT,                       -- NULL = use the rule
     avoid       INTEGER,                    -- NULL = use the rule
+    generic     TEXT,                       -- 'tofu natural' — matches the same thing across stores
+    pack_g      REAL,                       -- printed pack size in g / ml, if any
     updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 

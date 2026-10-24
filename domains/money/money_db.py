@@ -20,6 +20,9 @@ def init_money_db(db_path: Path = MONEY_DB_PATH) -> None:
 
     for stmt in [
         "ALTER TABLE holdings ADD COLUMN isin TEXT",
+        "ALTER TABLE receipts ADD COLUMN files_json TEXT",
+        "ALTER TABLE grocery_products ADD COLUMN generic TEXT",
+        "ALTER TABLE grocery_products ADD COLUMN pack_g REAL",
     ]:
         try:
             conn.execute(stmt)

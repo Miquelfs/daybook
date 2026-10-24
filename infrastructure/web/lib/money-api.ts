@@ -142,8 +142,20 @@ export type Receipt = {
   invoice_no: string | null;
   total: number;
   matches_transaction: boolean;
-  pdf_url: string;         // API path, e.g. /money/receipts/3/pdf
+  pdf_url: string | null;  // API path, e.g. /money/receipts/3/pdf (PDF tickets)
+  image_urls: string[];    // screenshot tickets: /money/receipts/3/image/1 …
   items: ReceiptItem[];
+};
+
+export type StoreOffer = { store: string; product: string; display: string; date: string; basis: "kg" | "unit"; price: number };
+export type GroceryStores = {
+  start: string;
+  total: number;
+  stores: { store: string; receipts: number; spend: number; share: number; avg_ticket: number; avoid_share: number;
+            last_date: string; top_groups: { group: string; amount: number }[] }[];
+  matches: { generic: string; basis: "kg" | "unit"; offers: StoreOffer[]; cheapest: string; spread_pct: number }[];
+  elsewhere: { store: string; other: string; items: number; paid: number; would_pay: number; diff: number }[];
+  unlabelled: number;
 };
 
 export type BudgetPlanRow = {
@@ -809,9 +821,10 @@ export const moneyApi = {
   receipt: (txnId: string) =>
     get<Receipt>(`/money/transactions/${encodeURIComponent(txnId)}/receipt`),
 
-  attachReceipt: async (txnId: string, file: File): Promise<Receipt> => {
+  /** One Mercadona PDF, or one or more screenshots of an emailed ticket (El Corte Inglés…). */
+  attachReceipt: async (txnId: string, files: File | File[]): Promise<Receipt> => {
     const fd = new FormData();
-    fd.set("file", file);
+    for (const f of Array.isArray(files) ? files : [files]) fd.append("file", f);
     const path = `/api/money/transactions/${encodeURIComponent(txnId)}/receipt`;
     const res = await fetch(`${PROXY_BASE}${path}`, { method: "POST", body: fd, cache: "no-store" });
     if (!res.ok) throw new Error(await errorMessage(res, "Couldn't read that ticket"));
@@ -820,6 +833,9 @@ export const moneyApi = {
 
   removeReceipt: (txnId: string) =>
     proxyDel(`/api/money/transactions/${encodeURIComponent(txnId)}/receipt`),
+
+  groceryStores: (window: GroceryWindow) =>
+    get<GroceryStores>(`/money/groceries/stores?window=${window}`),
 
   grocerySummary: (window: GroceryWindow) =>
     get<GrocerySummary>(`/money/groceries/summary?window=${window}`),
@@ -990,8 +1006,12 @@ export function fmtAmount(amount: number): string {
 }
 
 /** Same-origin URL for a ticket PDF (the API path proxied under /api). */
-export function receiptPdfHref(r: Receipt): string {
-  return `/api${r.pdf_url}`;
+export function receiptPdfHref(r: Receipt): string | null {
+  return r.pdf_url ? `/api${r.pdf_url}` : null;
+}
+
+export function receiptImageHrefs(r: Receipt): string[] {
+  return (r.image_urls ?? []).map((u) => `/api${u}`);
 }
 
 export function isExpense(t: Transaction): boolean {

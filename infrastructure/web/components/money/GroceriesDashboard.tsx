@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
-  moneyApi, fmtAmount, GROCERY_GROUPS, type GroceryProduct, type GrocerySummary, type GroceryWindow,
+  moneyApi, fmtAmount, GROCERY_GROUPS, type GroceryProduct, type GroceryStores, type GrocerySummary, type GroceryWindow,
 } from "@/lib/money-api";
 import { groupStyle } from "./grocery-groups";
 
@@ -29,6 +29,11 @@ export function GroceriesDashboard() {
     queryFn: () => moneyApi.grocerySummary(win),
     placeholderData: (prev) => prev, // keep the page up while switching windows
   });
+  const { data: stores } = useQuery({
+    queryKey: ["groceries", "stores", win],
+    queryFn: () => moneyApi.groceryStores(win),
+    placeholderData: (prev) => prev,
+  });
   const { data: products = [] } = useQuery({
     queryKey: ["groceries", "products"],
     queryFn: () => moneyApi.groceryProducts(),
@@ -41,8 +46,8 @@ export function GroceriesDashboard() {
       <div className="border border-dashed border-[#27272A] rounded-xl px-5 py-8 text-center">
         <p className="text-sm text-[#A1A1AA]">No tickets yet.</p>
         <p className="text-xs text-[#52525B] mt-2 leading-relaxed">
-          Add a Groceries expense and attach the Mercadona PDF — or tap the 🧾 on an existing one in the
-          transaction list. Each ticket&apos;s lines show up here.
+          Add a Groceries expense and attach the Mercadona PDF or El Corte Inglés screenshots — or tap the 🧾
+          on an existing one in the transaction list. Each ticket&apos;s lines show up here.
         </p>
       </div>
     );
@@ -80,6 +85,7 @@ export function GroceriesDashboard() {
           </div>
           <ByType summary={summary} />
           <Avoid summary={summary} />
+          {stores && stores.stores.length > 0 && <Stores data={stores} />}
         </>
       ) : (
         <p className="text-sm text-[#52525B]">No tickets in this period.</p>
@@ -187,6 +193,91 @@ function Avoid({ summary }: { summary: GrocerySummary }) {
               <span className="text-sm text-[#A1A1AA] tabular-nums w-16 text-right">{fmtAmount(a.amount)}</span>
             </div>
           ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const perBasis = (basis: "kg" | "unit") => (basis === "kg" ? "/kg" : "/u");
+
+// Supermarkets side by side: where the money goes, the same products' prices,
+// and each basket re-priced at the other store.
+function Stores({ data }: { data: GroceryStores }) {
+  const [showAll, setShowAll] = useState(false);
+  const several = data.stores.length > 1;
+  const matches = showAll ? data.matches : data.matches.slice(0, 8);
+  return (
+    <section>
+      <h2 className={h2}>Supermarkets</h2>
+      <div className={`${card} px-4 py-1 divide-y divide-[#18181B]`}>
+        {data.stores.map((st) => (
+          <div key={st.store} className="py-3" title={`${st.store}: ${fmtAmount(st.spend)} · ${Math.round(st.share * 100)}%`}>
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-[#E4E4E7] font-medium">{st.store}</span>
+              <span className="tabular-nums text-[#A1A1AA]">
+                {fmtAmount(st.spend)} {several && <span className="text-[#52525B] text-xs">· {Math.round(st.share * 100)}%</span>}
+              </span>
+            </div>
+            {several && (
+              <div className="h-1.5 rounded-full bg-[#18181B] mt-1.5">
+                <div className="h-full rounded-full bg-[#A1A1AA]" style={{ width: `${st.share * 100}%` }} />
+              </div>
+            )}
+            <p className="text-[11px] text-[#71717A] mt-1.5 tabular-nums">
+              {st.receipts} {st.receipts === 1 ? "ticket" : "tickets"} · {fmtAmount(st.avg_ticket)} avg
+              · {Math.round(st.avoid_share * 100)}% to avoid
+              · mostly {st.top_groups.map((g) => g.group.toLowerCase()).join(", ")}
+              · last {format(parseISO(st.last_date), "d MMM")}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {data.elsewhere.filter((e) => e.items > 0).map((e) => (
+        <p key={`${e.store}-${e.other}`} className="text-sm text-[#A1A1AA] mt-3">
+          The {e.items} {e.items === 1 ? "item" : "items"} from {e.store} that {e.other} also sells would have cost{" "}
+          <span className="text-[#FAFAFA] tabular-nums">{fmtAmount(e.would_pay)}</span> there instead of{" "}
+          <span className="tabular-nums">{fmtAmount(e.paid)}</span>
+          {Math.abs(e.diff) >= 0.05 && (
+            <> — <span className="text-[#FAFAFA]">{fmtAmount(Math.abs(e.diff))} {e.diff < 0 ? "cheaper" : "dearer"}</span> at {e.other}</>
+          )}.
+        </p>
+      ))}
+
+      {several && (
+        <div className="mt-4">
+          <p className="text-xs text-[#71717A] mb-2">Same product, different store — latest prices</p>
+          {data.matches.length === 0 ? (
+            <p className="text-sm text-[#52525B]">
+              No product bought at more than one store yet{data.unlabelled > 0 ? ` (${data.unlabelled} products are still being named — overnight)` : ""}.
+            </p>
+          ) : (
+            <div className={`${card} px-4 py-1 divide-y divide-[#18181B]`}>
+              {matches.map((m) => (
+                <div key={m.generic} className="py-2.5">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-sm text-[#D4D4D8] first-letter:uppercase">{m.generic}</span>
+                    <span className="text-[11px] text-[#71717A] tabular-nums">{m.spread_pct > 0 ? `+${m.spread_pct}% spread` : "same price"}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
+                    {m.offers.map((o, i) => (
+                      <span key={o.store} className="text-xs tabular-nums" title={`${o.display} · ${o.date}`}>
+                        <span className={i === 0 ? "text-[#FAFAFA]" : "text-[#71717A]"}>{o.store}</span>{" "}
+                        <span className={i === 0 ? "text-[#FAFAFA]" : "text-[#A1A1AA]"}>{fmtAmount(o.price)}{perBasis(m.basis)}</span>
+                        {i === 0 && <span className="text-[10px] text-[#4ADE80] ml-1">cheapest</span>}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {data.matches.length > 8 && (
+            <button type="button" onClick={() => setShowAll((v) => !v)} className="text-xs text-[#71717A] hover:text-[#FAFAFA] mt-2">
+              {showAll ? "Show fewer" : `All ${data.matches.length} products`}
+            </button>
+          )}
         </div>
       )}
     </section>

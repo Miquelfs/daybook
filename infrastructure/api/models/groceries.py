@@ -22,7 +22,8 @@ class ReceiptOut(BaseModel):
     invoice_no: Optional[str]
     total: float
     matches_transaction: bool     # ticket total == expense amount
-    pdf_url: str                  # path on the API, e.g. /money/receipts/3/pdf
+    pdf_url: Optional[str]        # path on the API, e.g. /money/receipts/3/pdf (PDF tickets)
+    image_urls: list[str] = []    # screenshot tickets: /money/receipts/3/image/1 …
     items: list[ReceiptItemOut]
 
 
@@ -92,3 +93,54 @@ class RecentGrocery(BaseModel):
     avoid: bool
     times: int
     last_date: str
+
+
+class StoreGroup(BaseModel):
+    group: str
+    amount: float
+
+
+class StoreSpend(BaseModel):
+    store: str
+    receipts: int
+    spend: float
+    share: float
+    avg_ticket: float
+    avoid_share: float
+    last_date: str
+    top_groups: list[StoreGroup]
+
+
+class StoreOffer(BaseModel):
+    store: str
+    product: str
+    display: str
+    date: str
+    basis: str                    # kg (€/kg or €/l) | unit
+    price: float
+
+
+class StoreMatch(BaseModel):
+    generic: str                  # 'tofu natural'
+    basis: str
+    offers: list[StoreOffer]      # cheapest first
+    cheapest: str
+    spread_pct: float
+
+
+class StoreElsewhere(BaseModel):
+    store: str                    # where it was bought
+    other: str                    # re-priced at
+    items: int
+    paid: float
+    would_pay: float
+    diff: float                   # would_pay − paid (negative = cheaper there)
+
+
+class GroceryStores(BaseModel):
+    start: str
+    total: float
+    stores: list[StoreSpend]
+    matches: list[StoreMatch]
+    elsewhere: list[StoreElsewhere]
+    unlabelled: int

@@ -31,7 +31,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta, account: presetAc
   const [txDate, setTxDate] = useState(date);
   const [notes, setNotes] = useState("");
   // Supermarket ticket (Groceries only) — optional, can also be attached later from the list
-  const [ticket, setTicket] = useState<File | null>(null);
+  const [ticket, setTicket] = useState<File[]>([]);
   const [ticketError, setTicketError] = useState<string | null>(null);
   const [autocompleteQ, setAutocompleteQ] = useState("");
   const [subcatQ, setSubcatQ] = useState("");
@@ -108,7 +108,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta, account: presetAc
       setAccount(presetAccount ?? (meta.defaults.account || ""));
       setTxDate(date);
       setNotes("");
-      setTicket(null);
+      setTicket([]);
       setTicketError(null);
       setCategoryTouched(false);
       setAutoCategory(null);
@@ -145,7 +145,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta, account: presetAc
         notes: notes.trim() || undefined,
       });
       // The expense is saved either way; a ticket that can't be read is reported, not fatal.
-      if (ticket && isGroceries) {
+      if (ticket.length && isGroceries) {
         try {
           await moneyApi.attachReceipt(txn.id, ticket);
         } catch (e) {
@@ -391,25 +391,28 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta, account: presetAc
               <input
                 ref={ticketRef}
                 type="file"
-                accept="application/pdf,.pdf"
+                accept="application/pdf,.pdf,image/*"
+                multiple
                 className="hidden"
-                onChange={(e) => setTicket(e.target.files?.[0] ?? null)}
+                onChange={(e) => setTicket(Array.from(e.target.files ?? []))}
               />
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => ticketRef.current?.click()}
                   className={`flex-1 min-w-0 flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm border transition-colors ${
-                    ticket
+                    ticket.length
                       ? "bg-[#F59E0B]/10 border-[#F59E0B]/40 text-[#F59E0B]"
                       : "bg-[#18181B] border-[#27272A] text-[#71717A] hover:border-[#3F3F46]"
                   }`}
                 >
                   <Paperclip size={14} className="shrink-0" />
-                  <span className="truncate">{ticket ? ticket.name : "Attach Mercadona PDF"}</span>
+                  <span className="truncate">
+                    {ticket.length > 1 ? `${ticket.length} screenshots` : ticket.length ? ticket[0].name : "Mercadona PDF or El Corte Inglés screenshots"}
+                  </span>
                 </button>
-                {ticket && (
-                  <button type="button" onClick={() => setTicket(null)} className="text-[#52525B] hover:text-[#A1A1AA] p-1">
+                {ticket.length > 0 && (
+                  <button type="button" onClick={() => setTicket([])} className="text-[#52525B] hover:text-[#A1A1AA] p-1">
                     <X size={16} />
                   </button>
                 )}

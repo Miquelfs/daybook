@@ -3,12 +3,12 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Loader, Paperclip } from "lucide-react";
-import { moneyApi, fmtAmount, receiptPdfHref, type Transaction } from "@/lib/money-api";
+import { FileText, Image as ImageIcon, Loader, Paperclip } from "lucide-react";
+import { moneyApi, fmtAmount, receiptImageHrefs, receiptPdfHref, type Transaction } from "@/lib/money-api";
 import { groupStyle, itemDetail } from "./grocery-groups";
 
-// The supermarket ticket behind a grocery expense: attach the PDF (now or when
-// the email arrives), then see it line by line.
+// The supermarket ticket behind a grocery expense: attach Mercadona's PDF or
+// screenshots of an emailed ticket (El Corte Inglés…), then see it line by line.
 export function ReceiptPanel({ t }: { t: Transaction }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -26,7 +26,7 @@ export function ReceiptPanel({ t }: { t: Transaction }) {
   };
 
   const attach = useMutation({
-    mutationFn: (file: File) => moneyApi.attachReceipt(t.id, file),
+    mutationFn: (files: File[]) => moneyApi.attachReceipt(t.id, files),
     onSuccess: invalidate,
   });
 
@@ -39,11 +39,12 @@ export function ReceiptPanel({ t }: { t: Transaction }) {
     <input
       ref={fileRef}
       type="file"
-      accept="application/pdf,.pdf"
+      accept="application/pdf,.pdf,image/*"
+      multiple
       className="hidden"
       onChange={(e) => {
-        const f = e.target.files?.[0];
-        if (f) attach.mutate(f);
+        const files = Array.from(e.target.files ?? []);
+        if (files.length) attach.mutate(files);
         e.target.value = "";
       }}
     />
@@ -62,8 +63,13 @@ export function ReceiptPanel({ t }: { t: Transaction }) {
           className="flex items-center gap-2 text-sm text-[#D4D4D8] hover:text-[#FAFAFA] disabled:opacity-50"
         >
           {attach.isPending ? <Loader size={14} className="animate-spin" /> : <Paperclip size={14} />}
-          {attach.isPending ? "Reading ticket…" : "Attach Mercadona ticket (PDF)"}
+          {attach.isPending ? "Reading ticket…" : "Attach ticket — Mercadona PDF or screenshots"}
         </button>
+        {!attach.isPending && (
+          <p className="text-[11px] text-[#52525B] mt-1.5">
+            El Corte Inglés: screenshot the emailed product list (all of it, down to TOTAL COMPRA) and pick every screenshot.
+          </p>
+        )}
         {attach.error && <p className="text-xs text-[#EF4444] mt-2">{attach.error.message}</p>}
       </div>
     );
@@ -111,9 +117,16 @@ export function ReceiptPanel({ t }: { t: Transaction }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 pt-2 border-t border-[#18181B]">
-        <a href={receiptPdfHref(receipt)} target="_blank" rel="noreferrer" className={`${linkCls} flex items-center gap-1`}>
-          <FileText size={12} /> PDF
-        </a>
+        {receiptPdfHref(receipt) && (
+          <a href={receiptPdfHref(receipt)!} target="_blank" rel="noreferrer" className={`${linkCls} flex items-center gap-1`}>
+            <FileText size={12} /> PDF
+          </a>
+        )}
+        {receiptImageHrefs(receipt).map((href, i, all) => (
+          <a key={href} href={href} target="_blank" rel="noreferrer" className={`${linkCls} flex items-center gap-1`}>
+            <ImageIcon size={12} /> {all.length > 1 ? `Screenshot ${i + 1}` : "Screenshot"}
+          </a>
+        ))}
         <button type="button" onClick={() => fileRef.current?.click()} disabled={attach.isPending} className={linkCls}>
           {attach.isPending ? "Reading…" : "Replace"}
         </button>

@@ -210,6 +210,10 @@ step price_sync python -m domains.money.price_sync
 log "Executing due investment plans..."
 step plan_executor python -m domains.money.plan_executor
 
+# Grocery tickets: generic names for products not labelled yet (store comparison).
+# Only calls Claude when there's something new — usually a no-op.
+step grocery_labels python -m domains.money.grocery_labels
+
 # AI: morning brief (requires Ollama at OLLAMA_HOST; skips gracefully otherwise).
 # The cron runs hourly — attempt across the 05–11h window so the brief lands
 # once around 6am and can be regenerated once Garmin uploads last night's sleep
