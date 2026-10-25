@@ -111,6 +111,23 @@ class AttachTest(unittest.TestCase):
         names = {r[0] for r in self.c.execute("SELECT stream_type FROM activity_streams")}
         self.assertEqual(names, {"sumduration", "directtimestamp", "directheartrate", "sumdistance"})
 
+    def test_file_heart_rate_beats_the_wrist(self):
+        # strap paired to the app reads 30 bpm higher than a wrist sensor that lost lock
+        app0 = self.ts0 - 40 + 1800
+        fit = fit_bytes([(app0 + s, hr_curve(s) + 30, 90, s * 2.5, 180) for s in range(1600)])
+        st = fit_import.attach(self.c, "garmin_1", fit, "ride.fit")
+        self.assertEqual(st["hr_source"], "file")
+        hr = json.loads(self.c.execute("SELECT data_json FROM activity_streams "
+                                       "WHERE stream_type='directheartrate'").fetchone()[0])
+        self.assertEqual(hr[100], hr_curve(140) + 30)
+        a = self.c.execute("SELECT avg_heart_rate, max_heart_rate FROM activities").fetchone()
+        self.assertGreater(a["avg_heart_rate"], 150)
+        self.assertIsNotNone(a["max_heart_rate"])
+
+        fit_import.detach(self.c, "garmin_1")
+        a = self.c.execute("SELECT avg_heart_rate, max_heart_rate FROM activities").fetchone()
+        self.assertEqual((a["avg_heart_rate"], a["max_heart_rate"]), (150, None))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -221,6 +221,7 @@ export type FitImport = {
   clock_skew_s: number | null;
   channels: string[];
   ftp_w: number | null;
+  threshold_hr: number | null;
   seconds?: number;
   covered_s?: number;
   distance_m?: number | null;
@@ -229,6 +230,7 @@ export type FitImport = {
   avg_cadence?: number | null;
   ascent_m?: number | null;
   best_20min?: { start_s: number; avg_power_w: number; avg_hr: number | null } | null;
+  hr_source?: "file" | "watch";
 };
 
 export type SegmentEffort = {

@@ -10,7 +10,10 @@ function alignText(f: FitImport) {
   if (f.align_method === "hr")
     return `Lined up by heart rate (match ${Math.round((f.align_corr ?? 0) * 100)}%)` +
       (f.clock_skew_s && Math.abs(f.clock_skew_s) > 60 ? ` — the file's clock was ${mmss(f.clock_skew_s)} off` : "");
-  if (f.align_method === "clock") return "Lined up by the device clocks (no heart rate to match)";
+  if (f.align_method === "clock")
+    return f.channels.includes("hr")
+      ? "Lined up by the device clocks (the two heart rates didn't agree enough to match)"
+      : "Lined up by the device clocks (no heart rate to match)";
   return "Assumed both started together — no heart rate or clock overlap to line them up";
 }
 
@@ -52,7 +55,10 @@ export function FitFileCard({ activityId, date, fit, isTest, sessionId }: {
 
   const b20 = fit?.best_20min;
   const newFtp = b20 ? Math.round(b20.avg_power_w * 0.95) : null;
-  const ftpSet = newFtp != null && fit?.ftp_w != null && Math.round(fit.ftp_w) === newFtp;
+  // threshold HR comes from the same test (avg HR × 0.98) — a stale one means re-save
+  const newThrHr = b20?.avg_hr ? Math.round(b20.avg_hr * 0.98) : null;
+  const ftpSet = newFtp != null && fit?.ftp_w != null && Math.round(fit.ftp_w) === newFtp
+    && (newThrHr == null || fit?.threshold_hr === newThrHr);
 
   async function setFtp() {
     if (!b20) return;
@@ -83,7 +89,10 @@ export function FitFileCard({ activityId, date, fit, isTest, sessionId }: {
               <span className="font-medium">{fit.device ?? "Trainer app"}</span>
               <span className="text-[#71717A]"> merged · {fit.channels.filter((c) => c !== "hr" && c !== "altitude").join(", ")}</span>
             </p>
-            <p className="text-xs text-[#71717A] mt-1">{alignText(fit)}</p>
+            <p className="text-xs text-[#71717A] mt-1">
+              {alignText(fit)}
+              {fit.hr_source === "file" ? ` · heart rate from ${fit.device ?? "the file"}` : ""}
+            </p>
             <p className="text-xs text-[#A1A1AA] mt-2 tabular-nums">
               {[
                 fit.avg_power_w != null ? `${fit.avg_power_w} W avg` : null,
@@ -100,10 +109,10 @@ export function FitFileCard({ activityId, date, fit, isTest, sessionId }: {
                   <span className="text-[#71717A]"> → FTP {newFtp} W</span>
                 </p>
                 {isTest && (ftpSet
-                  ? <span className="text-xs text-emerald-400">✓ FTP set to {newFtp} W</span>
+                  ? <span className="text-xs text-emerald-400">✓ FTP set to {newFtp} W{newThrHr ? ` · threshold ${newThrHr} bpm` : ""}</span>
                   : <button onClick={setFtp} disabled={!!busy}
                             className="text-xs px-3 py-1.5 rounded-full bg-white text-black font-medium disabled:opacity-50">
-                      {busy === "ftp" ? "Saving…" : `Set FTP ${newFtp} W`}
+                      {busy === "ftp" ? "Saving…" : `Set FTP ${newFtp} W${newThrHr ? ` · threshold ${newThrHr} bpm` : ""}`}
                     </button>)}
               </div>
             )}

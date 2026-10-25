@@ -2,8 +2,10 @@
 Attach a .fit file from a trainer app (MyWhoosh, Zwift, …) to an activity the
 watch already recorded, and merge the two into one activity — no duplicate.
 
-  watch  → heart rate, body battery, the activity's timeline and identity
+  watch  → body battery, the activity's timeline and identity
   .fit   → power, cadence, speed, distance (and ascent for the summary)
+  hr     → the file's when it has one (a strap paired to the app beats a wrist
+           sensor that loses lock on the bars), the watch's for any gaps
 
 The two clocks can't be trusted to agree (an iPad clock 28 min off is real),
 so the file is aligned by cross-correlating its heart rate against the watch's.
@@ -19,6 +21,7 @@ they are a game world, not a place.
 
 CLI:  python -m domains.health.fit_import <activity_id> <file.fit>
       python -m domains.health.fit_import <activity_id> --detach
+      python -m domains.health.fit_import --reapply-all    # after changing the merge rules
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ MIN_CORR = 0.8          # below this the HR match isn't trusted
 COARSE_BUCKET_S = 10
 FIT_CHANNELS = ("power", "cadence", "speed", "distance", "altitude", "hr")
 SUMMARY_COLS = ("distance_meters", "avg_speed_mps", "avg_power_watts", "elevation_gain_meters",
-                "moving_time_seconds", "training_stress_score")
+                "moving_time_seconds", "training_stress_score", "avg_heart_rate", "max_heart_rate")
 
 
 def ensure_table(conn) -> None:
@@ -230,12 +233,13 @@ def merge_streams(original: dict, fit: dict, offset: int) -> tuple[dict, dict]:
     hr = out.get("directheartrate")
     fit_hr_used = 0
     if fit.get("hr"):
-        if hr is None:
-            hr = [None] * n
+        watch_hr = hr or [None] * n
+        hr = []
         for s in range(n):
-            if not hr[s] and at("hr", s):
-                hr[s] = at("hr", s)
+            v = at("hr", s)
+            if v:
                 fit_hr_used += 1
+            hr.append(v or watch_hr[s])
         out["directheartrate"] = hr
     moving, acc = [], 0
     for s in range(n):
@@ -268,7 +272,8 @@ def merge_streams(original: dict, fit: dict, offset: int) -> tuple[dict, dict]:
         "ascent_m": round(ascent) if any(a is not None for a in alt) else None,
         "moving_s": acc,
         "best_20min": best20,
-        "fit_hr_filled_s": fit_hr_used,
+        "fit_hr_s": fit_hr_used,
+        "hr_source": "file" if fit_hr_used >= n // 2 else "watch",
     }
     return out, summary
 
@@ -288,15 +293,18 @@ def _apply(conn, row) -> dict:
     orig = json.loads(row["original_summary"])
     dur = orig.get("duration_seconds") or summary["seconds"]
     dist = summary["distance_m"]
+    hr = [v for v in merged.get("directheartrate") or [] if v] if summary["fit_hr_s"] else []
     conn.execute(
         """UPDATE activities SET distance_meters=?, avg_speed_mps=?, avg_power_watts=?,
                   elevation_gain_meters=?, moving_time_seconds=?,
+                  avg_heart_rate=COALESCE(?, avg_heart_rate), max_heart_rate=COALESCE(?, max_heart_rate),
                   updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?""",
         (dist if dist is not None else orig.get("distance_meters"),
          round(dist / dur, 3) if dist and dur else orig.get("avg_speed_mps"),
          summary["avg_power_w"] if summary["avg_power_w"] is not None else orig.get("avg_power_watts"),
          summary["ascent_m"] if summary["ascent_m"] is not None else orig.get("elevation_gain_meters"),
          summary["moving_s"] or orig.get("moving_time_seconds"),
+         round(sum(hr) / len(hr)) if hr else None, round(max(hr)) if hr else None,
          row["activity_id"]),
     )
     conn.execute("UPDATE activity_fit_imports SET summary_json=? WHERE activity_id=?",
@@ -368,8 +376,9 @@ def detach(conn, activity_id: str) -> bool:
         return False
     _write_streams(conn, activity_id, json.loads(row["original_streams"]))
     orig = json.loads(row["original_summary"])
-    conn.execute(f"UPDATE activities SET {', '.join(f'{c}=?' for c in SUMMARY_COLS)} WHERE id=?",
-                 tuple(orig.get(c) for c in SUMMARY_COLS) + (activity_id,))
+    cols = [c for c in SUMMARY_COLS if c in orig]   # older imports predate the HR columns
+    conn.execute(f"UPDATE activities SET {', '.join(f'{c}=?' for c in cols)} WHERE id=?",
+                 tuple(orig[c] for c in cols) + (activity_id,))
     conn.execute("DELETE FROM activity_fit_imports WHERE activity_id=?", (activity_id,))
     conn.commit()
     recompute(conn, activity_id)
@@ -406,14 +415,15 @@ def status(conn, activity_id: str) -> dict | None:
         t = json.loads(ts[0])
         if t and t[0] is not None:   # how far the file's clock is from the watch's
             skew = round(fit["t0"] + row["fit_offset_s"] - t[0] / 1000)
-    ftp = None
+    ftp = threshold_hr = None
     try:
-        z = conn.execute("SELECT ftp_w FROM athlete_zones WHERE sport='ride' ORDER BY valid_from DESC LIMIT 1").fetchone()
-        ftp = z[0] if z else None
+        z = conn.execute("SELECT ftp_w, threshold_hr FROM athlete_zones WHERE sport='ride' "
+                         "ORDER BY valid_from DESC LIMIT 1").fetchone()
+        ftp, threshold_hr = (z[0], z[1]) if z else (None, None)
     except sqlite3.OperationalError:
         pass
     return {
-        "ftp_w": ftp,
+        "ftp_w": ftp, "threshold_hr": threshold_hr,
         "filename": row["filename"], "device": row["device"], "imported_at": row["imported_at"],
         "offset_s": row["fit_offset_s"], "align_method": row["align_method"], "align_corr": row["align_corr"],
         "clock_skew_s": skew, "channels": [c for c in FIT_CHANNELS if c in fit],
@@ -424,11 +434,24 @@ def status(conn, activity_id: str) -> dict | None:
 def main() -> None:
     from infrastructure.db.connection import get_connection
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("activity_id")
+    ap.add_argument("activity_id", nargs="?")
     ap.add_argument("fit", nargs="?")
     ap.add_argument("--detach", action="store_true")
+    ap.add_argument("--reapply-all", action="store_true", help="re-merge every attached file from its stored copy")
     args = ap.parse_args()
     conn = get_connection()
+    if args.reapply_all:
+        ensure_table(conn)
+        ids = [r[0] for r in conn.execute("SELECT activity_id FROM activity_fit_imports")]
+        for aid in ids:
+            reapply_if_attached(conn, aid)
+            conn.commit()
+            recompute(conn, aid)
+            print(aid, json.dumps({k: v for k, v in (status(conn, aid) or {}).items()
+                                   if k in ("hr_source", "best_20min", "threshold_hr")}))
+        return
+    if not args.activity_id:
+        ap.error("pass an activity id (or --reapply-all)")
     if args.detach:
         print("detached" if detach(conn, args.activity_id) else "nothing attached")
         return
