@@ -1636,6 +1636,9 @@ def create_benchmark(body: BenchmarkCreate, conn: DB):
 
     delta = {"old": old_val, "new": new_val,
              "change": (round(new_val - old_val, 1) if (old_val is not None and new_val is not None) else None)}
+    if body.session_id:   # re-saving a test (e.g. after its heart rate was fixed) replaces its result
+        conn.execute("DELETE FROM benchmark_results WHERE session_id=? AND test_type=?",
+                     (body.session_id, body.test_type))
     conn.execute(
         """INSERT INTO benchmark_results (date, sport, test_type, result_json, derived_json, session_id)
            VALUES (?,?,?,?,?,?)""",
