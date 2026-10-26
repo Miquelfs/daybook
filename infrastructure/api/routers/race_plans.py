@@ -131,8 +131,9 @@ _ZONE_META = {
     "Z5": {"hr_pct": "95–100%", "rpe": "9–10", "label": "VO2max"},
 }
 
-# threshold-pace multipliers (Z3 = threshold)
-_PACE_MULT = {"Z1": 1.37, "Z2": 1.15, "Z3": 1.00, "Z4": 0.885, "Z5": 0.80}
+# threshold-pace multipliers (Z4 = threshold) — the same scale as the run sessions'
+# cues (b_race.paces) and the Garmin pace targets, so the card, cue and watch agree
+_PACE_MULT = {"Z1": 1.37, "Z2": 1.27, "Z3": 1.07, "Z4": 1.00, "Z5": 0.93}
 # %FTP bands for trainer (ERG) sessions — the road bike has no power meter, so
 # outdoor rides keep HR; Z3 is sweet spot, matching the plans' intent.
 _FTP_PCT = {"Z1": (0, 55), "Z2": (56, 75), "Z3": (88, 94), "Z4": (95, 105), "Z5": (106, 120)}
