@@ -225,6 +225,7 @@ const GOAL_STATUS: Record<string, { text: string; cls: string }> = {
   "there": { text: "at race-day fitness", cls: "text-emerald-400" },
   "on track": { text: "on track", cls: "text-emerald-400" },
   "behind": { text: "behind — build a little faster", cls: "text-amber-400" },
+  "building": { text: "building at the pace you need", cls: "text-emerald-400" },
   "too steep": { text: "the gap needs more than a safe build rate", cls: "text-rose-400" },
 };
 
@@ -250,10 +251,16 @@ function GoalFitness({ fitness }: { fitness: number }) {
         <p className="text-xs text-[#A1A1AA] mt-1 leading-relaxed">
           To reach ~{g.target_fitness} you need <b className="text-[#FAFAFA]">+{g.needed_ramp_per_week} fitness a week</b> for
           the next {Math.max(1, g.weeks_to_race - 2)} weeks, then a 2-week taper.
-          {" "}Last 4 weeks: {L.ramp_per_week >= 0 ? "+" : ""}{L.ramp_per_week}/week
-          {g.projected_fitness < g.target_fitness
-            ? <> — if that pace simply continued you&apos;d arrive at ~{g.projected_fitness}, so the build needs to come from the plan&apos;s upcoming weeks.</>
-            : <> — keep that up and you arrive at ~{g.projected_fitness}.</>}
+          {g.status === "building" && L.ramp_7d != null ? (
+            <>{" "}This week: <b className="text-[#FAFAFA]">+{L.ramp_7d}</b> — on pace. The 4-week rate
+              ({L.ramp_per_week >= 0 ? "+" : ""}{L.ramp_per_week}/week) still holds the weeks before the plan; it catches up
+              as they roll out.</>
+          ) : (
+            <>{" "}Last 4 weeks: {L.ramp_per_week >= 0 ? "+" : ""}{L.ramp_per_week}/week
+              {g.projected_fitness < g.target_fitness
+                ? <> — if that pace simply continued you&apos;d arrive at ~{g.projected_fitness}, so the build needs to come from the plan&apos;s upcoming weeks.</>
+                : <> — keep that up and you arrive at ~{g.projected_fitness}.</>}</>
+          )}
           {" "}<span className="text-[#71717A]">Stay under +{g.safe_ramp}/week to avoid overload.</span>
         </p>
       ) : (
@@ -307,7 +314,7 @@ const FA_COMPONENT: Record<string, { label: string; fmt: (v: number) => string }
   vigorousMinutesAvg: { label: "Vigorous min/wk", fmt: (v) => `${Math.round(v)}` },
 };
 
-/** Fitness age — Garmin's when synced (VO2max, resting HR, BMI, vigorous minutes), else estimated from VO2max. */
+/** Fitness age — Daybook's own model (same number as Health), Garmin's alongside; Garmin / VO2max estimate as fallbacks. */
 function FitnessAge() {
   const { data } = useFitnessSummary();
   const f = data?.fitness_age;
@@ -329,9 +336,18 @@ function FitnessAge() {
         </div>
         <p className="text-xs text-[#71717A] text-right tabular-nums">
           {f.vo2max ? <>VO₂max {f.vo2max}<br /></> : null}
-          {f.source === "garmin" ? "from Garmin" : "rough estimate from VO₂max"}
+          {f.source === "daybook" ? (f.garmin != null ? `Garmin says ${f.garmin}` : "Daybook's own")
+            : f.source === "garmin" ? "from Garmin" : "rough estimate from VO₂max"}
         </p>
       </div>
+      {f.source === "daybook" && f.lever && (
+        <p className="text-xs text-[#A1A1AA] mt-2">
+          Biggest lever: {f.lever.title} · {f.lever.now}{f.lever.unit ? ` ${f.lever.unit}` : ""} → {f.lever.target}
+          <span className="text-emerald-400"> −{f.lever.years} y</span>
+          {f.achievable != null && f.achievable < f.value && <span className="text-[#71717A]"> · {f.achievable} reachable</span>}
+          {" · "}<Link href="/health" className="underline underline-offset-2 hover:text-[#FAFAFA]">breakdown</Link>
+        </p>
+      )}
       {comps.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
           {comps.map(([k, c]) => (
@@ -345,7 +361,7 @@ function FitnessAge() {
           ))}
         </div>
       )}
-      {f.achievable != null && f.achievable < f.value && (
+      {f.source === "garmin" && f.achievable != null && f.achievable < f.value && (
         <p className="text-xs text-[#71717A] mt-2">Garmin says {f.achievable} is reachable by hitting those targets.</p>
       )}
       {f.source === "estimate" && (

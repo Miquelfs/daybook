@@ -67,20 +67,39 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(g["needed_ramp_per_week"], round(28 / 24, 1))
         self.assertEqual(g["status"], "on track")
 
-    def test_fitness_age(self):
+    def test_fitness_age_fallbacks(self):
         c = _db()
+        c.execute("DELETE FROM user_profile")      # no birthdate: Daybook's model can't run
         c.execute("INSERT INTO garmin_physio VALUES ('2026-10-20', 49.0, NULL, '{}')")
         fa = summary(c, today=date(2026, 10, 21))["fitness_age"]
         self.assertEqual(fa["source"], "estimate")
-        self.assertEqual(fa["age"], 36)
         c.execute("INSERT INTO garmin_physio VALUES ('2026-10-21', 50.0, NULL, ?)",
                   (json.dumps({"max_metrics": [{"generic": {"fitnessAge": 29}}]}),))
         fa = summary(c, today=date(2026, 10, 21))["fitness_age"]
-        self.assertEqual((fa["value"], fa["source"], fa["delta"]), (29, "garmin", -7))
+        self.assertEqual((fa["value"], fa["source"]), (29, "garmin"))
 
+
+    def test_daybook_fitness_age_first_garmin_alongside(self):
+        c = _db()
+        c.execute("INSERT INTO garmin_physio VALUES ('2026-10-20', 52.6, NULL, '{}')")
+        c.execute("CREATE TABLE garmin_fitness_age (date TEXT, fitness_age REAL, chronological_age INT,"
+                  " achievable_fitness_age REAL, components_json TEXT, raw_payload TEXT)")
+        c.execute("INSERT INTO garmin_fitness_age VALUES ('2026-10-21', 22.4, 36, 20.0, '{}', '{}')")
+        fa = summary(c, today=date(2026, 10, 21))["fitness_age"]
+        self.assertEqual((fa["source"], fa["garmin"], fa["age"]), ("daybook", 22, 36))
+        self.assertEqual(fa["lever"]["title"], "Raise VO₂max")
+
+    def test_this_weeks_build_counts(self):
+        c = _db()     # flat for a month, then a week at the needed pace
+        c.execute("DELETE FROM training_load_daily")
+        for d, ctl in (("2026-09-23", 30), ("2026-10-14", 29.5), ("2026-10-21", 31.5)):
+            c.execute("INSERT INTO training_load_daily VALUES (?,'combined',?,30)", (d, ctl))
+        out = summary(c, today=date(2026, 10, 21))
+        self.assertEqual((out["load"]["ramp_7d"], out["goal"]["status"]), (2.0, "building"))
 
     def test_garmin_fitness_age_wins(self):
         c = _db()
+        c.execute("DELETE FROM user_profile")      # Daybook's model needs a birthdate; Garmin's row carries the age
         c.execute("INSERT INTO garmin_physio VALUES ('2026-10-20', 52.6, NULL, '{}')")
         c.execute("CREATE TABLE garmin_fitness_age (date TEXT, fitness_age REAL, chronological_age INT,"
                   " achievable_fitness_age REAL, components_json TEXT, raw_payload TEXT)")

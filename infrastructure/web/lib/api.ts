@@ -1583,15 +1583,18 @@ export interface ActivityAnalysis {
 // ── Activity training impact (GET /activities/{id}/impact) ───────────────────
 /** GET /training/fitness-summary — fitness/fatigue/form vs the race-day target, and fitness age. */
 export interface FitnessSummary {
-  load: { fitness: number; fatigue: number; form: number; ramp_per_week: number } | null;
+  load: { fitness: number; fatigue: number; form: number; ramp_per_week: number; ramp_7d: number | null } | null;
   goal: {
     name: string; race_date: string; weeks_to_race: number; target_fitness: number; pct: number;
     needed_ramp_per_week: number; projected_fitness: number; safe_ramp: number;
-    status: "there" | "on track" | "behind" | "too steep";
+    status: "there" | "on track" | "building" | "behind" | "too steep";
   } | null;
   fitness_age: {
-    value: number; source: "garmin" | "estimate"; vo2max: number | null; age: number | null; delta: number | null; as_of: string;
+    value: number; source: "daybook" | "garmin" | "estimate"; vo2max: number | null; age: number | null; delta: number | null; as_of: string;
     precise?: number; achievable?: number | null;
+    /** daybook source: Garmin's own number alongside, and the single biggest way down */
+    garmin?: number | null;
+    lever?: { title: string; now: number; target: string; unit: string; years: number } | null;
     components?: Record<string, { value: number | null; target: number | null }>;
   } | null;
   /** Whoop-style day strain (0–21), last 7 days, oldest first. */

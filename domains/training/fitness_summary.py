@@ -61,6 +61,19 @@ def _age(conn, t, today: date) -> int | None:
 
 
 def fitness_age(conn, t: set[str], today: date) -> dict | None:
+    """Daybook's own model (the Health page's number) — Garmin's alongside; Garmin / VO2max-only as fallbacks."""
+    from domains.health import fitness_age as own_model
+    own = own_model.compute(conn, today)
+    if own:
+        g = conn.execute("SELECT fitness_age FROM garmin_fitness_age WHERE fitness_age IS NOT NULL AND date >= ? "
+                         "ORDER BY date DESC LIMIT 1", ((today - timedelta(days=30)).isoformat(),)).fetchone() \
+            if "garmin_fitness_age" in t else None
+        lever = own["plan"][0] if own["plan"] else None
+        return {"value": own["fitness_age"], "precise": own["precise"], "source": "daybook",
+                "vo2max": own["vo2max"], "age": own["age"], "delta": own["delta"], "as_of": own["date"],
+                "achievable": own["floor"], "garmin": round(g[0]) if g else None,
+                "lever": {"title": lever["title"], "now": lever["now"], "target": lever["target"],
+                          "unit": lever["unit"], "years": lever["years"]} if lever else None}
     age = _age(conn, t, today)
     vo2row = conn.execute(
         """SELECT vo2max_run, vo2max_bike FROM garmin_physio
@@ -143,8 +156,11 @@ def summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
     now, back = rows[0], rows[-1]
     weeks_back = max(1.0, (date.fromisoformat(now["date"]) - date.fromisoformat(back["date"])).days / 7)
     ramp = (now["ctl"] - back["ctl"]) / weeks_back
+    week_ago = next((r for r in rows if (date.fromisoformat(now["date"]) - date.fromisoformat(r["date"])).days >= 7), None)
+    ramp_7d = now["ctl"] - week_ago["ctl"] if week_ago else None
     out["load"] = {"fitness": round(now["ctl"], 1), "fatigue": round(now["atl"], 1),
-                   "form": round(now["ctl"] - now["atl"], 1), "ramp_per_week": round(ramp, 1)}
+                   "form": round(now["ctl"] - now["atl"], 1), "ramp_per_week": round(ramp, 1),
+                   "ramp_7d": round(ramp_7d, 1) if ramp_7d is not None else None}
 
     if "race_goals" in t:
         g = conn.execute("SELECT name, race_type, race_date FROM race_goals WHERE status='active' AND race_date >= ? "
@@ -156,9 +172,11 @@ def summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
             gap = target - now["ctl"]
             needed = gap / build
             projected = now["ctl"] + ramp * build
+            # the 4-week rate lags a build that just started — a week at the needed pace counts
             status = ("there" if gap <= 0 else
                       "on track" if ramp >= needed * 0.9 else
-                      "too steep" if needed > SAFE_RAMP else "behind")
+                      "too steep" if needed > SAFE_RAMP else
+                      "building" if ramp_7d is not None and ramp_7d >= needed * 0.9 else "behind")
             out["goal"] = {"name": g["name"], "race_date": g["race_date"], "weeks_to_race": weeks,
                            "target_fitness": target, "pct": round(min(100, now["ctl"] / target * 100)),
                            "needed_ramp_per_week": round(needed, 1), "projected_fitness": round(projected),
