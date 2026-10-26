@@ -754,7 +754,8 @@ def _linked_plan_session(conn: sqlite3.Connection, activity_id: str):
             structure = None
         if structure:
             from domains.training.b_race import render_structure
-            structure = render_structure(structure, conn)
+            from domains.training.vo2_boost import as_ridden
+            structure = render_structure(as_ridden(structure, ps["session_type"], ps["intensity_zone"]), conn)
 
     weeks_to_race = None
     if ps["race_date"]:

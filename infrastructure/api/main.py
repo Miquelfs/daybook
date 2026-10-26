@@ -245,6 +245,10 @@ def _run_migrations() -> None:
     _conn17 = _get_conn()
     _migrate_hr_zones(_conn17)
     _conn17.close()
+    from domains.training.vo2_boost import apply_all as _vo2_boost     # weekly VO2 boost into the live plan
+    _conn18 = _get_conn()
+    _vo2_boost(_conn18)
+    _conn18.close()
     # money.db: all CREATE ... IF NOT EXISTS (receipts tables etc.) — idempotent
     from domains.money.money_db import init_money_db as _init_money_db
     _init_money_db()

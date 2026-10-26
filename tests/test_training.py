@@ -132,6 +132,87 @@ class ReflowTest(unittest.TestCase):
         self.assertIn("Activation", by_date.get("2027-04-22", ""))
 
 
+class HardSportTest(ReflowTest):
+    """A tennis match: its day is taken, it is the week's hard work, the 312 work stays."""
+
+    BOOST = "Cycling - Z2 + VO2 (trainer)"
+
+    def mark(self, d="2026-12-10", hard=True):
+        self.c.execute("INSERT OR REPLACE INTO training_day_blocks (date, note, load) VALUES (?,?,?)",
+                       (d, "Tennis match", "hard" if hard else None))
+        rf.reflow_goal(self.c, 1)
+
+    def boost(self):
+        return self.c.execute("SELECT status, intensity_zone, schedule_note, session_date FROM plan_sessions "
+                              "WHERE session_type=? AND week_number=1", (self.BOOST,)).fetchone()
+
+    def test_boost_is_placed_like_an_easy_ride(self):
+        b = self.boost()
+        self.assertEqual(b["status"], "pending")
+        self.assertIn("VO2 set", b["schedule_note"])
+
+    def test_match_switches_vo2_off_and_keeps_312_work(self):
+        keys_before = {r["session_type"] for r in self.week() if r["role"] == "key"}
+        self.mark()
+        b = self.boost()
+        self.assertEqual((b["status"], b["intensity_zone"]), ("pending", "Z2"))      # the ride stays, as Z2
+        self.assertIn("Tennis match (Thu) is this week's hard work", b["schedule_note"])
+        self.assertFalse([r for r in self.week() if r["session_date"] == "2026-12-10"])
+        self.assertEqual({r["session_type"] for r in self.week() if r["role"] == "key"}, keys_before)
+        self.assertFalse([r for r in self.week() if r["role"] == "long" and r["session_date"] == "2026-12-11"])
+
+    def test_removing_the_match_restores_the_week(self):
+        before = self.boost()
+        self.mark()
+        self.c.execute("DELETE FROM training_day_blocks")
+        rf.reflow_goal(self.c, 1)
+        self.assertEqual(tuple(self.boost()), tuple(before))
+
+    def test_a_plain_block_is_not_hard_work(self):
+        self.mark(hard=False)
+        self.assertNotIn("Tennis", self.boost()["schedule_note"])
+
+    def test_vo2_set_only_on_a_well_spaced_day(self):
+        from datetime import date, timedelta
+        for b in self.c.execute("SELECT * FROM plan_sessions WHERE session_type=? AND intensity_zone='Z5' "
+                                "AND status='pending'", (self.BOOST,)):
+            d = date.fromisoformat(b["session_date"])
+            near = self.c.execute(
+                "SELECT session_type, role, discipline, session_date FROM plan_sessions WHERE status='pending' "
+                "AND session_date IN (?,?)", ((d - timedelta(days=1)).isoformat(),
+                                              (d + timedelta(days=1)).isoformat())).fetchall()
+            self.assertFalse([n for n in near if n["role"] == "key" and n["discipline"] != "running"], b["session_date"])
+            self.assertFalse([n for n in near if n["role"] == "long" and n["session_date"] > b["session_date"]])
+
+    def test_ridden_without_the_set_when_off(self):
+        from domains.training.vo2_boost import as_ridden
+        from domains.training.plan_templates.mallorca_312 import z2_vo2
+        st = z2_vo2(5, 4, 90)["structure"]
+        off = as_ridden(st, self.BOOST, "Z2")
+        self.assertFalse([x for x in off if x.get("work_zone") == "Z5"])
+        self.assertEqual(sum(x["duration_min"] for x in off), sum(
+            x.get("duration_min") or x["reps"] * (x["work_min"] + x["rest_min"]) for x in st))
+        self.assertEqual(as_ridden(st, self.BOOST, "Z5"), st)
+
+
+class Vo2BoostTest(ReflowTest):
+    def test_converts_a_materialized_plan_once(self):
+        from datetime import date
+        from domains.training import vo2_boost
+        from domains.training.plan_templates.mallorca_312 import BOOST_TYPE, VO2_BOOST
+        # a plan made before the boost: put the Zone 2 rides back
+        self.c.execute("UPDATE plan_sessions SET session_type='Cycling - Zone 2 Ride', intensity_zone='Z2' "
+                       "WHERE session_type=?", (BOOST_TYPE,))
+        changed = vo2_boost.apply(self.c, 1, today=date(2026, 12, 7))
+        weeks = {r[0] for r in self.c.execute("SELECT week_number FROM plan_sessions WHERE session_type=?",
+                                              (BOOST_TYPE,))}
+        self.assertEqual(weeks, {w - 7 for w in VO2_BOOST if w > 7})   # plan starts at template week 8
+        self.assertEqual(len(changed), len(weeks))
+        self.assertEqual(vo2_boost.apply(self.c, 1, today=date(2026, 12, 7)), [])   # idempotent
+        r = self.c.execute("SELECT role, status FROM plan_sessions WHERE session_type=?", (BOOST_TYPE,)).fetchone()
+        self.assertEqual((r["role"], r["status"]), ("easy", "pending"))
+
+
 class CoachGuardRailsTest(ReflowTest):
     """Reuses ReflowTest's seeded, re-placed week (its tests run here too — cheap)."""
 

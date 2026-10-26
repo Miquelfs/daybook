@@ -41,7 +41,7 @@ DISTANCES_KM = {"half_marathon": 21.0975, "10k": 10.0, "marathon": 42.195}
 PACE_MULT = {"Z1": 1.37, "Z2": 1.27, "Z3": 1.07, "Z4": 1.00, "Z5": 0.93}
 RACE_PACE_FACTOR = {"half_marathon": 1.04, "10k": 0.99, "marathon": 1.10}   # × threshold pace
 PHASE2 = "01-04"                       # month-day the long-run phase starts (first Monday of January-ish)
-SWAP_TYPES = ("cycling - zone 2 ride",)
+SWAP_TYPES = ("cycling - zone 2 ride", "cycling - z2 + vo2 (trainer)")   # the VO2 boost is a Z2 ride too
 EXTRA_MIN_LIGHT, EXTRA_MIN_HEAVY, HEAVY_WEEK_MIN = 150, 90, 12 * 60   # extra running on top, per week
 NOTE_SWAP = "Swapped for a run ({name} build)"
 

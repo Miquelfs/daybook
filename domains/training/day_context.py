@@ -129,6 +129,17 @@ class DayContextReader:
         return (r[0] or "") if r else None
 
     @lru_cache(maxsize=512)
+    def hard_sport(self, d: str) -> str | None:
+        """A blocked day that is another sport's hard session (a tennis match): its note."""
+        if "training_day_blocks" not in self.tables:
+            return None
+        try:
+            r = self.conn.execute("SELECT note FROM training_day_blocks WHERE date=? AND load='hard'", (d,)).fetchone()
+        except sqlite3.OperationalError:          # before the column exists
+            return None
+        return (r[0] or "Hard session") if r else None
+
+    @lru_cache(maxsize=512)
     def sleep_hours(self, d: str) -> float | None:
         if "sleep" not in self.tables:
             return None
@@ -174,7 +185,12 @@ class DayContextReader:
         blk = self.block(d)
         if blk is not None:
             ctx["blocked"] = True
-            ctx["label"] = f"Blocked by you{': ' + blk if blk else ''}"
+            hard = self.hard_sport(d)
+            if hard:
+                ctx["hard_sport"] = hard
+                ctx["label"] = f"{hard} — counts as a hard day"
+            else:
+                ctx["label"] = f"Blocked by you{': ' + blk if blk else ''}"
             return ctx
         if not weekday_ok:
             ctx["label"] = "Not a training day (your settings)"

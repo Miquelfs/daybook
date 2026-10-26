@@ -146,6 +146,24 @@ def vo2(reps, work, mins=90):
     ], role="key")
 
 
+BOOST_TYPE = "Cycling - Z2 + VO2 (trainer)"
+
+
+def z2_vo2(reps, work, mins=75, optional=False):
+    """A midweek Z2 ride that carries a short VO2 set when the week has room for it: it is
+    placed like any easy ride (never costs a day or 312 work), and the reflow switches the
+    set off — intensity Z2, ridden all aerobic — beside a bike key day or a match, the day
+    before the long ride, or in a week that already has VO2 work (run intervals)."""
+    block = reps * work * 2
+    mins = min(max(mins, 15 + block + 10), 15 + block + 40)    # Z2 finish 10–40 min
+    return _sess(BOOST_TYPE, mins, "Z5", [
+        _steady("Warm-up", 15, "Z1", "Build to Z2 with 2× 1min openers"),
+        _intervals(f"{reps}× {work}min VO2", reps, work, work, "Z5", "Z1",
+                   "106–120% FTP — hard but repeatable, equal recovery"),
+        _steady("Aerobic finish", mins - 15 - block, "Z2", "60–75% FTP, conversational"),
+    ], role="easy", optional=optional)
+
+
 def ftp_test():
     # Calibrate after the trainer is warm — a cold belt/flywheel reads differently —
     # so every test is measured on the same scale.
@@ -301,11 +319,31 @@ def _race_phase(w: int) -> str:
     return "base" if w <= 8 else "build" if w <= 16 else "race_prep"
 
 
+# Weekly VO2 boost (plan week → reps × minutes): one midweek Z2 ride becomes z2_vo2 in
+# the build weeks that carry no VO2 work yet — not recovery / test / tour weeks, not the
+# B-race week, not the biggest 312 weeks or the taper. Progresses 5×3′ → 5×5′.
+VO2_BOOST = {3: (5, 3), 6: (5, 3), 8: (6, 3), 10: (4, 4), 13: (5, 4), 14: (5, 4),
+             16: (6, 4), 18: (4, 5), 20: (5, 5)}
+
+
+def _with_vo2(week: int, sessions: list) -> list:
+    if week not in VO2_BOOST:
+        return sessions
+    out, done = [], False
+    for x in sessions:
+        if not done and x["type"] == "Cycling - Zone 2 Ride" and not x.get("optional"):
+            out.append(z2_vo2(*VO2_BOOST[week], mins=x["duration"]))
+            done = True
+        else:
+            out.append(x)
+    return out
+
+
 # Week metadata for the race cockpit: phase band + recovery (✦) weeks.
 MALLORCA_312_TEMPLATE = (
-    [{"week": i + 1, "sessions": sess, "phase": "foundation", "recovery": i in (4, 6)}
+    [{"week": i + 1, "sessions": _with_vo2(i + 1, sess), "phase": "foundation", "recovery": i in (4, 6)}
      for i, sess in enumerate(_FOUNDATION)]
-    + [{"week": len(_FOUNDATION) + wk["week"], "sessions": wk["sessions"],
+    + [{"week": len(_FOUNDATION) + wk["week"], "sessions": _with_vo2(len(_FOUNDATION) + wk["week"], wk["sessions"]),
         "phase": _race_phase(wk["week"]), "recovery": wk["week"] in (4, 8, 12)}
        for wk in _RACE_PLAN]
 )

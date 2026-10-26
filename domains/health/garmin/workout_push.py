@@ -33,6 +33,7 @@ import sys
 from datetime import date, timedelta
 
 from domains.training import hr_zones
+from domains.training.vo2_boost import as_ridden
 from domains.training.b_race import RACE_TOKEN, race_pace_s, render_cue
 
 WINDOW_DAYS = 9            # today … next Sunday after the weekend planning
@@ -112,6 +113,7 @@ def trimmed_structure(session: dict) -> tuple[list[dict], int]:
     (coach / roster / volume factor) trimming its main steady block. Shared with
     the Intervals.icu → MyWhoosh push."""
     structure = json.loads(session["structure_json"]) if session.get("structure_json") else None
+    structure = as_ridden(structure, session.get("session_type"), session.get("intensity_zone"))
     if not structure:
         structure = [{"kind": "steady", "label": session["session_type"], "duration_min": session["effective_duration_min"]
                       or session["duration_min"], "zone": session["intensity_zone"]}]

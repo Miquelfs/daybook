@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, ChevronLeft, ChevronRight, Wand2, Check, Ban } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Wand2, Check, Ban, Flame } from "lucide-react";
 import { localISODate } from "@/lib/dates";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -36,6 +36,8 @@ interface PlannerDay {
     woke_away: boolean;
   };
   block_note: string | null;
+  /** another sport's hard session that day (a tennis match) */
+  hard_sport: string | null;
 }
 
 interface PlannerWeek {
@@ -60,8 +62,9 @@ function fmtWindow(min: number) {
 /**
  * Sunday ritual: lay out next week around the roster. Move a session with its
  * day picker (it then stays put — the nightly re-plan respects hand moves),
- * block a day you can't train, let "Auto-arrange" redo the week from scratch,
- * and confirm when it looks right.
+ * block a day you can't train — or mark another sport's hard session (a tennis
+ * match: it counts as a hard day and covers the week's VO2 work) — let
+ * "Auto-arrange" redo the week from scratch, and confirm when it looks right.
  */
 export function WeekPlanner({ goalId, initialDate, onClose }: {
   goalId: number;
@@ -111,6 +114,19 @@ export function WeekPlanner({ goalId, initialDate, onClose }: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date: d.date, note }),
+      });
+    });
+
+  const markHard = (d: PlannerDay) =>
+    act(async () => {
+      const note = window.prompt(
+        `What's on ${d.day_name} ${d.date.slice(5)}? It counts as a hard day: the week's VO2 session is ` +
+        "covered by it, and intervals / the long ride stay off the days around it.", "Tennis match");
+      if (note === null) return;
+      return fetch(`${BASE}/race-plans/day-blocks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: d.date, note: note.trim() || "Tennis match", hard: true }),
       });
     });
 
@@ -172,6 +188,16 @@ export function WeekPlanner({ goalId, initialDate, onClose }: {
                     {fmtWindow(d.context.window_min)}{d.context.window_min > 0 && !d.context.intense_ok ? " · easy only" : ""}
                   </p>
                 </div>
+                {!past && !d.context.blocked && (
+                  <button
+                    onClick={() => markHard(d)}
+                    disabled={busy}
+                    title="Another sport's hard session — a tennis match"
+                    className="shrink-0 flex items-center gap-1 text-[10px] px-2 py-1 rounded-md border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA]"
+                  >
+                    <Flame size={10} /> Match
+                  </button>
+                )}
                 {!past && (
                   <button
                     onClick={() => toggleBlock(d)}
@@ -182,7 +208,7 @@ export function WeekPlanner({ goalId, initialDate, onClose }: {
                         : "border-[#27272A] text-[#71717A] hover:text-[#A1A1AA]"
                     }`}
                   >
-                    <Ban size={10} /> {d.context.blocked ? "Unblock" : "Block"}
+                    {d.hard_sport ? <Flame size={10} /> : <Ban size={10} />} {d.context.blocked ? (d.hard_sport ? "Remove" : "Unblock") : "Block"}
                   </button>
                 )}
               </div>
@@ -193,12 +219,14 @@ export function WeekPlanner({ goalId, initialDate, onClose }: {
                     <div key={s.id} className="flex items-center gap-2 bg-[#18181B] rounded-lg px-2.5 py-1.5">
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ background: ZONE_COLOUR[s.intensity_zone] ?? "#52525B" }} />
                       <div className="flex-1 min-w-0">
-                        <p className={`text-xs truncate ${s.status === "completed" ? "text-[#4ADE80]" : "text-[#E4E4E7]"}`}>
+                        <p className={`text-xs truncate ${s.status === "completed" ? "text-[#4ADE80]"
+                          : s.status === "displaced" ? "text-[#52525B] line-through" : "text-[#E4E4E7]"}`}>
                           {s.status === "completed" ? "✓ " : ""}{s.session_type.replace(/^Cycling - /, "")}
                           {s.is_optional ? <span className="text-[#52525B]"> · optional</span> : null}
                         </p>
                         <p className="text-[10px] text-[#52525B]">
-                          {s.effective_duration_min} min · {s.intensity_zone}{s.is_displaced ? " · moved by you" : ""}{s.on_garmin ? " · ⌚ on Garmin" : ""}
+                          {s.status === "displaced" && s.schedule_note ? s.schedule_note
+                            : <>{s.effective_duration_min} min · {s.intensity_zone}{s.is_displaced ? " · moved by you" : ""}{s.on_garmin ? " · ⌚ on Garmin" : ""}</>}
                         </p>
                       </div>
                       {s.status === "pending" && !past && (

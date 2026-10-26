@@ -523,6 +523,9 @@ def _session_out(row: sqlite3.Row, conn: Optional[sqlite3.Connection] = None) ->
             structure = json.loads(row["structure_json"])
         except Exception:
             structure = None
+    if structure:
+        from domains.training.vo2_boost import as_ridden
+        structure = as_ridden(structure, row["session_type"], row["intensity_zone"])
     if structure and conn is not None:
         from domains.training.b_race import render_structure
         structure = render_structure(structure, conn)
@@ -1193,6 +1196,7 @@ def delete_training_block(block_id: int, conn: DB):
 class DayBlock(BaseModel):
     date: str
     note: Optional[str] = None
+    hard: bool = False        # another sport's hard session (a tennis match) — counts as a key day
 
 
 def _reflow_active(conn: sqlite3.Connection) -> None:
@@ -1202,10 +1206,12 @@ def _reflow_active(conn: sqlite3.Connection) -> None:
 
 @router.post("/day-blocks", status_code=201)
 def add_day_block(body: DayBlock, conn: DB):
-    """Mark a day unavailable (busy, family, sick…) → the week re-plans around it."""
+    """Mark a day unavailable (busy, family, sick…) → the week re-plans around it.
+    hard=True: it's another sport's hard session (a tennis match) — the plan keeps key
+    days and the long ride off its neighbours and lets it stand in for the week's VO2 work."""
     _ensure_reflow_columns(conn)
-    conn.execute("INSERT OR REPLACE INTO training_day_blocks (date, note) VALUES (?, ?)",
-                 (body.date, (body.note or "").strip() or None))
+    conn.execute("INSERT OR REPLACE INTO training_day_blocks (date, note, load) VALUES (?, ?, ?)",
+                 (body.date, (body.note or "").strip() or None, "hard" if body.hard else None))
     conn.commit()
     _reflow_active(conn)
     return {"date": body.date, "note": body.note}
@@ -2053,6 +2059,7 @@ def goal_week(goal_id: int, conn: DB, date: Optional[str] = Query(None)):
             "context": {k: ctx[k] for k in ("label", "window_min", "intense_ok", "blocked",
                                             "woke_away", "night_away", "report_time", "end_time")},
             "block_note": reader.block(ds),
+            "hard_sport": ctx.get("hard_sport"),
         })
         d += timedelta(days=1)
 
