@@ -25,7 +25,7 @@ import math
 import sqlite3
 from bisect import bisect_right
 
-VERSION = 3
+VERSION = 4   # 4: HR zones from threshold HR (hr_zones)
 MAX_GAP_S = 30
 MAX_SERIES = 600
 

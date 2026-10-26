@@ -10,31 +10,11 @@ Run on the Pi:  python -m infrastructure.db.backfill_athlete_zones [--dry-run]
 """
 
 import argparse
-import json
 import sys
 from datetime import date, timedelta
 
+from domains.training import hr_zones
 from infrastructure.db.connection import get_connection
-
-# %max-HR band edges (shared shape with migrate_strava_analytics seed)
-_HR_BANDS = [
-    ("Z1", 0.00, 0.65),
-    ("Z2", 0.65, 0.75),
-    ("Z3", 0.75, 0.82),
-    ("Z4", 0.82, 0.88),
-    ("Z5", 0.88, 1.60),
-]
-
-
-def _zones_json(max_hr: int) -> str:
-    bands = []
-    for name, lo, hi in _HR_BANDS:
-        bands.append({
-            "name": name,
-            "min_hr": round(max_hr * lo),
-            "max_hr": 999 if hi >= 1.5 else round(max_hr * hi),
-        })
-    return json.dumps(bands)
 
 
 def _observed_max_hr(conn) -> int:
@@ -152,7 +132,8 @@ def backfill(conn, dry_run: bool = False):
                 threshold_pace_s_per_km, css_pace_s_per_100m, zones_json)
                VALUES (?,?,?,?,?,?,?,?)""",
             (today, z["sport"], z["max_hr"], z["threshold_hr"], z["ftp_w"],
-             z["threshold_pace_s_per_km"], z["css_pace_s_per_100m"], _zones_json(z["max_hr"])),
+             z["threshold_pace_s_per_km"], z["css_pace_s_per_100m"],
+             hr_zones.zones_json(z["sport"], z["threshold_hr"], z["max_hr"])),
         )
 
     if not dry_run:

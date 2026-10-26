@@ -32,21 +32,19 @@ import sqlite3
 import sys
 from datetime import date, timedelta
 
+from domains.training import hr_zones
 from domains.training.b_race import RACE_TOKEN, race_pace_s, render_cue
 
 WINDOW_DAYS = 9            # today … next Sunday after the weekend planning
 
 CYCLING = {"sportTypeId": 2, "sportTypeKey": "cycling"}
 RUNNING = {"sportTypeId": 1, "sportTypeKey": "running"}
-# running: %LTHR (Friel run zones) for the easy work, pace bands as × threshold pace (s/km) for the quality work
-RUN_LTHR_PCT = {"Z1": (70, 84), "Z2": (85, 89), "Z3": (90, 94), "Z4": (95, 99), "Z5": (100, 106)}
+# running: HR (the stored zone table) for the easy work, pace bands as × threshold pace (s/km) for the quality work
 RUN_PACE_X = {"Z3": (1.10, 1.04), "Z4": (1.03, 0.97), "Z5": (0.95, 0.88)}     # (slow end, fast end)
 RACE_PACE_BAND = (1.02, 0.98)          # race-pace steps: ±2% around the race's own pace
 STEP = {"warmup": (1, "warmup"), "cooldown": (2, "cooldown"), "interval": (3, "interval"),
         "recovery": (4, "recovery"), "repeat": (6, "repeat")}
 FTP_PCT = {"Z1": (40, 55), "Z2": (56, 75), "Z3": (88, 94), "Z4": (95, 105), "Z5": (106, 120)}
-# %LTHR when the zone table is missing (Friel cycling zones)
-LTHR_PCT = {"Z1": (60, 80), "Z2": (81, 89), "Z3": (90, 93), "Z4": (94, 99), "Z5": (100, 106)}
 
 
 # ── payload ──────────────────────────────────────────────────────────────────
@@ -55,36 +53,28 @@ def _targets(conn: sqlite3.Connection) -> dict:
     """{'ftp': W|None, 'hr': {Z: (lo, hi)}} from the latest ride zones."""
     out: dict = {"ftp": None, "hr": {}, "run_hr": {}, "run_pace": {}}
     try:
-        z = conn.execute("SELECT ftp_w, threshold_hr, zones_json FROM athlete_zones WHERE sport='ride' "
+        z = conn.execute("SELECT ftp_w, threshold_hr, max_hr, zones_json FROM athlete_zones WHERE sport='ride' "
                          "ORDER BY valid_from DESC LIMIT 1").fetchone()
     except sqlite3.OperationalError:
         return out
     if z:
         out["ftp"] = z["ftp_w"]
     try:
-        r = conn.execute("SELECT threshold_hr, threshold_pace_s_per_km FROM athlete_zones WHERE sport='run' "
-                         "ORDER BY valid_from DESC LIMIT 1").fetchone()
+        r = conn.execute("SELECT threshold_hr, max_hr, zones_json, threshold_pace_s_per_km FROM athlete_zones "
+                         "WHERE sport='run' ORDER BY valid_from DESC LIMIT 1").fetchone()
     except sqlite3.OperationalError:
         r = None
-    if r and r["threshold_hr"]:
-        out["run_hr"] = {k: (round(r["threshold_hr"] * lo / 100), round(r["threshold_hr"] * hi / 100))
-                         for k, (lo, hi) in RUN_LTHR_PCT.items()}
+    # HR targets are the stored zone table — the same beats Daybook grades the activity by
+    if r:
+        out["run_hr"] = hr_zones.watch_targets(hr_zones.stored(r, "run"), r["max_hr"])
     if r and r["threshold_pace_s_per_km"]:
         t = r["threshold_pace_s_per_km"]
         # Garmin pace targets are speeds in m/s: slower bound first
         out["run_pace"] = {k: (round(1000 / (t * slow), 3), round(1000 / (t * fast), 3))
                            for k, (slow, fast) in RUN_PACE_X.items()}
         out["run_threshold_pace"] = t
-    if z and z["threshold_hr"]:
-        for k, (lo, hi) in LTHR_PCT.items():
-            out["hr"][k] = (round(z["threshold_hr"] * lo / 100), round(z["threshold_hr"] * hi / 100))
-    elif z:
-        try:
-            for b in json.loads(z["zones_json"] or "[]"):
-                if b.get("name") in FTP_PCT and b.get("min_hr"):
-                    out["hr"][b["name"]] = (b["min_hr"], min(b.get("max_hr") or 220, 220))
-        except ValueError:
-            pass
+    if z:
+        out["hr"] = hr_zones.watch_targets(hr_zones.stored(z, "ride"), z["max_hr"])
     return out
 
 

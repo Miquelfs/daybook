@@ -241,6 +241,10 @@ def _run_migrations() -> None:
     _conn16 = _get_conn()
     _migrate_live_cues(_conn16)
     _conn16.close()
+    from infrastructure.db.migrate_hr_zones import migrate as _migrate_hr_zones
+    _conn17 = _get_conn()
+    _migrate_hr_zones(_conn17)
+    _conn17.close()
     # money.db: all CREATE ... IF NOT EXISTS (receipts tables etc.) — idempotent
     from domains.money.money_db import init_money_db as _init_money_db
     _init_money_db()

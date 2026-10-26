@@ -179,15 +179,7 @@ def _latest_zone_row(conn: sqlite3.Connection, sport: str) -> Optional[sqlite3.R
         return None
 
 
-_HR_BANDS = [("Z1", 0.0, 0.65), ("Z2", 0.65, 0.75), ("Z3", 0.75, 0.82),
-             ("Z4", 0.82, 0.88), ("Z5", 0.88, 1.6)]
-
-
-def _zones_json_from_max(max_hr: int) -> str:
-    return json.dumps([
-        {"name": n, "min_hr": round(max_hr * lo), "max_hr": 999 if hi >= 1.5 else round(max_hr * hi)}
-        for n, lo, hi in _HR_BANDS
-    ])
+from domains.training import hr_zones
 
 
 def _race_sweat_rate(conn: sqlite3.Connection) -> Optional[float]:
@@ -1486,11 +1478,22 @@ def get_discipline_zones(goal_id: int, conn: DB):
 
     # ---- RUN: reuse the /pace-zones tiering for the threshold, then bands ----
     pace = get_pace_zones(goal_id, conn)
+    run_zones = {z: dict(v) for z, v in (pace.get("zones") or {}).items()}
+    # HR bands from the stored table — the watch's targets. Easy zones lead with HR
+    # (that's what the watch shows for them); quality zones keep pace first.
+    run_row = _latest_zone_row(conn, "run")
+    if run_row is not None:
+        targets = hr_zones.watch_targets(hr_zones.stored(run_row, "run"), run_row["max_hr"])
+        for z, entry in run_zones.items():
+            if z in targets:
+                entry["hr_lo"], entry["hr_hi"] = targets[z]
+                if z in ("Z1", "Z2"):
+                    entry["display"] = f"{entry['hr_lo']}–{entry['hr_hi']} bpm · ~{entry['display']}"
     out["run"] = {
         "source": pace.get("source"),
         "threshold_pace_s_km": pace.get("threshold_pace_s_km"),
         "threshold_pace_display": pace.get("threshold_pace_display"),
-        "zones": pace.get("zones"),
+        "zones": run_zones,
     }
 
     # ---- RIDE: HR bands from athlete_zones + speed hint from reference pace ----
@@ -1637,7 +1640,7 @@ def create_benchmark(body: BenchmarkCreate, conn: DB):
            VALUES (?,?,?,?,?,?,?,?)""",
         (test_date, sport, row_vals["max_hr"], row_vals["threshold_hr"], row_vals["ftp_w"],
          row_vals["threshold_pace_s_per_km"], row_vals["css_pace_s_per_100m"],
-         _zones_json_from_max(row_vals["max_hr"])),
+         hr_zones.zones_json(sport, row_vals["threshold_hr"], row_vals["max_hr"])),
     )
 
     delta = {"old": old_val, "new": new_val,

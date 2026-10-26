@@ -87,5 +87,42 @@ class LiveCuesTest(unittest.TestCase):
         self.assertEqual(steps[0]["targetType"]["workoutTargetTypeKey"], "heart.rate.zone")   # easy part by HR
 
 
+class HrZonesTest(unittest.TestCase):
+    """The watch's HR targets and Daybook's grading come from the same stored table."""
+
+    def _db(self):
+        import sqlite3
+        from domains.training import hr_zones
+        c = sqlite3.connect(":memory:")
+        c.row_factory = sqlite3.Row
+        c.execute("CREATE TABLE athlete_zones (valid_from TEXT, sport TEXT, max_hr INT, threshold_hr INT, ftp_w REAL,"
+                  " threshold_pace_s_per_km REAL, css_pace_s_per_100m REAL, zones_json TEXT)")
+        for sport, thr in (("run", 183), ("ride", 168)):
+            c.execute("INSERT INTO athlete_zones VALUES ('2026-10-25',?,203,?,240,274,NULL,?)",
+                      (sport, thr, hr_zones.zones_json(sport, thr, 203)))
+        return c
+
+    def test_threshold_zones(self):
+        from domains.training import hr_zones
+        z = {b["name"]: (b["min_hr"], b["max_hr"]) for b in hr_zones.bands("run", 183, 203)}
+        self.assertEqual(z["Z2"], (148, 165))        # the whole easy range, not a 7-beat slot
+        self.assertEqual(z["Z5"][0], 183)            # threshold is the top of Z4, not inside Z5
+        self.assertEqual(hr_zones.bands("run", None, 203)[1], {"name": "Z2", "min_hr": 132, "max_hr": 152})
+
+    def test_watch_targets_match_the_graded_zones(self):
+        import json
+        from domains.training import hr_zones
+        c = self._db()
+        tg = workout_push._targets(c)
+        for sport, key in (("run", "run_hr"), ("ride", "hr")):
+            stored = {b["name"]: b for b in json.loads(c.execute(
+                "SELECT zones_json FROM athlete_zones WHERE sport=?", (sport,)).fetchone()[0])}
+            for zone, (lo, hi) in tg[key].items():
+                self.assertGreaterEqual(lo, stored[zone]["min_hr"], (sport, zone))
+                self.assertLessEqual(hi, min(stored[zone]["max_hr"], 203), (sport, zone))
+        self.assertEqual(tg["run_hr"]["Z2"], (148, 164))
+        self.assertEqual(hr_zones.watch_targets(hr_zones.bands("run", 183, 203), 203)["Z5"], (183, 203))
+
+
 if __name__ == "__main__":
     unittest.main()

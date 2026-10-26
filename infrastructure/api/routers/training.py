@@ -1393,15 +1393,7 @@ class ZonePut(BaseModel):
     css_pace_s_per_100m: Optional[float] = None
 
 
-_HR_BANDS = [("Z1", 0.0, 0.65), ("Z2", 0.65, 0.75), ("Z3", 0.75, 0.82),
-             ("Z4", 0.82, 0.88), ("Z5", 0.88, 1.6)]
-
-
-def _zones_json_from_max(max_hr: int) -> str:
-    return json.dumps([
-        {"name": n, "min_hr": round(max_hr * lo), "max_hr": 999 if hi >= 1.5 else round(max_hr * hi)}
-        for n, lo, hi in _HR_BANDS
-    ])
+from domains.training import hr_zones
 
 
 @router.put("/zones/{sport}")
@@ -1433,7 +1425,7 @@ def put_athlete_zones(sport: str, body: ZonePut, conn: DB):
            (valid_from, sport, max_hr, threshold_hr, ftp_w,
             threshold_pace_s_per_km, css_pace_s_per_100m, zones_json)
            VALUES (?,?,?,?,?,?,?,?)""",
-        (today, sport, max_hr, threshold_hr, ftp_w, thr_pace, css, _zones_json_from_max(max_hr)),
+        (today, sport, max_hr, threshold_hr, ftp_w, thr_pace, css, hr_zones.zones_json(sport, threshold_hr, max_hr)),
     )
     conn.commit()
     row = conn.execute(
