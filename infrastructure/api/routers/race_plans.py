@@ -131,12 +131,14 @@ _ZONE_META = {
     "Z5": {"hr_pct": "95–100%", "rpe": "9–10", "label": "VO2max"},
 }
 
-# threshold-pace multipliers (Z4 = threshold) — the same scale as the run sessions'
-# cues (b_race.paces) and the Garmin pace targets, so the card, cue and watch agree
-_PACE_MULT = {"Z1": 1.37, "Z2": 1.27, "Z3": 1.07, "Z4": 1.00, "Z5": 0.93}
+# threshold-pace multipliers (Z4 = threshold) — the one scale shared with the session
+# cues and the Garmin pace targets, so the card, cue and watch agree
+from domains.training.b_race import PACE_MULT as _PACE_MULT
 # %FTP bands for trainer (ERG) sessions — the road bike has no power meter, so
-# outdoor rides keep HR; Z3 is sweet spot, matching the plans' intent.
-_FTP_PCT = {"Z1": (0, 55), "Z2": (56, 75), "Z3": (88, 94), "Z4": (95, 105), "Z5": (106, 120)}
+# outdoor rides keep HR; Z3 is sweet spot. The same bands the watch / MyWhoosh get
+# (the card shows Z1 from 0: recovery has no floor).
+from domains.health.garmin.workout_push import FTP_PCT as _ERG_FTP_PCT
+_FTP_PCT = {**_ERG_FTP_PCT, "Z1": (0, _ERG_FTP_PCT["Z1"][1])}
 # speed factors relative to a hard-steady reference speed (bike, no power meter)
 _SPEED_FACTOR = {"Z1": 0.72, "Z2": 0.85, "Z3": 0.93, "Z4": 1.00, "Z5": 1.06}
 # swim CSS offsets in seconds/100m (Z4 = CSS)

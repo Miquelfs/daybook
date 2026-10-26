@@ -35,6 +35,9 @@ import sqlite3
 from datetime import date, timedelta
 
 DISTANCES_KM = {"half_marathon": 21.0975, "10k": 10.0, "marathon": 42.195}
+# The one run pace scale (× threshold pace, Z4 = threshold). The plan card's zones,
+# the session cues and the Garmin pace targets all read it — tests hold them together.
+PACE_MULT = {"Z1": 1.37, "Z2": 1.27, "Z3": 1.07, "Z4": 1.00, "Z5": 0.93}
 RACE_PACE_FACTOR = {"half_marathon": 1.04, "10k": 0.99, "marathon": 1.10}   # × threshold pace
 PHASE2 = "01-04"                       # month-day the long-run phase starts (first Monday of January-ish)
 SWAP_TYPES = ("cycling - zone 2 ride",)
@@ -74,7 +77,8 @@ def fmt_time(s: float) -> str:
 def paces(conn, race_type: str) -> dict:
     t = threshold_pace(conn)
     race = t * RACE_PACE_FACTOR.get(race_type, 1.04)
-    return {"easy": t * 1.27, "tempo": t * 1.07, "threshold": t, "vo2": t * 0.93, "race": race,
+    return {"easy": t * PACE_MULT["Z2"], "tempo": t * PACE_MULT["Z3"], "threshold": t * PACE_MULT["Z4"],
+            "vo2": t * PACE_MULT["Z5"], "race": race,
             "race_time_s": race * DISTANCES_KM.get(race_type, 21.0975)}
 
 
