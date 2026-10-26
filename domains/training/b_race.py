@@ -31,6 +31,7 @@ the new sessions around the roster like any other.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import date, timedelta
 
@@ -82,6 +83,45 @@ def paces(conn, race_type: str) -> dict:
             "race_time_s": race * DISTANCES_KM.get(race_type, 21.0975)}
 
 
+# ── live paces in cues ───────────────────────────────────────────────────────
+# Cues never store a pace: zone paces show live beside the cue (card) or as the
+# step target (watch), and race pace is a token rendered from today's threshold —
+# so a new threshold reaches every session already in the plan.
+
+RACE_TOKEN = re.compile(r"\{pace:race:(\w+)\}")
+_STORED_PACE = re.compile(r"(?:~\s*)?\d{1,2}:\d{2}/km")
+
+
+def race_token(race_type: str) -> str:
+    return "{pace:race:%s}" % race_type
+
+
+def race_pace_s(threshold_s: float, race_type: str) -> float:
+    return threshold_s * RACE_PACE_FACTOR.get(race_type, 1.04)
+
+
+def render_cue(cue: str | None, threshold_s: float) -> str | None:
+    if not cue or "{pace:" not in cue:
+        return cue
+    return RACE_TOKEN.sub(lambda m: fmt_pace(race_pace_s(threshold_s, m.group(1))), cue)
+
+
+def render_structure(structure, conn) -> list | None:
+    """The stored structure with race-pace tokens filled in from today's threshold."""
+    if not structure or "{pace:" not in json.dumps(structure):
+        return structure
+    t = threshold_pace(conn)
+    return [{**st, "cue": render_cue(st.get("cue"), t)} if st.get("cue") else st for st in structure]
+
+
+def strip_stored_pace(cue: str) -> str:
+    """'conversational, ~5:48/km' → 'conversational' (for sessions written before cues went live)."""
+    out = _STORED_PACE.sub("", cue)
+    out = re.sub(r"\s*([,;—])\s*(?=[,;—]|$)", "", out)        # separators left dangling
+    out = re.sub(r"^\s*[,;—]\s*", "", out)
+    return re.sub(r"\s{2,}", " ", out).strip()
+
+
 # ── run sessions (same structure format as the plan templates) ───────────────
 
 def _steady(label, minutes, zone, cue=None):
@@ -100,7 +140,7 @@ def _intervals(label, reps, work_min, rest_min, work_zone, cue=None):
 
 
 def easy_run(p, mins, strides=False) -> dict:
-    st = [_steady("Easy run", mins - (5 if strides else 0), "Z2", f"conversational, ~{fmt_pace(p['easy'])}")]
+    st = [_steady("Easy run", mins - (5 if strides else 0), "Z2", "conversational")]
     if strides:
         st.append(_steady("6 × 20 s strides", 5, "Z1", "relaxed and fast, full recovery between"))
     return {"type": "Running - Easy Run", "duration": mins, "zone": "Z2", "structure": st, "role": "run"}
@@ -109,22 +149,22 @@ def easy_run(p, mins, strides=False) -> dict:
 def quality_run(p, week_i: int, late: bool) -> dict:
     wu, cd = _steady("Warm-up", 15, "Z2", "easy jog"), _steady("Cool-down", 10, "Z1")
     if late and week_i % 3 == 2:                      # race-pace blocks in the last phase
-        main = _intervals("3 × 2 km at race pace", 3, 9, 2, "Z4", f"~{fmt_pace(p['race'])}, controlled")
+        main = _intervals("3 × 2 km at race pace", 3, 9, 2, "Z4", f"~{p['race_token']}, controlled")
         name, mins = "Running - Goal Pace", 15 + 33 + 10
     elif week_i % 2 == 0:
-        main = _intervals("5 × 3 min hard", 5, 3, 2, "Z5", f"~{fmt_pace(p['vo2'])} — the VO2max session")
+        main = _intervals("5 × 3 min hard", 5, 3, 2, "Z5", "the VO2max session")
         name, mins = "Running - Intervals", 15 + 25 + 10
     else:
-        main = (_intervals("3 × 8 min threshold", 3, 8, 2, "Z4", f"~{fmt_pace(p['threshold'])}") if late else
-                _intervals("2 × 10 min tempo", 2, 10, 3, "Z3", f"~{fmt_pace(p['tempo'])}, comfortably hard"))
+        main = (_intervals("3 × 8 min threshold", 3, 8, 2, "Z4", "even effort") if late else
+                _intervals("2 × 10 min tempo", 2, 10, 3, "Z3", "comfortably hard"))
         name, mins = "Running - Tempo", 15 + (30 if late else 26) + 10
     return {"type": name, "duration": mins, "zone": main["work_zone"], "structure": [wu, main, cd], "role": "key"}
 
 
 def long_run(p, mins, race_finish: int = 0) -> dict:
-    st = [_steady("Long run", mins - race_finish, "Z2", f"easy, ~{fmt_pace(p['easy'])}; gel after 60 min")]
+    st = [_steady("Long run", mins - race_finish, "Z2", "easy; gel after 60 min")]
     if race_finish:
-        st.append(_steady("Finish at race pace", race_finish, "Z4", f"~{fmt_pace(p['race'])}"))
+        st.append(_steady("Finish at race pace", race_finish, "Z4", f"~{p['race_token']}"))
     return {"type": "Running - Long Run", "duration": mins, "zone": "Z2", "structure": st, "role": "long"}
 
 
@@ -194,7 +234,7 @@ def create(conn, goal_id: int, name: str, race_date: str, race_type: str = "half
         raise ValueError("the B race must be after today and before the main race")
     if conn.execute("SELECT 1 FROM b_races WHERE goal_id=? AND race_date=?", (goal_id, race_date)).fetchone():
         raise ValueError("there's already a race on that day")
-    p = paces(conn, race_type)
+    p = {**paces(conn, race_type), "race_token": race_token(race_type)}
     ch: dict = {"inserted": [], "swapped": [], "modified": []}
     blocked = _blocked_weeks(conn)
     race_monday = _monday(race)
@@ -268,7 +308,7 @@ def create(conn, goal_id: int, name: str, race_date: str, race_type: str = "half
             conn.execute("UPDATE plan_sessions SET effective_duration_min=?, eff_override=?, intensity_zone='Z2', "
                          "schedule_note=? WHERE id=?", (60, 60, f"{name} week — short and easy", s["id"]))
     sharpener = {"type": "Running - Sharpener", "duration": 40, "zone": "Z4", "role": "key", "structure": [
-        _steady("Warm-up", 15, "Z2"), _intervals("3 × 1 km at race pace", 3, 5, 2, "Z4", f"~{fmt_pace(p['race'])}"),
+        _steady("Warm-up", 15, "Z2"), _intervals("3 × 1 km at race pace", 3, 5, 2, "Z4", f"~{p['race_token']}"),
         _steady("Cool-down", 10, "Z1")]}
     ch["inserted"].append(_insert(conn, goal_id, race - timedelta(days=4), sharpener, f"{name} week", pinned=True))
     ch["inserted"].append(_insert(conn, goal_id, race - timedelta(days=2), easy_run(p, 30), f"{name} week",
@@ -279,8 +319,8 @@ def create(conn, goal_id: int, name: str, race_date: str, race_type: str = "half
     race_min = round(p["race_time_s"] / 60)
     km = DISTANCES_KM.get(race_type, 21.0975)
     race_s = {"type": f"Race - {name}", "duration": race_min, "zone": "Z4", "role": "key", "structure": [
-        _steady("First 5 km", round(race_min * 5 / km), "Z3", f"a touch slower than {fmt_pace(p['race'])} — settle"),
-        _steady("Race", round(race_min * (km - 8) / km), "Z4", f"hold ~{fmt_pace(p['race'])}"),
+        _steady("First 5 km", round(race_min * 5 / km), "Z3", f"a touch slower than {p['race_token']} — settle"),
+        _steady("Race", round(race_min * (km - 8) / km), "Z4", f"hold ~{p['race_token']}"),
         _steady("Last 3 km", race_min - round(race_min * 5 / km) - round(race_min * (km - 8) / km), "Z4",
                 "whatever is left")]}
     ch["inserted"].append(_insert(conn, goal_id, race, race_s, f"{name} — target ~{fmt_time(p['race_time_s'])}",

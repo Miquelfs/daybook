@@ -32,6 +32,8 @@ import sqlite3
 import sys
 from datetime import date, timedelta
 
+from domains.training.b_race import RACE_TOKEN, race_pace_s, render_cue
+
 WINDOW_DAYS = 9            # today … next Sunday after the weekend planning
 
 CYCLING = {"sportTypeId": 2, "sportTypeKey": "cycling"}
@@ -39,6 +41,7 @@ RUNNING = {"sportTypeId": 1, "sportTypeKey": "running"}
 # running: %LTHR (Friel run zones) for the easy work, pace bands as × threshold pace (s/km) for the quality work
 RUN_LTHR_PCT = {"Z1": (70, 84), "Z2": (85, 89), "Z3": (90, 94), "Z4": (95, 99), "Z5": (100, 106)}
 RUN_PACE_X = {"Z3": (1.10, 1.04), "Z4": (1.03, 0.97), "Z5": (0.95, 0.88)}     # (slow end, fast end)
+RACE_PACE_BAND = (1.02, 0.98)          # race-pace steps: ±2% around the race's own pace
 STEP = {"warmup": (1, "warmup"), "cooldown": (2, "cooldown"), "interval": (3, "interval"),
         "recovery": (4, "recovery"), "repeat": (6, "repeat")}
 FTP_PCT = {"Z1": (40, 55), "Z2": (56, 75), "Z3": (88, 94), "Z4": (95, 105), "Z5": (106, 120)}
@@ -157,16 +160,28 @@ def build_workout(session: dict, tg: dict) -> dict | None:
     indoor = not run and is_indoor(stype)
     structure, eff = trimmed_structure(session)
     is_test = stype.lower().startswith("test")
+    tp = tg.get("run_threshold_pace")
+
+    def race_pace(st: dict) -> float | None:
+        """Race-pace steps carry a {pace:race:<type>} token: their target is race pace, not the Z4 band."""
+        m = RACE_TOKEN.search(st.get("cue") or "") if run and tp else None
+        return race_pace_s(tp, m.group(1)) if m else None
+
+    def text(st: dict) -> str:
+        return " — ".join(x for x in (st.get("label"), render_cue(st.get("cue"), tp or 300.0)) if x)
 
     order = 0
     steps = []
 
-    def exe(kind: str, secs: int, zone: str, desc: str | None, free: bool = False):
+    def exe(kind: str, secs: int, zone: str, desc: str | None, free: bool = False, pace_s: float | None = None):
         nonlocal order
         order += 1
         sid, skey = STEP[kind]
         # free=True: no target — the FTP test effort must not be ERG-capped
         target = {"targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}} if free \
+            else {"targetType": {"workoutTargetTypeId": 6, "workoutTargetTypeKey": "pace.zone"},
+                  "targetValueOne": round(1000 / (pace_s * RACE_PACE_BAND[0]), 3),
+                  "targetValueTwo": round(1000 / (pace_s * RACE_PACE_BAND[1]), 3)} if pace_s \
             else _run_target(zone, tg) if run else _target(zone, indoor, tg)
         d = {"type": "ExecutableStepDTO", "stepOrder": order,
              "stepType": {"stepTypeId": sid, "stepTypeKey": skey},
@@ -183,12 +198,11 @@ def build_workout(session: dict, tg: dict) -> dict | None:
         if kind == "steady" and st.get("duration_min"):
             role = "warmup" if (i == 0 and "warm" in label) else "cooldown" if (i == n - 1 and "cool" in label) \
                 else "recovery" if st.get("zone") == "Z1" and "spin" not in label else "interval"
-            steps.append(exe(role, st["duration_min"] * 60, st.get("zone") or "Z2",
-                             " — ".join(x for x in (st.get("label"), st.get("cue")) if x)))
+            steps.append(exe(role, st["duration_min"] * 60, st.get("zone") or "Z2", text(st), pace_s=race_pace(st)))
         elif kind == "intervals" and st.get("reps") == 1 and st.get("work_min"):
             # A single effort (FTP test, climb benchmark) is one plain step, not a repeat ×1.
-            steps.append(exe("interval", st["work_min"] * 60, st.get("work_zone") or "Z4",
-                             " — ".join(x for x in (st.get("label"), st.get("cue")) if x), free=is_test))
+            steps.append(exe("interval", st["work_min"] * 60, st.get("work_zone") or "Z4", text(st), free=is_test,
+                             pace_s=race_pace(st)))
             if st.get("rest_min"):
                 steps.append(exe("recovery", st["rest_min"] * 60, st.get("rest_zone") or "Z1", None))
         elif kind == "intervals" and st.get("reps") and st.get("work_min"):
@@ -198,9 +212,8 @@ def build_workout(session: dict, tg: dict) -> dict | None:
                      "numberOfIterations": int(st["reps"]), "smartRepeat": False,
                      "endCondition": {"conditionTypeId": 7, "conditionTypeKey": "iterations"},
                      "endConditionValue": int(st["reps"]), "workoutSteps": []}
-            group["workoutSteps"].append(exe("interval", st["work_min"] * 60, st.get("work_zone") or "Z4",
-                                             " — ".join(x for x in (st.get("label"), st.get("cue")) if x),
-                                             free=is_test))
+            group["workoutSteps"].append(exe("interval", st["work_min"] * 60, st.get("work_zone") or "Z4", text(st),
+                                             free=is_test, pace_s=race_pace(st)))
             if st.get("rest_min"):
                 group["workoutSteps"].append(exe("recovery", st["rest_min"] * 60, st.get("rest_zone") or "Z1", None))
             steps.append(group)

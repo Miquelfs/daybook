@@ -531,6 +531,9 @@ def _session_out(row: sqlite3.Row, conn: Optional[sqlite3.Connection] = None) ->
             structure = json.loads(row["structure_json"])
         except Exception:
             structure = None
+    if structure and conn is not None:
+        from domains.training.b_race import render_structure
+        structure = render_structure(structure, conn)
     completed_activity_id = row["completed_activity_id"]
     return {
         "id": row["id"],

@@ -752,6 +752,9 @@ def _linked_plan_session(conn: sqlite3.Connection, activity_id: str):
             structure = json.loads(ps["structure_json"])
         except Exception:
             structure = None
+        if structure:
+            from domains.training.b_race import render_structure
+            structure = render_structure(structure, conn)
 
     weeks_to_race = None
     if ps["race_date"]:
