@@ -323,7 +323,7 @@ def _parse_max_metrics(raw) -> dict:
                 vo2 = item.get("vo2MaxPreciseValue") or item.get("vo2Max")
                 if "run" in sport and vo2:
                     result["vo2max_run"] = vo2
-                elif "cycling" in sport or "bike" in sport and vo2:
+                elif ("cycling" in sport or "bike" in sport) and vo2:
                     result["vo2max_bike"] = vo2
         return result
     if isinstance(raw, dict):
@@ -387,6 +387,12 @@ def sync_physio(client, conn, d: str, recompute: bool = False) -> bool:
         data.update(_parse_readiness(tr_raw))
     except Exception as e:
         print(f"  WARN physio readiness {d}: {e}", file=sys.stderr)
+
+    # A refresh that comes back short (one call failed) mustn't blank what the row already had
+    if existing:
+        for i, k in enumerate(("acute_load", "chronic_load", "training_readiness_score", "vo2max_run"), start=1):
+            if data.get(k) is None and existing[i] is not None:
+                data[k] = existing[i]
 
     # Only insert if we got at least something useful
     if any(v for k, v in data.items() if k != "date"):
@@ -555,7 +561,10 @@ def main() -> None:
         d = date.today() - timedelta(days=lookback)
         while d <= date.today():
             ds = d.isoformat()
-            ok = sync_physio(client, conn, ds, recompute=args.recompute)
+            # today/yesterday are still moving: VO2max, load and status update after each workout, and
+            # the hourly sync would otherwise freeze them at the morning's readiness-only snapshot
+            fresh = d >= date.today() - timedelta(days=1)
+            ok = sync_physio(client, conn, ds, recompute=args.recompute or fresh)
             if ok:
                 physio_count += 1
                 print(f"  physio {ds} ✓", file=sys.stderr)

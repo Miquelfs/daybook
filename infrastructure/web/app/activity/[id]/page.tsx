@@ -378,6 +378,7 @@ export default async function ActivityPage({ params }: Props) {
         <PlannedVsActual
           planSession={activity.plan_session}
           splits={activity.splits ?? []}
+          intervals={analysis?.intervals}
           activity={{
             duration_seconds: activity.duration_seconds,
             moving_time_seconds: activity.moving_time_seconds,

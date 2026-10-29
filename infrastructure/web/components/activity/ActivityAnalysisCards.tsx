@@ -5,7 +5,7 @@ import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   ReferenceArea, ReferenceLine, CartesianGrid,
 } from "recharts";
-import type { ActivityAnalysis, ZoneShare, Climb } from "@/lib/api";
+import type { ActivityAnalysis, AnalysisIntervals, ZoneShare, Climb } from "@/lib/api";
 
 // ── tokens (defined in globals.css, themed for dark + paper) ──────────────────
 const I = ["--viz-i1", "--viz-i2", "--viz-i3", "--viz-i4", "--viz-i5", "--viz-i6", "--viz-i7"].map((v) => `var(${v})`);
@@ -181,7 +181,9 @@ function HeartRateCard({ a }: { a: ActivityAnalysis }) {
     <Card title="Heart rate" headline={hr.avg} unit="bpm avg" aside={`max ${hr.max} bpm`} verdict={hr.verdict}>
       {plan && (
         <p className={`text-xs mb-4 -mt-2 ${plan.ok ? "text-emerald-400" : "text-amber-400"}`}>
-          {plan.ok ? "✓" : "△"} Planned {plan.zone} — {plan.pct_at_or_below}% at or below {plan.zone}
+          {plan.ok ? "✓" : "△"} Planned {plan.zone} — {plan.reps
+            ? `HR reached ${plan.zone} in ${plan.reps_reaching} of ${plan.reps} reps (it lags short reps — pace is the better gauge)`
+            : `${plan.pct_at_or_below}% at or below ${plan.zone}`}
         </p>
       )}
       <ZoneBar zones={hr.zones} ramp={HR_RAMP} unit="bpm" />
@@ -275,6 +277,7 @@ function PaceCard({ a }: { a: ActivityAnalysis }) {
           ))}
         </div>
       )}
+      {a.intervals && <RepsTable iv={a.intervals} run={run} />}
       <Tiles>
         {p.split && (
           <Tile label={a.sport === "ride" ? "Halves (flats)" : "Halves"}
@@ -292,6 +295,32 @@ function PaceCard({ a }: { a: ActivityAnalysis }) {
         ))}
       </Tiles>
     </Card>
+  );
+}
+
+/** The work set, rep by rep — what an interval session is actually judged on. */
+function RepsTable({ iv, run }: { iv: AnalysisIntervals; run: boolean }) {
+  return (
+    <div className="mb-4">
+      <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1.5">
+        Reps · found from {iv.source}{iv.avg_recovery_s ? ` · ~${clock(iv.avg_recovery_s)} recoveries` : ""}
+      </p>
+      <div className="text-xs tabular-nums">
+        {iv.reps.map((r, i) => (
+          <div key={i} className="flex items-center gap-3 py-1 border-b border-[#18181B] last:border-0">
+            <span className="text-[#52525B] w-5">{i + 1}</span>
+            <span className="text-[#A1A1AA] w-12">{clock(r.secs)}</span>
+            <span className="text-[#FAFAFA] font-medium w-20">
+              {run && r.pace_s_km ? `${clock(r.pace_s_km)} /km` : r.avg_w ? `${r.avg_w} W` : "—"}
+            </span>
+            {run && r.avg_w ? <span className="text-[#71717A] w-14">{r.avg_w} W</span> : null}
+            <span className="text-[#71717A] ml-auto">
+              {r.max_hr ? `HR ${r.avg_hr}→${r.max_hr}` : ""}{r.zone_reached ? ` · ${r.zone_reached}` : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -316,7 +345,8 @@ function PowerCard({ a }: { a: ActivityAnalysis }) {
       <Tiles>
         <Tile label="Intensity" value={p.if != null ? p.if.toFixed(2) : null} sub="NP ÷ FTP" />
         <Tile label="Load" value={p.tss != null ? `${p.tss} TSS` : null} />
-        <Tile label="Work" value={`${p.kj} kJ`} sub={`≈ ${p.kj} kcal burned`} />
+        {/* kJ ≈ kcal is a cycling rule (~24% efficiency cancels the 4.18 kJ/kcal) — running power isn't on that scale */}
+        <Tile label="Work" value={`${p.kj} kJ`} sub={a.sport === "ride" ? `≈ ${p.kj} kcal burned` : undefined} />
         <Tile label="Variability" value={p.vi != null ? p.vi.toFixed(2) : null}
               sub={p.vi == null ? undefined : p.vi < 1.05 ? "smooth" : p.vi < 1.15 ? "some surges" : "surgy"} />
         <Tile label="W/kg" value={p.wkg != null ? p.wkg.toFixed(2) : null} />

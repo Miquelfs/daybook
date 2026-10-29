@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { resolveStructure, DisciplineZones } from "@/lib/workout-description";
-import type { LinkedPlanSession, ActivitySplit } from "@/lib/api";
+import type { LinkedPlanSession, ActivitySplit, AnalysisIntervals } from "@/lib/api";
 
 // Zone dots on the same intensity ramp as the heart-rate card
 const ZONE_DOT: Record<string, string> = {
@@ -36,6 +36,27 @@ function hrVerdict(avgHr: number | null, targetZone: string, dz?: DisciplineZone
   return { label: "in the target zone", cls: "text-[#4ADE80]" };
 }
 
+const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+
+// An interval session is judged on its reps, not the whole-session average (warm-up, recoveries
+// and cool-down always pull that below the work zone). Pace leads: HR lags a 3-minute rep.
+function repsVerdict(iv: AnalysisIntervals, planSession: LinkedPlanSession, dz?: DisciplineZones) {
+  const set = planSession.structure?.find((s) => s.kind === "intervals");
+  const zone = set?.work_zone ?? planSession.intensity_zone;
+  const isRun = !/cycl|ride|swim/i.test(planSession.discipline);
+  const target = isRun ? dz?.run?.zones?.[zone]?.pace_s_km : undefined;
+  const planned = set?.reps && set.work_min ? `${set.reps} × ${clock(set.work_min * 60)}` : null;
+  const did = `${iv.count} × ${clock(iv.avg_rep_s)}`;
+  let pace: { label: string; cls: string } | null = null;
+  if (target && iv.avg_pace_s_km) {
+    const d = iv.avg_pace_s_km - target;
+    pace = Math.abs(d) <= Math.max(4, target * 0.02) ? { label: "on the target pace", cls: "text-[#4ADE80]" }
+      : d < 0 ? { label: `${-d} s/km faster than the target`, cls: "text-[#FB923C]" }
+      : { label: `${d} s/km slower than the target`, cls: "text-[#60A5FA]" };
+  }
+  return { zone, target, planned, did, pace, short: set?.reps ? iv.count < set.reps : false, setReps: set?.reps };
+}
+
 function Tile({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="bg-[#18181B] rounded-xl px-3 py-2.5 min-w-0">
@@ -45,9 +66,10 @@ function Tile({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-export function PlannedVsActual({ planSession, splits, activity }: {
+export function PlannedVsActual({ planSession, splits, activity, intervals }: {
   planSession: LinkedPlanSession;
   splits: ActivitySplit[];
+  intervals?: AnalysisIntervals | null;
   activity: { duration_seconds: number | null; moving_time_seconds: number | null; avg_heart_rate: number | null; avg_speed_mps: number | null; activity_type: string | null };
 }) {
   const { data: dz } = useQuery<DisciplineZones>({
@@ -84,6 +106,7 @@ export function PlannedVsActual({ planSession, splits, activity }: {
   const durDelta = actualMin - plannedMin;
   const durPct = plannedMin ? Math.round((durDelta / plannedMin) * 100) : 0;
   const verdict = hrVerdict(activity.avg_heart_rate, planSession.intensity_zone, dz, planSession.discipline);
+  const reps = intervals ? repsVerdict(intervals, planSession, dz) : null;
   const zoneRpe = ZONE_RPE[planSession.intensity_zone];
   const rpeNote = rpe && zoneRpe
     ? rpe > zoneRpe[1] ? `Felt harder than a ${planSession.intensity_zone} session should (RPE ${zoneRpe[0]}–${zoneRpe[1]}) — fatigue, heat or under-fuelling?`
@@ -120,7 +143,16 @@ export function PlannedVsActual({ planSession, splits, activity }: {
             {activity.avg_heart_rate ? <span className="text-xs font-normal text-[#71717A] ml-1">bpm</span> : null}
           </Tile>
         </div>
-        {verdict && (
+        {reps ? (
+          <p className="text-sm text-[#A1A1AA]">
+            {reps.planned ? <>Planned {reps.planned} at {reps.zone}</> : <>Target {reps.zone}</>}
+            {reps.target ? <span className="text-[#71717A]"> (~{clock(reps.target)} /km)</span> : null}
+            {" — "}you did {reps.did}
+            {intervals?.avg_pace_s_km ? <> at {clock(intervals.avg_pace_s_km)} /km</> : null}
+            {reps.pace ? <>, <b className={reps.pace.cls}>{reps.pace.label}</b></> : null}
+            {reps.short ? <span className="text-[#FB923C]"> · {reps.setReps! - intervals!.count} rep{reps.setReps! - intervals!.count > 1 ? "s" : ""} short</span> : null}
+          </p>
+        ) : verdict && (
           <p className="text-sm text-[#A1A1AA]">
             Target {planSession.intensity_zone} — average HR was <b className={verdict.cls}>{verdict.label}</b>
             {actualPace ? <span className="text-[#71717A]"> · {actualPace} avg</span> : null}

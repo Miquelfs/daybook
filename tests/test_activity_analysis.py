@@ -134,5 +134,50 @@ class AnalysisTest(unittest.TestCase):
         self.assertIsNone(aa.analyze(c, "x"))
 
 
+def _run_1hz(segments):
+    """1 Hz run from (seconds, m/s, hr) segments → (s1, moving) as _analyze would hand them on."""
+    spd, hr, d, dist = [], [], [], 0.0
+    for secs, v, h in segments:
+        for _ in range(secs):
+            dist += v
+            spd.append(v)
+            hr.append(h)
+            d.append(dist)
+    return {"spd": spd, "hr": hr, "d": d}, [True] * len(spd)
+
+
+BANDS = [("Z1", 0, 148), ("Z2", 148, 165), ("Z3", 165, 174), ("Z4", 174, 183), ("Z5", 183, 999)]
+
+
+class IntervalsTest(unittest.TestCase):
+    def test_finds_the_set_and_reads_it_rep_by_rep(self):
+        # 15' warm-up, 5 × (3' @ 3:50/km, 2' jog), 10' cool-down — the session from the plan
+        seg = [(900, 3.2, 150)]
+        for _ in range(5):
+            seg += [(180, 1000 / 230, 186), (120, 2.2, 140)]
+        seg += [(600, 2.8, 145)]
+        s1, moving = _run_1hz(seg)
+        iv = aa._intervals("run", s1, moving, BANDS)
+        self.assertEqual(iv["count"], 5)
+        self.assertTrue(all(170 <= r["secs"] <= 190 for r in iv["reps"]))
+        self.assertAlmostEqual(iv["avg_pace_s_km"], 230, delta=5)
+        self.assertEqual({r["zone_reached"] for r in iv["reps"]}, {"Z5"})
+        self.assertAlmostEqual(iv["avg_recovery_s"], 120, delta=12)
+
+        hr = aa._hr_card(s1["hr"], moving, BANDS, 195, 180, "Z5", s1["spd"], None, iv)
+        self.assertEqual((hr["plan"]["reps_reaching"], hr["plan"]["ok"]), (5, True))
+        self.assertIsNone(hr["drift_bpm"])
+        pace = aa._pace_card("run", s1["spd"], s1["d"], [0.0] * len(s1["d"]), moving, None, iv)
+        self.assertRegex(pace["verdict"], r"^Intervals — 5 × 2:5\d at 3:5\d /km")
+        self.assertIsNone(pace["split"])                 # no "Faded — second half slower"
+
+    def test_steady_run_with_surges_is_not_intervals(self):
+        # easy run with uneven surges (hills, a crossing) — bouts, but no regular pattern
+        seg = [(600, 3.0, 145), (80, 3.9, 160), (300, 3.0, 150), (280, 3.8, 162), (60, 3.0, 150),
+               (50, 3.9, 160), (900, 3.0, 150), (45, 3.8, 158), (400, 3.0, 150)]
+        s1, moving = _run_1hz(seg)
+        self.assertIsNone(aa._intervals("run", s1, moving, BANDS))
+
+
 if __name__ == "__main__":
     unittest.main()

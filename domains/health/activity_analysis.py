@@ -25,7 +25,7 @@ import math
 import sqlite3
 from bisect import bisect_right
 
-VERSION = 4   # 4: HR zones from threshold HR (hr_zones)
+VERSION = 5   # 4: HR zones from threshold HR (hr_zones) · 5: interval reps
 MAX_GAP_S = 30
 MAX_SERIES = 600
 
@@ -186,9 +186,108 @@ def _weight(conn, on_date: str) -> float | None:
         return None
 
 
+# ── intervals ────────────────────────────────────────────────────────────────
+
+def _intervals(sport, s1, moving, bands) -> dict | None:
+    """Work reps found in the stream: ≥3 bouts of 30 s–20 min clearly above the recoveries between them.
+
+    Runs read power when the watch records it (it reacts instantly) and pace otherwise; rides need
+    power (outdoor speed follows the terrain, not the effort). A rep is ≥ 85% of the session's p95."""
+    key = "pw" if s1.get("pw") and any(s1["pw"]) else "spd" if sport == "run" else None
+    if sport not in ("run", "ride") or not key or not s1.get(key):
+        return None
+    raw = [v if m and v else 0 for v, m in zip(s1[key], moving)]
+    sm = _smooth(raw, 10)
+    sig = sm[5:] + [sm[-1]] * 5                      # centre the 10 s window so reps don't start late
+    vals = sorted(v for v, m in zip(sig, moving) if m and v > 0)
+    if len(vals) < 600:
+        return None
+    thr = 0.85 * vals[int(len(vals) * 0.95)]
+    bouts, start = [], None
+    for i, v in enumerate(sig):
+        if v >= thr and moving[i]:
+            if start is None:
+                start = i
+        elif start is not None:
+            bouts.append([start, i])
+            start = None
+    if start is not None:
+        bouts.append([start, len(sig)])
+    merged = []
+    for b in bouts:                                  # a 10 s stumble doesn't split a rep
+        if merged and b[0] - merged[-1][1] < 15:
+            merged[-1][1] = b[1]
+        else:
+            merged.append(b)
+    bouts = [b for b in merged if 30 <= b[1] - b[0] <= 1200]
+
+    def even(xs, tol):
+        m = sorted(xs)[len(xs) // 2]
+        return all(abs(x - m) <= tol * m for x in xs)
+
+    # the set: the longest run of consecutive bouts with like-for-like reps and recoveries — hills,
+    # traffic lights and surges on an easy run make bouts too, but never a regular pattern
+    reps = []
+    for i in range(len(bouts)):
+        for j in range(len(bouts), i + 2, -1):
+            seq = bouts[i:j]
+            if j - i <= len(reps):
+                break
+            gaps = [seq[k + 1][0] - seq[k][1] for k in range(len(seq) - 1)]
+            if even([b - a for a, b in seq], 0.3) and even(gaps, 0.5) and 30 <= min(gaps) and max(gaps) <= 600:
+                reps = seq
+                break
+    if len(reps) < 3:
+        return None
+    work_s = sum(b - a for a, b in reps)
+    if work_s > 0.7 * sum(1 for m in moving if m):
+        return None
+    on = _mean(raw[i] for a, b in reps for i in range(a, b))
+    off = _mean(raw[i] for k in range(len(reps) - 1) for i in range(reps[k][1], reps[k + 1][0]))
+    if not on or off is None or off > 0.8 * on:
+        return None
+
+    hr, d, pw = s1.get("hr"), s1.get("d"), s1.get("pw")
+
+    def zone_of(h):
+        return next((n for n, lo, _ in reversed(bands) if h >= lo), bands[0][0]) if h else None
+
+    out = []
+    for k, (a, b) in enumerate(reps):
+        dist = (d[b - 1] - d[a]) if d and d[a] is not None and d[b - 1] is not None else None
+        hrs = [h for h in (hr or [])[a:b] if h]
+        rec = (reps[k + 1][0] - b) if k + 1 < len(reps) else None
+        out.append({
+            "start_km": round(d[a] / 1000, 2) if d and d[a] is not None else None,
+            "secs": b - a, "dist_m": round(dist) if dist else None,
+            "pace_s_km": round((b - a) / dist * 1000) if dist and dist > 50 else None,
+            "avg_hr": round(sum(hrs) / len(hrs)) if hrs else None,
+            "max_hr": round(max(hrs)) if hrs else None, "zone_reached": zone_of(max(hrs) if hrs else None),
+            "avg_w": round(_mean(pw[a:b])) if pw and _mean(pw[a:b]) else None,
+            "recovery_s": rec,
+        })
+    paced = [r for r in out if r["pace_s_km"]]
+    dist_sum = sum(r["dist_m"] for r in paced)
+    pace = round(sum(r["secs"] for r in paced) / dist_sum * 1000) if paced and dist_sum else None
+    fade = round((paced[-1]["pace_s_km"] / paced[0]["pace_s_km"] - 1) * 100, 1) if len(paced) >= 2 else None
+    recs = [r["recovery_s"] for r in out if r["recovery_s"]]
+    return {
+        "source": "power" if key == "pw" else "pace", "reps": out, "count": len(out), "work_s": work_s,
+        "avg_rep_s": round(work_s / len(out)), "avg_pace_s_km": pace,
+        "avg_hr": round(_mean(r["avg_hr"] for r in out)) if any(r["avg_hr"] for r in out) else None,
+        "max_hr": max((r["max_hr"] for r in out if r["max_hr"]), default=None),
+        "avg_w": round(_mean(r["avg_w"] for r in out)) if any(r["avg_w"] for r in out) else None,
+        "fade_pct": fade, "avg_recovery_s": round(sum(recs) / len(recs)) if recs else None,
+    }
+
+
+def _clock(s: float) -> str:
+    return f"{int(s) // 60}:{int(round(s)) % 60:02d}"
+
+
 # ── cards ────────────────────────────────────────────────────────────────────
 
-def _hr_card(hr, moving, bands, max_hr, threshold_hr, plan_zone, spd, computed) -> dict | None:
+def _hr_card(hr, moving, bands, max_hr, threshold_hr, plan_zone, spd, computed, iv=None) -> dict | None:
     secs = [h for h, m in zip(hr, moving) if m and h and h > 40]
     if len(secs) < 120:
         return None
@@ -211,7 +310,10 @@ def _hr_card(hr, moving, bands, max_hr, threshold_hr, plan_zone, spd, computed) 
     hr1, hr2 = _mean(hr[i] for i in first), _mean(hr[i] for i in last)
     drift_bpm = round(hr2 - hr1) if hr1 and hr2 else None
 
-    if hard >= 25:
+    if iv:
+        top = max((r["max_hr"] for r in iv["reps"] if r["max_hr"]), default=None)
+        verdict = f"Intervals — {iv['count']} reps" + (f", HR peaking at {top} bpm" if top else "")
+    elif hard >= 25:
         verdict = f"Hard session — {hard}% in Z4–Z5"
     elif pct.get("Z3", 0) >= 30:
         verdict = f"Lots of tempo ({pct['Z3']}% Z3) — harder than easy, easier than hard"
@@ -225,7 +327,14 @@ def _hr_card(hr, moving, bands, max_hr, threshold_hr, plan_zone, spd, computed) 
         at_or_below = sum(z["pct"] for z in zones if z["zone"][1:].isdigit() and int(z["zone"][1:]) <= pz)
         plan = {"zone": plan_zone, "pct_at_or_below": at_or_below,
                 "ok": at_or_below >= 75 if pz <= 2 else sum(z["pct"] for z in zones if z["zone"] == f"Z{pz}") >= 20}
+        if iv and pz >= 3:
+            # HR lags a short rep, so judge each rep by the zone its HR reached, not the whole-session spread
+            n = sum(1 for r in iv["reps"] if r["zone_reached"] and r["zone_reached"][1:].isdigit()
+                    and int(r["zone_reached"][1:]) >= pz)
+            plan.update({"reps": iv["count"], "reps_reaching": n, "ok": n * 2 >= iv["count"]})
     dec = computed.get("decoupling_pct") if computed else None
+    if iv:                                           # drift and decoupling assume a steady effort
+        drift_bpm = dec = None
     return {
         "avg": round(sum(secs) / len(secs)), "max": round(max(secs)), "zones": zones,
         "max_hr": round(max_hr) if max_hr else None, "threshold_hr": threshold_hr,
@@ -239,7 +348,7 @@ def _hr_card(hr, moving, bands, max_hr, threshold_hr, plan_zone, spd, computed) 
     }
 
 
-def _pace_card(sport, spd, dist, alt_grade, moving, gap_spd) -> dict | None:
+def _pace_card(sport, spd, dist, alt_grade, moving, gap_spd, iv=None) -> dict | None:
     mv = [(s, g) for s, g, m in zip(spd, alt_grade, moving) if m and s is not None]
     thr = 1.0 if sport == "ride" else 0.5
     rolling = [(s, g) for s, g in mv if s > thr]
@@ -296,7 +405,17 @@ def _pace_card(sport, spd, dist, alt_grade, moving, gap_spd) -> dict | None:
                 best[label] = round(b * 3.6, 1)
 
     stopped = elapsed_s - moving_s
-    if split and abs(split["pct"]) <= 2:
+    if iv:
+        # halves and steadiness read an interval session as a fade / choppy pacing — the reps are the story
+        split = cv = None
+        verdict = f"Intervals — {iv['count']} × {_clock(iv['avg_rep_s'])}"
+        if iv["avg_pace_s_km"] and sport == "run":
+            verdict += f" at {_clock(iv['avg_pace_s_km'])} /km"
+        if iv["fade_pct"] is not None and abs(iv["fade_pct"]) > 3:
+            verdict += f" · last rep {abs(iv['fade_pct'])}% {'slower' if iv['fade_pct'] > 0 else 'faster'} than the first"
+        elif iv["fade_pct"] is not None:
+            verdict += " · even reps"
+    elif split and abs(split["pct"]) <= 2:
         verdict = ("Even pacing — first and second half within 2%" if sport != "ride"
                    else "Even on the flats — both halves within 2%")
     elif split and split["pct"] > 2:
@@ -651,9 +770,10 @@ def _analyze(conn, act, sport) -> dict | None:
                 k = bisect_right(gd, d / 1000) - 1
                 grade_1hz[i] = grade_grid[k][1] if k >= 0 else None
 
+    iv = _intervals(sport, s1, moving, bands)
     hr = _hr_card(s1["hr"], moving, bands, max_hr, zrow["threshold_hr"] if zrow is not None else None,
-                  _plan_zone(conn, act["id"]), s1.get("spd"), computed) if s1.get("hr") else None
-    pace = (_pace_card(sport, s1["spd"], s1.get("d"), grade_1hz, moving, s1.get("gap"))
+                  _plan_zone(conn, act["id"]), s1.get("spd"), computed, iv) if s1.get("hr") else None
+    pace = (_pace_card(sport, s1["spd"], s1.get("d"), grade_1hz, moving, s1.get("gap"), iv)
             if s1.get("spd") and has_dist and sport != "swim" else None)
     ftp = zrow["ftp_w"] if zrow is not None and sport == "ride" else None
     power = _power_card(s1["pw"], moving, ftp, _weight(conn, act["date"]), indoor, sport) if s1.get("pw") else None
@@ -677,7 +797,7 @@ def _analyze(conn, act, sport) -> dict | None:
         "moving_s": sum(1 for m in moving if m), "elapsed_s": len(secs),
         "temp_c": {"avg": round(sum(temp) / len(temp)), "min": round(min(temp)), "max": round(max(temp))}
         if len(temp) > 60 else None,
-        "hr": hr, "pace": pace, "power": power, "elevation": elev, "cadence": cadence,
+        "hr": hr, "pace": pace, "power": power, "elevation": elev, "cadence": cadence, "intervals": iv,
         "series": _series(sport, secs, s1, moving, grade_grid, has_dist),
     }
 

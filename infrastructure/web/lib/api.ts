@@ -1544,6 +1544,18 @@ export interface Climb {
   from_km: number; to_km: number; length_km: number; gain_m: number; avg_grade: number; max_grade: number;
   duration_s: number | null; vam: number | null; avg_hr: number | null; avg_w: number | null; category: string | null;
 }
+export interface IntervalRep {
+  start_km: number | null; secs: number; dist_m: number | null; pace_s_km: number | null;
+  avg_hr: number | null; max_hr: number | null; zone_reached: string | null; avg_w: number | null;
+  recovery_s: number | null;
+}
+
+export interface AnalysisIntervals {
+  source: "power" | "pace"; reps: IntervalRep[]; count: number; work_s: number; avg_rep_s: number;
+  avg_pace_s_km: number | null; avg_hr: number | null; max_hr: number | null; avg_w: number | null;
+  fade_pct: number | null; avg_recovery_s: number | null;
+}
+
 export interface ActivityAnalysis {
   sport: "ride" | "run" | "swim" | "hike" | "other";
   indoor: boolean;
@@ -1554,7 +1566,8 @@ export interface ActivityAnalysis {
     avg: number; max: number; zones: ZoneShare[]; max_hr: number | null; threshold_hr: number | null;
     above_threshold_min: number | null; peak_5min: number | null; peak_20min: number | null;
     drift_bpm: number | null; decoupling_pct: number | null; durability: "durable" | "borderline" | "fading" | null;
-    verdict: string; plan: { zone: string; pct_at_or_below: number; ok: boolean } | null;
+    verdict: string;
+    plan: { zone: string; pct_at_or_below: number; ok: boolean; reps?: number; reps_reaching?: number } | null;
   } | null;
   pace: {
     avg_mps: number; max_mps: number; moving_s: number; stopped_s: number;
@@ -1574,6 +1587,8 @@ export interface ActivityAnalysis {
     terrain_pct: { climb: number; flat: number; descent: number }; climbs: Climb[]; verdict: string;
   } | null;
   cadence: { avg: number; max: number; unit: string; bands: { band: string; pct: number }[]; verdict: string } | null;
+  /** The work set when the stream shows a regular reps/recoveries pattern (from power, else pace). */
+  intervals?: AnalysisIntervals | null;
   series: {
     x_unit: "km" | "min";
     points: { x: number; hr?: number; spd?: number; alt?: number; pw?: number; cad?: number; grade?: number }[];

@@ -119,8 +119,23 @@ def _load(conn, d: str, tss: float | None, t) -> dict | None:
     }
 
 
-def _efficiency(conn, act, sport, t) -> dict | None:
+def _intervals_of(conn, ids) -> set:
+    """Activities whose cached analysis found an interval set."""
+    if not ids:
+        return set()
+    try:
+        rows = conn.execute("SELECT activity_id, result_json FROM activity_analysis WHERE activity_id IN ({})"
+                            .format(",".join("?" * len(ids))), tuple(ids)).fetchall()
+    except sqlite3.OperationalError:
+        return set()
+    return {r[0] for r in rows if r[1] and '"intervals": {' in r[1]}
+
+
+def _efficiency(conn, act, sport, t, analysis=None) -> dict | None:
     if "activity_detail" not in t:
+        return None
+    # output per heartbeat only compares like with like: reps and recoveries aren't a steady effort
+    if (analysis or {}).get("intervals"):
         return None
     me = conn.execute("SELECT efficiency_factor FROM activity_detail WHERE activity_id=?", (act["id"],)).fetchone()
     if not me or not me[0]:
@@ -135,7 +150,9 @@ def _efficiency(conn, act, sport, t) -> dict | None:
            ORDER BY a.date DESC""", (since, act["date"], act["date"], act["id"])).fetchall()
     indoor = is_indoor(act["activity_type"])
     similar = [r for r in rows if sport_of(r["activity_type"]) == sport and is_indoor(r["activity_type"]) == indoor
-               and dur and r["dur"] and 0.5 <= r["dur"] / dur <= 2.0][:8]
+               and dur and r["dur"] and 0.5 <= r["dur"] / dur <= 2.0][:16]
+    reps = _intervals_of(conn, [r["id"] for r in similar])
+    similar = [r for r in similar if r["id"] not in reps][:8]
     if len(similar) < 3:
         return {"ef": round(me[0], 3), "n": len(similar), "trend": None}
     base = median(r["ef"] for r in similar)
@@ -373,7 +390,7 @@ def impact(conn: sqlite3.Connection, activity_id: str, analysis: dict | None = N
         "tss": round(tss) if tss else None, "tss_source": tss_source,
         "load": _load(conn, act["date"], tss, t),
         "strain": _strain(conn, act, t, analysis),
-        "efficiency": _efficiency(conn, act, sport, t),
+        "efficiency": _efficiency(conn, act, sport, t, analysis),
         "race": _race(conn, act, sport, t, analysis, fuel_target_fn),
         "matched": _matched(conn, act, sport),
         "cols": _cols(conn, act["id"]),
