@@ -19,6 +19,9 @@ interface RosterDay {
   report_time: string | null;
   end_time: string | null;
   raw_code: string;
+  edited_at: string | null;            // set by hand (a swap) — survives PDF re-imports
+  imported_duty_type: string | null;   // what the PDF said
+  imported_raw_code: string | null;
 }
 
 interface RosterLeg {
@@ -152,42 +155,112 @@ function PaySection({ day }: { day: PayDay }) {
   );
 }
 
-/** For days the PDF import missed (or couldn't classify): set the duty by hand. */
-function SetDuty({ date, current }: { date: string; current?: string }) {
+// The kinds a day can be set to by hand, with the raw code it gets.
+const EDIT_KINDS: { duty: string; code: string; label: string; timed: boolean }[] = [
+  { duty: "flying_duty", code: "FlD", label: "Flying",   timed: true },
+  { duty: "standby",     code: "Sby", label: "Standby",  timed: true },
+  { duty: "day_off",     code: "Off", label: "Day off",  timed: false },
+  { duty: "vacation",    code: "VAC", label: "Vacation", timed: false },
+  { duty: "ground_duty", code: "Dty", label: "Ground",   timed: true },
+];
+const KNOWN_CODES = new Set(["fld", "sby", "sbm", "sbs", "off", "do", "dty", "cbt", "grd", "sim", "trg", "vac"]);
+
+const invalidateRoster = (qc: ReturnType<typeof useQueryClient>) =>
+  ["roster", "roster-day", "roster-months", "roster-brief", "pay-estimate", "day-tags"]
+    .forEach(k => qc.invalidateQueries({ queryKey: [k] }));
+
+/** Change a day by hand — a swap (flight ↔ off ↔ standby), a vacation the PDF missed.
+ *  Pay and Today follow at once; a later PDF import keeps the edit. */
+function DutyEditor({ date, day }: { date: string; day: RosterDay | null }) {
   const qc = useQueryClient();
-  const [saving, setSaving] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const set = async (duty_type: string, raw_code: string) => {
-    setSaving(duty_type);
+  const [rep, setRep] = useState(day?.report_time ?? "");
+  const [end, setEnd] = useState(day?.end_time ?? "");
+  // A code the parser didn't know (or one that came in wrong): offer to remember it.
+  const code = day?.imported_raw_code ?? (day && !day.edited_at ? day.raw_code : null);
+  const teachable = !!code && !KNOWN_CODES.has(code.trim().toLowerCase());
+  const [teach, setTeach] = useState(teachable);
+
+  async function call(key: string, url: string, init: RequestInit) {
+    setBusy(key);
     setErr(null);
     try {
-      const res = await fetch("/api/roster/entry", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, duty_type, raw_code }),
-      });
+      const res = await fetch(url, init);
       if (!res.ok) throw new Error(String(res.status));
-      ["roster", "roster-day", "roster-months", "pay-estimate"].forEach(k => qc.invalidateQueries({ queryKey: [k] }));
+      invalidateRoster(qc);
     } catch {
       setErr("Couldn't save — is the Pi reachable?");
     } finally {
-      setSaving(null);
+      setBusy(null);
     }
+  }
+  const json = (method: string, body: unknown): RequestInit =>
+    ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+  const set = (k: typeof EDIT_KINDS[number]) => {
+    const keepTimes = k.timed && k.duty === day?.duty_type;
+    return teachable && teach
+      ? call(k.duty, `/api/roster/code-map/${encodeURIComponent(code!.trim())}`, json("PUT", { duty_type: k.duty }))
+      : call(k.duty, "/api/roster/entry", json("POST", {
+          date, duty_type: k.duty, raw_code: k.code,
+          report_time: keepTimes ? rep || null : null, end_time: keepTimes ? end || null : null,
+        }));
   };
-  const btn = "flex-1 flex items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-sm font-medium border border-[#27272A] transition-[filter] hover:brightness-110 disabled:opacity-50";
+  const saveTimes = () => day && call("times", "/api/roster/entry", json("POST", {
+    date, duty_type: day.duty_type, raw_code: day.raw_code, report_time: rep || null, end_time: end || null,
+  }));
+
+  const current = day?.duty_type;
+  const timed = EDIT_KINDS.find(k => k.duty === current)?.timed;
+  const timeCls = "w-20 bg-[#111113] border border-[#27272A] rounded-lg px-2 py-1.5 text-sm tabular-nums text-[#E4E4E7] focus:outline-none focus:border-[#F59E0B]";
+
   return (
-    <div className="space-y-2 pt-4">
-      <p className="text-xs text-[#71717A]">
-        {current ? <>Imported as <span className="font-mono">{current}</span> — not a code Daybook knows.</> : "Not on the imported roster."} Set it:
-      </p>
-      <div className="flex gap-2">
-        <button className={`${btn} duty-vac`} disabled={!!saving} onClick={() => set("vacation", "VAC")}>
-          {saving === "vacation" && <Loader2 size={13} className="animate-spin" />}Vacation
-        </button>
-        <button className={`${btn} duty-off`} disabled={!!saving} onClick={() => set("day_off", "Off")}>
-          {saving === "day_off" && <Loader2 size={13} className="animate-spin" />}Day off
-        </button>
+    <div className="space-y-2.5 pt-4">
+      <div className="flex items-center gap-2">
+        <p className="text-xs font-semibold text-[#52525B] uppercase tracking-wider">Duty</p>
+        {busy && <Loader2 size={12} className="animate-spin text-[#52525B]" />}
       </div>
+      {day?.edited_at ? (
+        <p className="text-xs text-[#71717A]">
+          Changed by hand{day.imported_raw_code ? <> — the PDF says <span className="font-mono">{day.imported_raw_code}</span></> : " — not on the PDF"}.{" "}
+          <button className="text-[#F59E0B] hover:underline" disabled={!!busy}
+                  onClick={() => call("revert", `/api/roster/revert/${date}`, { method: "POST" })}>
+            {day.imported_raw_code ? "Revert" : "Remove"}
+          </button>
+        </p>
+      ) : (
+        <p className="text-xs text-[#71717A]">
+          {!day ? "Not on the imported roster." : current === "unknown" ? <>Imported as <span className="font-mono">{day.raw_code}</span> — not a code Daybook knows.</> : "Swapped? Set what it really is:"}
+        </p>
+      )}
+      <div className="grid grid-cols-5 gap-1.5">
+        {EDIT_KINDS.map(k => {
+          const s = DUTY_STYLE[k.duty];
+          const on = current === k.duty;
+          return (
+            <button key={k.duty} disabled={!!busy} onClick={() => !on && set(k)}
+                    className={`${s.cls} flex items-center justify-center gap-1 rounded-xl px-1 py-2 text-xs font-medium border transition-[filter] hover:brightness-110 disabled:opacity-60 ${on ? "border-current" : "border-transparent opacity-70"}`}>
+              {busy === k.duty && <Loader2 size={11} className="animate-spin" />}{k.label}
+            </button>
+          );
+        })}
+      </div>
+      {teachable && (
+        <label className="flex items-center gap-2 text-xs text-[#A1A1AA]">
+          <input type="checkbox" checked={teach} onChange={e => setTeach(e.target.checked)} className="accent-[#F59E0B]" />
+          Always read <span className="font-mono">{code}</span> this way (every day with it, and future imports)
+        </label>
+      )}
+      {timed && (
+        <div className="flex items-center gap-2 text-xs text-[#71717A]">
+          C/I <input value={rep} onChange={e => setRep(e.target.value)} placeholder="HH:MM" className={timeCls} />
+          C/O <input value={end} onChange={e => setEnd(e.target.value)} placeholder="HH:MM" className={timeCls} />
+          {(rep !== (day?.report_time ?? "") || end !== (day?.end_time ?? "")) && (
+            <button onClick={saveTimes} disabled={!!busy} className="text-xs font-medium text-[#F59E0B]">Save</button>
+          )}
+        </div>
+      )}
       {err && <p className="text-xs text-rose-400">{err}</p>}
     </div>
   );
@@ -237,7 +310,10 @@ function DayDetailSheet({
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-xs duty-sub mb-0.5">{dateLabel}</p>
-                <p className="text-lg font-semibold">{detail ? style.label : "Not on the roster"}</p>
+                <p className="text-lg font-semibold">
+                  {detail ? style.label : "Not on the roster"}
+                  {detail?.edited_at && <span className="ml-2 text-xs font-normal duty-sub">⇄ swapped</span>}
+                </p>
                 {detail && (detail.report_time || detail.end_time) && (
                   <p className="text-sm duty-sub mt-1 tabular-nums">
                     {detail.report_time && <>C/I {detail.report_time}</>}
@@ -263,7 +339,13 @@ function DayDetailSheet({
               </div>
             )}
 
-            {!isLoading && detail && detail.legs.length > 0 && (
+            {!isLoading && detail && detail.legs.length > 0 && detail.duty_type !== "flying_duty" && (
+              <p className="pt-4 text-xs text-[#71717A]">
+                {detail.legs.length} planned leg{detail.legs.length > 1 ? "s" : ""} ({detail.legs.map(l => `${l.dep_iata}→${l.arr_iata}`).join(", ")}) — not flown under this duty.
+              </p>
+            )}
+
+            {!isLoading && detail && detail.legs.length > 0 && detail.duty_type === "flying_duty" && (
               <>
                 {/* Flight legs */}
                 <div className="pt-4 space-y-2">
@@ -327,7 +409,7 @@ function DayDetailSheet({
               </>
             )}
 
-            {!isLoading && (!detail || detail.duty_type === "unknown") && <SetDuty date={date} current={detail?.raw_code} />}
+            {!isLoading && <DutyEditor key={JSON.stringify(detail)} date={date} day={detail ?? null} />}
 
             {payDay && <PaySection key={JSON.stringify(payDay.override)} day={payDay} />}
 
@@ -388,7 +470,7 @@ function RosterCalendar({
           if (day === null) return <div key={`e-${i}`} />;
           const dateStr = `${month}-${String(day).padStart(2, "0")}`;
           const row = byDate[dateStr];
-          const style = row ? DUTY_STYLE[row.duty_type] ?? DUTY_STYLE.unknown : DUTY_STYLE.day_off;
+          const style = row ? DUTY_STYLE[row.duty_type] ?? DUTY_STYLE.unknown : null;   // not on the roster ≠ off
           const isToday = dateStr === TODAY;
           const pd = payDays[dateStr];
           const badge = pd ? dayBadge(pd) : null;
@@ -399,7 +481,7 @@ function RosterCalendar({
               onClick={() => onSelectDate(dateStr)}
               className={`
                 relative rounded-lg p-1.5 min-h-[64px] flex flex-col gap-0.5 transition-[filter,transform] text-left
-                ${style.cls}
+                ${style ? style.cls : "border border-dashed border-[#27272A] text-[#52525B]"}
                 ${isToday ? "ring-2 ring-[#F59E0B]" : ""}
                 ${pd?.status === "not_flown" ? "opacity-60" : ""}
                 hover:brightness-110 active:scale-95
@@ -409,7 +491,7 @@ function RosterCalendar({
               {row ? (
                 <>
                   <span className={`text-[10px] font-semibold leading-tight ${pd?.status === "not_flown" ? "line-through" : ""}`}>
-                    {row.raw_code}
+                    {row.raw_code}{row.edited_at && <span title={`Changed by hand${row.imported_raw_code ? ` — PDF: ${row.imported_raw_code}` : ""}`}> ⇄</span>}
                   </span>
                   {row.report_time && (
                     <span className="text-[9px] duty-sub leading-tight tabular-nums">{row.report_time}</span>

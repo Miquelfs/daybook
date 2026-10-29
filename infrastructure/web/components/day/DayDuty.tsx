@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Moon, PlaneTakeoff } from "lucide-react";
+import { format, parseISO, differenceInCalendarDays } from "date-fns";
+import { Moon, Palmtree, PlaneTakeoff, Sofa } from "lucide-react";
 import type { FlightSummary } from "@/lib/api";
 import { mainFunction, FUNCTION_SHORT } from "@/lib/flight-time";
 import { LaneHeader, LaneLink } from "./Lane";
@@ -12,6 +13,11 @@ interface RosterBrief {
   report_time: string | null;
   end_time: string | null;
   raw_code: string;
+  edited_at?: string | null;            // changed by hand (a swap)
+  imported_raw_code?: string | null;    // what the PDF said
+  // Rest days only: place in the stretch + what comes next.
+  stretch?: { day: number; of: number; until: string };
+  next_duty?: { date: string; duty_type: string; report_time: string | null; raw_code: string } | null;
 }
 
 // The card takes the colour of who you flew for (Norwegian red, Ryanair blue), else
@@ -20,7 +26,8 @@ const DUTY: Record<string, { label: string; color: string }> = {
   flying_duty: { label: "Flying duty", color: "#4ADE80" },
   standby:     { label: "Standby",     color: "#FACC15" },
   ground_duty: { label: "Ground duty", color: "#818CF8" },
-  day_off:     { label: "Day off",     color: "#71717A" },
+  day_off:     { label: "Day off",     color: "#94A3B8" },
+  vacation:    { label: "Vacation",    color: "#2DD4BF" },
   unknown:     { label: "Duty",        color: "#A1A1AA" },
 };
 
@@ -80,13 +87,8 @@ export function DayDuty({ date }: { date: string }) {
   const real = flights.filter((f) => !f.is_sim);
   const kind = brief?.duty_type ?? (real.length ? "flying_duty" : "unknown");
 
-  if (flights.length === 0 && kind === "day_off") {
-    return (
-      <section>
-        {header}
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 text-sm text-[#71717A]">Day off — no duty</div>
-      </section>
-    );
+  if (flights.length === 0 && (kind === "day_off" || kind === "vacation") && brief) {
+    return <section>{header}<RestCard date={date} brief={brief} /></section>;
   }
 
   const d = DUTY[kind] ?? DUTY.unknown;
@@ -95,6 +97,7 @@ export function DayDuty({ date }: { date: string }) {
   const nightSec = real.reduce((s, f) => s + (f.night_seconds ?? 0), 0);
   const label = flights.length > 0 && real.length === 0 ? "Simulator"
     : kind === "standby" && real.length > 0 ? "Standby · called out"
+    : (kind === "day_off" || kind === "vacation") && real.length > 0 ? `${d.label} · flew`
     : d.label;
 
   return (
@@ -103,7 +106,9 @@ export function DayDuty({ date }: { date: string }) {
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${accent}` }}>
         <div className="px-4 py-3.5 flex items-end gap-3" style={{ background: `${accent}12` }}>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] uppercase tracking-widest font-medium" style={{ color: ink(accent) }}>{label}</p>
+            <p className="text-[10px] uppercase tracking-widest font-medium" style={{ color: ink(accent) }}>
+              {label}{brief?.edited_at && <span className="normal-case tracking-normal"> · ⇄ swapped</span>}
+            </p>
             {blockSec > 0 ? (
               <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums leading-tight mt-0.5">
                 {hm(blockSec)} <span className="text-sm font-normal text-[#71717A]">block</span>
@@ -165,5 +170,39 @@ export function DayDuty({ date }: { date: string }) {
         })}
       </div>
     </section>
+  );
+}
+
+/** A day off or vacation: the same tinted card as a duty, saying where you are in the
+ *  stretch and when work starts again. */
+function RestCard({ date, brief }: { date: string; brief: RosterBrief }) {
+  const vac = brief.duty_type === "vacation";
+  const d = DUTY[brief.duty_type];
+  const Icon = vac ? Palmtree : Sofa;
+  const st = brief.stretch;
+  const nd = brief.next_duty;
+  const back = nd ? differenceInCalendarDays(parseISO(nd.date), parseISO(date)) : null;
+  const nextLabel = nd ? (DUTY[nd.duty_type]?.label ?? nd.raw_code) : null;
+  return (
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${d.color}` }}>
+      <div className="px-4 py-3.5 flex items-center gap-3" style={{ background: `${d.color}12` }}>
+        <Icon size={20} strokeWidth={1.5} className="shrink-0" style={{ color: ink(d.color) }} />
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] uppercase tracking-widest font-medium" style={{ color: ink(d.color) }}>
+            {d.label}{brief.edited_at && <span className="normal-case tracking-normal"> · ⇄ swapped{brief.imported_raw_code ? ` from ${brief.imported_raw_code}` : ""}</span>}
+          </p>
+          <p className="text-base font-semibold text-[#FAFAFA] leading-tight mt-0.5">
+            {st && st.of > 1 ? <>Day {st.day} <span className="text-sm font-normal text-[#71717A]">of {st.of}</span></>
+              : vac ? "Enjoy it" : "No duty"}
+          </p>
+        </div>
+        {nd && back != null && (
+          <div className="text-right shrink-0 text-xs text-[#71717A] tabular-nums">
+            <p>{back === 1 ? "Back tomorrow" : `Back ${format(parseISO(nd.date), "EEE d")}`}</p>
+            <p className="mt-0.5">{nextLabel}{nd.report_time && ` · C/I ${nd.report_time}`}</p>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

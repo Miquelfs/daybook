@@ -209,6 +209,10 @@ def _run_migrations() -> None:
     _conn7 = _get_conn()
     _migrate_pax_flights(_conn7)
     _conn7.close()
+    from domains.aviation.roster_importer import ensure_tables as _migrate_roster
+    _conn_r = _get_conn()
+    _migrate_roster(_conn_r)
+    _conn_r.close()
     from infrastructure.db.migrate_settings import migrate as _migrate_settings
     _conn8 = _get_conn()
     _migrate_settings(_conn8)

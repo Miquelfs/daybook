@@ -5,7 +5,10 @@ POST /roster/upload          multipart PDF → parse + upsert
 GET  /roster                 ?month=YYYY-MM → list of RosterDay rows
 GET  /roster/months          → list of distinct YYYY-MM periods available
 GET  /roster/day/{date}      → full day detail (roster row + legs with crew)
-GET  /roster/day/{date}/brief → lightweight duty summary (or null)
+GET  /roster/day/{date}/brief → lightweight duty summary (or null) + rest stretch / next duty
+POST /roster                 manual edit of one day (a swap) — kept across PDF re-imports
+POST /roster/{date}/revert   drop the manual edit, back to what the PDF said
+PUT  /roster/code-map/{code} teach an unknown PDF code (VAR → vacation) for all days + future imports
 GET  /roster/pay-estimate    ?month=YYYY-MM → payslip of month+1 (CLA II ESP), day-by-day reconciled
 GET/PUT /roster/pay-settings → category, level, IRPF %, default jornada %
 GET  /roster/pay-jornada · PUT /roster/pay-jornada/{month} → per-month working %
@@ -24,7 +27,7 @@ from pathlib import Path
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Query
 
 
 # Importer vocabulary first (what the roster table holds); the legacy short codes stay accepted.
@@ -48,6 +51,7 @@ class RosterEntryPatch(BaseModel):
 
 from infrastructure.db.connection import DB_PATH, get_connection
 from domains.aviation import pay
+from domains.aviation.roster_importer import REST, code_map, patch_day, rest_context, revert_day, set_day, teach_code
 
 router = APIRouter(prefix="/roster", tags=["roster"])
 
@@ -113,21 +117,26 @@ def get_roster_months():
 
 @router.get("/day/{date}/brief")
 def get_roster_day_brief(date: str):
-    """Return lightweight duty summary for a date, or null if no roster."""
+    """Lightweight duty summary for a date, or null if no roster.
+    On a rest day it also places the day in its stretch (day 2 of 4 off) and names
+    the next duty, so Today can say when work starts again."""
     conn = _get_conn()
     try:
         row = conn.execute(
-            "SELECT duty_type, report_time, end_time, raw_code FROM roster WHERE date = ?",
+            "SELECT duty_type, report_time, end_time, raw_code, edited_at, imported_duty_type, imported_raw_code "
+            "FROM roster WHERE date = ?",
             (date,),
         ).fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        if row["duty_type"] in REST:
+            out.update(rest_context(conn, date))
+        return out
     except sqlite3.OperationalError:
         return None
     finally:
         conn.close()
-
-    if not row:
-        return None
-    return dict(row)
 
 
 @router.get("/day/{date}")
@@ -136,7 +145,7 @@ def get_roster_day(date: str):
     conn = _get_conn()
     try:
         row = conn.execute(
-            "SELECT date, duty_type, report_time, end_time, raw_code FROM roster WHERE date = ?",
+            f"SELECT {_DAY_COLS} FROM roster WHERE date = ?",
             (date,),
         ).fetchone()
 
@@ -190,7 +199,7 @@ def get_roster(month: str = Query(..., description="YYYY-MM")):
     conn = _get_conn()
     try:
         rows = conn.execute(
-            "SELECT date, duty_type, report_time, end_time, raw_code, imported_at "
+            f"SELECT {_DAY_COLS}, imported_at "
             "FROM roster WHERE strftime('%Y-%m', date) = ? ORDER BY date",
             (month,),
         ).fetchall()
@@ -202,56 +211,110 @@ def get_roster(month: str = Query(..., description="YYYY-MM")):
     return [dict(r) for r in rows]
 
 
+_DAY_COLS = ("date, duty_type, report_time, end_time, raw_code, edited_at, "
+             "imported_duty_type, imported_raw_code")
+
+
+def _day_row(conn: sqlite3.Connection, date: str) -> dict | None:
+    row = conn.execute(f"SELECT {_DAY_COLS} FROM roster WHERE date=?", (date,)).fetchone()
+    return dict(row) if row else None
+
+
+def _after_change(dates: list[str]) -> None:
+    """A duty changed by hand: re-sync the duty tags and re-place training around it
+    (after the response — reflow is slow on the Pi). Pay needs nothing: it reads the roster live."""
+    if not dates:
+        return
+    try:
+        from domains.aviation.roster_tag_sync import sync
+        sync(min(dates), max(dates), DB_PATH)
+    except Exception as e:
+        print(f"WARN roster tag sync after edit: {e}")
+    try:
+        from domains.training.reflow import reflow_all
+        rconn = _get_conn()
+        try:
+            reflow_all(rconn)
+        finally:
+            rconn.close()
+    except Exception as e:
+        print(f"WARN reflow after roster edit: {e}")
+
+
 @router.post("", status_code=201)
-def create_roster_entry(body: RosterEntryIn):
-    """Manually add or overwrite a single roster entry."""
+def create_roster_entry(body: RosterEntryIn, background: BackgroundTasks):
+    """Set one day by hand (swap to off / standby / flying, a missed vacation…).
+    Kept across PDF re-imports; the PDF's own values stay aside for revert."""
     conn = _get_conn()
     try:
-        conn.execute(
-            """INSERT INTO roster (date, duty_type, report_time, end_time, raw_code, imported_at)
-               VALUES (?, ?, ?, ?, ?, datetime('now'))
-               ON CONFLICT(date) DO UPDATE SET
-                 duty_type   = excluded.duty_type,
-                 report_time = excluded.report_time,
-                 end_time    = excluded.end_time,
-                 raw_code    = excluded.raw_code,
-                 imported_at = excluded.imported_at""",
-            (body.date, body.duty_type, body.report_time, body.end_time, body.raw_code),
-        )
-        conn.commit()
-        row = conn.execute(
-            "SELECT date, duty_type, report_time, end_time, raw_code FROM roster WHERE date=?",
-            (body.date,),
-        ).fetchone()
+        set_day(conn, body.date, body.duty_type, body.report_time, body.end_time, body.raw_code)
+        row = _day_row(conn, body.date)
     finally:
         conn.close()
-    return dict(row)
+    background.add_task(_after_change, [body.date])
+    return row
 
 
 @router.patch("/{date}")
-def patch_roster_entry(date: str, body: RosterEntryPatch):
-    """Update fields on an existing roster entry."""
+def patch_roster_entry(date: str, body: RosterEntryPatch, background: BackgroundTasks):
+    """Update fields on an existing roster entry (explicit nulls clear a time)."""
     conn = _get_conn()
     try:
-        row = conn.execute("SELECT * FROM roster WHERE date=?", (date,)).fetchone()
-        if not row:
+        if not conn.execute("SELECT 1 FROM roster WHERE date=?", (date,)).fetchone():
             raise HTTPException(status_code=404, detail="No roster entry for that date")
-        updates = {k: v for k, v in body.model_dump().items() if v is not None}
-        if updates:
-            set_clause = ", ".join(f"{k}=?" for k in updates)
-            conn.execute(f"UPDATE roster SET {set_clause} WHERE date=?", [*updates.values(), date])
-            conn.commit()
-        row = conn.execute(
-            "SELECT date, duty_type, report_time, end_time, raw_code FROM roster WHERE date=?",
-            (date,),
-        ).fetchone()
+        fields = body.model_dump(exclude_unset=True)
+        if fields.get("duty_type", "") is None:
+            fields.pop("duty_type")
+        patch_day(conn, date, fields)
+        row = _day_row(conn, date)
     finally:
         conn.close()
-    return dict(row)
+    background.add_task(_after_change, [date])
+    return row
+
+
+@router.post("/{date}/revert")
+def revert_roster_entry(date: str, background: BackgroundTasks):
+    """Undo a hand edit: back to what the PDF said (a day the PDF never had is removed)."""
+    conn = _get_conn()
+    try:
+        revert_day(conn, date)
+        row = _day_row(conn, date)
+    finally:
+        conn.close()
+    background.add_task(_after_change, [date])
+    return row
+
+
+class CodeMapIn(BaseModel):
+    duty_type: Literal["flying_duty", "standby", "day_off", "ground_duty", "vacation"]
+
+
+@router.get("/code-map")
+def get_code_map():
+    conn = _get_conn()
+    try:
+        return code_map(conn)
+    finally:
+        conn.close()
+
+
+@router.put("/code-map/{raw_code}")
+def put_code_map(raw_code: str, body: CodeMapIn, background: BackgroundTasks):
+    """Teach a PDF code: every day imported with it (not edited by hand) and every future import."""
+    if not raw_code.strip():
+        raise HTTPException(422, "Empty code")
+    conn = _get_conn()
+    try:
+        dates = teach_code(conn, raw_code, body.duty_type)
+    finally:
+        conn.close()
+    background.add_task(_after_change, dates)
+    return {"code": raw_code.strip(), "duty_type": body.duty_type, "days_updated": len(dates)}
 
 
 @router.delete("/{date}", status_code=204)
-def delete_roster_entry(date: str):
+def delete_roster_entry(date: str, background: BackgroundTasks):
     """Delete a manually-added roster entry."""
     conn = _get_conn()
     try:
@@ -259,6 +322,7 @@ def delete_roster_entry(date: str):
         conn.commit()
     finally:
         conn.close()
+    background.add_task(_after_change, [date])
 
 
 # ── Pay estimate (CLA II ESP) — model lives in domains/aviation/pay.py ───────

@@ -14,6 +14,12 @@ Duty type mapping from NetLine codes:
   VAC / AL / HOL… → vacation      (paid "VAR on SOC/VAC")
   anything else   → unknown       (kept with its raw code — never dropped)
 
+A code the parser doesn't know can be taught once (roster_code_map, set from the
+roster page) and applies to every later import. Days edited by hand (a swap to
+off, standby, a flight…) carry edited_at: a re-import keeps the edit, and only
+records what the PDF said in imported_duty_type / imported_raw_code (so the edit
+can be reverted). If the new PDF agrees with the edit, the day is plain again.
+
 Run standalone:
     python -m domains.aviation.roster_importer path/to/duty-plan.pdf [--db PATH]
 """
@@ -24,7 +30,7 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 DB_PATH = Path(__file__).parents[2] / "infrastructure" / "db" / "daybook.db"
@@ -44,8 +50,10 @@ _GROUND  = {"dty", "cbt", "grd", "sim", "trg"}
 _VACATION = {"vac", "vc", "al", "hol", "soc", "lve", "lv", "ulv", "pl", "par", "mat", "ptv", "anl"}
 
 
-def _normalise_duty(raw: str) -> str:
+def _normalise_duty(raw: str, code_map: dict[str, str] | None = None) -> str:
     key = raw.strip().lower()
+    if code_map and key in code_map:
+        return code_map[key]
     if key in _FLYING:   return "flying_duty"
     if key in _STANDBY:  return "standby"
     if key in _OFF:       return "day_off"
@@ -376,7 +384,7 @@ def parse_pdf(pdf_path: str | Path) -> tuple[str, list[RosterDay], list[RosterLe
 
 # ── DB upsert ──────────────────────────────────────────────────────────────────
 
-def _ensure_tables(conn: sqlite3.Connection) -> None:
+def ensure_tables(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS roster (
             date        TEXT PRIMARY KEY,
@@ -385,6 +393,16 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             end_time    TEXT,
             raw_code    TEXT,
             imported_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        )
+    """)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(roster)")}
+    for col in ("edited_at", "imported_duty_type", "imported_raw_code", "imported_report_time", "imported_end_time"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE roster ADD COLUMN {col} TEXT")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS roster_code_map (
+            raw_code  TEXT PRIMARY KEY,      -- lower-cased PDF code
+            duty_type TEXT NOT NULL
         )
     """)
     conn.execute("""
@@ -406,6 +424,14 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def code_map(conn: sqlite3.Connection) -> dict[str, str]:
+    """Codes taught by hand: lower-cased raw code → duty_type."""
+    try:
+        return {r[0]: r[1] for r in conn.execute("SELECT raw_code, duty_type FROM roster_code_map")}
+    except sqlite3.OperationalError:
+        return {}
+
+
 def upsert_roster(
     days: list[RosterDay],
     legs: list[RosterLeg],
@@ -413,22 +439,42 @@ def upsert_roster(
 ) -> int:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    _ensure_tables(conn)
+    ensure_tables(conn)
+    taught = code_map(conn)
 
     count = 0
     for day in days:
+        duty_type = _normalise_duty(day.raw_code, taught)
+        prev = conn.execute("SELECT duty_type, edited_at FROM roster WHERE date = ?", (day.date,)).fetchone()
+        if prev and prev["edited_at"] and prev["duty_type"] != duty_type:
+            # A hand edit (swap) the PDF doesn't know about yet: keep it, note what the PDF says.
+            conn.execute(
+                """UPDATE roster SET imported_duty_type = ?, imported_raw_code = ?,
+                          imported_report_time = ?, imported_end_time = ?,
+                          imported_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE date = ?""",
+                (duty_type, day.raw_code, day.report_time, day.end_time, day.date),
+            )
+            count += 1
+            continue
         conn.execute(
             """
-            INSERT INTO roster (date, duty_type, report_time, end_time, raw_code)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO roster (date, duty_type, report_time, end_time, raw_code,
+                                imported_duty_type, imported_raw_code, imported_report_time, imported_end_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(date) DO UPDATE SET
                 duty_type   = excluded.duty_type,
                 report_time = excluded.report_time,
                 end_time    = excluded.end_time,
                 raw_code    = excluded.raw_code,
+                imported_duty_type = excluded.imported_duty_type,
+                imported_raw_code  = excluded.imported_raw_code,
+                imported_report_time = excluded.imported_report_time,
+                imported_end_time    = excluded.imported_end_time,
+                edited_at   = NULL,
                 imported_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
             """,
-            (day.date, day.duty_type, day.report_time, day.end_time, day.raw_code),
+            (day.date, duty_type, day.report_time, day.end_time, day.raw_code,
+             duty_type, day.raw_code, day.report_time, day.end_time),
         )
         count += 1
 
@@ -469,6 +515,100 @@ def upsert_roster(
     conn.commit()
     conn.close()
     return count
+
+
+# ── Hand edits (swaps), revert, taught codes ─────────────────────────────────
+
+_SNAPSHOT = """UPDATE roster SET
+     imported_duty_type   = COALESCE(imported_duty_type,   CASE WHEN edited_at IS NULL THEN duty_type   END),
+     imported_raw_code    = COALESCE(imported_raw_code,    CASE WHEN edited_at IS NULL THEN raw_code    END),
+     imported_report_time = COALESCE(imported_report_time, CASE WHEN edited_at IS NULL THEN report_time END),
+     imported_end_time    = COALESCE(imported_end_time,    CASE WHEN edited_at IS NULL THEN end_time    END)
+   WHERE date = ?"""
+
+
+def set_day(conn: sqlite3.Connection, day: str, duty_type: str, report_time: str | None = None,
+            end_time: str | None = None, raw_code: str | None = None) -> None:
+    """Set one day by hand. What the PDF said is kept aside (first edit only) for revert."""
+    conn.execute(_SNAPSHOT, (day,))
+    conn.execute(
+        """INSERT INTO roster (date, duty_type, report_time, end_time, raw_code, edited_at)
+           VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+           ON CONFLICT(date) DO UPDATE SET
+             duty_type = excluded.duty_type, report_time = excluded.report_time,
+             end_time = excluded.end_time, raw_code = excluded.raw_code, edited_at = excluded.edited_at""",
+        (day, duty_type, report_time, end_time, raw_code),
+    )
+    conn.commit()
+
+
+def patch_day(conn: sqlite3.Connection, day: str, fields: dict) -> None:
+    """Change some fields of an existing day by hand."""
+    fields = {k: v for k, v in fields.items() if k in ("duty_type", "report_time", "end_time", "raw_code")}
+    if not fields:
+        return
+    conn.execute(_SNAPSHOT, (day,))
+    conn.execute(
+        f"UPDATE roster SET {', '.join(f'{k} = ?' for k in fields)}, "
+        "edited_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE date = ?",
+        [*fields.values(), day],
+    )
+    conn.commit()
+
+
+def revert_day(conn: sqlite3.Connection, day: str) -> None:
+    """Back to what the PDF said; a day only ever set by hand is removed."""
+    row = conn.execute("SELECT imported_duty_type, edited_at FROM roster WHERE date = ?", (day,)).fetchone()
+    if not row or not row[1]:
+        return
+    if row[0]:
+        conn.execute(
+            """UPDATE roster SET duty_type = imported_duty_type, raw_code = imported_raw_code,
+                      report_time = imported_report_time, end_time = imported_end_time, edited_at = NULL
+               WHERE date = ?""", (day,))
+    else:
+        conn.execute("DELETE FROM roster WHERE date = ?", (day,))
+    conn.commit()
+
+
+def teach_code(conn: sqlite3.Connection, raw_code: str, duty_type: str) -> list[str]:
+    """Remember what a PDF code means; re-classify the imported days that carry it.
+    Hand-edited days keep their edit. Returns the dates that changed."""
+    key = raw_code.strip().lower()
+    conn.execute(
+        "INSERT INTO roster_code_map (raw_code, duty_type) VALUES (?, ?) "
+        "ON CONFLICT(raw_code) DO UPDATE SET duty_type = excluded.duty_type", (key, duty_type))
+    dates = [r[0] for r in conn.execute(
+        "SELECT date FROM roster WHERE lower(trim(raw_code)) = ? AND edited_at IS NULL AND duty_type != ?",
+        (key, duty_type))]
+    conn.execute("UPDATE roster SET duty_type = ? WHERE lower(trim(raw_code)) = ? AND edited_at IS NULL",
+                 (duty_type, key))
+    conn.execute("UPDATE roster SET imported_duty_type = ? WHERE lower(trim(imported_raw_code)) = ?",
+                 (duty_type, key))
+    conn.commit()
+    return dates
+
+
+REST = ("day_off", "vacation")
+
+
+def rest_context(conn: sqlite3.Connection, day: str) -> dict:
+    """For a rest day: its place in the stretch of the same kind, and the next duty."""
+    d0 = date.fromisoformat(day)
+    near = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
+        "SELECT date, duty_type, report_time, raw_code FROM roster WHERE date BETWEEN ? AND ?",
+        ((d0 - timedelta(days=40)).isoformat(), (d0 + timedelta(days=40)).isoformat()))}
+    kind = near.get(day, (None,))[0]
+    same = lambda d: near.get(d.isoformat(), (None,))[0] == kind
+    first = last = d0
+    while same(first - timedelta(days=1)):
+        first -= timedelta(days=1)
+    while same(last + timedelta(days=1)):
+        last += timedelta(days=1)
+    nxt = next(({"date": k, "duty_type": near[k][0], "report_time": near[k][1], "raw_code": near[k][2]}
+                for k in sorted(near) if k > day and near[k][0] not in REST), None)
+    return {"stretch": {"day": (d0 - first).days + 1, "of": (last - first).days + 1, "until": last.isoformat()},
+            "next_duty": nxt}
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────

@@ -51,14 +51,15 @@ export function LaneLink({ href, children }: { href: string; children: React.Rea
   );
 }
 
-/** Open/closed state for a collapsible lane, kept in this browser (open by default). */
-export function useLaneOpen(key: string): [boolean, () => void] {
+/** Open/closed state for a collapsible lane, kept in this browser (open unless `defaultOpen` says otherwise). */
+export function useLaneOpen(key: string, defaultOpen = true): [boolean, () => void] {
   const storageKey = `daybook.lane.${key}`;
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   useEffect(() => {
     try {
-      if (localStorage.getItem(storageKey) === "closed") setOpen(false);
-    } catch { /* storage blocked — stay open */ }
+      const saved = localStorage.getItem(storageKey);
+      if (saved) setOpen(saved === "open");
+    } catch { /* storage blocked — keep the default */ }
   }, [storageKey]);
   const toggle = () => setOpen((o) => {
     try { localStorage.setItem(storageKey, o ? "closed" : "open"); } catch { /* ignore */ }

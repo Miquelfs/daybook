@@ -4,8 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { addDays, format, parseISO } from "date-fns";
-import { Cake, CalendarDays, Inbox, ListTodo, Plane, Plus, Target } from "lucide-react";
-import { LaneHeader, LaneLink } from "@/components/day/Lane";
+import { Cake, CalendarDays, ChevronDown, Inbox, ListTodo, Plane, Plus, Target } from "lucide-react";
+import { LaneHeader, LaneLink, useLaneOpen } from "@/components/day/Lane";
 import { plansApi, PLAN_KEYS, type Task } from "@/lib/plans-api";
 import { TaskRow } from "./TaskRow";
 import { TaskSheet } from "./TaskSheet";
@@ -30,6 +30,7 @@ function Ahead({ date }: { date: string }) {
   const [quickDue, setQuickDue] = useState(date);              // quick add's date — today unless picked
   const [composing, setComposing] = useState(false);            // the full sheet, from the date chip
   const [saving, setSaving] = useState(false);
+  const [nextOpen, toggleNext] = useLaneOpen("tasks-next7", false);   // not urgent yet — folded unless opened
 
   const { data: a } = useQuery({
     queryKey: ["agenda", date],
@@ -144,10 +145,19 @@ function Ahead({ date }: { date: string }) {
         {next.length > 0 && (
           <div className="px-1">
             <div className="flex items-baseline justify-between mb-1">
-              <p className="text-[11px] uppercase tracking-wider text-[#52525B]">Next 7 days</p>
+              <button onClick={toggleNext} aria-expanded={nextOpen}
+                      className="flex items-center gap-1.5 min-w-0 text-[11px] text-[#52525B] hover:text-[#A1A1AA]">
+                <span className="uppercase tracking-wider">Next 7 days</span>
+                <ChevronDown size={12} className={`transition-transform ${nextOpen ? "" : "-rotate-90"}`} />
+                {!nextOpen && (
+                  <span className="normal-case truncate">
+                    · {next.length}{next.some((n) => n.warn) && <span className="text-[#F59E0B]"> · {next.filter((n) => n.warn).length} heads-up</span>}
+                  </span>
+                )}
+              </button>
               <Link href="/plan?tab=calendar" className="text-[11px] text-[#52525B] hover:text-[#A1A1AA]">Calendar →</Link>
             </div>
-            <div className="flex flex-col">
+            {nextOpen && <div className="flex flex-col">
               {next.map((n) => {
                 const body = (
                   <>
@@ -161,7 +171,7 @@ function Ahead({ date }: { date: string }) {
                   ? <Link key={n.key} href={n.href} className={cls}>{body}</Link>
                   : <button key={n.key} onClick={n.onClick} className={cls}>{body}</button>;
               })}
-            </div>
+            </div>}
           </div>
         )}
 
