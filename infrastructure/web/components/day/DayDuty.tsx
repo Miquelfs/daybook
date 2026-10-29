@@ -14,13 +14,14 @@ interface RosterBrief {
   raw_code: string;
 }
 
-// Colour only on the duty name — the card itself stays plain like the other lanes.
-const DUTY: Record<string, { label: string; text: string }> = {
-  flying_duty: { label: "Flying duty", text: "text-[#4ADE80]" },
-  standby:     { label: "Standby",     text: "text-[#FACC15]" },
-  ground_duty: { label: "Ground duty", text: "text-[#818CF8]" },
-  day_off:     { label: "Day off",     text: "text-[#71717A]" },
-  unknown:     { label: "Duty",        text: "text-[#A1A1AA]" },
+// The card takes the colour of who you flew for (Norwegian red, Ryanair blue), else
+// the duty's own: a tinted header with an accent edge, as the flight-duty banner had.
+const DUTY: Record<string, { label: string; color: string }> = {
+  flying_duty: { label: "Flying duty", color: "#4ADE80" },
+  standby:     { label: "Standby",     color: "#FACC15" },
+  ground_duty: { label: "Ground duty", color: "#818CF8" },
+  day_off:     { label: "Day off",     color: "#71717A" },
+  unknown:     { label: "Duty",        color: "#A1A1AA" },
 };
 
 function opDot(f: FlightSummary): string {
@@ -37,6 +38,14 @@ function hm(sec: number): string {
 }
 
 const hhmm = (s: string | null | undefined) => (s ? (s.length > 5 ? s.slice(11, 16) : s) : "");
+
+/** Minutes between two UTC times ("HH:MM" or ISO), across midnight if needed. */
+function gapMin(from: string | null | undefined, to: string | null | undefined): number | null {
+  const a = hhmm(from), b = hhmm(to);
+  if (!a || !b) return null;
+  const m = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  return (m(b) - m(a) + 1440) % 1440;
+}
 
 /** The roster duty and the flights flown under it, as one card. */
 export function DayDuty({ date }: { date: string }) {
@@ -78,73 +87,79 @@ export function DayDuty({ date }: { date: string }) {
   }
 
   const d = DUTY[kind] ?? DUTY.unknown;
+  const accent = real.length ? opDot(real[0]) : flights.length ? opDot(flights[0]) : d.color;
   const blockSec = real.reduce((s, f) => s + (f.block_seconds ?? 0), 0);
+  const nightSec = real.reduce((s, f) => s + (f.night_seconds ?? 0), 0);
+  const label = flights.length > 0 && real.length === 0 ? "Simulator"
+    : kind === "standby" && real.length > 0 ? "Standby · called out"
+    : d.label;
 
   return (
     <section>
       {header}
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
-        <div className="px-4 py-3 flex items-center gap-3">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden" style={{ borderLeft: `3px solid ${accent}` }}>
+        <div className="px-4 py-3.5 flex items-end gap-3" style={{ background: `${accent}12` }}>
           <div className="flex-1 min-w-0">
-            <p className={`text-sm font-semibold ${d.text}`}>{flights.length > 0 && real.length === 0 ? "Simulator" : d.label}</p>
+            <p className="text-[10px] uppercase tracking-widest font-medium" style={{ color: accent }}>{label}</p>
+            {blockSec > 0 ? (
+              <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums leading-tight mt-0.5">
+                {hm(blockSec)} <span className="text-sm font-normal text-[#71717A]">block</span>
+              </p>
+            ) : (
+              <p className="text-sm text-[#A1A1AA] mt-0.5">{flights.length ? `${flights.length} session${flights.length > 1 ? "s" : ""}` : "No flights"}</p>
+            )}
             {brief?.report_time && (
               <p className="text-xs text-[#71717A] tabular-nums mt-0.5">
                 C/I {brief.report_time}{brief.end_time && <> · C/O {brief.end_time}</>}
               </p>
             )}
           </div>
-          {blockSec > 0 && (
-            <div className="text-right shrink-0">
-              <p className="text-sm font-semibold text-[#FAFAFA] tabular-nums">
-                {hm(blockSec)} <span className="text-xs font-normal text-[#71717A]">block</span>
+          <div className="text-right shrink-0 text-xs text-[#71717A] space-y-0.5">
+            {real.length > 0 && <p>{real.length} sector{real.length > 1 ? "s" : ""}</p>}
+            {nightSec > 0 && (
+              <p className="inline-flex items-center gap-1 text-indigo-400 tabular-nums">
+                <Moon size={10} />{(nightSec / 3600).toFixed(1)}h night
               </p>
-              {real.length > 1 && <p className="text-[11px] text-[#71717A]">{real.length} sectors</p>}
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        {flights.length > 0 && (
-          <div className="divide-y divide-[#18181B] border-t border-[#18181B]">
-            {flights.map((f) => {
-              const route = f.is_sim
-                ? (f.aircraft_type || "SIM")
-                : `${f.dep_icao || f.dep_iata || "?"} → ${f.arr_icao || f.arr_iata || "?"}`;
-              const times = [hhmm(f.off_block_utc), hhmm(f.on_block_utc)].filter(Boolean).join("–");
-              const meta = [
-                times && `${times} UTC`,
-                !f.is_sim && f.aircraft_type && `${f.aircraft_type}${f.aircraft_reg ? ` · ${f.aircraft_reg}` : ""}`,
-              ].filter(Boolean).join(" · ");
-              return (
-                <Link key={f.id} href={`/aviation/${f.id}`}
-                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#131316] transition-colors">
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: opDot(f) }} />
-                  <div className="flex-1 min-w-0">
-                    <p className="truncate">
-                      <span className={`text-sm font-mono font-semibold ${f.is_sim ? "text-violet-300" : "text-sky-400"}`}>{route}</span>
-                      {f.flight_number && <span className="ml-2 text-xs text-[#71717A]">{f.flight_number}</span>}
-                    </p>
-                    <p className="text-[11px] text-[#71717A] tabular-nums truncate mt-0.5">
-                      {meta}
-                      {f.night_seconds > 0 && (
-                        <span className="inline-flex items-center gap-0.5 ml-1.5 text-indigo-400">
-                          <Moon size={9} />{(f.night_seconds / 3600).toFixed(1)}h
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-[#27272A] text-[#A1A1AA]">
-                      {FUNCTION_SHORT[mainFunction(f)]}
-                    </span>
-                    <span className="text-xs text-[#A1A1AA] tabular-nums w-12 text-right">
-                      {f.block_seconds ? hm(f.block_seconds) : "—"}
-                    </span>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
+        {flights.map((f, i) => {
+          const route = f.is_sim
+            ? (f.aircraft_type || "SIM")
+            : `${f.dep_icao || f.dep_iata || "?"} → ${f.arr_icao || f.arr_iata || "?"}`;
+          const times = [hhmm(f.off_block_utc), hhmm(f.on_block_utc)].filter(Boolean).join("–");
+          const turn = i > 0 ? gapMin(flights[i - 1].on_block_utc, f.off_block_utc) : null;
+          return (
+            <div key={f.id}>
+              {turn != null && turn < 12 * 60 && (
+                <p className="px-4 py-1 text-[10px] text-[#71717A] tabular-nums border-t border-[#18181B] bg-[#131316]/40">
+                  ↻ {hm(turn * 60)} turnaround{f.dep_icao || f.dep_iata ? ` · ${f.dep_icao || f.dep_iata}` : ""}
+                </p>
+              )}
+              <Link href={`/aviation/${f.id}`}
+                    className="flex items-center gap-3 px-4 py-3 border-t border-[#18181B] hover:bg-[#131316] transition-colors">
+                <div className="flex-1 min-w-0">
+                  <p className="truncate">
+                    <span className={`text-sm font-mono font-semibold ${f.is_sim ? "text-violet-300" : "text-sky-400"}`}>{route}</span>
+                    {f.flight_number && <span className="ml-2 text-xs text-[#71717A]">{f.flight_number}</span>}
+                  </p>
+                  <p className="text-[11px] text-[#71717A] tabular-nums truncate mt-0.5">
+                    {times && `${times} UTC`}
+                    {!f.is_sim && f.aircraft_type && ` · ${f.aircraft_type}${f.aircraft_reg ? ` · ${f.aircraft_reg}` : ""}`}
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-sm text-[#FAFAFA] tabular-nums">{f.block_seconds ? hm(f.block_seconds) : "—"}</span>
+                  <span className="text-[10px] font-mono px-1.5 py-px rounded"
+                        style={{ background: `${opDot(f)}1F`, color: opDot(f) }}>
+                    {FUNCTION_SHORT[mainFunction(f)]}
+                  </span>
+                </div>
+              </Link>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

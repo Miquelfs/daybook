@@ -19,6 +19,8 @@ export interface TimelineEvent {
 export interface TimelineSpan {
   start: string; end: string; label: string; type: string;
   id?: string; href?: string; you_flew?: boolean | null; detail?: string | null;
+  /** Lands after local midnight (clipped at 24:00) · the tail of yesterday's late sector. */
+  continues?: boolean | null; carried?: boolean;
 }
 
 export interface WellnessTimeline {
@@ -82,7 +84,28 @@ export interface StressPlaces {
   }[];
 }
 
+export interface DriverRow { label: string; icon: string | null; avg: number; delta: number; days: number }
+export interface DayCard { date: string; avg: number; context: string[]; tags: string[] }
+
+export interface StressInsights {
+  days: number;
+  overview: {
+    avg: number | null;
+    prev_avg: number | null;
+    rest_min_per_day: number | null;
+    stressed_min_per_day: number | null;
+    series: { date: string; v: number }[];
+  };
+  rhythm: {
+    kinds: { key: "flying" | "standby" | "off"; label: string; days: number; hours: (number | null)[];
+             awake_avg: number | null; peak_hour: number }[];
+  };
+  drivers: { baseline: number | null; days?: number; groups: { key: string; label: string; rows: DriverRow[] }[] };
+  extremes: { high: DayCard[]; low: DayCard[] };
+}
+
 export const wellnessApi = {
+  stressInsights: (days = 90): Promise<StressInsights> => get(`/wellness/stress-insights?days=${days}`),
   timeline: (date: string): Promise<WellnessTimeline> => get(`/wellness/timeline?date=${date}`),
   recovery: (date: string): Promise<RecoveryFlag> => get(`/wellness/recovery?date=${date}`),
   flightPhases: (date: string): Promise<FlightPhases> => get(`/wellness/flight-phases?date=${date}`),

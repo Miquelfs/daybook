@@ -14,6 +14,7 @@ from domains.health.stress_context import (
     stress_contexts_rollup, stress_by_place_rollup,
 )
 from domains.health.flight_physio import rollup as flight_physio_rollup
+from domains.health.stress_insights import insights as stress_insights
 
 router = APIRouter(prefix="/wellness", tags=["wellness"])
 
@@ -36,6 +37,14 @@ def _local_hhmm(iso_utc: Optional[str], offset_min: int, plus_s: int = 0) -> Opt
         return dt.strftime("%H:%M")
     except Exception:
         return None
+
+
+def _span_end(start: str, end: Optional[str]) -> str:
+    """A span that runs past local midnight ends at 24:00 on this day's chart —
+    left as is, 22:38→01:38 would shade 01:38→22:38, nearly the whole day."""
+    if not end:
+        return start
+    return "24:00" if end < start else end
 
 
 _MEAL_LABEL = {
@@ -102,6 +111,12 @@ def get_stress_contexts(days: int = Query(90, ge=7, le=730), conn: DB = None):
     return stress_contexts_rollup(conn, days)
 
 
+@router.get("/stress-insights")
+def get_stress_insights(days: int = Query(90, ge=14, le=730), conn: DB = None):
+    """Insights → Stress: trend, rhythm by kind of day, what moves it, extreme days."""
+    return stress_insights(conn, days)
+
+
 @router.get("/stress-places")
 def get_stress_places(days: int = Query(180, ge=7, le=730), conn: DB = None):
     """Life-wide: which specific places stress you above baseline, across the window."""
@@ -125,8 +140,9 @@ def get_timeline(date: str = Query(...), conn: DB = None):
     Series are stored local; events (activities, meals, flights) are UTC, so we
     localize them with the day's offset captured during the wellness sync.
     """
-    stress = [{"t": r["time"], "v": r["level"]}
-              for r in conn.execute("SELECT time, level FROM intraday_stress WHERE date=? ORDER BY time", (date,))]
+    stress = [{"t": r["time"], "v": r["level"]}       # level < 0 = unmeasured / off-wrist
+              for r in conn.execute("SELECT time, level FROM intraday_stress WHERE date=? AND level >= 0 "
+                                    "ORDER BY time", (date,))]
     body_battery = [{"t": r["time"], "v": r["level"]}
                     for r in conn.execute("SELECT time, level FROM intraday_body_battery WHERE date=? ORDER BY time", (date,))]
     try:
@@ -151,7 +167,7 @@ def get_timeline(date: str = Query(...), conn: DB = None):
         label = a["name"] or (a["activity_type"] or "Activity")
         end = _local_hhmm(a["start_time"], offset_min, plus_s=int(a["duration_seconds"] or 0))
         spans.append({
-            "start": start, "end": end or start, "label": label, "type": "activity",
+            "start": start, "end": _span_end(start, end), "label": label, "type": "activity",
             "id": str(a["id"]), "href": f"/activity/{a['id']}",
         })
 
@@ -176,16 +192,38 @@ def get_timeline(date: str = Query(...), conn: DB = None):
             detail = f"landing stress {'+' if ld_delta >= 0 else ''}{round(ld_delta)}"
         if s and e:
             spans.append({
-                "start": s, "end": e, "label": leg, "type": "flight",
+                "start": s, "end": _span_end(s, e), "label": leg, "type": "flight",
                 "id": str(f["id"]), "href": f"/aviation/{f['id']}",
                 "you_flew": you_flew, "detail": detail,
+                "continues": e < s or None,              # lands after midnight — tail on tomorrow
             })
         tk = _local_hhmm(f["takeoff_utc"], offset_min)
         ld = _local_hhmm(f["landing_utc"], offset_min)
         if tk:
             events.append({"t": tk, "label": f"T/O {f['dep_iata'] or ''}".strip(),
                            "type": "takeoff", "id": str(f["id"]), "href": f"/aviation/{f['id']}"})
-        if ld:
+        if ld and not (tk and ld < tk):                  # an after-midnight landing belongs to tomorrow
+            events.append({"t": ld, "label": f"LDG {f['arr_iata'] or ''}".strip(),
+                           "type": "landing", "id": str(f["id"]), "href": f"/aviation/{f['id']}"})
+
+    # Yesterday's last sector landing after local midnight: its tail opens today.
+    prev = (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    for f in conn.execute(
+        "SELECT id, dep_iata, arr_iata, off_block_utc, on_block_utc, takeoff_utc, landing_utc "
+        "FROM flights WHERE date=? AND is_sim=0", (prev,),
+    ):
+        s = _local_hhmm(f["off_block_utc"], offset_min) or _local_hhmm(f["takeoff_utc"], offset_min)
+        e = _local_hhmm(f["on_block_utc"], offset_min) or _local_hhmm(f["landing_utc"], offset_min)
+        if not (s and e and e < s):
+            continue
+        spans.append({
+            "start": "00:00", "end": e, "label": f"{f['dep_iata'] or '?'}→{f['arr_iata'] or '?'}",
+            "type": "flight", "id": str(f["id"]), "href": f"/aviation/{f['id']}",
+            "detail": "from yesterday", "carried": True,
+        })
+        tk = _local_hhmm(f["takeoff_utc"], offset_min)
+        ld = _local_hhmm(f["landing_utc"], offset_min)
+        if ld and tk and ld < tk:
             events.append({"t": ld, "label": f"LDG {f['arr_iata'] or ''}".strip(),
                            "type": "landing", "id": str(f["id"]), "href": f"/aviation/{f['id']}"})
 

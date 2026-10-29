@@ -1,10 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Plane, MapPin } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { Activity, Plane, MapPin, Clock, Scale, CalendarRange, TrendingDown, TrendingUp } from "lucide-react";
 import {
-  wellnessApi, type StressContexts, type FlightPhysioRollup, type StressPlaces,
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area,
+} from "recharts";
+import {
+  wellnessApi, type StressContexts, type FlightPhysioRollup, type StressPlaces, type StressInsights, type DayCard,
 } from "@/lib/wellness-api";
 
 const CTX_EMOJI: Record<string, string> = {
@@ -47,12 +52,16 @@ function WhatStressesYou() {
     queryFn: () => wellnessApi.stressContexts(90),
     staleTime: 300_000,
   });
-  const rows = data?.contexts ?? [];
+  // Exercise isn't life stress — the watch reads effort as stress, so it would always
+  // top the list. Shown apart, as a footnote.
+  const all = data?.contexts ?? [];
+  const rows = all.filter((r) => r.context !== "exercise");
+  const exercise = all.find((r) => r.context === "exercise");
   const max = Math.max(60, ...rows.map((r) => r.avg_stress));
 
   return (
     <Card title="What stresses you" icon={<Activity size={15} className="text-[#F97316]" />}>
-      <p className="text-[11px] text-[#52525B] mb-3">Average stress by what you were doing · last 90 days</p>
+      <p className="text-[11px] text-[#52525B] mb-3">Average stress by where you were · last 90 days</p>
       {rows.length === 0 ? (
         <p className="text-xs text-[#52525B]">No context data yet — it fills in as the CIRQA syncs.</p>
       ) : (
@@ -71,6 +80,11 @@ function WhatStressesYou() {
             </div>
           ))}
         </div>
+      )}
+      {exercise && (
+        <p className="text-[11px] text-[#52525B] mt-3">
+          🏃 Exercise ({fmtDur(exercise.minutes)}) is left out — the watch reads effort as stress.
+        </p>
       )}
     </Card>
   );
@@ -178,11 +192,221 @@ export function FlightLoadRollup() {
   );
 }
 
-// Life-wide stress insights for the Correlations page: what stresses you across
-// all of life + the flight-physio rollups (airport / phase / captain).
+// ── Built from everything logged: trend, rhythm by kind of day, drivers, extreme days ──
+
+const KIND_COLOR: Record<string, string> = { flying: "#F97316", standby: "#FACC15", off: "#34D399" };
+const PERIODS = [30, 90, 180] as const;
+const hours = (min: number | null) => (min == null ? "—" : `${(min / 60).toFixed(1)}h`);
+
+function Overview({ d }: { d: StressInsights }) {
+  const o = d.overview;
+  const diff = o.avg != null && o.prev_avg != null ? o.avg - o.prev_avg : null;
+  return (
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.2em] text-[#71717A]">Average stress · last {d.days} days</p>
+          <p className="mt-1 flex items-baseline gap-2">
+            <span className="text-4xl font-semibold tabular-nums" style={{ color: o.avg != null ? stressColor(o.avg) : undefined }}>
+              {o.avg ?? "—"}
+            </span>
+            {diff != null && (
+              <span className={`inline-flex items-center gap-1 text-xs ${diff > 1 ? "text-[#F97316]" : diff < -1 ? "text-emerald-400" : "text-[#71717A]"}`}>
+                {diff > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                {diff > 0 ? "+" : ""}{diff} vs the {d.days} days before
+              </span>
+            )}
+          </p>
+        </div>
+        <div className="text-right text-xs text-[#71717A] space-y-1 shrink-0">
+          <p><span className="text-[#E4E4E7] font-medium tabular-nums">{hours(o.rest_min_per_day)}</span> at rest / day</p>
+          <p><span className="text-[#E4E4E7] font-medium tabular-nums">{hours(o.stressed_min_per_day)}</span> stressed / day</p>
+        </div>
+      </div>
+      {o.series.length > 3 && (
+        <div className="h-16 mt-3 -mx-1">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={o.series} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+              <defs>
+                <linearGradient id="stressFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#F97316" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#F97316" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <YAxis hide domain={[0, "dataMax + 5"]} />
+              <XAxis dataKey="date" hide />
+              <Tooltip
+                contentStyle={{ background: "#111113", border: "1px solid #27272A", borderRadius: 8, fontSize: 11 }}
+                labelFormatter={(l) => format(parseISO(String(l)), "EEE d MMM")}
+                formatter={(v) => [v, "Stress"]}
+              />
+              <Area dataKey="v" stroke="#F97316" strokeWidth={1.5} fill="url(#stressFill)" isAnimationActive={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Rhythm({ d }: { d: StressInsights }) {
+  const kinds = d.rhythm.kinds;
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const rows = Array.from({ length: 24 }, (_, h) => ({
+    h, ...Object.fromEntries(kinds.map((k) => [k.key, k.hours[h]])),
+  }));
+  return (
+    <Card title="Your stress through the day" icon={<Clock size={15} className="text-[#F97316]" />}>
+      <p className="text-[11px] text-[#52525B] mb-3">Average by hour, by kind of day · workouts left out · last {d.days} days</p>
+      {kinds.length === 0 ? (
+        <p className="text-xs text-[#52525B]">Not enough days yet.</p>
+      ) : (
+        <>
+          <div className="h-44 -ml-6">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#18181B" vertical={false} />
+                <XAxis dataKey="h" ticks={[0, 3, 6, 9, 12, 15, 18, 21]} tickFormatter={(h) => `${String(h).padStart(2, "0")}h`}
+                       tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis domain={[0, "dataMax + 5"]} tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background: "#111113", border: "1px solid #27272A", borderRadius: 8, fontSize: 11 }}
+                  labelFormatter={(h) => `${String(h).padStart(2, "0")}:00–${String(Number(h) + 1).padStart(2, "0")}:00`}
+                />
+                {kinds.filter((k) => !hidden.has(k.key)).map((k) => (
+                  <Line key={k.key} dataKey={k.key} name={k.label} stroke={KIND_COLOR[k.key]} strokeWidth={1.8}
+                        dot={false} connectNulls isAnimationActive={false} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-2 space-y-1">
+            {kinds.map((k) => (
+              <button key={k.key} onClick={() => setHidden((s) => { const n = new Set(s); if (n.has(k.key)) n.delete(k.key); else n.add(k.key); return n; })}
+                      className={`w-full flex items-center gap-2 text-xs text-left transition-opacity ${hidden.has(k.key) ? "opacity-35" : ""}`}>
+                <span className="w-3 h-[2px] rounded-full" style={{ background: KIND_COLOR[k.key] }} />
+                <span className="text-[#D4D4D8]">{k.label}</span>
+                <span className="text-[#52525B]">· {k.days}d</span>
+                <span className="ml-auto tabular-nums text-[#71717A]">
+                  awake avg <span className="text-[#E4E4E7] font-medium">{k.awake_avg ?? "—"}</span> · peaks {String(k.peak_hour).padStart(2, "0")}:00
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function Drivers({ d }: { d: StressInsights }) {
+  const dr = d.drivers;
+  const max = Math.max(4, ...dr.groups.flatMap((g) => g.rows.map((r) => Math.abs(r.delta))));
+  return (
+    <Card title="What moves your daily stress" icon={<Scale size={15} className="text-[#F97316]" />}>
+      <p className="text-[11px] text-[#52525B] mb-3">
+        Day average vs yours{dr.baseline != null ? ` (${Math.round(dr.baseline)})` : ""} · {dr.days ?? 0} days · at least 3 days per row
+      </p>
+      {dr.groups.length === 0 ? (
+        <p className="text-xs text-[#52525B]">Not enough days yet.</p>
+      ) : (
+        <div className="space-y-4">
+          {dr.groups.map((g) => (
+            <div key={g.key}>
+              <p className="text-[10px] uppercase tracking-widest text-[#52525B] mb-1.5">{g.label}</p>
+              <div className="space-y-1.5">
+                {g.rows.map((r) => {
+                  const w = (Math.abs(r.delta) / max) * 50;
+                  const color = r.delta > 1 ? "#F97316" : r.delta < -1 ? "#34D399" : "#52525B";
+                  return (
+                    <div key={r.label} className="grid grid-cols-[minmax(0,9rem)_1fr_4.5rem] items-center gap-2 text-xs">
+                      <span className="text-[#D4D4D8] truncate">{r.icon ? `${r.icon} ` : ""}{r.label}</span>
+                      <div className="relative h-2">
+                        <div className="absolute inset-y-0 left-1/2 w-px bg-[#27272A]" />
+                        <div className="absolute inset-y-0 rounded-full"
+                             style={{ background: color, width: `${w}%`, left: r.delta >= 0 ? "50%" : `${50 - w}%` }} />
+                      </div>
+                      <span className="text-right tabular-nums">
+                        <span className="font-semibold" style={{ color }}>{r.delta > 0 ? "+" : ""}{r.delta}</span>
+                        <span className="text-[#52525B]"> · {r.days}d</span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function DayList({ title, days }: { title: string; days: DayCard[] }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] uppercase tracking-widest text-[#52525B] mb-2">{title}</p>
+      <div className="space-y-1.5">
+        {days.map((x) => (
+          <Link key={x.date} href={`/day/${x.date}`}
+                className="block rounded-lg border border-[#27272A] bg-[#131316] px-3 py-2 hover:border-[#3F3F46] transition-colors">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-xs text-[#E4E4E7]">{format(parseISO(x.date), "EEE d MMM")}</span>
+              <span className="text-sm font-semibold tabular-nums" style={{ color: stressColor(x.avg) }}>{x.avg}</span>
+            </div>
+            {(x.context.length > 0 || x.tags.length > 0) && (
+              <p className="text-[10px] text-[#71717A] truncate mt-0.5">{[...x.context, ...x.tags].join(" · ")}</p>
+            )}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Extremes({ d }: { d: StressInsights }) {
+  if (d.extremes.high.length === 0) return null;
+  return (
+    <Card title="Your hottest and calmest days" icon={<CalendarRange size={15} className="text-[#F97316]" />}>
+      <div className="grid grid-cols-2 gap-3">
+        <DayList title="Most stressful" days={d.extremes.high} />
+        <DayList title="Calmest" days={d.extremes.low} />
+      </div>
+    </Card>
+  );
+}
+
+// Life-wide stress insights for the Correlations page: the trend, your stress
+// through the day by kind of day, what moves it (duty, sleep, training, tags),
+// extreme days, where you were, and the flight-physio rollups.
 export function StressLifeInsights() {
+  const [days, setDays] = useState<(typeof PERIODS)[number]>(90);
+  const { data } = useQuery<StressInsights>({
+    queryKey: ["stress-insights", days],
+    queryFn: () => wellnessApi.stressInsights(days),
+    staleTime: 300_000,
+  });
   return (
     <div className="space-y-6">
+      <div className="flex justify-end gap-1">
+        {PERIODS.map((p) => (
+          <button key={p} onClick={() => setDays(p)}
+                  className={`px-2.5 py-1 rounded-lg text-xs tabular-nums transition-colors ${
+                    p === days ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
+            {p}d
+          </button>
+        ))}
+      </div>
+      {data ? (
+        <>
+          <Overview d={data} />
+          <Rhythm d={data} />
+          <Drivers d={data} />
+          <Extremes d={data} />
+        </>
+      ) : (
+        <div className="h-40 animate-pulse bg-[#18181B] rounded-xl" />
+      )}
       <WhatStressesYou />
       <StressfulPlaces />
       <FlightLoadRollup />

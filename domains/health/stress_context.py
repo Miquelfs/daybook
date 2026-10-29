@@ -55,6 +55,8 @@ def _series_min(conn, table: str, col: str, date: str) -> dict[int, float]:
     out: dict[int, float] = {}
     try:
         for r in conn.execute(f"SELECT time, {col} AS v FROM {table} WHERE date=?", (date,)):
+            if r["v"] is None or r["v"] < 0:          # stress < 0 = unmeasured / off-wrist
+                continue
             h, m = r["time"].split(":")
             out[int(h) * 60 + int(m)] = float(r["v"])
     except sqlite3.OperationalError:
@@ -187,12 +189,16 @@ def stress_by_place(conn, date: str) -> dict:
         best = min(gps, key=lambda g: abs(g[0] - mn))
         return best if abs(best[0] - mn) <= 30 else None  # within 30 min
 
+    def inside(mn: int, s: int, e: int) -> bool:
+        # a span past local midnight (22:38→01:38) wraps: it covers this day's late evening
+        return s <= mn <= e if s <= e else mn >= s
+
     def classify(mn: int) -> str:
         for s, e in spans:
-            if s <= mn <= e:
+            if inside(mn, s, e):
                 return "in-flight"
         for s, e in ex_spans:
-            if s <= mn <= e:
+            if inside(mn, s, e):
                 return "exercise"
         g = nearest_gps(mn)
         if not g:
