@@ -12,8 +12,9 @@ import { format, parseISO } from "date-fns";
 import { correlationsApi } from "@/lib/correlations-api";
 import { WeeklyReview } from "@/components/insights/WeeklyReview";
 import { Links } from "@/components/insights/Links";
+import { AskData } from "@/components/insights/AskData";
 import type { MetricMeta, TopCorrelation, TagImpact, PrecomputedCorrelation } from "@/lib/correlations-api";
-import { TrendingUp, Minus, ArrowUpRight, ArrowDownRight, Plus, X, CheckCircle, Trash2, Sparkles, GitCompare, CalendarDays, BarChart2, FlaskConical, Activity, ClipboardCheck } from "lucide-react";
+import { TrendingUp, Minus, ArrowUpRight, ArrowDownRight, Plus, X, CheckCircle, Trash2, Sparkles, GitCompare, CalendarDays, BarChart2, FlaskConical, Activity, ClipboardCheck, MessageCircleQuestion } from "lucide-react";
 import { TagStatsDrawer } from "@/components/TagStatsDrawer";
 import { StressLifeInsights } from "@/components/StressLifeInsights";
 import { type Tag as TagType } from "@/lib/tags-api";
@@ -48,7 +49,7 @@ const TOOLTIP_STYLE = {
   itemStyle: { color: "#FAFAFA" },
 };
 
-type Tab = "review" | "discover" | "compare" | "weekly" | "period" | "stress" | "experiments";
+type Tab = "ask" | "review" | "discover" | "compare" | "weekly" | "period" | "stress" | "experiments";
 
 function rColor(r: number | null) {
   if (r === null) return "text-[#52525B]";
@@ -247,6 +248,7 @@ export default function CorrelationsPage() {
         {(
           [
             { id: "review" as Tab, label: "Review", icon: <ClipboardCheck size={13} /> },
+            { id: "ask" as Tab, label: "Ask", icon: <MessageCircleQuestion size={13} /> },
             { id: "discover" as Tab, label: "Discover", icon: <Sparkles size={13} /> },
             { id: "compare" as Tab, label: "Compare", icon: <GitCompare size={13} /> },
             { id: "weekly" as Tab, label: "Weekly", icon: <CalendarDays size={13} /> },
@@ -269,6 +271,8 @@ export default function CorrelationsPage() {
 
       {/* ── DISCOVER TAB ── */}
       {tab === "review" && <WeeklyReview />}
+
+      {tab === "ask" && <AskData />}
 
       {tab === "discover" && (
         <div className="space-y-8">
