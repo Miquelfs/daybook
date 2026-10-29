@@ -4,8 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { addDays, format, parseISO } from "date-fns";
-import { Cake, Inbox, Plane, Plus, Target } from "lucide-react";
-import { SectionLabel } from "@/components/MorningBrief";
+import { Cake, Inbox, ListTodo, Plane, Plus, Target } from "lucide-react";
+import { LaneHeader, LaneLink } from "@/components/day/Lane";
 import { plansApi, PLAN_KEYS, type Task } from "@/lib/plans-api";
 import { TaskRow } from "./TaskRow";
 import { TaskSheet } from "./TaskSheet";
@@ -13,7 +13,7 @@ import { dueLabel } from "./format";
 import { area } from "./areas";
 
 /**
- * Today's plan, kept calm: a birthday line when it's someone's day, one card
+ * The Tasks lane of Today, kept calm: a birthday line when it's someone's day, one card
  * with what's due (overdue, today, notes resurfacing) + quick add, then a quiet
  * "next" list. Goals stay on the Plan page — Today only mentions them on
  * Mondays (a one-line weekly check) or when a deadline is within a week.
@@ -80,10 +80,7 @@ function Ahead({ date }: { date: string }) {
 
   return (
     <section>
-      <div className="flex items-baseline justify-between">
-        <SectionLabel>Today&apos;s plan</SectionLabel>
-        <Link href="/plan" className="text-xs text-[#52525B] hover:text-[#A1A1AA]">Plan →</Link>
-      </div>
+      <LaneHeader icon={ListTodo} label="Tasks" action={<LaneLink href="/plan">Plan →</LaneLink>} />
 
       <div className="flex flex-col gap-3">
         {bdayToday.map((b) => (
@@ -182,7 +179,7 @@ function DoneOn({ date }: { date: string }) {
   if (done.length === 0) return null;
   return (
     <section>
-      <SectionLabel>Got done</SectionLabel>
+      <LaneHeader icon={ListTodo} label="Got done" />
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-1.5 divide-y divide-[#18181B]">
         {done.map((t) => <TaskRow key={t.id} task={t} today={date} />)}
       </div>

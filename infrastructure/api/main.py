@@ -46,6 +46,7 @@ from infrastructure.api.routers import food as food_module
 from infrastructure.api.routers import wellness as wellness_module
 from infrastructure.api.routers import system as system_module
 from infrastructure.api.routers import plans as plans_module
+from infrastructure.api.routers import learning as learning_module
 
 VERSION = "0.1.0"
 ROOT = Path(__file__).parents[2]
@@ -153,6 +154,7 @@ app.include_router(nutrition_module.router)
 app.include_router(food_module.router)
 app.include_router(wellness_module.router)
 app.include_router(plans_module.router)
+app.include_router(learning_module.router)
 
 _photos_dir = ROOT / "data" / "photos"
 _photos_dir.mkdir(parents=True, exist_ok=True)
@@ -241,6 +243,10 @@ def _run_migrations() -> None:
     _conn16 = _get_conn()
     _migrate_live_cues(_conn16)
     _conn16.close()
+    from infrastructure.db.migrate_learning import migrate as _migrate_learning
+    _conn_l = _get_conn()
+    _migrate_learning(_conn_l)
+    _conn_l.close()
     from infrastructure.db.migrate_hr_zones import migrate as _migrate_hr_zones
     _conn17 = _get_conn()
     _migrate_hr_zones(_conn17)

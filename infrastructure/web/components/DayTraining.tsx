@@ -5,7 +5,8 @@ import type { PlanCourse } from "@/lib/api";
 import { sessionIcon } from "@/lib/sport";
 import Link from "next/link";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
-import { SectionLabel } from "@/components/MorningBrief";
+import { Dumbbell } from "lucide-react";
+import { LaneHeader, LaneLink } from "@/components/day/Lane";
 import { SessionActualStats } from "@/components/training/SessionActualStats";
 import type { SessionActual } from "@/lib/api";
 import {
@@ -801,9 +802,11 @@ function PlanNextWeekNudge({ date }: { date: string }) {
   );
 }
 
-export function DayTraining({ initialPrescription, date }: {
+export function DayTraining({ initialPrescription, date, lead }: {
   initialPrescription: DayPrescription | null;
   date: string;
+  /** Rendered under the lane header (the recovery cue). */
+  lead?: React.ReactNode;
 }) {
   const [data, setData] = useState<DayPrescription | null>(initialPrescription);
   const [loading, setLoading] = useState(true);
@@ -862,7 +865,7 @@ export function DayTraining({ initialPrescription, date }: {
   if (loading) {
     return (
       <section className="space-y-3">
-        <SectionLabel>Training</SectionLabel>
+        <LaneHeader icon={Dumbbell} label="Training" />
         <div className="h-16 animate-pulse bg-[#18181B] rounded-xl" />
       </section>
     );
@@ -872,7 +875,7 @@ export function DayTraining({ initialPrescription, date }: {
   if (fetchError) {
     return (
       <section className="space-y-3">
-        <SectionLabel>Training</SectionLabel>
+        <LaneHeader icon={Dumbbell} label="Training" />
         <p className="text-xs text-[#3F3F46] text-center py-2">Could not load training plan</p>
       </section>
     );
@@ -887,15 +890,18 @@ export function DayTraining({ initialPrescription, date }: {
   return (
     <>
       <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <SectionLabel>Training</SectionLabel>
-          {sessions[0]?.days_until_race != null && (
-            <Link href="/omyra" className="text-[11px] text-[#71717A] hover:text-[#F59E0B]">
+        <LaneHeader
+          icon={Dumbbell}
+          label="Training"
+          action={sessions[0]?.days_until_race != null && (
+            <LaneLink href="/omyra">
               {sessions[0].goal_name} · {sessions[0].days_until_race}d
               {sessions[0].current_week ? ` · wk ${sessions[0].current_week}/${sessions[0].total_weeks}` : ""} →
-            </Link>
+            </LaneLink>
           )}
-        </div>
+        />
+
+        {lead}
 
         <PlanNextWeekNudge date={date} />
 

@@ -4,11 +4,12 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { differenceInCalendarDays } from "date-fns";
-import { Plus, CalendarDays, ChevronDown, ChevronUp, Target, Flame, ListChecks, StickyNote, Users, type LucideIcon } from "lucide-react";
+import { Plus, CalendarDays, ChevronDown, ChevronUp, Target, Flame, GraduationCap, ListChecks, StickyNote, Users, type LucideIcon } from "lucide-react";
 import { plansApi, PLAN_KEYS, type Goal, type Task, type TaskKind } from "@/lib/plans-api";
 import { localISODate } from "@/lib/dates";
 import { HabitTracker } from "@/components/habits/HabitTracker";
 import { PeopleView } from "@/components/people/PeopleView";
+import { LearnView } from "@/components/learning/LearnView";
 import { GoalRow } from "@/components/plan/GoalRow";
 import { GoalSheet } from "@/components/plan/GoalSheet";
 import { TaskSheet } from "@/components/plan/TaskSheet";
@@ -21,6 +22,7 @@ const TABS = [
   { key: "tasks", label: "Tasks", icon: ListChecks },
   { key: "calendar", label: "Calendar", icon: CalendarDays },
   { key: "goals", label: "Goals", icon: Target },
+  { key: "learn", label: "Learn", icon: GraduationCap },
   { key: "habits", label: "Habits", icon: Flame },
   { key: "people", label: "People", icon: Users },
 ] as const;
@@ -184,7 +186,7 @@ function PlanPageInner() {
         <div className="flex items-end justify-between gap-3 mb-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Plan</h1>
-            <p className="text-sm text-[#71717A] mt-0.5">Tasks, goals, habits & people</p>
+            <p className="text-sm text-[#71717A] mt-0.5">Tasks, goals, learning, habits & people</p>
           </div>
           {action && <ActionButton icon={Plus} onClick={action.open}>{action.label}</ActionButton>}
         </div>
@@ -209,6 +211,7 @@ function PlanPageInner() {
         />
       )}
       {tab === "goals" && <GoalsTab onEdit={editGoal} />}
+      {tab === "learn" && <LearnView today={today} />}
       {tab === "habits" && (
         <HabitTracker
           onEditGoal={editGoal}

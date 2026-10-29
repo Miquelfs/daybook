@@ -8,8 +8,8 @@ import { Questionnaire } from "@/components/Questionnaire";
 import { SectionLabel } from "@/components/MorningBrief";
 import { LocationSection } from "@/components/LocationSection";
 import { DaySpendSummary } from "@/components/money/DaySpendSummary";
-import { DayRosterBadge } from "@/components/DayRosterBadge";
-import { DayFlights } from "@/components/DayFlights";
+import { DayDuty } from "@/components/day/DayDuty";
+import { DayLearning } from "@/components/learning/DayLearning";
 import { DayPassengerFlights } from "@/components/DayPassengerFlights";
 import { DayRestaurants } from "@/components/DayRestaurants";
 import { DayBooks } from "@/components/DayBooks";
@@ -101,15 +101,20 @@ export async function DayView({ date }: { date: string }) {
           aiAvailable={aiStatus?.ollama_available ?? false}
         />
 
-        {/* Today: tasks, notes, birthdays, goals. Past day: what got done. */}
-        <AheadStrip date={date} isToday={date === localToday} />
+        {/* The day's structure — what it holds, lane by lane: the duty that frames
+            it, training, learning, then tasks. Each lane hides itself when empty;
+            on a past day they become the record of what happened. */}
+        <section>
+          <SectionLabel>{date === localToday ? "Today" : "The day"}</SectionLabel>
+          <div className="flex flex-col gap-8">
+            <DayDuty date={date} />
+            <DayTraining initialPrescription={trainingDay} date={date} lead={<RecoveryCard date={date} />} />
+            <DayLearning date={date} isToday={date === localToday} />
+            <AheadStrip date={date} isToday={date === localToday} />
+          </div>
+        </section>
 
-        {/* Recovery cue sits tight above Training — it's a lead-in to it, not
-            a standalone section, so keep the gap small (gap-4, not gap-12). */}
-        <div className="flex flex-col gap-4">
-          <RecoveryCard date={date} />
-          <DayTraining initialPrescription={trainingDay} date={date} />
-        </div>
+        <DayPassengerFlights date={date} />
 
         <MovementBlock
           date={date}
@@ -119,12 +124,6 @@ export async function DayView({ date }: { date: string }) {
         />
 
         <StressEnergyTimeline date={date} />
-
-        <DayRosterBadge date={date} />
-
-        <DayFlights date={date} />
-
-        <DayPassengerFlights date={date} />
 
         <DaySpendSummary date={date} />
 
