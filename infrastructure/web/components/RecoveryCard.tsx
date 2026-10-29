@@ -27,7 +27,7 @@ export function RecoveryCard({ date }: { date: string }) {
       {flag ? <ShieldAlert size={16} style={{ color }} className="mt-0.5 shrink-0" />
             : <ShieldCheck size={16} style={{ color }} className="mt-0.5 shrink-0" />}
       <div className="min-w-0">
-        <p className="text-sm font-medium" style={{ color }}>
+        <p className="text-sm font-medium" style={{ color: `color-mix(in srgb, ${color} var(--accent-ink), black)` }}>
           {flag ? "Recovery flag" : "Recovery watch"}
         </p>
         <p className="text-xs text-[#A1A1AA] mt-0.5">

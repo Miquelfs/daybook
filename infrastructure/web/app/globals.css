@@ -32,6 +32,11 @@
   --viz-hr: #F43F5E; --viz-spd: #38BDF8; --viz-pw: #A78BFA; --viz-alt: #A1A1AA; --viz-cad: #34D399;
   --viz-grid: #27272A; --viz-axis: #52525B; --viz-ref: #71717A; --viz-gap: #0D0D0F;
   --viz-deep: #1E40AF; --viz-rem: #38BDF8; --viz-light: #93C5FD; --viz-mood: #A78BFA;
+  /* stress & energy: the all-day chart, Insights → Stress */
+  /* accent text (operator / duty / alert colours): as is on dark, deepened on paper —
+     use as color-mix(in srgb, <hex> var(--accent-ink), black) */
+  --accent-ink: 100%;
+  --viz-stress: #F97316; --viz-energy: #22D3EE; --viz-calm: #34D399; --viz-mid: #FBBF24; --viz-hot: #F87171;
 }
 html[data-theme="light"] {
   --viz-i1: #B5AB95; --viz-i2: #FDBA74; --viz-i3: #FB923C; --viz-i4: #F97316;
@@ -39,6 +44,8 @@ html[data-theme="light"] {
   --viz-hr: #BE123C; --viz-spd: #0369A1; --viz-pw: #6D28D9; --viz-alt: #78716C; --viz-cad: #047857;
   --viz-grid: #E6DECC; --viz-axis: #7A7161; --viz-ref: #A99E86; --viz-gap: #FBF9F3;
   --viz-deep: #1E3A8A; --viz-rem: #0284C7; --viz-light: #93C5FD; --viz-mood: #6D28D9;
+  --accent-ink: 62%;
+  --viz-stress: #C2410C; --viz-energy: #0E7490; --viz-calm: #047857; --viz-mid: #A16207; --viz-hot: #B91C1C;
 }
 
 html {
@@ -143,6 +150,7 @@ html[data-theme="light"] .bg-\[\#09090B\]        { background-color: var(--paper
 html[data-theme="light"] .bg-\[\#09090B\]\/95    { background-color: rgba(243, 239, 230, 0.92); }
 html[data-theme="light"] .bg-\[\#0D0D0F\]        { background-color: var(--paper-raised); }
 html[data-theme="light"] .bg-\[\#111113\]        { background-color: var(--paper-raised); }
+html[data-theme="light"] .bg-\[\#131316\]        { background-color: var(--paper-inset); }
 html[data-theme="light"] .bg-\[\#18181B\]        { background-color: var(--paper-inset); }
 html[data-theme="light"] .bg-\[\#27272A\]        { background-color: var(--paper-line); }
 html[data-theme="light"] .bg-\[\#3F3F46\]        { background-color: #C9BC9F; }
@@ -207,6 +215,12 @@ html[data-theme="light"] .bg-\[\#EF4444\]\/25 { background-color: rgba(180, 35, 
 
 /* — Hovers that reference dark surfaces — */
 html[data-theme="light"] .hover\:bg-\[\#18181B\]:hover   { background-color: var(--paper-inset); }
+html[data-theme="light"] .hover\:bg-\[\#131316\]:hover   { background-color: var(--paper-inset); }
+/* Recharts' default tooltip is styled inline (contentStyle) — the class remap can't reach it */
+html[data-theme="light"] .recharts-default-tooltip {
+  background-color: var(--paper-raised) !important; border-color: var(--paper-line) !important; color: var(--ink) !important;
+}
+html[data-theme="light"] .recharts-default-tooltip .recharts-tooltip-label { color: var(--ink-soft) !important; }
 html[data-theme="light"] .hover\:bg-\[\#27272A\]:hover   { background-color: var(--paper-line-soft); }
 html[data-theme="light"] .hover\:text-\[\#FAFAFA\]:hover { color: var(--ink); }
 html[data-theme="light"] .hover\:text-\[\#A1A1AA\]:hover { color: #4E4737; }

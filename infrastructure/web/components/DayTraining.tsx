@@ -145,7 +145,8 @@ function ReadinessHeader({ ctx }: { ctx: ReadinessContext }) {
     : tsb >= -25 ? { color: "#FB923C", label: "productive" }
     : { color: "#F87171", label: "overreaching" };
 
-  const hasAny = readiness != null || status != null || tsb != null || ctx.roster_today;
+  // The roster isn't repeated here — the Duty lane right above shows it.
+  const hasAny = readiness != null || status != null || tsb != null;
   if (!hasAny) return null;
 
   const R = 13;
@@ -187,11 +188,6 @@ function ReadinessHeader({ ctx }: { ctx: ReadinessContext }) {
           </span>
           <span className="text-[10px] text-[#52525B]">{formMeta.label}</span>
         </div>
-      )}
-      {ctx.roster_today && (
-        <span className={`text-[10px] px-2 py-0.5 rounded bg-[#1C1700] border border-[#B45309] text-[#FCD34D] ${tsb == null ? "ml-auto" : ""}`}>
-          ✈ {ctx.roster_today}
-        </span>
       )}
     </div>
   );
@@ -864,7 +860,7 @@ export function DayTraining({ initialPrescription, date, lead }: {
 
   if (loading) {
     return (
-      <section className="space-y-3">
+      <section>
         <LaneHeader icon={Dumbbell} label="Training" />
         <div className="h-16 animate-pulse bg-[#18181B] rounded-xl" />
       </section>
@@ -874,7 +870,7 @@ export function DayTraining({ initialPrescription, date, lead }: {
   // Fetch error — show a subtle message so it's diagnosable, doesn't break the page
   if (fetchError) {
     return (
-      <section className="space-y-3">
+      <section>
         <LaneHeader icon={Dumbbell} label="Training" />
         <p className="text-xs text-[#3F3F46] text-center py-2">Could not load training plan</p>
       </section>
@@ -889,7 +885,7 @@ export function DayTraining({ initialPrescription, date, lead }: {
 
   return (
     <>
-      <section className="space-y-3">
+      <section>
         <LaneHeader
           icon={Dumbbell}
           label="Training"
@@ -901,6 +897,8 @@ export function DayTraining({ initialPrescription, date, lead }: {
           )}
         />
 
+        {/* header sits outside the stack so its gap matches the other lanes */}
+        <div className="space-y-3">
         {lead}
 
         <PlanNextWeekNudge date={date} />
@@ -1007,6 +1005,7 @@ export function DayTraining({ initialPrescription, date, lead }: {
               })}
             </div>
           )}
+        </div>
         </div>
       </section>
 

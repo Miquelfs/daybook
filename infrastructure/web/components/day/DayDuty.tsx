@@ -37,6 +37,9 @@ function hm(sec: number): string {
   return h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
 }
 
+/** An accent hex as text: deepened in light mode so yellow / green stay readable. */
+const ink = (hex: string) => `color-mix(in srgb, ${hex} var(--accent-ink), black)`;
+
 const hhmm = (s: string | null | undefined) => (s ? (s.length > 5 ? s.slice(11, 16) : s) : "");
 
 /** Minutes between two UTC times ("HH:MM" or ISO), across midnight if needed. */
@@ -81,7 +84,7 @@ export function DayDuty({ date }: { date: string }) {
     return (
       <section>
         {header}
-        <p className="text-sm text-[#71717A] px-0.5">Day off</p>
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 text-sm text-[#71717A]">Day off — no duty</div>
       </section>
     );
   }
@@ -97,10 +100,10 @@ export function DayDuty({ date }: { date: string }) {
   return (
     <section>
       {header}
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden" style={{ borderLeft: `3px solid ${accent}` }}>
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${accent}` }}>
         <div className="px-4 py-3.5 flex items-end gap-3" style={{ background: `${accent}12` }}>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] uppercase tracking-widest font-medium" style={{ color: accent }}>{label}</p>
+            <p className="text-[10px] uppercase tracking-widest font-medium" style={{ color: ink(accent) }}>{label}</p>
             {blockSec > 0 ? (
               <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums leading-tight mt-0.5">
                 {hm(blockSec)} <span className="text-sm font-normal text-[#71717A]">block</span>
@@ -152,7 +155,7 @@ export function DayDuty({ date }: { date: string }) {
                 <div className="flex flex-col items-end gap-1 shrink-0">
                   <span className="text-sm text-[#FAFAFA] tabular-nums">{f.block_seconds ? hm(f.block_seconds) : "—"}</span>
                   <span className="text-[10px] font-mono px-1.5 py-px rounded"
-                        style={{ background: `${opDot(f)}1F`, color: opDot(f) }}>
+                        style={{ background: `${opDot(f)}1F`, color: ink(opDot(f)) }}>
                     {FUNCTION_SHORT[mainFunction(f)]}
                   </span>
                 </div>

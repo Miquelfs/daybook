@@ -10,18 +10,19 @@ import { Activity, X } from "lucide-react";
 import { wellnessApi, type WellnessTimeline } from "@/lib/wellness-api";
 import { SectionLabel } from "@/components/MorningBrief";
 
-const STRESS = "#F97316";  // orange
-const ENERGY = "#22D3EE";  // cyan (Body Battery)
-const HR = "#F87171";      // red
+// Theme-aware (globals.css): the bright dark-mode hues are unreadable on paper.
+const STRESS = "var(--viz-stress)";  // orange
+const ENERGY = "var(--viz-energy)";  // cyan (Body Battery)
+const HR = "var(--viz-hot)";         // red
 
 const SPAN_COLOR: Record<string, string> = {
-  activity: "#34D399",  // green
-  flight: "#1E40AF",    // dark blue
-  nap: "#818CF8",       // indigo
+  activity: "var(--viz-calm)",  // green
+  flight: "var(--viz-deep)",    // dark blue
+  nap: "var(--viz-mood)",       // indigo
 };
 const SPAN_FILL_OPACITY: Record<string, number> = { flight: 0.22, activity: 0.14, nap: 0.18 };
 const EVENT_COLOR: Record<string, string> = {
-  meal: "#FBBF24",     // brighter amber so it reads over the flight shading
+  meal: "var(--viz-mid)",  // amber so it reads over the flight shading
   takeoff: "#60A5FA",
   landing: "#3B82F6",
   nap: "#818CF8",
@@ -194,16 +195,16 @@ export function StressEnergyTimeline({ date }: { date: string }) {
         <div className="h-52 cursor-pointer">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={merged} margin={{ top: 8, right: 4, bottom: 0, left: -24 }} onClick={onChartClick}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#18181B" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--viz-grid)" vertical={false} />
               <XAxis
                 dataKey="m" type="number" domain={[0, 1440]}
                 ticks={[0, 180, 360, 540, 720, 900, 1080, 1260, 1440]}
-                tickFormatter={fmt} tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false}
+                tickFormatter={fmt} tick={{ fill: "var(--viz-axis)", fontSize: 10 }} axisLine={false} tickLine={false}
               />
-              <YAxis yAxisId="pct" domain={[0, 100]} tick={{ fill: "#52525B", fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="pct" domain={[0, 100]} tick={{ fill: "var(--viz-axis)", fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis yAxisId="hr" orientation="right" domain={[40, 180]} hide />
               <Tooltip
-                cursor={{ stroke: "#52525B", strokeWidth: 1 }}
+                cursor={{ stroke: "var(--viz-ref)", strokeWidth: 1 }}
                 content={({ active, label, payload }) => {
                   if (!active || label == null) return null;
                   const m = Number(label);
@@ -216,7 +217,7 @@ export function StressEnergyTimeline({ date }: { date: string }) {
                       <p className="tabular-nums">
                         {row.stress != null && !hidden.has("stress") && <span style={{ color: STRESS }}>Stress {row.stress} </span>}
                         {row.bb != null && !hidden.has("bb") && <span style={{ color: ENERGY }}>· Energy {row.bb} </span>}
-                        {row.hr != null && !hidden.has("hr") && <span className="text-[#F87171]">· {row.hr} bpm</span>}
+                        {row.hr != null && !hidden.has("hr") && <span style={{ color: HR }}>· {row.hr} bpm</span>}
                       </p>
                     </div>
                   );
@@ -294,7 +295,7 @@ function Stat({ label, value, sub, tone }: { label: string; value: string; sub?:
   return (
     <div className="min-w-0">
       <p className="text-[10px] uppercase tracking-widest text-[#52525B]">{label}</p>
-      <p className="text-base font-semibold tabular-nums" style={tone ? { color: tone } : undefined}>{value}</p>
+      <p className="text-base font-semibold tabular-nums text-[#FAFAFA]" style={tone ? { color: tone } : undefined}>{value}</p>
       {sub && <p className="text-[10px] text-[#71717A] tabular-nums truncate">{sub}</p>}
     </div>
   );
@@ -314,7 +315,7 @@ function Selected({ item, rows, dayStress, onClose }: {
   const exercise = item.type === "activity";
 
   const range = meal ? item.time : `${item.time}–${item.m2 >= 1440 ? "24:00" : clock(item.m2)}`;
-  const stressTone = (v: number | null) => (v == null ? undefined : v > 3 ? "#F97316" : v < -3 ? "#34D399" : undefined);
+  const stressTone = (v: number | null) => (v == null ? undefined : v > 3 ? STRESS : v < -3 ? "var(--viz-calm)" : undefined);
 
   return (
     <div className="mt-2.5 rounded-lg border border-[#27272A] bg-[#131316] px-3 py-2.5">
@@ -350,7 +351,7 @@ function Selected({ item, rows, dayStress, onClose }: {
         <Stat label="Energy"
               value={st.bbDelta != null ? `${st.bbDelta > 0 ? "+" : ""}${st.bbDelta}` : "—"}
               sub={st.bb0 != null && st.bb1 != null ? `${st.bb0} → ${st.bb1}` : undefined}
-              tone={st.bbDelta == null ? undefined : st.bbDelta > 0 ? "#22D3EE" : undefined} />
+              tone={st.bbDelta == null ? undefined : st.bbDelta > 0 ? ENERGY : undefined} />
         <Stat label="Heart rate"
               value={st.hr != null ? `${st.hr}` : "—"}
               sub={st.hrPeak != null ? `avg bpm · peak ${st.hrPeak}` : undefined} />

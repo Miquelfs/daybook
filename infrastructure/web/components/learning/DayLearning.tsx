@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, GraduationCap, Plus, X } from "lucide-react";
-import { LaneHeader, LaneLink } from "@/components/day/Lane";
+import { LaneHeader, LaneLink, useLaneOpen } from "@/components/day/Lane";
 import {
   learningApi, LEARNING_KEYS, fmtMinutes, type LearningDay, type LearningItem,
 } from "@/lib/learning-api";
@@ -37,6 +37,7 @@ function PlanLane({ d, date, isToday }: { d: LearningDay; date: string; isToday:
   const qc = useQueryClient();
   const [logging, setLogging] = useState(false);
   const [busy, setBusy] = useState<number | null>(null);
+  const [open, toggleOpen] = useLaneOpen(`learning-${d.plan.id}`);
   const refresh = () => LEARNING_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: [...k] }));
 
   async function run(id: number, fn: () => Promise<unknown>) {
@@ -60,7 +61,7 @@ function PlanLane({ d, date, isToday }: { d: LearningDay; date: string; isToday:
     return (
       <section>
         <LaneHeader icon={GraduationCap} label="Learning" action={link} />
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-1.5 divide-y divide-[#18181B]">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-1.5 divide-y divide-[#18181B]">
           {d.done_today.map((i) => <ItemLine key={i.id} item={i} done />)}
           {d.minutes_today > 0 && (
             <p className="text-xs text-[#71717A] py-2">{fmtMinutes(d.minutes_today)} studied</p>
@@ -74,7 +75,17 @@ function PlanLane({ d, date, isToday }: { d: LearningDay; date: string; isToday:
     return (
       <section>
         <LaneHeader icon={GraduationCap} label="Learning" action={link} />
-        <p className="text-sm text-[#71717A] px-0.5">Starts {d.week_start}</p>
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 text-sm text-[#71717A]">Starts {d.week_start}</div>
+      </section>
+    );
+  }
+
+  const target = (p.weekly_hours ?? 0) * 60;
+  const summary = `${d.due.length ? `${d.due.length} to do` : "week done"} · ${fmtMinutes(d.minutes_week)}${target > 0 ? ` / ${p.weekly_hours}h` : ""}`;
+  if (!open) {
+    return (
+      <section>
+        <LaneHeader icon={GraduationCap} label="Learning" action={link} open={false} onToggle={toggleOpen} summary={summary} />
       </section>
     );
   }
@@ -84,13 +95,12 @@ function PlanLane({ d, date, isToday }: { d: LearningDay; date: string; isToday:
     ...d.due.map((item) => ({ item, done: false })),
   ];
   const more = rows.length - SHOW;
-  const target = (p.weekly_hours ?? 0) * 60;
   const pct = target > 0 ? Math.min(100, Math.round((d.minutes_week / target) * 100)) : 0;
 
   return (
     <section>
-      <LaneHeader icon={GraduationCap} label="Learning" action={link} />
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
+      <LaneHeader icon={GraduationCap} label="Learning" action={link} open onToggle={toggleOpen} />
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
         {d.phase && (
           <div className="px-4 pt-3 pb-1 flex items-baseline justify-between gap-3">
             <p className="text-xs text-[#A1A1AA] truncate">{d.phase.title}</p>

@@ -105,7 +105,8 @@ export async function DayView({ date }: { date: string }) {
             it, training, learning, then tasks. Each lane hides itself when empty;
             on a past day they become the record of what happened. */}
         <section>
-          <SectionLabel>{date === localToday ? "Today" : "The day"}</SectionLabel>
+          {/* "Day plan", not "Today" — the page header already says Today */}
+          <SectionLabel>{date === localToday ? "Day plan" : "The day"}</SectionLabel>
           <div className="flex flex-col gap-8">
             <DayDuty date={date} />
             <DayTraining initialPrescription={trainingDay} date={date} lead={<RecoveryCard date={date} />} />
