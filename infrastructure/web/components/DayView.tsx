@@ -101,17 +101,18 @@ export async function DayView({ date }: { date: string }) {
           aiAvailable={aiStatus?.ollama_available ?? false}
         />
 
-        {/* The day's structure — what it holds, lane by lane: the duty that frames
-            it, training, learning, then tasks. Each lane hides itself when empty;
+        {/* The day's structure — what it holds, lane by lane: tasks, the duty
+            that frames it, training, learning. Each lane hides itself when empty;
             on a past day they become the record of what happened. */}
         <section>
           {/* "Day plan", not "Today" — the page header already says Today */}
           <SectionLabel>{date === localToday ? "Day plan" : "The day"}</SectionLabel>
           <div className="flex flex-col gap-8">
+            {/* Tasks first: adding one should be one tap from the top */}
+            <AheadStrip date={date} isToday={date === localToday} />
             <DayDuty date={date} />
             <DayTraining initialPrescription={trainingDay} date={date} lead={<RecoveryCard date={date} />} />
             <DayLearning date={date} isToday={date === localToday} />
-            <AheadStrip date={date} isToday={date === localToday} />
           </div>
         </section>
 

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { addDays, format, parseISO } from "date-fns";
-import { Cake, Inbox, ListTodo, Plane, Plus, Target } from "lucide-react";
+import { Cake, CalendarDays, Inbox, ListTodo, Plane, Plus, Target } from "lucide-react";
 import { LaneHeader, LaneLink } from "@/components/day/Lane";
 import { plansApi, PLAN_KEYS, type Task } from "@/lib/plans-api";
 import { TaskRow } from "./TaskRow";
@@ -27,6 +27,7 @@ function Ahead({ date }: { date: string }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<Task | null>(null);
   const [quick, setQuick] = useState("");
+  const [quickDue, setQuickDue] = useState(date);              // quick add's date — today unless picked
   const [saving, setSaving] = useState(false);
 
   const { data: a } = useQuery({
@@ -45,8 +46,9 @@ function Ahead({ date }: { date: string }) {
     if (!quick.trim()) return;
     setSaving(true);
     try {
-      await plansApi.createTask({ title: quick.trim(), due_date: date });
+      await plansApi.createTask({ title: quick.trim(), due_date: quickDue });
       setQuick("");
+      setQuickDue(date);
       PLAN_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: [...k] }));
     } finally {
       setSaving(false);
@@ -115,9 +117,24 @@ function Ahead({ date }: { date: string }) {
               value={quick}
               onChange={(e) => setQuick(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); quickAdd(); } }}
-              placeholder={due.length || doneToday.length ? "Add something for today…" : "Nothing due today — add something…"}
+              placeholder={due.length || doneToday.length ? "Add a task…" : "Nothing due today — add a task…"}
               className="flex-1 bg-transparent py-1 text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none"
             />
+            {/* The date: a chip over the native picker (today · tomorrow · a quick pick) */}
+            {quick.trim() && quickDue === date && (
+              <button type="button" onClick={() => setQuickDue(format(addDays(parseISO(date), 1), "yyyy-MM-dd"))}
+                      className="shrink-0 text-[11px] text-[#71717A] hover:text-[#A1A1AA]">
+                Tomorrow?
+              </button>
+            )}
+            <label className={`relative shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border cursor-pointer transition-colors ${
+              quickDue !== date ? "border-[#F59E0B]/40 text-[#F59E0B] bg-[#F59E0B]/10" : "border-[#27272A] text-[#71717A] hover:text-[#A1A1AA]"}`}>
+              <CalendarDays size={12} />
+              {dueLabel(quickDue, date)}
+              <input type="date" value={quickDue} min={date} aria-label="Due date"
+                     onChange={(e) => setQuickDue(e.target.value || date)}
+                     className="absolute inset-0 opacity-0 cursor-pointer" />
+            </label>
             {quick.trim() && (
               <button onClick={quickAdd} disabled={saving} className="text-xs font-medium text-[#F59E0B]">Add</button>
             )}
