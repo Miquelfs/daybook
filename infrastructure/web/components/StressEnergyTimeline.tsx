@@ -10,10 +10,15 @@ import { Activity, X } from "lucide-react";
 import { wellnessApi, type WellnessTimeline } from "@/lib/wellness-api";
 import { SectionLabel } from "@/components/MorningBrief";
 
-// Theme-aware (globals.css): the bright dark-mode hues are unreadable on paper.
-const STRESS = "var(--viz-stress)";  // orange
-const ENERGY = "var(--viz-energy)";  // cyan (Body Battery)
-const HR = "var(--viz-hot)";         // red
+// Lines keep their bright hues in both themes (orange · cyan · soft red, set apart
+// by the HR line's low opacity). Text uses the theme-aware tones — the bright ones
+// wash out as text on paper.
+const STRESS = "#F97316";  // orange
+const ENERGY = "#22D3EE";  // cyan (Body Battery)
+const HR = "#F87171";      // red, drawn at 40%
+const STRESS_TEXT = "var(--viz-stress)";
+const ENERGY_TEXT = "var(--viz-energy)";
+const HR_TEXT = "var(--viz-hot)";
 
 const SPAN_COLOR: Record<string, string> = {
   activity: "var(--viz-calm)",  // green
@@ -215,9 +220,9 @@ export function StressEnergyTimeline({ date }: { date: string }) {
                       <p className="text-[#A1A1AA] tabular-nums">{clock(m)}</p>
                       {ctx && <p className="text-[#FAFAFA]">{ctx.emoji} {ctx.label}</p>}
                       <p className="tabular-nums">
-                        {row.stress != null && !hidden.has("stress") && <span style={{ color: STRESS }}>Stress {row.stress} </span>}
-                        {row.bb != null && !hidden.has("bb") && <span style={{ color: ENERGY }}>· Energy {row.bb} </span>}
-                        {row.hr != null && !hidden.has("hr") && <span style={{ color: HR }}>· {row.hr} bpm</span>}
+                        {row.stress != null && !hidden.has("stress") && <span style={{ color: STRESS_TEXT }}>Stress {row.stress} </span>}
+                        {row.bb != null && !hidden.has("bb") && <span style={{ color: ENERGY_TEXT }}>· Energy {row.bb} </span>}
+                        {row.hr != null && !hidden.has("hr") && <span style={{ color: HR_TEXT }}>· {row.hr} bpm</span>}
                       </p>
                     </div>
                   );
@@ -315,7 +320,7 @@ function Selected({ item, rows, dayStress, onClose }: {
   const exercise = item.type === "activity";
 
   const range = meal ? item.time : `${item.time}–${item.m2 >= 1440 ? "24:00" : clock(item.m2)}`;
-  const stressTone = (v: number | null) => (v == null ? undefined : v > 3 ? STRESS : v < -3 ? "var(--viz-calm)" : undefined);
+  const stressTone = (v: number | null) => (v == null ? undefined : v > 3 ? STRESS_TEXT : v < -3 ? "var(--viz-calm)" : undefined);
 
   return (
     <div className="mt-2.5 rounded-lg border border-[#27272A] bg-[#131316] px-3 py-2.5">
@@ -351,7 +356,7 @@ function Selected({ item, rows, dayStress, onClose }: {
         <Stat label="Energy"
               value={st.bbDelta != null ? `${st.bbDelta > 0 ? "+" : ""}${st.bbDelta}` : "—"}
               sub={st.bb0 != null && st.bb1 != null ? `${st.bb0} → ${st.bb1}` : undefined}
-              tone={st.bbDelta == null ? undefined : st.bbDelta > 0 ? ENERGY : undefined} />
+              tone={st.bbDelta == null ? undefined : st.bbDelta > 0 ? ENERGY_TEXT : undefined} />
         <Stat label="Heart rate"
               value={st.hr != null ? `${st.hr}` : "—"}
               sub={st.hrPeak != null ? `avg bpm · peak ${st.hrPeak}` : undefined} />

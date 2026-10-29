@@ -28,6 +28,7 @@ function Ahead({ date }: { date: string }) {
   const [editing, setEditing] = useState<Task | null>(null);
   const [quick, setQuick] = useState("");
   const [quickDue, setQuickDue] = useState(date);              // quick add's date — today unless picked
+  const [composing, setComposing] = useState(false);            // the full sheet, from the date chip
   const [saving, setSaving] = useState(false);
 
   const { data: a } = useQuery({
@@ -120,21 +121,20 @@ function Ahead({ date }: { date: string }) {
               placeholder={due.length || doneToday.length ? "Add a task…" : "Nothing due today — add a task…"}
               className="flex-1 bg-transparent py-1 text-sm text-[#FAFAFA] placeholder:text-[#3F3F46] outline-none"
             />
-            {/* The date: a chip over the native picker (today · tomorrow · a quick pick) */}
+            {/* Tomorrow in one tap; the date chip opens the full task sheet (date, time,
+                area, goal, repeat…) with what's typed carried over. */}
             {quick.trim() && quickDue === date && (
               <button type="button" onClick={() => setQuickDue(format(addDays(parseISO(date), 1), "yyyy-MM-dd"))}
                       className="shrink-0 text-[11px] text-[#71717A] hover:text-[#A1A1AA]">
                 Tomorrow?
               </button>
             )}
-            <label className={`relative shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border cursor-pointer transition-colors ${
-              quickDue !== date ? "border-[#F59E0B]/40 text-[#F59E0B] bg-[#F59E0B]/10" : "border-[#27272A] text-[#71717A] hover:text-[#A1A1AA]"}`}>
+            <button type="button" onClick={() => setComposing(true)} title="Date, area, goal, repeat…"
+                    className={`shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border transition-colors ${
+                      quickDue !== date ? "border-[#F59E0B]/40 text-[#F59E0B] bg-[#F59E0B]/10" : "border-[#27272A] text-[#71717A] hover:text-[#A1A1AA]"}`}>
               <CalendarDays size={12} />
               {dueLabel(quickDue, date)}
-              <input type="date" value={quickDue} min={date} aria-label="Due date"
-                     onChange={(e) => setQuickDue(e.target.value || date)}
-                     className="absolute inset-0 opacity-0 cursor-pointer" />
-            </label>
+            </button>
             {quick.trim() && (
               <button onClick={quickAdd} disabled={saving} className="text-xs font-medium text-[#F59E0B]">Add</button>
             )}
@@ -183,6 +183,11 @@ function Ahead({ date }: { date: string }) {
       </div>
 
       {editing && <TaskSheet task={editing} onClose={() => setEditing(null)} />}
+      {composing && (
+        <TaskSheet defaultTitle={quick.trim()} defaultDate={quickDue}
+                   onSaved={() => { setQuick(""); setQuickDue(date); }}
+                   onClose={() => setComposing(false)} />
+      )}
     </section>
   );
 }

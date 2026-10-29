@@ -7,18 +7,22 @@ import { Sheet, Field, Chips, inputCls } from "./Sheet";
 import { AREA_LIST } from "./areas";
 import { Pill } from "./ui";
 
-export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, defaultTripId, onClose }: {
+export function TaskSheet({ task, kind = "task", defaultTitle, defaultDate, defaultArea, defaultTripId, onSaved, onClose }: {
   task?: Task;
   kind?: TaskKind;
+  /** What was already typed in a quick-add line. */
+  defaultTitle?: string;
   defaultDate?: string;
   defaultArea?: string;
   /** Adding to a planned trip's checklist. */
   defaultTripId?: number;
+  /** After a successful save (not delete) — e.g. clear the quick-add line. */
+  onSaved?: () => void;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
   const [f, setF] = useState({
-    title: task?.title ?? "",
+    title: task?.title ?? defaultTitle ?? "",
     notes: task?.notes ?? "",
     kind: task?.kind ?? kind,
     due_date: task?.due_date ?? defaultDate ?? "",
@@ -70,7 +74,10 @@ export function TaskSheet({ task, kind = "task", defaultDate, defaultArea, defau
       area: f.area,
       goal_id: f.goal_id,
     };
-    run(() => (task ? plansApi.updateTask(task.id, body) : plansApi.createTask(body)));
+    run(async () => {
+      await (task ? plansApi.updateTask(task.id, body) : plansApi.createTask(body));
+      onSaved?.();
+    });
   }
 
   return (

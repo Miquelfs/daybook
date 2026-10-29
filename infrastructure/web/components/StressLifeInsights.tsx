@@ -194,7 +194,8 @@ export function FlightLoadRollup() {
 
 // ── Built from everything logged: trend, rhythm by kind of day, drivers, extreme days ──
 
-const KIND_COLOR: Record<string, string> = { flying: "var(--viz-stress)", standby: "var(--viz-mid)", off: "var(--viz-calm)" };
+// Chart lines stay bright in both themes; stressColor / deltaColor are for text.
+const KIND_COLOR: Record<string, string> = { flying: "#F97316", standby: "#EAB308", off: "#10B981" };
 const TIP = { background: "#111113", border: "1px solid #27272A", borderRadius: 8, fontSize: 11 };   // light: globals.css
 const PERIODS = [30, 90, 180] as const;
 const hours = (min: number | null) => (min == null ? "—" : `${(min / 60).toFixed(1)}h`);
@@ -231,8 +232,8 @@ function Overview({ d }: { d: StressInsights }) {
             <AreaChart data={o.series} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
               <defs>
                 <linearGradient id="stressFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="var(--viz-stress)" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="var(--viz-stress)" stopOpacity={0} />
+                  <stop offset="0%" stopColor="#F97316" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#F97316" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <YAxis hide domain={[0, "dataMax + 5"]} />
@@ -242,7 +243,7 @@ function Overview({ d }: { d: StressInsights }) {
                 labelFormatter={(l) => format(parseISO(String(l)), "EEE d MMM")}
                 formatter={(v) => [v, "Stress"]}
               />
-              <Area dataKey="v" stroke="var(--viz-stress)" strokeWidth={1.5} fill="url(#stressFill)" isAnimationActive={false} />
+              <Area dataKey="v" stroke="#F97316" strokeWidth={1.5} fill="url(#stressFill)" isAnimationActive={false} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
