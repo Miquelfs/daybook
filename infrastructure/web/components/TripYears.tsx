@@ -25,30 +25,33 @@ export function TripYears({
   );
 
   return (
-    <div className="flex flex-col gap-3">
-      {groups.map(({ year, trips }, i) => {
+    <div className="flex flex-col gap-6">
+      {groups.map(({ year, trips }) => {
         const isOpen = filtered || open[year];
         const nights = trips.reduce((s, t) => s + t.n_nights, 0);
+        const flights = trips.reduce((s, t) => s + t.passenger_flight_count, 0);
         return (
           <div key={year}>
             {!filtered && (
               <button
                 onClick={() => setOpen((o) => ({ ...o, [year]: !o[year] }))}
-                className="flex items-center gap-1.5 w-full text-left mb-2 text-[#71717A] hover:text-[#A1A1AA] transition-colors"
+                className="flex items-baseline gap-3 w-full text-left mb-3 group"
                 aria-expanded={isOpen}
               >
-                {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                <span className="text-xs tabular-nums font-medium">{year}</span>
-                <span className="text-xs text-[#3F3F46]">
-                  · {trips.length} {trips.length === 1 ? "trip" : "trips"} · {nights} nights away
+                <span className="text-xl font-semibold tabular-nums text-[#FAFAFA]">{year}</span>
+                <span className="text-xs text-[#71717A] tabular-nums">
+                  {trips.length} {trips.length === 1 ? "trip" : "trips"} · {nights} nights{flights ? ` · ${flights} flights` : ""}
+                </span>
+                <span className="flex-1 border-b border-dashed border-[#27272A] translate-y-[-3px]" />
+                <span className="text-[#52525B] group-hover:text-[#A1A1AA]">
+                  {isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                 </span>
               </button>
             )}
             {isOpen && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {trips.map((t) => (
-                  <TripCard key={t.id} trip={t}
-                            flag={t.primary_country === "Spain" ? null : <Flag country={t.primary_country} />} />
+                  <TripCard key={t.id} trip={t} flag={<Flag country={t.primary_country} fallback="" />} />
                 ))}
               </div>
             )}

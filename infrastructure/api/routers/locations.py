@@ -411,6 +411,25 @@ def get_location_summary_range(start: str, end: str):
     return [dict(r) for r in rows]
 
 
+@router.get("/movement/modes")
+def get_movement_modes(year: int | None = None):
+    """Movement by mode (on foot · run · bike · vehicle · flight) — totals, months, years, records."""
+    from domains.locations.movement_modes import refresh, stats
+    con = _conn()
+    day_con = None
+    try:
+        try:
+            day_con = sqlite3.connect(_DAYBOOK_DB)
+        except sqlite3.Error:
+            day_con = None
+        refresh(con, day_con)
+        return stats(con, year)
+    finally:
+        con.close()
+        if day_con is not None:
+            day_con.close()
+
+
 @router.get("/movement/stats")
 def get_movement_stats(year: int | None = None):
     """
@@ -508,6 +527,28 @@ def get_movement_stats(year: int | None = None):
         "top_days": [dict(r) for r in top_days],
         "summary": dict(summary_row) if summary_row and summary_row["days_tracked"] else {},
     }
+
+
+@router.get("/place-stats/day/{date_str}")
+def get_place_stats_day(date_str: str):
+    """Places / cities / countries on one day and which were first visits."""
+    from domains.locations.place_stats import day
+    con = _conn()
+    try:
+        return day(con, date_str)
+    finally:
+        con.close()
+
+
+@router.get("/place-stats/months")
+def get_place_stats_months(year: int | None = None):
+    """Per month (a year, or the last 12): places, cities, countries and how many were new."""
+    from domains.locations.place_stats import months
+    con = _conn()
+    try:
+        return months(con, year)
+    finally:
+        con.close()
 
 
 @router.get("/top-places")

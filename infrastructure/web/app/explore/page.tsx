@@ -9,6 +9,7 @@ import { Flag } from "@/components/Flag";
 import { ManualCountries } from "@/components/ManualCountries";
 import { TripYears } from "@/components/TripYears";
 import { YearSelect } from "@/components/YearSelect";
+import { PlacesMonthsCard } from "@/components/explore/PlacesMonthsCard";
 import type { TopPlace, CityStay, WorldCoverage, FunFactCard, Trip } from "@/lib/api";
 
 interface Props {
@@ -97,27 +98,34 @@ export default async function ExplorePage({ searchParams }: Props) {
       {(data.points.length > 0 || (coverage && coverage.countries_visited > 0)) && (
         <section className="mb-8">
           {coverage && coverage.countries_visited > 0 && (
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 mb-3">
-              <div className="flex items-baseline justify-between mb-3">
-                <p className="text-xs text-[#52525B] uppercase tracking-widest">World coverage</p>
-                <p className="text-sm tabular-nums">
-                  <span className="text-[#F59E0B] font-semibold">{coverage.countries_visited}</span>
-                  <span className="text-[#52525B]"> of {coverage.countries_total} countries · </span>
-                  <span className="text-[#FAFAFA] font-semibold">{coverage.pct_world}%</span>
-                </p>
+            <div className="rounded-3xl border border-[#27272A] bg-[#0D0D0F] p-5 sm:p-6 mb-3">
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-[10px] text-[#71717A] uppercase tracking-widest">World coverage{year ? ` · ${year}` : ""}</p>
+                  <p className="mt-1 leading-none">
+                    <span className="text-5xl font-semibold tabular-nums text-[#F59E0B]">{coverage.countries_visited}</span>
+                    <span className="text-sm text-[#71717A]"> of {coverage.countries_total} countries</span>
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-3xl font-semibold tabular-nums leading-none">{coverage.pct_world}%</p>
+                  <p className="text-[10px] text-[#71717A] uppercase tracking-widest mt-1">of the world</p>
+                </div>
               </div>
-              <div className="h-1.5 rounded-full bg-[#18181B] mb-4">
-                <div className="h-full rounded-full bg-[#F59E0B]" style={{ width: `${Math.max(coverage.pct_world, 1)}%` }} />
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-3 mt-5">
                 {Object.entries(coverage.continents)
                   .filter(([cont]) => cont !== "Unknown")
+                  .sort((a, b) => b[1].visited_count / b[1].total - a[1].visited_count / a[1].total)
                   .map(([cont, c]) => (
-                    <div key={cont} className="flex items-center justify-between gap-2" title={c.visited.join(", ") || "none yet"}>
-                      <span className="text-xs text-[#71717A] truncate">{cont}</span>
-                      <span className="text-xs tabular-nums shrink-0" style={{ color: c.visited_count > 0 ? "#A1A1AA" : "#3F3F46" }}>
-                        {c.visited_count}/{c.total}
-                      </span>
+                    <div key={cont} title={c.visited.join(", ") || "none yet"}>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-xs text-[#A1A1AA] truncate">{cont}</span>
+                        <span className="text-[11px] tabular-nums text-[#71717A]">{c.visited_count}/{c.total}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-[#18181B] mt-1 overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${(c.visited_count / Math.max(1, c.total)) * 100}%`,
+                                                                     background: c.visited_count ? "#F59E0B" : "transparent" }} />
+                      </div>
                     </div>
                   ))}
               </div>
@@ -134,6 +142,9 @@ export default async function ExplorePage({ searchParams }: Props) {
         </section>
       )}
 
+      {/* New places / cities per month */}
+      <PlacesMonthsCard year={year} />
+
       {/* Fun facts strip */}
       {funFacts && funFacts.cards.length > 0 && (
         <section className="mb-8">
@@ -142,7 +153,7 @@ export default async function ExplorePage({ searchParams }: Props) {
             {funFacts.cards.map((c) => (
               <div
                 key={c.label}
-                className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 min-w-[170px] shrink-0"
+                className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3.5 min-w-[170px] shrink-0"
                 title={c.subtitle}
               >
                 <p className="text-lg leading-none mb-1.5">{c.icon}</p>
@@ -214,7 +225,7 @@ export default async function ExplorePage({ searchParams }: Props) {
                 </span>
                 <span className="text-sm text-[#D4D4D8] flex-1 truncate group-hover:text-[#FAFAFA] transition-colors">{c.city}</span>
                 <span className="text-xs text-[#52525B] truncate max-w-[90px] inline-flex items-center gap-1">
-                  <Flag country={c.country} region={c.region} size={13} fallback="" /> {c.region === "Catalonia" ? "Catalunya" : c.country}
+                  <Flag country={c.country} region={c.region} size={13} fallback="" /> {c.country}
                 </span>
                 <span className="text-xs text-[#52525B] tabular-nums w-8 text-right shrink-0">
                   {c.days}d
@@ -278,7 +289,7 @@ export default async function ExplorePage({ searchParams }: Props) {
                   <span className="text-base w-6 text-center shrink-0"><Flag country={stay.country} region={stay.region} /></span>
                   <div className="flex-1 min-w-0">
                     <span className="text-sm text-[#D4D4D8] font-medium group-hover:text-[#FAFAFA] transition-colors">{stay.city}</span>
-                    <span className="text-xs text-[#52525B] ml-2">{stay.region === "Catalonia" ? "Catalunya" : stay.country}</span>
+                    <span className="text-xs text-[#52525B] ml-2">{stay.country}</span>
                   </div>
                   <span className="text-xs text-[#52525B] tabular-nums shrink-0">{dateLabel}</span>
                   <span className="text-xs text-[#F59E0B] tabular-nums w-8 text-right shrink-0">{stay.days}d</span>

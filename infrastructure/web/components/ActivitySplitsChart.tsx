@@ -24,14 +24,12 @@ function hrZoneColor(hr: number | null): string {
   return ZONE_COLORS[4];
 }
 
-function splitLabel(split: ActivitySplit, index: number): string {
-  if (split.type === "auto_km" || split.type === "auto_mile") {
-    return `${split.split_index + 1} km`;
-  }
-  if (split.type === "manual_lap") {
-    return `L${split.split_index + 1}`;
-  }
-  return `${index + 1}`;
+// Label each split by where it ends (5, 10, 15 km on a ride's 5 km auto-laps; 1, 2, 3 km on a run);
+// a short last split shows its real end (52.4 km), manual laps keep L1, L2…
+function splitLabel(split: ActivitySplit, endKm: number): string {
+  if (split.type === "manual_lap") return `L${split.split_index + 1}`;
+  const r = Math.round(endKm);
+  return Math.abs(endKm - r) < 0.05 ? `${r} km` : `${endKm.toFixed(1)} km`;
 }
 
 function fmtPace(sPerKm: number): string {
@@ -63,7 +61,9 @@ export function ActivitySplitsChart({ splits, activityType }: Props) {
   const hasPower = isCycling && splits.some((s) => (s.avg_power_w ?? 0) > 0);
   const mode: "pace" | "power" | "speed" = !isCycling ? "pace" : hasPower ? "power" : "speed";
 
-  const data = splits.map((s, i) => {
+  let cum = 0;
+  const data = splits.map((s) => {
+    cum += (s.distance_m ?? 0) / 1000;
     // Derive pace from time_s / distance_m if avg_pace_s_per_km missing
     let yValue: number | null = null;
     if (mode === "power") {
@@ -78,7 +78,7 @@ export function ActivitySplitsChart({ splits, activityType }: Props) {
       }
     }
     return {
-      label: splitLabel(s, i),
+      label: splitLabel(s, cum),
       value: yValue,
       hr: s.avg_hr,
       distKm: s.distance_m ? (s.distance_m / 1000).toFixed(2) : null,

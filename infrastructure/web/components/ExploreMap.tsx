@@ -1,7 +1,9 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Globe, Flame } from "lucide-react";
+import Link from "next/link";
+import { Globe, Flame, Maximize2, Minimize2, X } from "lucide-react";
+import { Flag } from "@/components/Flag";
 import type { HeatmapData, WorldCoverage } from "@/lib/api";
 
 type Country = WorldCoverage["country_details"][number];
@@ -34,6 +36,15 @@ const TILE_FILTER: Record<Theme, string> = {
   light: "",
 };
 
+/** Amber → orange → deep red as a country fills with days (0–1). */
+function heatColor(x: number): string {
+  const stops = [[253, 230, 138], [245, 158, 11], [234, 88, 12], [185, 28, 28]];
+  const p = Math.max(0, Math.min(1, x)) * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(p)), f = p - i;
+  const c = stops[i].map((v, k) => Math.round(v + (stops[i + 1][k] - v) * f));
+  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+}
+
 /**
  * One map for the whole "travel" picture — toggle between a geographic
  * coverage choropleth (countries filled by days visited, from the
@@ -52,6 +63,8 @@ export const ExploreMap = forwardRef<ExploreMapHandle, { points: HeatmapData["po
   const heatRef = useRef<any>(null);
 
   const [mode, setMode] = useState<Mode>("heatmap");
+  const [selected, setSelected] = useState<Country | null>(null);
+  const [tall, setTall] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
   const [ready, setReady] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,21 +148,21 @@ export const ExploreMap = forwardRef<ExploreMapHandle, { points: HeatmapData["po
           const c = visitedFor(feat.properties);
           if (!c) return { color: "transparent", weight: 0, fillColor: "#000", fillOpacity: 0 };
           const intensity = Math.sqrt(c.total_days) / Math.sqrt(maxDays);
-          return { color: "#F59E0B", weight: 0.7, fillColor: "#F59E0B", fillOpacity: 0.25 + intensity * 0.6 };
+          return { color: "#FFFFFF", weight: 0.6, fillColor: heatColor(intensity), fillOpacity: 0.55 + intensity * 0.35 };
         },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onEachFeature: (feat: any, layer: any) => {
           const c = visitedFor(feat.properties);
           if (!c) return;
-          layer.bindPopup(
-            `<strong>${c.country}</strong><br>${c.total_days} day${c.total_days === 1 ? "" : "s"} · ${c.cities_visited} ${c.cities_visited === 1 ? "city" : "cities"}` +
-            (c.first_visit ? `<br><span style="color:#888">since ${c.first_visit}</span>` : "")
-          );
+          layer.bindTooltip(`<b>${c.country}</b> · ${c.total_days} day${c.total_days === 1 ? "" : "s"}`,
+                            { sticky: true, direction: "top", opacity: 0.95 });
           layer.on({
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            mouseover: (e: any) => e.target.setStyle({ weight: 1.5, color: "#FBBF24" }),
+            mouseover: (e: any) => { e.target.setStyle({ weight: 2, color: "#111827" }); e.target.bringToFront(); },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            mouseout: (e: any) => e.target.setStyle({ weight: 0.7, color: "#F59E0B" }),
+            mouseout: (e: any) => e.target.setStyle({ weight: 0.6, color: "#FFFFFF" }),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            click: (e: any) => { setSelected(c); map.fitBounds(e.target.getBounds(), { padding: [40, 40], maxZoom: 6 }); },
           });
         },
       });
@@ -225,7 +238,8 @@ export const ExploreMap = forwardRef<ExploreMapHandle, { points: HeatmapData["po
     pendingFocusRef.current = null;
     if (!target) return;
     map.fitBounds(target.getBounds(), { padding: [40, 40], maxZoom: 6 });
-    target.openPopup();
+    const hit = details.find((d) => (c.iso2 && d.iso2?.toUpperCase() === c.iso2.toUpperCase()) || d.country === c.country);
+    if (hit) setSelected(hit);
   };
 
   useEffect(() => {
@@ -241,6 +255,11 @@ export const ExploreMap = forwardRef<ExploreMapHandle, { points: HeatmapData["po
     },
   }), []);
 
+  // Taller map: Leaflet must re-measure its container
+  useEffect(() => {
+    if (ready && mapRef.current) setTimeout(() => mapRef.current?.invalidateSize(), 50);
+  }, [tall, ready]);
+
   const btn = (active: boolean) =>
     `flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
       active ? "bg-[#F59E0B] text-[#0D0D0F]" : "text-[#A1A1AA] hover:text-[#FAFAFA]"
@@ -250,7 +269,7 @@ export const ExploreMap = forwardRef<ExploreMapHandle, { points: HeatmapData["po
     <>
       <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
       <div className="relative rounded-xl overflow-hidden border border-[#27272A] shadow-sm">
-        <div ref={containerRef} style={{ height: 420, width: "100%", background: theme === "dark" ? "#0D0D0F" : "#e5e7eb" }} />
+        <div ref={containerRef} style={{ height: tall ? 640 : 420, width: "100%", background: theme === "dark" ? "#0D0D0F" : "#e5e7eb", transition: "height .25s" }} />
 
         {/* Mode toggle */}
         <div className="absolute top-3 left-3 z-[1000] flex items-center gap-0.5 bg-[#0D0D0F]/85 border border-[#27272A] rounded-lg p-0.5 backdrop-blur-sm">
@@ -261,6 +280,47 @@ export const ExploreMap = forwardRef<ExploreMapHandle, { points: HeatmapData["po
             <Flame size={12} /> Heatmap
           </button>
         </div>
+
+        {/* Taller / shorter */}
+        <button onClick={() => setTall((v) => !v)} aria-label={tall ? "Smaller map" : "Bigger map"}
+                className="absolute top-3 right-3 z-[1000] p-1.5 rounded-lg bg-[#0D0D0F]/85 border border-[#27272A] text-[#A1A1AA] hover:text-[#FAFAFA] backdrop-blur-sm">
+          {tall ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
+
+        {/* Coverage legend */}
+        {mode === "coverage" && !selected && (
+          <div className="absolute bottom-3 left-3 z-[1000] flex items-center gap-2 bg-[#0D0D0F]/85 border border-[#27272A] rounded-lg px-2.5 py-1.5 backdrop-blur-sm text-[10px] text-[#A1A1AA]">
+            fewer days
+            <span className="w-20 h-1.5 rounded-full" style={{ background: `linear-gradient(90deg, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})` }} />
+            more · tap a country
+          </div>
+        )}
+
+        {/* The tapped country */}
+        {selected && (
+          <div className="absolute bottom-3 left-3 right-3 sm:right-auto sm:w-80 z-[1000] rounded-2xl border border-[#27272A] bg-[#0D0D0F]/95 backdrop-blur p-4 shadow-lg">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-base font-semibold"><Flag country={selected.country} fallback="" /> {selected.country}</p>
+                <p className="text-xs text-[#71717A]">{selected.continent}{selected.manual ? " · added by hand" : ""}</p>
+              </div>
+              <button onClick={() => setSelected(null)} aria-label="Close" className="text-[#52525B] hover:text-[#A1A1AA]"><X size={15} /></button>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mt-3">
+              {[["days", selected.total_days], ["cities", selected.cities_visited],
+                ["since", selected.first_visit ? selected.first_visit.slice(0, 4) : "—"]].map(([l, v]) => (
+                <div key={l as string} className="rounded-xl bg-[#18181B] px-2.5 py-2">
+                  <p className="text-lg font-semibold tabular-nums leading-none">{v}</p>
+                  <p className="text-[10px] text-[#71717A] uppercase tracking-widest mt-1">{l}</p>
+                </div>
+              ))}
+            </div>
+            {selected.last_visit && <p className="text-xs text-[#71717A] mt-2">Last there {selected.last_visit}</p>}
+            <Link href={`/explore/country/${encodeURIComponent(selected.country)}`} className="inline-block mt-3 text-xs font-medium text-[#F59E0B] hover:underline">
+              Cities, days and trips →
+            </Link>
+          </div>
+        )}
       </div>
     </>
   );

@@ -75,24 +75,27 @@ export function TripCard({ trip, flag }: { trip: Trip; flag?: React.ReactNode })
     );
   }
 
+  const start = new Date(trip.start_date + "T12:00:00");
+  const far = trip.max_distance_from_home_km;
   return (
     <div
       onClick={go}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === "Enter") go(); }}
-      className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3 hover:border-[#3F3F46] hover:bg-[#111113] transition-colors group flex items-start gap-3 cursor-pointer"
+      className="relative bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 hover:border-[#3F3F46] transition-colors group flex gap-3.5 cursor-pointer"
     >
-      {trip.cover_photo_path && (
-        <div className="shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-[#27272A]">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={photoProxy(trip.cover_photo_path)} alt="" className="w-full h-full object-cover" />
-        </div>
-      )}
-      <div className="flex-1 min-w-0 space-y-1">
-        {/* Title on its own line — room to read it */}
+      {/* Date tile — the trip's first day, like a calendar leaf */}
+      <div className="shrink-0 w-12 rounded-xl overflow-hidden border border-[#27272A] text-center self-start">
+        <p className="text-[9px] font-semibold uppercase tracking-widest py-0.5 bg-[#F59E0B]/15 text-[#F59E0B]">
+          {start.toLocaleDateString("en-GB", { month: "short" })}
+        </p>
+        <p className="text-lg font-semibold tabular-nums leading-tight py-1">{start.getDate()}</p>
+      </div>
+
+      <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <p className="text-sm text-[#D4D4D8] group-hover:text-[#FAFAFA] font-medium leading-snug line-clamp-2 transition-colors flex-1 min-w-0">
+          <p className="text-[15px] text-[#FAFAFA] font-semibold leading-snug line-clamp-2 flex-1 min-w-0">
             {flag && <span className="mr-1.5 align-middle">{flag}</span>}{name}
           </p>
           <div className="flex items-center gap-2 shrink-0 pt-0.5">
@@ -122,35 +125,50 @@ export function TripCard({ trip, flag }: { trip: Trip; flag?: React.ReactNode })
             )}
           </div>
         </div>
-        <div className="text-xs text-[#71717A] flex flex-wrap items-baseline gap-x-2 tabular-nums">
-          <span>{fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}</span>
-          {trip.passenger_flight_count > 0 && (
-            <span className="text-sky-400">✈ {trip.passenger_flight_count} flight{trip.passenger_flight_count > 1 ? "s" : ""}</span>
-          )}
-          {trip.max_distance_from_home_km != null && (
-            <span className="text-[#52525B]">{Math.round(trip.max_distance_from_home_km)} km out</span>
-          )}
-        </div>
-        <div className="text-xs text-[#52525B] flex flex-wrap items-baseline gap-x-1">
-          {trip.cities.length > 0 && (
-            <span className="text-[#52525B]">
-              {trip.cities.slice(0, 3).map((city, i) => (
-                <Fragment key={city}>
-                  {i > 0 && ", "}
-                  <Link
-                    href={`/explore/place/${encodeURIComponent(city)}`}
-                    onClick={(e) => e.stopPropagation()}
-                    className="hover:text-[#A1A1AA] hover:underline transition-colors"
-                  >
-                    {city}
-                  </Link>
-                </Fragment>
-              ))}
+        <p className="text-xs text-[#71717A] tabular-nums mt-0.5">{fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}</p>
+
+        {/* The trip in three numbers */}
+        <div className="flex flex-wrap gap-1.5 mt-2.5">
+          <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#18181B] text-[#D4D4D8] tabular-nums">
+            {trip.n_nights} night{trip.n_nights === 1 ? "" : "s"}
+          </span>
+          {far != null && far >= 1 && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#18181B] text-[#A1A1AA] tabular-nums">
+              {far >= 1000 ? `${(far / 1000).toFixed(1)}k` : Math.round(far)} km away
             </span>
           )}
-          {trip.home_at_start && <span className="text-[#3F3F46]">{trip.cities.length ? " · " : ""}from {trip.home_at_start}</span>}
+          {trip.passenger_flight_count > 0 && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-500 tabular-nums">
+              ✈ {trip.passenger_flight_count} flight{trip.passenger_flight_count > 1 ? "s" : ""}
+            </span>
+          )}
         </div>
+
+        {trip.cities.length > 0 && (
+          <p className="text-xs text-[#52525B] mt-2 truncate">
+            {trip.cities.slice(0, 4).map((city, i) => (
+              <Fragment key={city}>
+                {i > 0 && " · "}
+                <Link
+                  href={`/explore/place/${encodeURIComponent(city)}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="hover:text-[#A1A1AA] hover:underline transition-colors"
+                >
+                  {city}
+                </Link>
+              </Fragment>
+            ))}
+            {trip.cities.length > 4 && ` +${trip.cities.length - 4}`}
+          </p>
+        )}
       </div>
+
+      {trip.cover_photo_path && (
+        <div className="shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-[#27272A] self-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={photoProxy(trip.cover_photo_path)} alt="" className="w-full h-full object-cover" />
+        </div>
+      )}
     </div>
   );
 }

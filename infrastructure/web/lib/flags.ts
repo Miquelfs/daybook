@@ -1,7 +1,8 @@
-// Country (English name, as the API rollups return it) → flag emoji.
+// Country (English name, as the API rollups return it) → flag emoji. Spain has none on purpose:
+// home is shown as "Spain", with neither the Spanish nor the Catalan flag.
 export const FLAG: Record<string, string> = {
   // Europe
-  Spain: "🇪🇸", France: "🇫🇷", Germany: "🇩🇪", Italy: "🇮🇹",
+  Spain: "", France: "🇫🇷", Germany: "🇩🇪", Italy: "🇮🇹",
   Portugal: "🇵🇹", Netherlands: "🇳🇱", Belgium: "🇧🇪", Luxembourg: "🇱🇺",
   Switzerland: "🇨🇭", Austria: "🇦🇹", Ireland: "🇮🇪", "United Kingdom": "🇬🇧",
   Norway: "🇳🇴", Sweden: "🇸🇪", Denmark: "🇩🇰", Finland: "🇫🇮",

@@ -2,7 +2,7 @@ import { api, fmtDuration, fmtDistance, fmtPace, activityIcon } from "@/lib/api"
 import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis, ActivityImpact, ActivityEffort, ActivityStory } from "@/lib/api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ActivityMap } from "@/components/ActivityMap";
+import { ActivityHero } from "@/components/activity/ActivityHero";
 import { HighlightsCard } from "@/components/activity/HighlightsCard";
 import { ActivityWind } from "@/components/ActivityWind";
 import { ActivityAnalysisCards } from "@/components/activity/ActivityAnalysisCards";
@@ -271,76 +271,48 @@ export default async function ActivityPage({ params }: Props) {
         </Link>
       </div>
 
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-1">
-          <span className="text-3xl">{activityIcon(isGym ? "strength_training" : activity.activity_type)}</span>
-          <h1 className="text-2xl font-semibold">{title}</h1>
-        </div>
-        <div className="flex gap-2 items-center mt-1">
-          {activity.activity_type && (
-            <span
-              className="text-[10px] px-1.5 py-0.5 rounded font-medium capitalize"
-              style={{ backgroundColor: `${sportColor}1A`, color: sportColor }}
-            >
-              {typeLabel}
-            </span>
-          )}
-          <span className="text-xs text-[#52525B]">
-            {activity.start_time
-              ? new Date(activity.start_time).toLocaleTimeString("en-GB", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : ""}
-          </span>
-          <span className="text-xs text-[#3F3F46]">·</span>
-          <span className="text-xs text-[#52525B] capitalize">
-            {activity.source}
-          </span>
-          {activity.strava_id && (
-            <>
-              <span className="text-xs text-[#3F3F46]">·</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#FC4C02]/10 text-[#FC4C02] font-medium">
-                Strava
-              </span>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Summary — the four numbers that describe the outing */}
-      <section className="mb-8">
-        {hasDistance ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <StatBlock label="Distance" value={fmtDistance(activity.distance_meters)} />
-            <StatBlock label="Moving time" value={fmtDuration(time ?? null)} />
-            <StatBlock label={sport === "ride" ? "Avg speed" : "Avg pace"} value={fmtPace(analysis?.pace?.avg_mps ?? activity.avg_speed_mps ?? null, activity.activity_type)} />
-            <StatBlock label="Climbing" value={activity.elevation_gain_meters ? `↑ ${Math.round(activity.elevation_gain_meters)} m` : null} />
-          </div>
-        ) : (
-          /* no distance (gym, timed activity…): time, heart rate, energy */
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <StatBlock label="Duration" value={fmtDuration(time ?? null)} />
-            <StatBlock label="Avg HR" value={activity.avg_heart_rate ? `${activity.avg_heart_rate} bpm` : null} />
-            <StatBlock label="Max HR" value={activity.max_heart_rate ? `${activity.max_heart_rate} bpm` : null} />
-            <StatBlock label="Calories" value={activity.calories ? `${activity.calories} kcal` : null} />
-          </div>
-        )}
+      {/* Hero: route banner, who/what/when, the headline numbers */}
+      <ActivityHero
+        icon={activityIcon(isGym ? "strength_training" : activity.activity_type)}
+        title={title}
+        typeLabel={typeLabel}
+        color={sportColor}
+        when={`${new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}${
+          activity.start_time ? ` · ${activity.start_time.slice(11, 16)}` : ""}`}
+        source={activity.source}
+        strava={!!activity.strava_id}
+        plan={activity.plan_session ? {
+          label: `${activity.plan_session.session_type.replace(/^(Cycling|Running|Swimming|Strength) - /, "")} · week ${activity.plan_session.week_number}`,
+          href: `/day/${date}`,
+        } : null}
+        stats={hasDistance ? [
+          { label: "Distance", value: fmtDistance(activity.distance_meters) },
+          { label: "Moving time", value: fmtDuration(time ?? null) },
+          { label: sport === "ride" ? "Avg speed" : "Avg pace", value: fmtPace(analysis?.pace?.avg_mps ?? activity.avg_speed_mps ?? null, activity.activity_type) },
+          { label: "Climbing", value: activity.elevation_gain_meters ? `↑ ${Math.round(activity.elevation_gain_meters)} m` : null },
+        ] : [
+          { label: "Duration", value: fmtDuration(time ?? null) },
+          { label: "Avg HR", value: activity.avg_heart_rate ? `${activity.avg_heart_rate} bpm` : null },
+          { label: "Max HR", value: activity.max_heart_rate ? `${activity.max_heart_rate} bpm` : null },
+          { label: "Calories", value: activity.calories ? `${activity.calories} kcal` : null },
+        ]}
+        chips={[
+          hasDistance && activity.calories ? `${activity.calories} kcal` : null,
+          hasDistance && activity.avg_heart_rate ? `♥ ${activity.avg_heart_rate} bpm avg` : null,
+          activity.training_stress_score ? `${Math.round(activity.training_stress_score)} TSS` : null,
+          activity.computed?.garmin_aerobic_te != null
+            ? `Training effect ${activity.computed.garmin_aerobic_te.toFixed(1)}${activity.computed.garmin_anaerobic_te != null ? ` / ${activity.computed.garmin_anaerobic_te.toFixed(1)}` : ""}`
+            : null,
+          analysis?.temp_c ? `${analysis.temp_c.avg}°C` : null,
+          analysis && analysis.elapsed_s - analysis.moving_s > 120 ? `${fmtDuration(analysis.elapsed_s)} elapsed` : null,
+        ]}
+        polyline={activity.polyline}
+        newRoad={story?.explore?.new_lines}
+        newKm={story?.explore?.new_km}
+      >
         {impact?.strain && <StrainChip strain={impact.strain} />}
         {impact?.cols && impact.cols.length > 0 && <ColsChips cols={impact.cols} />}
-        <p className="text-xs text-[#71717A] mt-3 tabular-nums">
-          {[
-            hasDistance && activity.calories ? `${activity.calories} kcal` : null,
-            activity.training_stress_score ? `${Math.round(activity.training_stress_score)} TSS` : null,
-            activity.computed?.garmin_aerobic_te != null
-              ? `Training effect ${activity.computed.garmin_aerobic_te.toFixed(1)} aerobic${activity.computed.garmin_anaerobic_te != null ? ` · ${activity.computed.garmin_anaerobic_te.toFixed(1)} anaerobic` : ""}`
-              : null,
-            analysis?.temp_c ? `${analysis.temp_c.avg}°C (${analysis.temp_c.min}–${analysis.temp_c.max})` : null,
-            analysis && analysis.elapsed_s - analysis.moving_s > 120 ? `${fmtDuration(analysis.elapsed_s)} elapsed` : null,
-          ].filter(Boolean).join(" · ")}
-        </p>
-      </section>
+      </ActivityHero>
 
       {/* Trainer rides: merge the trainer app's .fit (power, cadence, distance) into the watch recording */}
       {(activity.fit_import || (sport === "ride" && /indoor|virtual|trainer/.test(at))) && (
@@ -351,16 +323,8 @@ export default async function ActivityPage({ params }: Props) {
                      sessionId={activity.plan_session?.id ?? null} />
       )}
 
-      {/* Highlights: plan streak, new road, villages */}
+      {/* Achievements: plan streak, new road, villages */}
       {story && <HighlightsCard story={story} />}
-
-      {/* Map — road never covered before painted amber */}
-      {activity.polyline && (
-        <section className="mb-8">
-          <SectionLabel>Route</SectionLabel>
-          <ActivityMap polyline={activity.polyline} highlight={story?.explore?.new_lines} />
-        </section>
-      )}
 
       {/* Climbs in this ride (from its elevation) */}
       {impact?.climbs && impact.climbs.length > 0 && <ClimbsCard climbs={impact.climbs} />}
@@ -504,6 +468,13 @@ export default async function ActivityPage({ params }: Props) {
       {/* Notes & rating */}
       <section className="mb-8">
         <SectionLabel>How it felt</SectionLabel>
+        {activity.plan_session?.rpe_actual != null && (
+          <p className="text-sm text-[#A1A1AA] mb-3">
+            RPE <b className="text-[#FAFAFA]">{activity.plan_session.rpe_actual}</b>/10
+            <span className="text-[#71717A]"> · saved with the {activity.plan_session.session_type.replace(/^(Cycling|Running|Swimming|Strength) - /, "")} session in your plan
+              (change it in Planned vs actual) — notes below stay on this activity</span>
+          </p>
+        )}
         <ActivityNotes
           activityId={decodedId}
           initialNotes={activity.user_notes ?? null}

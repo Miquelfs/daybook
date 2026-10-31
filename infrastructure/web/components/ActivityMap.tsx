@@ -9,9 +9,11 @@ interface Props {
   interactive?: boolean;
   /** Extra encoded polylines painted over the route, e.g. road never ridden before. */
   highlight?: string[];
+  /** No border / rounding — when the map is a banner inside a card. */
+  bare?: boolean;
 }
 
-export function ActivityMap({ polyline, height = "280px", interactive = true, highlight }: Props) {
+export function ActivityMap({ polyline, height = "280px", interactive = true, highlight, bare = false }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,9 +57,11 @@ export function ActivityMap({ polyline, height = "280px", interactive = true, hi
         opacity: 0.85,
       }).addTo(map);
 
+      // New road: emerald with a white casing so it reads on any tile
       for (const enc of highlight ?? []) {
         const pts = (poly.decode(enc) as number[][]).map((p) => [p[0], p[1]] as [number, number]);
-        L.polyline(pts, { color: "#F59E0B", weight: 5, opacity: 0.9 }).addTo(map);
+        L.polyline(pts, { color: "#FFFFFF", weight: 8, opacity: 0.9, lineCap: "round" }).addTo(map);
+        L.polyline(pts, { color: "#10B981", weight: 5, opacity: 1, lineCap: "round" }).addTo(map);
       }
 
       // Start marker
@@ -92,7 +96,7 @@ export function ActivityMap({ polyline, height = "280px", interactive = true, hi
     <div
       ref={ref}
       style={{ height }}
-      className="w-full rounded-xl overflow-hidden border border-[#27272A]"
+      className={bare ? "w-full" : "w-full rounded-xl overflow-hidden border border-[#27272A]"}
     />
   );
 }

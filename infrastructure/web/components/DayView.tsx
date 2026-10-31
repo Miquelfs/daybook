@@ -7,6 +7,7 @@ import { MovementBlock } from "@/components/MovementBlock";
 import { Questionnaire } from "@/components/Questionnaire";
 import { SectionLabel } from "@/components/MorningBrief";
 import { LocationSection } from "@/components/LocationSection";
+import { DayPlaces } from "@/components/explore/DayPlaces";
 import { DaySpendSummary } from "@/components/money/DaySpendSummary";
 import { DayDuty } from "@/components/day/DayDuty";
 import { DayLearning } from "@/components/learning/DayLearning";
@@ -142,6 +143,7 @@ export async function DayView({ date }: { date: string }) {
         <section>
           <SectionLabel>Where I was</SectionLabel>
           <LocationSection date={date} initialTracks={tracks} editable={isEditable} />
+          <DayPlaces date={date} />
         </section>
 
         <Questionnaire date={date} initial={day.subjective} initialTags={day.tags ?? []} initialCompanions={day.companions ?? []} />
