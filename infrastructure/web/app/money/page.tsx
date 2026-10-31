@@ -32,9 +32,9 @@ export default async function MoneyPage({ searchParams }: Props) {
     : 0;
 
   return (
-    <main className="max-w-2xl mx-auto px-4 pb-28 pt-6">
-      {/* Header */}
-      <div className="mb-8">
+    <main className="max-w-2xl mx-auto px-4 pb-28">
+      {/* Month switcher */}
+      <div className="mb-6">
         {/* Month navigation */}
         <div className="flex items-center justify-between">
           <Link
@@ -44,7 +44,7 @@ export default async function MoneyPage({ searchParams }: Props) {
             ‹
           </Link>
           <div className="text-center">
-            <h1 className="text-xl font-semibold tracking-tight">{monthLabel}</h1>
+            <h2 className="text-base font-semibold tracking-tight">{monthLabel}</h2>
             {summary && (
               <p className="text-xs text-[#52525B] mt-0.5">
                 Day {summary.days_elapsed} of {summary.days_in_month}

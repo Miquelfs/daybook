@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { HealthTabs } from "@/components/health/HealthTabs";
+import { PageHeader } from "@/components/ui/kit";
 import { api } from "@/lib/api";
 import { SleepOverview } from "@/components/sleep/SleepOverview";
 import { SleepPatterns } from "@/components/sleep/SleepPatterns";
@@ -45,28 +46,21 @@ export default function SleepPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20">
-      {/* Header */}
-      <div className="pt-8 pb-6">
-        <Link href="/health" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
-          ← Health
-        </Link>
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Sleep</h1>
-            <p className="text-sm text-[#71717A] mt-1">Stage analysis, debt tracking and patterns</p>
-          </div>
-          {/* Period selector */}
-          <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mt-1">
-            {PERIODS.map(p => (
-              <button key={p.days} onClick={() => setSelectedDays(p.days)}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${selectedDays === p.days ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <HealthTabs active="/health/sleep" />
+      <div className="pt-8">
+        <PageHeader back={{ href: "/health", label: "Health" }} title="Sleep"
+                    subtitle="Stage analysis, debt tracking and patterns"
+                    right={
+                      <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1">
+                        {PERIODS.map((p) => (
+                          <button key={p.days} onClick={() => setSelectedDays(p.days)}
+                                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                                    selectedDays === p.days ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                    }
+                    tabs={<HealthTabs active="/health/sleep" />} />
       </div>
 
       <div className="mb-6">

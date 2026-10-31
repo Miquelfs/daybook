@@ -24,6 +24,8 @@ type Mark = {
   code?: string;
   // training
   discipline?: string; minutes?: number; zone?: string; status?: string; optional?: boolean; activity_id?: string | null;
+  // your own birthday
+  self?: boolean; age?: number;
 };
 
 const DOT: Partial<Record<Kind, string>> = {
@@ -190,7 +192,8 @@ export function PlanCalendar({ onEditTask, onNewTask, onEditGoal }: {
         <Icon size={14} strokeWidth={1.75} className="shrink-0 ml-1.5 mr-1.5" style={{ color: DOT[m.kind] ?? (m.kind.startsWith("trip") ? "#0EA5E9" : "#71717A") }} />
         <span className="flex-1 min-w-0 truncate text-sm text-[#D4D4D8]">
           {m.time && <span className="tabular-nums text-[#71717A] mr-2">{m.time}</span>}
-          {m.kind === "birthday" ? `${m.label}'s birthday` : m.kind === "deadline" ? `${m.label} — deadline` : m.label}
+          {m.kind === "birthday" ? (m.self ? `Your birthday · ${m.age}` : `${m.label}'s birthday`)
+            : m.kind === "deadline" ? `${m.label} — deadline` : m.label}
         </span>
       </>
     );

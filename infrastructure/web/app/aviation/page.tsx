@@ -27,6 +27,8 @@ import { LicensesCard } from "@/components/aviation/LicensesCard";
 import { PunctualityTab } from "@/components/aviation/PunctualityTab";
 import { FlightLoadRollup } from "@/components/StressLifeInsights";
 import { WeatherStress } from "@/components/aviation/WeatherStress";
+import { FatigueCard } from "@/components/aviation/FatigueCard";
+import { ActionButton, PageHeader } from "@/components/ui/kit";
 import { LogbookChecks } from "@/components/aviation/LogbookChecks";
 import { LogbookFun } from "@/components/aviation/LogbookFun";
 import { localISODate } from "@/lib/dates";
@@ -302,20 +304,8 @@ export default function AviationPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 pt-8 pb-24">
-      {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Today</Link>
-            <h1 className="text-2xl font-semibold tracking-tight">Logbook</h1>
-            <p className="text-sm text-[#71717A] mt-0.5">Flights, routes & EASA hours</p>
-          </div>
-          <button onClick={() => setAddOpen(true)}
-            className="mt-1 flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded-lg transition-colors">
-            <Plus size={13} />Add Flight
-          </button>
-        </div>
-      </div>
+      <PageHeader title="Logbook" subtitle="Flights, routes & EASA hours"
+                  right={<ActionButton onClick={() => setAddOpen(true)} icon={Plus}>Add flight</ActionButton>} />
 
       {/* Tabs */}
       <AviationTabs active={tab} onSelect={selectTab} className="mb-6" />
@@ -775,6 +765,7 @@ export default function AviationPage() {
           <p className="text-xs text-[#52525B]">
             Physiological load of flying — HR &amp; stress deltas in the takeoff / approach windows vs the day baseline, from the CIRQA.
           </p>
+          <FatigueCard />
           <WeatherStress />
           <FlightLoadRollup />
         </div>

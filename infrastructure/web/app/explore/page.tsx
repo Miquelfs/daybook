@@ -11,7 +11,7 @@ import { ManualCountries } from "@/components/ManualCountries";
 import { TripYears } from "@/components/TripYears";
 import { YearSelect } from "@/components/YearSelect";
 import { PlacesMonthsCard } from "@/components/explore/PlacesMonthsCard";
-import { Hero } from "@/components/ui/kit";
+import { Hero, PageHeader } from "@/components/ui/kit";
 import type { TopPlace, CityStay, WorldCoverage, FunFactCard, Trip } from "@/lib/api";
 
 interface Props {
@@ -58,31 +58,11 @@ export default async function ExplorePage({ searchParams }: Props) {
 
   return (
     <main className="max-w-3xl mx-auto px-4 pb-20 pt-8">
-      {/* Header */}
-      <div className="mb-8 relative z-20">
-        <Link
-          href="/"
-          className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest mb-3 inline-block"
-        >
-          ← Today
-        </Link>
-
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Explore</h1>
-            <p className="text-sm text-[#71717A] mt-1">
-              {year ? `${year}` : "All time"} — {totalCountries} {totalCountries === 1 ? "country" : "countries"} · {totalDays.toLocaleString()} days
-            </p>
-          </div>
-
-          {/* Year dropdown */}
-          <div className="shrink-0 mt-1">
-            <YearSelect years={data.years} current={yearStr} />
-          </div>
-        </div>
-
-        {/* Section tabs */}
-        <div className="mt-4"><ExploreTabs active="/explore" /></div>
+      <div className="relative z-20">
+        <PageHeader title="Explore"
+                    subtitle={`${year ? `${year}` : "All time"} — ${totalCountries} ${totalCountries === 1 ? "country" : "countries"} · ${totalDays.toLocaleString()} days`}
+                    right={<YearSelect years={data.years} current={yearStr} />}
+                    tabs={<ExploreTabs active="/explore" />} />
       </div>
 
       <TravelMapProvider>

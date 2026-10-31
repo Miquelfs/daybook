@@ -12,5 +12,5 @@ const TABS = [
 
 /** Health's sub-nav — one copy for every Health page. */
 export function HealthTabs({ active }: { active: (typeof TABS)[number]["href"] }) {
-  return <div className="mt-4"><SectionTabs tabs={TABS} active={active} /></div>;
+  return <SectionTabs tabs={TABS} active={active} />;
 }

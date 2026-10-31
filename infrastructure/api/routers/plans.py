@@ -458,6 +458,13 @@ def put_trip_with(start: str, end: str, body: WithIn, conn: DB):
     return companions_mod.set_trip_with(conn, _iso(start, "start"), _iso(end, "end"), body.contact_ids)
 
 
+@router.get("/now")
+def get_now(conn: DB, day: str = Query(..., alias="date"), time: str = Query(..., pattern=r"^\d{2}:\d{2}$")):
+    """Today's "what now?": the headline for this moment and up to three things next."""
+    from domains.plans.now import now
+    return now(conn, _iso(day, "date"), time)
+
+
 @router.get("/calendar/marks")
 def calendar_marks(conn: DB, month: str = Query(..., pattern=r"^\d{4}-\d{2}$"), plan: bool = Query(False)):
     y, m = int(month[:4]), int(month[5:])

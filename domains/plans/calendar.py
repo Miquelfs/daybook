@@ -64,6 +64,12 @@ def month_marks(conn: sqlite3.Connection, year: int, month: int, plan: bool = Fa
             p = parse_birthday(raw)
             if p and p[1] == month:
                 add(birthday_on(year, month, p[2]).isoformat(), "birthday", name)
+    if _has_table(conn, "user_profile"):                 # your own birthday, from the Life-in-weeks profile
+        r = conn.execute("SELECT birthdate FROM user_profile WHERE id = 1").fetchone()
+        if r and r[0] and r[0][5:7] == f"{month:02d}":
+            born = date.fromisoformat(r[0])
+            add(birthday_on(year, month, born.day).isoformat(), "birthday", "You", None, None,
+                self=True, age=year - born.year)
     if _has_table(conn, "days"):
         for (d,) in conn.execute("""
                 SELECT date FROM days WHERE date BETWEEN ? AND ?

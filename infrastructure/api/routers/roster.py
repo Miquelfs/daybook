@@ -99,6 +99,17 @@ async def upload_roster(file: UploadFile = File(...)):
             "training_sessions_replanned": replanned}
 
 
+@router.get("/fatigue")
+def get_fatigue():
+    """What the roster does to sleep / HRV / stress, by report time; short rests; the next 3 weeks."""
+    from domains.aviation.fatigue import summary
+    conn = _get_conn()
+    try:
+        return summary(conn)
+    finally:
+        conn.close()
+
+
 @router.get("/months")
 def get_roster_months():
     """Return list of YYYY-MM strings that have roster data."""

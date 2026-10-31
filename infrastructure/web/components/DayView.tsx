@@ -10,6 +10,7 @@ import { LocationSection } from "@/components/LocationSection";
 import { DayPlaces } from "@/components/explore/DayPlaces";
 import { DaySpendSummary } from "@/components/money/DaySpendSummary";
 import { DayDuty } from "@/components/day/DayDuty";
+import { NowCard } from "@/components/day/NowCard";
 import { DayLearning } from "@/components/learning/DayLearning";
 import { DayPassengerFlights } from "@/components/DayPassengerFlights";
 import { DayRestaurants } from "@/components/DayRestaurants";
@@ -93,6 +94,9 @@ export async function DayView({ date }: { date: string }) {
       <DayHeader date={date} />
 
       <div className="flex flex-col gap-12 mt-10">
+        {/* What now? — only on today, before everything else */}
+        {date === localToday && <NowCard date={date} />}
+
         <MorningBrief
           sleep={day.sleep}
           stats={day.daily_stats}

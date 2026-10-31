@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { HealthTabs } from "@/components/health/HealthTabs";
+import { PageHeader } from "@/components/ui/kit";
 import { format } from "date-fns";
 import {
   injuriesApi,
@@ -722,16 +723,9 @@ export default function InjuriesPage() {
 
   return (
     <div className="min-h-screen bg-[#09090B] text-white px-4 py-6 max-w-2xl mx-auto space-y-6">
-      {/* Header */}
-      <div>
-        <Link href="/health" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
-          ← Health
-        </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">Injuries</h1>
-        <p className="text-sm text-[#71717A] mt-0.5">Tap a zone to log or update pain · Bubble = pain scale</p>
-
-        <HealthTabs active="/health/injuries" />
-      </div>
+      <PageHeader back={{ href: "/health", label: "Health" }} title="Injuries"
+                  subtitle="Tap a zone to log or update pain · Bubble = pain scale"
+                  tabs={<HealthTabs active="/health/injuries" />} />
 
       {/* Summary chips */}
       {(activeCount > 0 || recoveringCount > 0) && (
