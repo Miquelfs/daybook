@@ -1,8 +1,7 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { Pencil, Check, X, Trash2 } from "lucide-react";
 import type { Trip } from "@/lib/api";
 
@@ -86,11 +85,11 @@ export function TripCard({ trip, flag }: { trip: Trip; flag?: React.ReactNode })
       className="relative bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-3 hover:border-[#3F3F46] transition-colors group flex gap-3 cursor-pointer"
     >
       {/* Date tile — the trip's first day, like a calendar leaf */}
-      <div className="shrink-0 w-10 rounded-lg bg-[#18181B] text-center self-start py-1">
-        <p className="text-[9px] uppercase tracking-widest text-[#71717A] leading-tight">
+      <div className="shrink-0 w-11 rounded-lg overflow-hidden border border-[#27272A] text-center self-start">
+        <p className="text-[9px] font-semibold uppercase tracking-widest py-0.5 bg-[#F59E0B]/15 text-[#F59E0B]">
           {start.toLocaleDateString("en-GB", { month: "short" })}
         </p>
-        <p className="text-sm font-semibold tabular-nums leading-tight">{start.getDate()}</p>
+        <p className="text-base font-semibold tabular-nums leading-tight py-0.5">{start.getDate()}</p>
       </div>
 
       <div className="flex-1 min-w-0">
@@ -131,24 +130,7 @@ export function TripCard({ trip, flag }: { trip: Trip; flag?: React.ReactNode })
           {trip.passenger_flight_count > 0 ? ` · ✈ ${trip.passenger_flight_count}` : ""}
         </p>
 
-        {trip.cities.length > 0 && (
-          <p className="text-xs text-[#52525B] mt-0.5 truncate">
-            {trip.cities.slice(0, 4).map((city, i) => (
-              <Fragment key={city}>
-                {i > 0 && " · "}
-                <Link
-                  href={`/explore/place/${encodeURIComponent(city)}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="hover:text-[#A1A1AA] hover:underline transition-colors"
-                >
-                  {city}
-                </Link>
-              </Fragment>
-            ))}
-            {trip.cities.length > 4 && ` +${trip.cities.length - 4}`}
-          </p>
-        )}
-      </div>
+</div>
 
       {trip.cover_photo_path && (
         <div className="shrink-0 w-12 h-12 rounded-lg overflow-hidden border border-[#27272A] self-center">

@@ -11,7 +11,7 @@ import { WithPicker } from "@/components/plan/WithPicker";
 import { TripPlan } from "@/components/plan/TripPlan";
 import { Flag } from "@/components/Flag";
 import { localISODate } from "@/lib/dates";
-import { Chip, Hero, Stat } from "@/components/ui/kit";
+import { Hero, Stat } from "@/components/ui/kit";
 
 interface Props {
   params: Promise<{ start: string; end: string }>;
@@ -88,11 +88,6 @@ export default async function TripDetailPage({ params }: Props) {
                 unit={trip.max_distance_from_home_km != null ? "km" : undefined} />
           <Stat plain label="Flights" value={trip.passenger_flight_count} />
         </div>
-        {trip.cities.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-4">
-            {trip.cities.map((c) => <Chip key={c} href={`/explore/place/${encodeURIComponent(c)}`}>{c}</Chip>)}
-          </div>
-        )}
       </Hero>
 
       <div className="flex flex-col gap-8">
