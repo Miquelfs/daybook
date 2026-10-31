@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Activity, Moon, AlertTriangle } from "lucide-react";
+import { HealthTabs } from "@/components/health/HealthTabs";
 import { HealthOverview } from "@/components/health/HealthOverview";
 import { AreaPlan } from "@/components/plan/AreaPlan";
 
@@ -44,18 +44,7 @@ export default function HealthPage() {
             ))}
           </div>
         </div>
-        {/* Sub-nav */}
-        <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mt-4 w-full overflow-x-auto">
-          <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#27272A] text-[#FAFAFA] whitespace-nowrap">
-            <Activity size={13} />Overview
-          </span>
-          <Link href="/health/sleep" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <Moon size={13} />Sleep
-          </Link>
-          <Link href="/health/injuries" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <AlertTriangle size={13} />Injuries
-          </Link>
-        </div>
+        <HealthTabs active="/health" />
       </div>
 
       <AreaPlan area="health" className="mb-6" />

@@ -28,9 +28,9 @@ def month_marks(conn: sqlite3.Connection, year: int, month: int, plan: bool = Fa
     m0, m1 = first.isoformat(), last.isoformat()
     marks: dict[str, list[dict]] = {}
 
-    def add(d: str, kind: str, label: str | None = None, item_id=None, time: str | None = None) -> None:
+    def add(d: str, kind: str, label: str | None = None, item_id=None, time: str | None = None, **extra) -> None:
         if m0 <= d <= m1:
-            marks.setdefault(d, []).append({"kind": kind, "label": label, "id": item_id, "time": time})
+            marks.setdefault(d, []).append({"kind": kind, "label": label, "id": item_id, "time": time, **extra})
 
     def span(start: str, end: str, kind: str, label: str | None, item_id=None) -> None:
         d, e = max(date.fromisoformat(start), first), min(date.fromisoformat(end), last)
@@ -76,6 +76,22 @@ def month_marks(conn: sqlite3.Connection, year: int, month: int, plan: bool = Fa
                 WHERE done_at IS NULL AND due_date BETWEEN ? AND ?
                 ORDER BY {time_col} IS NOT NULL, {time_col}""", (m0, m1)):
             add(d, "note" if kind == "note" else "task", title, tid, t)
+    # Duty first: it's how the days are really planned — and the training placed around it
+    if plan and _has_table(conn, "roster"):
+        for d, duty, rep_t, end_t, code in conn.execute("""
+                SELECT date, duty_type, report_time, end_time, raw_code FROM roster
+                WHERE date BETWEEN ? AND ? ORDER BY date""", (m0, m1)):
+            span_t = f"{rep_t}–{end_t}" if rep_t and end_t and duty != "day_off" else rep_t if duty != "day_off" else None
+            add(d, "duty", duty, None, span_t, code=code)
+    if plan and _has_table(conn, "plan_sessions"):
+        for sid, d, stype, disc, mins, eff, zone, status, opt, act in conn.execute("""
+                SELECT p.id, p.session_date, p.session_type, p.discipline, p.duration_min, p.effective_duration_min,
+                       p.intensity_zone, p.status, p.is_optional, p.completed_activity_id
+                FROM plan_sessions p JOIN race_goals g ON g.id = p.goal_id
+                WHERE g.status = 'active' AND p.status != 'displaced' AND p.session_date BETWEEN ? AND ?
+                ORDER BY p.session_date, p.is_optional, p.id""", (m0, m1)):
+            add(d, "training", stype, sid, None, discipline=disc, minutes=eff or mins, zone=zone,
+                status=status, optional=bool(opt), activity_id=act)
     if plan and _has_table(conn, "goals"):
         for gid, d, title in conn.execute("""
                 SELECT id, deadline, title FROM goals WHERE status = 'active' AND deadline BETWEEN ? AND ?""", (m0, m1)):

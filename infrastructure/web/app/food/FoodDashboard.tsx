@@ -16,7 +16,6 @@ import {
 } from "@/lib/food-api";
 import { groupByMeal } from "@/lib/food-meals";
 import { FoodEntryComposer } from "@/components/FoodEntryComposer";
-import { WeightSection } from "@/components/health/WeightSection";
 import { WaterTracker } from "@/components/WaterTracker";
 import { HeartDot, HEART_META } from "@/components/HeartRatingBadge";
 import { HeartHealthyPick } from "@/components/HeartHealthyPick";
@@ -603,8 +602,11 @@ export function FoodDashboard() {
         </Section>
       )}
 
-      {/* Weight — the fat-loss metric lives here now */}
-      <WeightSection />
+      {/* Weight lives in Health → Weight; a way there from the food log */}
+      <Link href="/health/weight" className="flex items-center justify-between mb-8 px-4 py-3 rounded-xl border border-[#27272A] bg-[#0D0D0F] text-sm text-[#A1A1AA] hover:text-[#FAFAFA]">
+        <span>Weigh-ins, trend and the goal line</span>
+        <span className="text-xs text-[#F59E0B]">Health → Weight →</span>
+      </Link>
 
       {/* The plan: target, heart-healthy pick, the week's meals + shopping list */}
       <Section title="Plan">

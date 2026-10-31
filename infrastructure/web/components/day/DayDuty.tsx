@@ -6,6 +6,7 @@ import { format, parseISO, differenceInCalendarDays } from "date-fns";
 import { Moon, Palmtree, PlaneTakeoff, Sofa } from "lucide-react";
 import type { FlightSummary } from "@/lib/api";
 import { mainFunction, FUNCTION_SHORT } from "@/lib/flight-time";
+import { DUTY, ink } from "@/lib/duty";
 import { LaneHeader, LaneLink } from "./Lane";
 
 interface RosterBrief {
@@ -22,14 +23,6 @@ interface RosterBrief {
 
 // The card takes the colour of who you flew for (Norwegian red, Ryanair blue), else
 // the duty's own: a tinted header with an accent edge, as the flight-duty banner had.
-const DUTY: Record<string, { label: string; color: string }> = {
-  flying_duty: { label: "Flying duty", color: "#4ADE80" },
-  standby:     { label: "Standby",     color: "#FACC15" },
-  ground_duty: { label: "Ground duty", color: "#818CF8" },
-  day_off:     { label: "Day off",     color: "#94A3B8" },
-  vacation:    { label: "Vacation",    color: "#2DD4BF" },
-  unknown:     { label: "Duty",        color: "#A1A1AA" },
-};
 
 function opDot(f: FlightSummary): string {
   if (f.is_sim) return "#A78BFA";
@@ -43,9 +36,6 @@ function hm(sec: number): string {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
   return h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
 }
-
-/** An accent hex as text: deepened in light mode so yellow / green stay readable. */
-const ink = (hex: string) => `color-mix(in srgb, ${hex} var(--accent-ink), black)`;
 
 const hhmm = (s: string | null | undefined) => (s ? (s.length > 5 ? s.slice(11, 16) : s) : "");
 

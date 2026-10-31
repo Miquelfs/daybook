@@ -3,8 +3,8 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { HealthTabs } from "@/components/health/HealthTabs";
 import { format } from "date-fns";
-import { Activity, Moon, AlertTriangle } from "lucide-react";
 import {
   injuriesApi,
   type Injury,
@@ -730,17 +730,7 @@ export default function InjuriesPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Injuries</h1>
         <p className="text-sm text-[#71717A] mt-0.5">Tap a zone to log or update pain · Bubble = pain scale</p>
 
-        <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mt-4 overflow-x-auto">
-          <Link href="/health" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <Activity size={13} />Overview
-          </Link>
-          <Link href="/health/sleep" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <Moon size={13} />Sleep
-          </Link>
-          <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#27272A] text-[#FAFAFA] whitespace-nowrap">
-            <AlertTriangle size={13} />Injuries
-          </span>
-        </div>
+        <HealthTabs active="/health/injuries" />
       </div>
 
       {/* Summary chips */}

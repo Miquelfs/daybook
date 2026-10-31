@@ -279,11 +279,30 @@ def compute(conn, on: date | None = None) -> dict | None:
     plan.sort(key=lambda x: -x["years"])
     floor = final_age(vo2_age(vo2_goal), [BEST[c["key"]] for c in comps])
 
+    # Weight: lightly through BMI, mostly through VO2max — it's per kg, so the same engine on less
+    # body weight reads higher (Garmin uses the profile weight: keep it current)
+    weight = None
+    if w:
+        goal_kg = None
+        if "race_goals" in t and "target_weight_kg" in {r[1] for r in conn.execute("PRAGMA table_info(race_goals)")}:
+            g = conn.execute("SELECT target_weight_kg FROM race_goals WHERE status='active' AND target_weight_kg IS NOT NULL "
+                             "ORDER BY race_date LIMIT 1").fetchone()
+            goal_kg = g[0] if g else None
+        weight = {"kg": round(w[0], 1), "height_m": round(height, 2) if height else None,
+                  "bmi": round(w[0] / height ** 2, 1) if height else None,
+                  "bmi25_kg": round(25 * height ** 2, 1) if height else None, "goal_kg": goal_kg}
+        if goal_kg and goal_kg < w[0]:
+            vo2_g = vo2 * w[0] / goal_kg
+            yrs_g = [years_bmi(goal_kg / height ** 2) if c["key"] == "bmi" and height else c["years"] for c in comps]
+            weight.update({"vo2_at_goal": round(vo2_g, 1),
+                           "fitness_age_at_goal": round(final_age(vo2_age(vo2_g), yrs_g), 1)})
+
     return {"date": end, "age": age, "fitness_age": round(fa), "precise": round(fa, 1),
             "delta": round(fa - age), "vo2max": round(vo2, 1),
             "vo2_age": round(base, 1), "adjust_years": round(adj, 1),
             "raw_adjust_years": round(sum(c["years"] for c in comps), 1),
             "achievable": round(best), "floor": round(floor), "vo2_goal": vo2_goal, "plan": plan, "components": comps,
+            "weight": weight,
             "biggest_gain": max(comps, key=lambda c: c["gain"])["key"] if comps and max(c["gain"] for c in comps) >= 0.5
             else None}
 

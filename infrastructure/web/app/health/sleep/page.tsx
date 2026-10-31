@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Activity, Moon, AlertTriangle } from "lucide-react";
+import { HealthTabs } from "@/components/health/HealthTabs";
 import { api } from "@/lib/api";
 import { SleepOverview } from "@/components/sleep/SleepOverview";
 import { SleepPatterns } from "@/components/sleep/SleepPatterns";
@@ -66,18 +66,7 @@ export default function SleepPage() {
           </div>
         </div>
 
-        {/* Sub-nav */}
-        <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mt-4 overflow-x-auto">
-          <Link href="/health" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <Activity size={13} />Overview
-          </Link>
-          <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#27272A] text-[#FAFAFA] whitespace-nowrap">
-            <Moon size={13} />Sleep
-          </span>
-          <Link href="/health/injuries" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <AlertTriangle size={13} />Injuries
-          </Link>
-        </div>
+        <HealthTabs active="/health/sleep" />
       </div>
 
       <div className="mb-6">

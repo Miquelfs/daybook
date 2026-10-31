@@ -120,6 +120,7 @@ export default function LoadIndexPage() {
         <div className="flex gap-2 mt-4 flex-wrap">
           <Link href="/health" className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors">Overview</Link>
           <Link href="/health/sleep" className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors">Sleep</Link>
+          <Link href="/health/weight" className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors">Weight</Link>
           <Link href="/omyra?tab=load" className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors">Training</Link>
           <Link href="/health/injuries" className="text-xs px-3 py-1.5 rounded-full border border-[#27272A] text-[#71717A] hover:text-[#A1A1AA] transition-colors">Injuries</Link>
         </div>
