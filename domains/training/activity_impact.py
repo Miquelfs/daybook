@@ -37,9 +37,9 @@ def _tables(conn) -> set[str]:
 
 
 def _tss(conn, act, t, analysis) -> tuple[float | None, str | None]:
-    if analysis and (analysis.get("power") or {}).get("tss"):
-        est = analysis["power"].get("estimated")
-        return float(analysis["power"]["tss"]), "estimated power" if est else "power"
+    # estimated power (no meter on the road bike) never sets the load — heart-rate TSS until a real meter
+    if analysis and (analysis.get("power") or {}).get("tss") and not analysis["power"].get("estimated"):
+        return float(analysis["power"]["tss"]), "power"
     if act["training_stress_score"]:
         return float(act["training_stress_score"]), "device"
     if "activity_detail" in t:

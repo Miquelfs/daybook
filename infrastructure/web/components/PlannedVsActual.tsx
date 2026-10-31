@@ -162,7 +162,8 @@ export function PlannedVsActual({ planSession, splits, activity, intervals, hrPl
   const verdict = hrVerdict(activity.avg_heart_rate, planSession.intensity_zone, dz, planSession.discipline);
   const reps = intervals ? repsVerdict(intervals, planSession, dz) : null;
   const isRideSession = /cycl|ride/i.test(planSession.discipline);
-  const pw = isRideSession && !reps ? powerVerdict(power, planSession.intensity_zone, dz) : null;
+  // only measured power is judged against the watt band — never estimated watts on an outdoor ride
+  const pw = isRideSession && !reps && !power?.estimated ? powerVerdict(power, planSession.intensity_zone, dz) : null;
   const zoneRpe = ZONE_RPE[planSession.intensity_zone];
   const rpeNote = rpe && zoneRpe
     ? rpe > zoneRpe[1] ? `Felt harder than a ${planSession.intensity_zone} session should (RPE ${zoneRpe[0]}–${zoneRpe[1]}) — fatigue, heat or under-fuelling?`

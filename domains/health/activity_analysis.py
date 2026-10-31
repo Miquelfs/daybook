@@ -25,7 +25,7 @@ import math
 import sqlite3
 from bisect import bisect_right
 
-VERSION = 6   # 4: HR zones from threshold HR (hr_zones) · 5: interval reps · 6: estimated ride power
+VERSION = 7   # 4: HR zones from threshold HR (hr_zones) · 5: interval reps · 6: estimated ride power · 7: no est. TSS
 MAX_GAP_S = 30
 MAX_SERIES = 600
 
@@ -800,6 +800,7 @@ def _analyze(conn, act, sport) -> dict | None:
     power = _power_card(s1["pw"], moving, ftp, weight, indoor, sport) if s1.get("pw") else None
     if power and est:
         power["estimated"] = est["meta"]
+        power["tss"] = None                      # load stays on heart rate until there's a real meter
         power["verdict"] = "Estimated · " + power["verdict"]
     cadence = _cad_card(sport, s1["cad"], moving) if s1.get("cad") else None
     temp = [t for t, m in zip(s1.get("temp") or [], moving) if m and t is not None]
