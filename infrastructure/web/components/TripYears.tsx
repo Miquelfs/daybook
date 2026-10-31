@@ -25,7 +25,7 @@ export function TripYears({
   );
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       {groups.map(({ year, trips }) => {
         const isOpen = filtered || open[year];
         const nights = trips.reduce((s, t) => s + t.n_nights, 0);
@@ -38,7 +38,7 @@ export function TripYears({
                 className="flex items-baseline gap-3 w-full text-left mb-3 group"
                 aria-expanded={isOpen}
               >
-                <span className="text-xl font-semibold tabular-nums text-[#FAFAFA]">{year}</span>
+                <span className="text-sm font-semibold tabular-nums text-[#FAFAFA]">{year}</span>
                 <span className="text-xs text-[#71717A] tabular-nums">
                   {trips.length} {trips.length === 1 ? "trip" : "trips"} · {nights} nights{flights ? ` · ${flights} flights` : ""}
                 </span>
@@ -49,7 +49,7 @@ export function TripYears({
               </button>
             )}
             {isOpen && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {trips.map((t) => (
                   <TripCard key={t.id} trip={t} flag={<Flag country={t.primary_country} fallback="" />} />
                 ))}

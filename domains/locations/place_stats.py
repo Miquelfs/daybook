@@ -122,3 +122,18 @@ def months(con: sqlite3.Connection, year: int | None = None, last: int = 12) -> 
             "new_countries": sorted(n["countries"]) if n else [],
         })
     return {"months": out, "totals": {"places": len(first_p), "cities": len(first_c), "countries": len(first_k)}}
+
+
+def month(con: sqlite3.Connection, ym: str) -> dict:
+    """One month in detail: each new place / city / country with the day it was first visited."""
+    first_p, first_c, first_k, by_day = _first_seen(con)
+    new_p = sorted(((d, p, c) for (p, c), d in first_p.items() if d[:7] == ym), key=lambda x: (x[0], x[1]))
+    new_c = sorted(((d, c, k) for (c, k), d in first_c.items() if d[:7] == ym), key=lambda x: (x[0], x[1]))
+    days = sorted(d for d in by_day if d[:7] == ym)
+    return {
+        "month": ym,
+        "new_places": [{"date": d, "name": p, "city": c} for d, p, c in new_p],
+        "new_cities": [{"date": d, "city": c, "country": k} for d, c, k in new_c],
+        "new_countries": [{"date": d, "country": k} for k, d in sorted(first_k.items(), key=lambda x: x[1]) if d[:7] == ym],
+        "days_with_data": len(days),
+    }

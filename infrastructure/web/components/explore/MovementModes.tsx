@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Bike, Car, Footprints, Plane, Zap } from "lucide-react";
+import { Block, Hero, Stat } from "@/components/ui/kit";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ink } from "@/lib/duty";
 
@@ -54,7 +55,7 @@ export function MovementModes({ year }: { year?: number }) {
     staleTime: 600_000,
   });
   const [withVehicle, setWithVehicle] = useState(false);
-  if (!data) return <div className="h-64 rounded-3xl border border-[#27272A] bg-[#0D0D0F] animate-pulse" />;
+  if (!data) return <div className="h-64 rounded-2xl border border-[#27272A] bg-[#0D0D0F] animate-pulse" />;
   if (!data.days) {
     return <p className="text-sm text-[#52525B] border border-dashed border-[#27272A] rounded-2xl px-4 py-10 text-center">No movement data yet.</p>;
   }
@@ -64,20 +65,11 @@ export function MovementModes({ year }: { year?: number }) {
 
   return (
     <div className="space-y-8">
-      {/* Hero — your own power */}
-      <section className="rounded-3xl border border-[#27272A] bg-[#0D0D0F] p-5 sm:p-6">
-        <p className="text-[10px] text-[#71717A] uppercase tracking-widest">Under your own power{year ? ` · ${year}` : " · all time"}</p>
-        <p className="mt-1 leading-none">
-          <span className="text-5xl font-semibold tabular-nums" style={{ color: ink("#10B981") }}>
-            {Math.round(data.self_powered_km).toLocaleString("en-GB")}
-          </span>
-          <span className="text-base text-[#71717A] ml-1.5">km</span>
-        </p>
-        <p className="text-sm text-[#A1A1AA] mt-2">
-          {data.active_days} active days (5 km+ on foot or bike) of {data.days} tracked
-        </p>
-        {/* share bar of the self-powered modes */}
-        <div className="flex h-2.5 rounded-full overflow-hidden mt-4 gap-0.5">
+      {/* Hero — your own power; road, rail and flights beside it, not on top of it */}
+      <Hero eyebrow={`Under your own power${year ? ` · ${year}` : " · all time"}`}
+            value={Math.round(data.self_powered_km).toLocaleString("en-GB")} unit="km"
+            sub={`${data.active_days} active days (5 km+ on foot or bike) of ${data.days} tracked`}>
+        <div className="flex h-1.5 rounded-full overflow-hidden mt-4 gap-px bg-[#18181B]">
           {SELF.map((m) => t[m] > 0 && (
             <span key={m} style={{ width: `${(t[m] / Math.max(1, data.self_powered_km)) * 100}%`, background: META[m].color }} />
           ))}
@@ -85,30 +77,16 @@ export function MovementModes({ year }: { year?: number }) {
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-[#71717A]">
           {SELF.map((m) => (
             <span key={m} className="inline-flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full" style={{ background: META[m].color }} />
-              {META[m].label} <b className="text-[#D4D4D8] tabular-nums">{Math.round(t[m]).toLocaleString("en-GB")}</b>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: META[m].color }} />
+              {META[m].label} <span className="text-[#D4D4D8] tabular-nums">{Math.round(t[m]).toLocaleString("en-GB")} km</span>
             </span>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-[#18181B]">
-          <div className="flex items-center gap-3">
-            <span className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#18181B]"><Car size={16} className="text-[#A1A1AA]" /></span>
-            <div>
-              <p className="text-lg font-semibold tabular-nums leading-none">{km(t.vehicle)} <span className="text-xs text-[#71717A] font-normal">km</span></p>
-              <p className="text-[11px] text-[#71717A] mt-0.5">road & rail</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "color-mix(in srgb, #8B5CF6 14%, transparent)" }}>
-              <Plane size={16} style={{ color: ink("#8B5CF6") }} />
-            </span>
-            <div>
-              <p className="text-lg font-semibold tabular-nums leading-none">{km(t.flight)} <span className="text-xs text-[#71717A] font-normal">km</span></p>
-              <p className="text-[11px] text-[#71717A] mt-0.5">flying · {(t.flight / EARTH_KM).toFixed(1)}× round the Earth</p>
-            </div>
-          </div>
+        <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-[#27272A]">
+          <Stat plain label="Road & rail" value={km(t.vehicle)} unit="km" />
+          <Stat plain label="Flying" value={km(t.flight)} unit="km" sub={`${(t.flight / EARTH_KM).toFixed(1)}× round the Earth`} />
         </div>
-      </section>
+      </Hero>
 
       {/* Month by month */}
       <section>
@@ -120,7 +98,7 @@ export function MovementModes({ year }: { year?: number }) {
             {withVehicle ? "✓ " : "+ "}road & rail
           </button>
         </div>
-        <div className="rounded-3xl border border-[#27272A] bg-[#0D0D0F] px-3 pt-4 pb-2">
+        <div className="rounded-2xl border border-[#27272A] bg-[#0D0D0F] px-3 pt-4 pb-2">
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={months} barCategoryGap="22%">
               <CartesianGrid vertical={false} stroke="var(--viz-grid)" strokeDasharray="3 3" />
@@ -139,34 +117,20 @@ export function MovementModes({ year }: { year?: number }) {
       </section>
 
       {/* Records */}
-      <section>
-        <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Biggest days</h2>
+      <Block title="Biggest days">
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {(Object.keys(META) as Mode[]).map((m) => {
             const r = data.records[m];
-            if (!r) return null;
-            const { Icon, color, label } = META[m];
-            return (
-              <Link key={m} href={`/day/${r.date}`}
-                    className="rounded-2xl border border-[#27272A] bg-[#0D0D0F] p-3.5 hover:border-[#3F3F46] transition-colors">
-                <span className="w-8 h-8 rounded-xl flex items-center justify-center"
-                      style={{ background: `color-mix(in srgb, ${color} 15%, transparent)` }}>
-                  <Icon size={15} style={{ color: ink(color) }} />
-                </span>
-                <p className="text-xl font-semibold tabular-nums mt-2 leading-none">{km(r.km)} <span className="text-xs text-[#71717A] font-normal">km</span></p>
-                <p className="text-[11px] text-[#A1A1AA] mt-1">{label}</p>
-                <p className="text-[11px] text-[#52525B]">{day(r.date)}</p>
-              </Link>
-            );
+            return r ? <Stat key={m} label={META[m].label} value={km(r.km)} unit="km" sub={day(r.date)} href={`/day/${r.date}`} /> : null;
           })}
         </div>
-      </section>
+      </Block>
 
       {/* Top ground days */}
       {data.top_ground_days.length > 0 && (
         <section>
           <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Most ground covered</h2>
-          <div className="rounded-3xl border border-[#27272A] bg-[#0D0D0F] divide-y divide-[#18181B] overflow-hidden">
+          <div className="rounded-2xl border border-[#27272A] bg-[#0D0D0F] divide-y divide-[#18181B] overflow-hidden">
             {data.top_ground_days.map((g, i) => {
               const total = g.foot + g.run + g.bike + g.vehicle;
               return (
@@ -190,7 +154,7 @@ export function MovementModes({ year }: { year?: number }) {
       {!year && data.yearly.length > 1 && (
         <section>
           <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Year by year · own power</h2>
-          <div className="rounded-3xl border border-[#27272A] bg-[#0D0D0F] p-4 space-y-2.5">
+          <div className="rounded-2xl border border-[#27272A] bg-[#0D0D0F] p-4 space-y-2.5">
             {[...data.yearly].reverse().map((y) => {
               const self = y.foot + y.run + y.bike;
               const max = Math.max(...data.yearly.map((r) => r.foot + r.run + r.bike), 1);

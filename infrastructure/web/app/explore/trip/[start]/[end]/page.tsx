@@ -11,6 +11,7 @@ import { WithPicker } from "@/components/plan/WithPicker";
 import { TripPlan } from "@/components/plan/TripPlan";
 import { Flag } from "@/components/Flag";
 import { localISODate } from "@/lib/dates";
+import { Chip, Hero, Stat } from "@/components/ui/kit";
 
 interface Props {
   params: Promise<{ start: string; end: string }>;
@@ -70,23 +71,31 @@ export default async function TripDetailPage({ params }: Props) {
 
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          {trip.primary_country !== "Spain" && <Flag country={trip.primary_country} size={24} />} {trip.name}
+          <Flag country={trip.primary_country} fallback="" /> {trip.name}
         </h1>
-        <p className="text-sm text-[#71717A] mt-1">
-          {fmtRange(trip.start_date, rangeEnd)} · {trip.n_nights} night{trip.n_nights === 1 ? "" : "s"}
-          {trip.passenger_flight_count > 0 && (
-            <span className="text-sky-400"> · ✈ {trip.passenger_flight_count} flight{trip.passenger_flight_count > 1 ? "s" : ""}</span>
-          )}
-          {trip.max_distance_from_home_km != null && (
-            <span className="text-[#3F3F46]"> · {Math.round(trip.max_distance_from_home_km)} km out</span>
-          )}
-        </p>
-        {trip.cities.length > 0 && (
-          <p className="text-xs text-[#52525B] mt-1">{trip.cities.join(" · ")}</p>
-        )}
+        <p className="text-sm text-[#71717A] mt-1">{fmtRange(trip.start_date, rangeEnd)}</p>
       </div>
 
-      <div className="flex flex-col gap-10">
+      <Hero className="mb-8" eyebrow="Away from home" value={trip.n_nights} unit={trip.n_nights === 1 ? "night" : "nights"}
+            sub={trip.home_at_start ? `from ${trip.home_at_start}` : undefined}
+            right={trip.cover_photo_path ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={photoProxy(trip.cover_photo_path)} alt="" className="w-16 h-16 rounded-xl object-cover border border-[#27272A]" />
+            ) : undefined}>
+        <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-[#27272A]">
+          <Stat plain label="Days" value={tripDates.length} />
+          <Stat plain label="Furthest" value={trip.max_distance_from_home_km != null ? Math.round(trip.max_distance_from_home_km).toLocaleString("en-GB") : "—"}
+                unit={trip.max_distance_from_home_km != null ? "km" : undefined} />
+          <Stat plain label="Flights" value={trip.passenger_flight_count} />
+        </div>
+        {trip.cities.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-4">
+            {trip.cities.map((c) => <Chip key={c} href={`/explore/place/${encodeURIComponent(c)}`}>{c}</Chip>)}
+          </div>
+        )}
+      </Hero>
+
+      <div className="flex flex-col gap-8">
         <section>
           <SectionLabel>With</SectionLabel>
           <WithPicker trip={{ start: trip.start_date, end: trip.end_date }} />
@@ -112,7 +121,7 @@ export default async function TripDetailPage({ params }: Props) {
                 <Link
                   key={d.date}
                   href={`/day/${d.date}`}
-                  className="relative aspect-square rounded-lg overflow-hidden border border-[#27272A] group"
+                  className="relative aspect-square rounded-xl overflow-hidden border border-[#27272A] group"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img

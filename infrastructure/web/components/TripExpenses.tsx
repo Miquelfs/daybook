@@ -34,9 +34,9 @@ export function TripExpenses({ start, end }: { start: string; end: string }) {
   return (
     <section>
       <SectionLabel>Spending</SectionLabel>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
         <div className="flex items-baseline justify-between mb-3">
-          <span className="text-2xl font-semibold text-[#FAFAFA] tabular-nums">{fmtAmount(totalSpent)}</span>
+          <span className="text-lg font-semibold text-[#FAFAFA] tabular-nums">{fmtAmount(totalSpent)}</span>
           <span className="text-xs text-[#52525B]">{expenses.length} expense{expenses.length === 1 ? "" : "s"}</span>
         </div>
         <div className="flex flex-col gap-1.5">
@@ -46,7 +46,7 @@ export function TripExpenses({ start, end }: { start: string; end: string }) {
               <div key={cat} className="flex items-center gap-2">
                 <span className="text-sm w-5 text-center shrink-0">{CATEGORY_EMOJI[cat] ?? "💳"}</span>
                 <span className="text-xs text-[#D4D4D8] flex-1 truncate">{cat}</span>
-                <div className="w-20 h-1.5 rounded-full bg-[#27272A] shrink-0">
+                <div className="w-20 h-1 rounded-full bg-[#18181B] shrink-0">
                   <div className="h-full rounded-full bg-[#F59E0B]" style={{ width: `${Math.max(pct, 2)}%` }} />
                 </div>
                 <span className="text-xs text-[#A1A1AA] tabular-nums w-14 text-right shrink-0">{fmtAmount(amount)}</span>

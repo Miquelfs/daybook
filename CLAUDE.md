@@ -102,6 +102,13 @@ but tags are now the source of truth. Structured tags include:
 - `candy`, `alcohol` — tracked as "negative" tags (clean streak = days without)
 - All other tags (sex, nap, outdoors, social, etc.) are positive — more = better
 
+## UI Style
+
+One style across Daybook: follow `infrastructure/web/DESIGN.md` and build from `components/ui/kit.tsx`
+(`Panel`, `Block`, `Hero`, `Stat`/`Stats`, `Chip`, `TabBar`, `Pill`). One hero number per page (`text-4xl`),
+stats `text-lg`, grey uppercase section titles, amber as the only accent; no gradients, glows or oversized
+cards. Anything naming a day, place, activity or trip links to it.
+
 ## Key Directories
 
 - `infrastructure/web/` — Next.js frontend

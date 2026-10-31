@@ -540,6 +540,19 @@ def get_place_stats_day(date_str: str):
         con.close()
 
 
+@router.get("/place-stats/month/{ym}")
+def get_place_stats_month(ym: str):
+    """One month: every new place / city / country and the day it was first visited."""
+    from domains.locations.place_stats import month
+    if not (len(ym) == 7 and ym[4] == "-"):
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+    con = _conn()
+    try:
+        return month(con, ym)
+    finally:
+        con.close()
+
+
 @router.get("/place-stats/months")
 def get_place_stats_months(year: int | None = None):
     """Per month (a year, or the last 12): places, cities, countries and how many were new."""

@@ -10,6 +10,7 @@ import { ManualCountries } from "@/components/ManualCountries";
 import { TripYears } from "@/components/TripYears";
 import { YearSelect } from "@/components/YearSelect";
 import { PlacesMonthsCard } from "@/components/explore/PlacesMonthsCard";
+import { Hero } from "@/components/ui/kit";
 import type { TopPlace, CityStay, WorldCoverage, FunFactCard, Trip } from "@/lib/api";
 
 interface Props {
@@ -98,21 +99,10 @@ export default async function ExplorePage({ searchParams }: Props) {
       {(data.points.length > 0 || (coverage && coverage.countries_visited > 0)) && (
         <section className="mb-8">
           {coverage && coverage.countries_visited > 0 && (
-            <div className="rounded-3xl border border-[#27272A] bg-[#0D0D0F] p-5 sm:p-6 mb-3">
-              <div className="flex items-end justify-between gap-4">
-                <div>
-                  <p className="text-[10px] text-[#71717A] uppercase tracking-widest">World coverage{year ? ` · ${year}` : ""}</p>
-                  <p className="mt-1 leading-none">
-                    <span className="text-5xl font-semibold tabular-nums text-[#F59E0B]">{coverage.countries_visited}</span>
-                    <span className="text-sm text-[#71717A]"> of {coverage.countries_total} countries</span>
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-3xl font-semibold tabular-nums leading-none">{coverage.pct_world}%</p>
-                  <p className="text-[10px] text-[#71717A] uppercase tracking-widest mt-1">of the world</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-3 mt-5">
+            <Hero className="mb-3" eyebrow={`World coverage${year ? ` · ${year}` : ""}`}
+                  value={coverage.countries_visited} unit={`of ${coverage.countries_total} countries`}
+                  right={<span className="text-sm text-[#A1A1AA] tabular-nums">{coverage.pct_world}% of the world</span>}>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-3 mt-4 pt-4 border-t border-[#27272A]">
                 {Object.entries(coverage.continents)
                   .filter(([cont]) => cont !== "Unknown")
                   .sort((a, b) => b[1].visited_count / b[1].total - a[1].visited_count / a[1].total)
@@ -122,14 +112,13 @@ export default async function ExplorePage({ searchParams }: Props) {
                         <span className="text-xs text-[#A1A1AA] truncate">{cont}</span>
                         <span className="text-[11px] tabular-nums text-[#71717A]">{c.visited_count}/{c.total}</span>
                       </div>
-                      <div className="h-1.5 rounded-full bg-[#18181B] mt-1 overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${(c.visited_count / Math.max(1, c.total)) * 100}%`,
-                                                                     background: c.visited_count ? "#F59E0B" : "transparent" }} />
+                      <div className="h-1 rounded-full bg-[#18181B] mt-1 overflow-hidden">
+                        <div className="h-full rounded-full bg-[#F59E0B]" style={{ width: `${(c.visited_count / Math.max(1, c.total)) * 100}%` }} />
                       </div>
                     </div>
                   ))}
               </div>
-            </div>
+            </Hero>
           )}
           <ExploreMapConnected points={data.points} details={coverage?.country_details ?? []} />
           {coverage && coverage.countries_visited > 0 && !year && (
@@ -153,7 +142,7 @@ export default async function ExplorePage({ searchParams }: Props) {
             {funFacts.cards.map((c) => (
               <div
                 key={c.label}
-                className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3.5 min-w-[170px] shrink-0"
+                className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 min-w-[170px] shrink-0"
                 title={c.subtitle}
               >
                 <p className="text-lg leading-none mb-1.5">{c.icon}</p>

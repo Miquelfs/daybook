@@ -195,7 +195,7 @@ function Pill({ label, value }: { label: string; value: string }) {
 
 export function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-xs text-[#F59E0B] uppercase tracking-[0.2em] mb-4">
+    <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">
       {children}
     </p>
   );

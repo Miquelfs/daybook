@@ -118,7 +118,7 @@ export function PunctualityTab() {
                   <span className="text-sm text-[#A1A1AA]">{name}</span>
                   <span className="text-xs text-[#52525B] ml-auto">{g.flights} flights</span>
                 </div>
-                <div className="text-3xl font-semibold tabular-nums" style={{ color }}>
+                <div className="text-xl font-semibold tabular-nums" style={{ color }}>
                   {g.on_time_pct ?? "—"}<span className="text-base font-normal text-[#71717A] ml-1">% on time</span>
                 </div>
                 <div className="text-xs text-[#71717A] mt-1">{g.avg_delay_min ?? "—"}m average delay</div>

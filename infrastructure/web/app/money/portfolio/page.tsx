@@ -89,7 +89,7 @@ function NetWorthHeader({ ov }: { ov: NonNullable<Awaited<ReturnType<typeof mone
   return (
     <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-6 py-6 mb-4">
       <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Total worth</p>
-      <p className="text-4xl font-bold text-[#FAFAFA] tabular-nums">{fmtAmount(ov.total_net_worth_eur)}</p>
+      <p className="text-4xl font-semibold tracking-tight text-[#FAFAFA] tabular-nums">{fmtAmount(ov.total_net_worth_eur)}</p>
       <div className="flex items-center gap-4 mt-2 text-xs text-[#71717A]">
         <span>
           Investments <span className="text-[#D4D4D8] tabular-nums">{fmtAmount(ov.total_value_eur)}</span>

@@ -121,24 +121,24 @@ export function ActivityStreaks() {
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Current streak</p>
-              <p className="text-3xl font-bold tabular-nums text-[#F59E0B]">{streaks.current_streak}</p>
+              <p className="text-xl font-semibold tabular-nums">{streaks.current_streak}</p>
               <p className="text-xs text-[#52525B] mt-0.5">active {streaks.current_streak === 1 ? "day" : "days"}</p>
             </div>
             <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Longest streak</p>
-              <p className="text-3xl font-bold tabular-nums text-[#22C55E]">{streaks.longest_streak}</p>
+              <p className="text-xl font-semibold tabular-nums">{streaks.longest_streak}</p>
               <p className="text-xs text-[#52525B] mt-0.5">
                 {streaks.longest_streak_end ? `ended ${format(parseISO(streaks.longest_streak_end), "d MMM yy")}` : "—"}
               </p>
             </div>
             <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Rest days now</p>
-              <p className="text-3xl font-bold tabular-nums text-[#A1A1AA]">{streaks.current_rest}</p>
+              <p className="text-xl font-semibold tabular-nums">{streaks.current_rest}</p>
               <p className="text-xs text-[#52525B] mt-0.5">since last activity</p>
             </div>
             <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Longest rest</p>
-              <p className="text-3xl font-bold tabular-nums text-[#71717A]">{streaks.longest_rest}</p>
+              <p className="text-xl font-semibold tabular-nums">{streaks.longest_rest}</p>
               <p className="text-xs text-[#52525B] mt-0.5">days without activity</p>
             </div>
           </div>

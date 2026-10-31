@@ -99,8 +99,8 @@ export function TripJourney({ dates, geojson }: { dates: string[]; geojson: Trac
       <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
         <button
           onClick={() => setSelected("all")}
-          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-            selected === "all" ? "bg-[#F59E0B] text-[#0D0D0F]" : "bg-[#0D0D0F] border border-[#27272A] text-[#A1A1AA] hover:text-[#FAFAFA]"
+          className={`shrink-0 px-3 py-1 rounded-full text-xs transition-colors tabular-nums ${
+            selected === "all" ? "border border-[#F59E0B] text-[#F59E0B] bg-[#F59E0B]/10" : "border border-[#27272A] text-[#52525B] hover:text-[#A1A1AA]"
           }`}
         >
           All days
@@ -109,8 +109,8 @@ export function TripJourney({ dates, geojson }: { dates: string[]; geojson: Trac
           <button
             key={d}
             onClick={() => setSelected(d)}
-            className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              selected === d ? "bg-[#F59E0B] text-[#0D0D0F]" : "bg-[#0D0D0F] border border-[#27272A] text-[#A1A1AA] hover:text-[#FAFAFA]"
+            className={`shrink-0 px-3 py-1 rounded-full text-xs transition-colors tabular-nums ${
+              selected === d ? "border border-[#F59E0B] text-[#F59E0B] bg-[#F59E0B]/10" : "border border-[#27272A] text-[#52525B] hover:text-[#A1A1AA]"
             }`}
           >
             D{i + 1} · {shortDate(d)}
@@ -147,7 +147,7 @@ export function TripJourney({ dates, geojson }: { dates: string[]; geojson: Trac
               const isOpen = openDates.has(date);
               const dayIdx = dates.indexOf(date);
               return (
-                <div key={date || "unknown"} className="rounded-lg border border-[#18181B] overflow-hidden">
+                <div key={date || "unknown"} className="rounded-2xl border border-[#27272A] bg-[#0D0D0F] overflow-hidden">
                   <div
                     role="button"
                     tabIndex={0}
@@ -179,7 +179,7 @@ export function TripJourney({ dates, geojson }: { dates: string[]; geojson: Trac
             })}
           </div>
         ) : (
-          <div className="rounded-lg border border-[#18181B] overflow-hidden">
+          <div className="rounded-2xl border border-[#27272A] bg-[#0D0D0F] overflow-hidden">
             <div
               role="button"
               tabIndex={0}

@@ -447,7 +447,7 @@ export default function CorrelationsPage() {
             <div className="space-y-4">
               <div className={`flex items-start gap-4 p-4 rounded-xl border ${rBg(result.r)}`}>
                 <div>
-                  <p className={`text-3xl font-semibold tabular-nums ${rColor(result.r)}`}>
+                  <p className={`text-xl font-semibold tabular-nums ${rColor(result.r)}`}>
                     {result.r !== null ? result.r.toFixed(2) : "—"}
                   </p>
                   <p className="text-xs text-[#52525B] mt-0.5">Pearson r</p>
@@ -602,7 +602,7 @@ export default function CorrelationsPage() {
                         </span>
                       )}
                     </p>
-                    <p className="text-3xl font-semibold tabular-nums text-[#FAFAFA]">
+                    <p className="text-xl font-semibold tabular-nums text-[#FAFAFA]">
                       {fmtPeriodValue(periodMetric, periodData.current.avg)}
                     </p>
                     {periodData.current.stddev != null && (
@@ -618,7 +618,7 @@ export default function CorrelationsPage() {
                         </span>
                       )}
                     </p>
-                    <p className="text-3xl font-semibold tabular-nums text-[#71717A]">
+                    <p className="text-xl font-semibold tabular-nums text-[#71717A]">
                       {fmtPeriodValue(periodMetric, periodData.prior.avg)}
                     </p>
                     {periodData.prior.stddev != null && (

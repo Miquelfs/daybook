@@ -41,7 +41,7 @@ export function FitnessAgeCard() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="flex items-baseline gap-2">
-              <span className="text-5xl font-semibold tracking-tight tabular-nums">{n.fitness_age}</span>
+              <span className="text-4xl font-semibold tracking-tight tabular-nums">{n.fitness_age}</span>
               <span className={`text-sm ${younger ? "text-emerald-400" : n.delta > 0 ? "text-amber-400" : "text-[#A1A1AA]"}`}>
                 {n.delta === 0 ? "same as your age" : `${Math.abs(n.delta)} years ${younger ? "younger" : "older"} than you are (${n.age})`}
               </span>

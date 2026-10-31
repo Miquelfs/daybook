@@ -83,19 +83,19 @@ export function TripCard({ trip, flag }: { trip: Trip; flag?: React.ReactNode })
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === "Enter") go(); }}
-      className="relative bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 hover:border-[#3F3F46] transition-colors group flex gap-3.5 cursor-pointer"
+      className="relative bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-3 hover:border-[#3F3F46] transition-colors group flex gap-3 cursor-pointer"
     >
       {/* Date tile — the trip's first day, like a calendar leaf */}
-      <div className="shrink-0 w-12 rounded-xl overflow-hidden border border-[#27272A] text-center self-start">
-        <p className="text-[9px] font-semibold uppercase tracking-widest py-0.5 bg-[#F59E0B]/15 text-[#F59E0B]">
+      <div className="shrink-0 w-10 rounded-lg bg-[#18181B] text-center self-start py-1">
+        <p className="text-[9px] uppercase tracking-widest text-[#71717A] leading-tight">
           {start.toLocaleDateString("en-GB", { month: "short" })}
         </p>
-        <p className="text-lg font-semibold tabular-nums leading-tight py-1">{start.getDate()}</p>
+        <p className="text-sm font-semibold tabular-nums leading-tight">{start.getDate()}</p>
       </div>
 
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <p className="text-[15px] text-[#FAFAFA] font-semibold leading-snug line-clamp-2 flex-1 min-w-0">
+          <p className="text-sm text-[#FAFAFA] font-medium leading-snug line-clamp-1 flex-1 min-w-0">
             {flag && <span className="mr-1.5 align-middle">{flag}</span>}{name}
           </p>
           <div className="flex items-center gap-2 shrink-0 pt-0.5">
@@ -125,27 +125,14 @@ export function TripCard({ trip, flag }: { trip: Trip; flag?: React.ReactNode })
             )}
           </div>
         </div>
-        <p className="text-xs text-[#71717A] tabular-nums mt-0.5">{fmtRange(trip.start_date, trip.return_date ?? trip.end_date)}</p>
-
-        {/* The trip in three numbers */}
-        <div className="flex flex-wrap gap-1.5 mt-2.5">
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#18181B] text-[#D4D4D8] tabular-nums">
-            {trip.n_nights} night{trip.n_nights === 1 ? "" : "s"}
-          </span>
-          {far != null && far >= 1 && (
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#18181B] text-[#A1A1AA] tabular-nums">
-              {far >= 1000 ? `${(far / 1000).toFixed(1)}k` : Math.round(far)} km away
-            </span>
-          )}
-          {trip.passenger_flight_count > 0 && (
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-500 tabular-nums">
-              ✈ {trip.passenger_flight_count} flight{trip.passenger_flight_count > 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
+        <p className="text-xs text-[#71717A] tabular-nums mt-0.5">
+          {fmtRange(trip.start_date, trip.return_date ?? trip.end_date)} · {trip.n_nights} night{trip.n_nights === 1 ? "" : "s"}
+          {far != null && far >= 1 ? ` · ${far >= 1000 ? `${(far / 1000).toFixed(1)}k` : Math.round(far)} km away` : ""}
+          {trip.passenger_flight_count > 0 ? ` · ✈ ${trip.passenger_flight_count}` : ""}
+        </p>
 
         {trip.cities.length > 0 && (
-          <p className="text-xs text-[#52525B] mt-2 truncate">
+          <p className="text-xs text-[#52525B] mt-0.5 truncate">
             {trip.cities.slice(0, 4).map((city, i) => (
               <Fragment key={city}>
                 {i > 0 && " · "}
@@ -164,7 +151,7 @@ export function TripCard({ trip, flag }: { trip: Trip; flag?: React.ReactNode })
       </div>
 
       {trip.cover_photo_path && (
-        <div className="shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-[#27272A] self-center">
+        <div className="shrink-0 w-12 h-12 rounded-lg overflow-hidden border border-[#27272A] self-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={photoProxy(trip.cover_photo_path)} alt="" className="w-full h-full object-cover" />
         </div>

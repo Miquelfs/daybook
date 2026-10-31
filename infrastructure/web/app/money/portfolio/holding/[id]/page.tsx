@@ -44,7 +44,7 @@ export default async function HoldingDetailPage({ params }: Props) {
 
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-6 py-6 mb-4">
         <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Market value</p>
-        <p className="text-3xl font-bold text-[#FAFAFA] tabular-nums">
+        <p className="text-4xl font-semibold tracking-tight text-[#FAFAFA] tabular-nums">
           {h.market_value_eur !== null ? fmtAmount(h.market_value_eur) : "No price yet"}
         </p>
         {h.current_price_eur !== null && (
