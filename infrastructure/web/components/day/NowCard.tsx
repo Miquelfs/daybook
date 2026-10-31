@@ -24,7 +24,8 @@ const clock = () => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-/** Today's "what now?" — the one thing that matters at this moment, then up to three next. */
+/** Today's "what now?" — the one time-sensitive thing at this moment (a report, a duty, a session
+ *  to do or rate, an early night). Tasks and tomorrow's duty live in the Plan chapter below. */
 export function NowCard({ date }: { date: string }) {
   const [time, setTime] = useState<string | null>(null);
   useEffect(() => {                                  // the phone's clock, not the Pi's
@@ -38,7 +39,8 @@ export function NowCard({ date }: { date: string }) {
     enabled: !!time,
     staleTime: 60_000,
   });
-  if (!data?.head) return <div className="h-[104px] rounded-2xl bg-[#18181B] animate-pulse" />;
+  // Only when something is time-sensitive; a free day is already told by the Plan below it.
+  if (!data?.head || data.head.kind === "free") return null;
   const { head } = data;
   const Icon = ICON[head.kind] ?? Sun;
 
@@ -56,20 +58,6 @@ export function NowCard({ date }: { date: string }) {
         </span>
         <ChevronRight size={16} className="text-[#52525B] group-hover:text-[#A1A1AA] mt-3" />
       </Link>
-      {data.next.length > 0 && (
-        <div className="border-t border-[#27272A] divide-y divide-[#18181B]">
-          {data.next.map((n) => {
-            const I = ICON[n.kind] ?? Sun;
-            return (
-              <Link key={n.kind + n.text} href={n.href} className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#111113] group">
-                <I size={14} className="text-[#71717A] shrink-0" />
-                <span className="flex-1 min-w-0 truncate text-sm text-[#D4D4D8]">{n.text}</span>
-                <ChevronRight size={14} className="text-[#3F3F46] group-hover:text-[#71717A]" />
-              </Link>
-            );
-          })}
-        </div>
-      )}
     </Panel>
   );
 }

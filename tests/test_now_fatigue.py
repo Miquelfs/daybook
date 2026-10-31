@@ -42,7 +42,9 @@ class NowTest(unittest.TestCase):
         self.assertTrue(any("Renew medical" in n["text"] for n in r["next"]))
 
     def test_session_on_a_day_off(self):
-        h = now(_db(), "2026-11-07", "08:30")["head"]
+        # the day view's Training lane leads with it — the card stays quiet unless asked
+        self.assertEqual(now(_db(), "2026-11-07", "08:30")["head"]["kind"], "free")
+        h = now(_db(), "2026-11-07", "08:30", with_training=True)["head"]
         self.assertEqual((h["kind"], h["title"]), ("train", "Long Ride"))
 
 

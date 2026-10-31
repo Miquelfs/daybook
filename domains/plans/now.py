@@ -7,7 +7,8 @@ tasks, last night's sleep and tomorrow's duty. Time of day decides the headline:
 
   before report        → "Report 06:55" · in 2h 10m
   on duty / standby    → "On duty until 16:20"
-  a session to do      → "Long Ride · 2h Z2" + today's advice
+  a session to do      → "Long Ride · 2h Z2" + today's advice (with_training only — the day view's
+                         Training lane already shows it, so the card leaves it out)
   session done, no RPE → "How did the Long Ride feel?"
   evening, early start → "Early start tomorrow" · lights out by 21:30
   otherwise            → the day's shape ("Day off", "Free evening")
@@ -72,7 +73,7 @@ def _what(s: dict) -> str:
     return f"{_dur(mins)} · {s.get('intensity_zone') or ''}".strip(" ·")
 
 
-def now(conn: sqlite3.Connection, d: str, hhmm: str) -> dict:
+def now(conn: sqlite3.Connection, d: str, hhmm: str, with_training: bool = False) -> dict:
     t = _tables(conn)
     now_m = _m(hhmm) or 12 * 60
     ctx = day_context(conn, d)
@@ -103,8 +104,8 @@ def now(conn: sqlite3.Connection, d: str, hhmm: str) -> dict:
         elif end is not None and rep <= now_m < end:
             head = {"kind": "duty", "title": f"{'On standby' if duty == 'standby' else 'On duty'} until {_hm(end)}",
                     "detail": ctx.get("label") or DUTY_LABEL.get(duty, ""), "href": f"/day/{d}"}
-    # 2 · a session still to do (before the evening)
-    if head is None and pending and now_m < EVENING + 60:
+    # 2 · a session still to do — only when asked for: the day view's Training lane already leads with it
+    if with_training and head is None and pending and now_m < EVENING + 60:
         s = pending[0]
         adv = today_advice(ctx, s)
         detail = _what(s)

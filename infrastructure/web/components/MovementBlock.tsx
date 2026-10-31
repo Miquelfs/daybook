@@ -6,7 +6,6 @@ import { api, fmtDuration, fmtDistance, activityIcon } from "@/lib/api";
 import type { Activity, DailyStats } from "@/lib/api";
 import { foodApi } from "@/lib/food-api";
 import { SectionLabel } from "./MorningBrief";
-import { ActivityMap } from "./ActivityMap";
 import type { ReactNode } from "react";
 
 interface Props {
@@ -136,7 +135,7 @@ function StepGoalRow({ goal }: { goal: import("@/lib/api").StepGoal }) {
 
 function ActivityRow({ activity: a }: { activity: Activity }) {
   const inner = (
-    <div className="flex items-center gap-3 bg-[#18181B] border border-[#27272A] rounded-lg px-4 py-3 transition-colors hover:border-[#3F3F46]">
+    <div className="flex items-center gap-3 bg-[#18181B] border border-[#27272A] rounded-xl px-4 py-3 transition-colors hover:border-[#3F3F46]">
       <span className="text-xl">{activityIcon(a.activity_type)}</span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{a.name ?? a.activity_type ?? "Activity"}</p>
@@ -150,25 +149,16 @@ function ActivityRow({ activity: a }: { activity: Activity }) {
         {a.elevation_gain_meters ? (
           <span className="text-xs text-[#52525B]">↑ {Math.round(a.elevation_gain_meters)}m</span>
         ) : null}
-        {a.strava_id && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#FC4C02]/10 text-[#FC4C02] font-medium">S</span>
-        )}
-        {a.has_polyline && (
-          <span className="text-[10px] text-[#52525B]">📍</span>
-        )}
         <span className="text-[#3F3F46]">›</span>
       </div>
     </div>
   );
 
+  // No route preview here: the day's map ("Where I was") already draws it, and the activity
+  // page has the full map.
   return (
     <Link href={`/activity/${encodeURIComponent(a.id)}`} className="block">
       {inner}
-      {a.polyline && (
-        <div className="mt-1.5 pointer-events-none">
-          <ActivityMap polyline={a.polyline} height="180px" interactive={false} />
-        </div>
-      )}
     </Link>
   );
 }
