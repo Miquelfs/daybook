@@ -1084,6 +1084,7 @@ export const api = {
     get<{ efforts: ActivityEffort[] }>(`/activities/${id}/efforts`).then((r) => r.efforts),
   activityImpact: (id: string) =>
     get<{ impact: ActivityImpact | null }>(`/activities/${id}/impact`).then((r) => r.impact),
+  activityStory: (id: string) => get<ActivityStory>(`/activities/${id}/story`),
   activities: (start: string, end: string) =>
     get<Activity[]>(`/activities?start=${start}&end=${end}`),
   syncStatus: () => get<SyncStatus[]>("/activities/sync-status"),
@@ -1581,6 +1582,12 @@ export interface ActivityAnalysis {
     tss: number | null; kj: number; wkg: number | null; zones: ZoneShare[] | null;
     bests: { secs: number; label: string; watts: number; wkg: number | null; pct_ftp: number | null }[];
     indoor: boolean; verdict: string;
+    /** Set when there was no power meter: watts estimated from physics + the HR line learned on the trainer. */
+    estimated?: {
+      method: string; mass_kg: number; cda: number; crr: number; wind: boolean; hr_scale: number;
+      climb_agreement_pct: number | null; climb_min: number;
+      hr_model: { a: number; b: number; blocks: number; r2: number; rmse_w: number; rides: number; latest: string } | null;
+    };
   } | null;
   elevation: {
     gain_m: number; loss_m: number; min_m: number; max_m: number; m_per_km: number; max_grade: number;
@@ -1619,6 +1626,17 @@ export interface FitnessSummary {
 export type ClimbAscent = {
   key: string; name: string; kind: string; side: string | null; length_km: number; gain_m: number; avg_pct: number;
   max_pct: number; secs: number; vam: number | null; top_ele: number; nth: number; first_time: boolean; best_vam: boolean;
+  /** Physics from gain, length and time (no power meter on the road bike). */
+  est_w?: number | null; wkg?: number | null;
+};
+
+/** GET /activities/{id}/story — what this activity explored and how it sits in the plan. */
+export type ActivityStory = {
+  explore: {
+    sport: string; earlier: number; total_km: number; new_km: number; new_pct: number; new_lines: string[];
+    villages: { name: string; place: string; new: boolean; first_date: string | null }[]; new_villages: number;
+  } | null;
+  plan: { goal: string; streak: number; done_4w: number; planned_4w: number; pct_4w: number | null } | null;
 };
 export type ClimbsSummary = {
   total: number; ascents: number; metres: number;

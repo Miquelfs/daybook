@@ -489,6 +489,25 @@ def get_activity_impact(
     return {"impact": impact(conn, activity_id, analysis=analysis, fuel_target_fn=fuel_target)}
 
 
+@router.get("/{activity_id}/story")
+def get_activity_story(
+    activity_id: str,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+):
+    """Highlights: new road / villages explored, and plan consistency (streak, last 4 weeks)."""
+    from domains.locations.ride_explore import get as explore
+    from domains.training.plan_streak import for_activity as plan_streak
+    if conn.execute("SELECT 1 FROM activities WHERE id=?", (activity_id,)).fetchone() is None:
+        raise HTTPException(status_code=404, detail=f"Activity {activity_id!r} not found")
+    out = {}
+    for key, fn in (("explore", explore), ("plan", plan_streak)):
+        try:
+            out[key] = fn(conn, activity_id)
+        except Exception:
+            out[key] = None
+    return out
+
+
 @router.get("/{activity_id}/wind")
 def get_activity_wind(
     activity_id: str,

@@ -34,6 +34,8 @@ export interface DZone {
   hr_lo?: number | null;
   hr_hi?: number | null;
   speed_kmh_hint?: number;
+  watts_lo?: number | null;
+  watts_hi?: number;
   pace_s_km?: number;
   pace_s_100m?: number;
 }

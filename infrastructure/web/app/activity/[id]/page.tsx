@@ -1,8 +1,9 @@
 import { api, fmtDuration, fmtDistance, fmtPace, activityIcon } from "@/lib/api";
-import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis, ActivityImpact, ActivityEffort } from "@/lib/api";
+import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis, ActivityImpact, ActivityEffort, ActivityStory } from "@/lib/api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ActivityMap } from "@/components/ActivityMap";
+import { HighlightsCard } from "@/components/activity/HighlightsCard";
 import { ActivityWind } from "@/components/ActivityWind";
 import { ActivityAnalysisCards } from "@/components/activity/ActivityAnalysisCards";
 import { TrainingImpactCard } from "@/components/activity/TrainingImpactCard";
@@ -91,6 +92,11 @@ function ClimbsCard({ climbs }: { climbs: NonNullable<ActivityImpact["climbs"]> 
             <div className="text-right shrink-0 tabular-nums">
               <p className="text-sm font-semibold">{hms(c.secs)}</p>
               <p className="text-[11px] text-[#71717A]">{c.vam ? `${c.vam} m/h` : ""}{!c.first_time ? ` · ${ordinal(c.nth)}` : ""}</p>
+              {c.wkg != null && (
+                <p className="text-[11px] text-[#A1A1AA]" title="estimated from gain, length and time">
+                  ~{c.est_w} W · <b className="text-[#FAFAFA]">{c.wkg.toFixed(2)} W/kg</b>
+                </p>
+              )}
             </div>
           </div>
         ))}
@@ -229,10 +235,11 @@ export default async function ActivityPage({ params }: Props) {
     notFound();
   }
 
-  const [analysis, impact, efforts] = await Promise.all([
+  const [analysis, impact, efforts, story] = await Promise.all([
     api.activityAnalysis(decodedId).catch((): ActivityAnalysis | null => null),
     api.activityImpact(decodedId).catch((): ActivityImpact | null => null),
     api.activityEfforts(decodedId).catch((): ActivityEffort[] => []),
+    api.activityStory(decodedId).catch((): ActivityStory | null => null),
   ]);
 
   const date = activity.date;
@@ -344,11 +351,14 @@ export default async function ActivityPage({ params }: Props) {
                      sessionId={activity.plan_session?.id ?? null} />
       )}
 
-      {/* Map */}
+      {/* Highlights: plan streak, new road, villages */}
+      {story && <HighlightsCard story={story} />}
+
+      {/* Map — road never covered before painted amber */}
       {activity.polyline && (
         <section className="mb-8">
           <SectionLabel>Route</SectionLabel>
-          <ActivityMap polyline={activity.polyline} />
+          <ActivityMap polyline={activity.polyline} highlight={story?.explore?.new_lines} />
         </section>
       )}
 
@@ -379,6 +389,8 @@ export default async function ActivityPage({ params }: Props) {
           planSession={activity.plan_session}
           splits={activity.splits ?? []}
           intervals={analysis?.intervals}
+          hrPlan={analysis?.hr?.plan}
+          power={analysis?.power ? { np: analysis.power.np, avg: analysis.power.avg, estimated: !!analysis.power.estimated } : null}
           activity={{
             duration_seconds: activity.duration_seconds,
             moving_time_seconds: activity.moving_time_seconds,

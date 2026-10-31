@@ -38,7 +38,8 @@ def _tables(conn) -> set[str]:
 
 def _tss(conn, act, t, analysis) -> tuple[float | None, str | None]:
     if analysis and (analysis.get("power") or {}).get("tss"):
-        return float(analysis["power"]["tss"]), "power"
+        est = analysis["power"].get("estimated")
+        return float(analysis["power"]["tss"]), "estimated power" if est else "power"
     if act["training_stress_score"]:
         return float(act["training_stress_score"]), "device"
     if "activity_detail" in t:

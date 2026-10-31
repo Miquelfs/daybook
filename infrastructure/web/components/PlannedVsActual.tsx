@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { resolveStructure, DisciplineZones } from "@/lib/workout-description";
-import type { LinkedPlanSession, ActivitySplit, AnalysisIntervals } from "@/lib/api";
+import type { LinkedPlanSession, ActivitySplit, AnalysisIntervals, ActivityAnalysis } from "@/lib/api";
 
 // Zone dots on the same intensity ramp as the heart-rate card
 const ZONE_DOT: Record<string, string> = {
@@ -57,6 +57,58 @@ function repsVerdict(iv: AnalysisIntervals, planSession: LinkedPlanSession, dz?:
   return { zone, target, planned, did, pace, short: set?.reps ? iv.count < set.reps : false, setReps: set?.reps };
 }
 
+type HrPlan = NonNullable<NonNullable<ActivityAnalysis["hr"]>["plan"]>;
+type PowerSummary = { np: number | null; avg: number; estimated: boolean };
+
+// Ride power against the planned zone's watt band (FTP-based — the same bands the trainer gets)
+function powerVerdict(power: PowerSummary | null | undefined, zone: string, dz?: DisciplineZones) {
+  const band = dz?.ride?.zones?.[zone];
+  const w = power?.np ?? power?.avg;
+  if (!w || !band?.watts_hi) return null;
+  const lo = band.watts_lo ?? 0, hi = band.watts_hi;
+  const off = w < lo ? (lo - w) / lo : w > hi ? (w - hi) / hi : 0;
+  return {
+    w, lo, hi, off, estimated: !!power?.estimated,
+    label: off === 0 ? "in the band" : w < lo ? "below the band" : "above the band",
+    cls: off === 0 ? "text-[#4ADE80]" : w < lo ? "text-[#60A5FA]" : "text-[#F87171]",
+  };
+}
+
+/** 0–100 for how closely the session matched the plan: duration 35 · intensity 45 · feel (RPE) 20.
+ *  Parts without data drop out and the rest is rescaled. */
+function sessionScore(o: {
+  durPct: number; zone: string; rpe: number | null; zoneRpe?: [number, number];
+  reps: ReturnType<typeof repsVerdict> | null; intervals?: AnalysisIntervals | null;
+  power: ReturnType<typeof powerVerdict>; hrPlan?: HrPlan | null; hrLabel?: string;
+}) {
+  const parts: { key: string; label: string; w: number; v: number }[] = [];
+  parts.push({ key: "dur", label: "Duration", w: 35, v: Math.max(0, 1 - Math.max(0, Math.abs(o.durPct) - 5) / 40) });
+  const easy = o.zone === "Z1" || o.zone === "Z2";
+  let inten: number | null = null;
+  if (o.reps && o.intervals) {
+    const done = o.reps.setReps ? Math.min(1, o.intervals.count / o.reps.setReps) : 1;
+    const pace = o.reps.target && o.intervals.avg_pace_s_km
+      ? Math.max(0.4, 1 - Math.max(0, Math.abs(o.intervals.avg_pace_s_km - o.reps.target) / o.reps.target - 0.02) * 4)
+      : o.hrPlan?.reps ? Math.max(0.4, (o.hrPlan.reps_reaching ?? 0) / o.hrPlan.reps) : 1;
+    inten = done * pace;
+  } else if (o.power) {
+    inten = Math.max(0.4, 1 - o.power.off * 3);
+  } else if (easy && o.hrPlan) {
+    inten = Math.min(1, o.hrPlan.pct_at_or_below / 90);
+  } else if (o.hrLabel) {
+    inten = o.hrLabel === "in the target zone" || (easy && o.hrLabel === "below the target zone") ? 1 : 0.6;
+  }
+  if (inten != null) parts.push({ key: "int", label: "Intensity", w: 45, v: inten });
+  if (o.rpe && o.zoneRpe) {
+    const off = o.rpe < o.zoneRpe[0] ? o.zoneRpe[0] - o.rpe : o.rpe > o.zoneRpe[1] ? o.rpe - o.zoneRpe[1] : 0;
+    parts.push({ key: "rpe", label: "Feel", w: 20, v: off === 0 ? 1 : off === 1 ? 0.6 : 0.25 });
+  }
+  const total = parts.reduce((s, p) => s + p.w, 0);
+  const score = Math.round((parts.reduce((s, p) => s + p.w * p.v, 0) / total) * 100);
+  const label = score >= 85 ? "Nailed it" : score >= 70 ? "On plan" : score >= 50 ? "Partly there" : "Off plan";
+  return { score, label, parts };
+}
+
 function Tile({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="bg-[#18181B] rounded-xl px-3 py-2.5 min-w-0">
@@ -66,10 +118,12 @@ function Tile({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-export function PlannedVsActual({ planSession, splits, activity, intervals }: {
+export function PlannedVsActual({ planSession, splits, activity, intervals, hrPlan, power }: {
   planSession: LinkedPlanSession;
   splits: ActivitySplit[];
   intervals?: AnalysisIntervals | null;
+  hrPlan?: HrPlan | null;
+  power?: PowerSummary | null;
   activity: { duration_seconds: number | null; moving_time_seconds: number | null; avg_heart_rate: number | null; avg_speed_mps: number | null; activity_type: string | null };
 }) {
   const { data: dz } = useQuery<DisciplineZones>({
@@ -107,12 +161,20 @@ export function PlannedVsActual({ planSession, splits, activity, intervals }: {
   const durPct = plannedMin ? Math.round((durDelta / plannedMin) * 100) : 0;
   const verdict = hrVerdict(activity.avg_heart_rate, planSession.intensity_zone, dz, planSession.discipline);
   const reps = intervals ? repsVerdict(intervals, planSession, dz) : null;
+  const isRideSession = /cycl|ride/i.test(planSession.discipline);
+  const pw = isRideSession && !reps ? powerVerdict(power, planSession.intensity_zone, dz) : null;
   const zoneRpe = ZONE_RPE[planSession.intensity_zone];
   const rpeNote = rpe && zoneRpe
     ? rpe > zoneRpe[1] ? `Felt harder than a ${planSession.intensity_zone} session should (RPE ${zoneRpe[0]}–${zoneRpe[1]}) — fatigue, heat or under-fuelling?`
       : rpe < zoneRpe[0] ? `Felt easier than planned (${planSession.intensity_zone} ≈ RPE ${zoneRpe[0]}–${zoneRpe[1]})`
       : `Right where a ${planSession.intensity_zone} session should feel`
     : null;
+
+  const score = sessionScore({
+    durPct, zone: planSession.intensity_zone, rpe, zoneRpe: zoneRpe as [number, number] | undefined,
+    reps, intervals, power: pw, hrPlan, hrLabel: verdict?.label,
+  });
+  const scoreColor = score.score >= 85 ? "#4ADE80" : score.score >= 70 ? "#F59E0B" : "#FB923C";
 
   const isRide = /cycl|ride|bik/i.test(activity.activity_type ?? "");
   const actualPace = activity.avg_speed_mps && activity.avg_speed_mps > 0
@@ -129,6 +191,29 @@ export function PlannedVsActual({ planSession, splits, activity, intervals }: {
         </span>
       </div>
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-4">
+        {/* Session score — how closely it matched the plan */}
+        <div className="flex items-center gap-4">
+          <div className="relative w-16 h-16 shrink-0">
+            <svg viewBox="0 0 36 36" className="w-16 h-16 -rotate-90">
+              <circle cx="18" cy="18" r="15.5" fill="none" stroke="#18181B" strokeWidth="3.5" />
+              <circle cx="18" cy="18" r="15.5" fill="none" stroke={scoreColor} strokeWidth="3.5" strokeLinecap="round"
+                      strokeDasharray={`${(score.score / 100) * 97.4} 97.4`} />
+            </svg>
+            <span className="absolute inset-0 flex items-center justify-center text-lg font-semibold tabular-nums">{score.score}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-semibold" style={{ color: scoreColor }}>{score.label}</p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
+              {score.parts.map((p) => (
+                <span key={p.key} className="text-xs text-[#71717A] tabular-nums">
+                  {p.label} <b className="text-[#D4D4D8]">{Math.round(p.v * p.w)}</b>/{p.w}
+                </span>
+              ))}
+              {!rpe && <span className="text-xs text-[#52525B]">rate the feel below for the full score</span>}
+            </div>
+          </div>
+        </div>
+
         {/* Duration + HR verdict */}
         <div className="grid grid-cols-3 gap-2">
           <Tile label="Planned">{fmtDur(plannedMin)}</Tile>
@@ -151,6 +236,12 @@ export function PlannedVsActual({ planSession, splits, activity, intervals }: {
             {intervals?.avg_pace_s_km ? <> at {clock(intervals.avg_pace_s_km)} /km</> : null}
             {reps.pace ? <>, <b className={reps.pace.cls}>{reps.pace.label}</b></> : null}
             {reps.short ? <span className="text-[#FB923C]"> · {reps.setReps! - intervals!.count} rep{reps.setReps! - intervals!.count > 1 ? "s" : ""} short</span> : null}
+          </p>
+        ) : pw ? (
+          <p className="text-sm text-[#A1A1AA]">
+            Target {planSession.intensity_zone} {pw.lo ? `${pw.lo}–${pw.hi}` : `<${pw.hi}`} W —{" "}
+            {pw.estimated ? "estimated" : ""} normalized power {pw.estimated ? "~" : ""}{pw.w} W was <b className={pw.cls}>{pw.label}</b>
+            {verdict ? <span className="text-[#71717A]"> · HR {verdict.label.replace("the target zone", "zone")}</span> : null}
           </p>
         ) : verdict && (
           <p className="text-sm text-[#A1A1AA]">

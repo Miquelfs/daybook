@@ -324,13 +324,30 @@ function RepsTable({ iv, run }: { iv: AnalysisIntervals; run: boolean }) {
   );
 }
 
+/** How the watts were estimated, and how far to trust them. */
+function EstimateNote({ e }: { e: NonNullable<NonNullable<ActivityAnalysis["power"]>["estimated"]> }) {
+  const m = e.hr_model;
+  return (
+    <p className="text-xs text-[#71717A] -mt-2 mb-4 leading-relaxed">
+      No power meter — physics from speed, gradient{e.wind ? ", wind" : ""} and {e.mass_kg} kg (rider + bike)
+      {m ? <>, blended on the flats with your heart rate → power line from {m.rides} trainer ride{m.rides > 1 ? "s" : ""} (±{m.rmse_w} W)</> : null}.
+      {e.climb_agreement_pct != null
+        ? <> On {e.climb_min} min of climbing the HR line read {Math.abs(e.climb_agreement_pct)}% {e.climb_agreement_pct < 0 ? "low" : "high"} — rescaled to match physics there.</>
+        : m && e.hr_scale !== 1 ? <> HR line scaled ×{e.hr_scale} (your usual outdoor offset).</> : null}
+      {" "}Climbs ±5%, flats ±10–15%.
+    </p>
+  );
+}
+
 function PowerCard({ a }: { a: ActivityAnalysis }) {
   const p = a.power!;
   const pts = a.series.points;
   const maxBest = Math.max(...p.bests.map((b) => b.watts), 1);
   return (
-    <Card title={a.sport === "run" ? "Running power" : p.indoor ? "Power · trainer" : "Power"} headline={p.np ?? p.avg} unit={p.np ? "W normalized" : "W avg"}
+    <Card title={a.sport === "run" ? "Running power" : p.indoor ? "Power · trainer" : p.estimated ? "Power · estimated" : "Power"}
+          headline={p.estimated ? <>~{p.np ?? p.avg}</> : p.np ?? p.avg} unit={p.np ? "W normalized" : "W avg"}
           aside={<>avg {p.avg} W · max {p.max} W{p.ftp && <><br />FTP {p.ftp} W</>}</>} verdict={p.verdict}>
+      {p.estimated && <EstimateNote e={p.estimated} />}
       {pts.some((x) => x.pw) && (
         <div className="mb-4">
           <SeriesChart data={pts} k="pw" color={C.pw} unit={a.series.x_unit} name="Power" area

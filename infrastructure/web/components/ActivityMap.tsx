@@ -7,9 +7,11 @@ interface Props {
   height?: string;
   /** false → static preview (no pan/zoom), e.g. inside a tappable card. */
   interactive?: boolean;
+  /** Extra encoded polylines painted over the route, e.g. road never ridden before. */
+  highlight?: string[];
 }
 
-export function ActivityMap({ polyline, height = "280px", interactive = true }: Props) {
+export function ActivityMap({ polyline, height = "280px", interactive = true, highlight }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,6 +55,11 @@ export function ActivityMap({ polyline, height = "280px", interactive = true }: 
         opacity: 0.85,
       }).addTo(map);
 
+      for (const enc of highlight ?? []) {
+        const pts = (poly.decode(enc) as number[][]).map((p) => [p[0], p[1]] as [number, number]);
+        L.polyline(pts, { color: "#F59E0B", weight: 5, opacity: 0.9 }).addTo(map);
+      }
+
       // Start marker
       const start = coords[0];
       const end = coords[coords.length - 1];
@@ -79,7 +86,7 @@ export function ActivityMap({ polyline, height = "280px", interactive = true }: 
     return () => {
       map?.remove();
     };
-  }, [polyline, interactive]);
+  }, [polyline, interactive, highlight]);
 
   return (
     <div

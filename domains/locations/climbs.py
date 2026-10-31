@@ -300,7 +300,23 @@ def for_activity(conn, activity_id: str) -> list[dict]:
                WHERE v.activity_id = ? ORDER BY v.gain_m DESC""", (activity_id,)).fetchall()
     except sqlite3.OperationalError:
         return []
+    # watts / W/kg per climb (the road bike has no power meter: physics from gain, length and time)
+    from domains.training.est_power import BIKE_KG, climb_watts
+    kg = None
+    if rows:
+        try:
+            w = conn.execute("SELECT weight_kg FROM weight_log WHERE date <= ? AND weight_kg IS NOT NULL "
+                             "ORDER BY date DESC LIMIT 1", (rows[0]["date"],)).fetchone()
+            kg = w[0] if w else None
+        except sqlite3.OperationalError:
+            kg = None
+
+    def watts(r):
+        return climb_watts(r["gain_m"], r["length_km"], r["secs"], kg + BIKE_KG) if kg else None
+
     return [{"key": r["key"], "name": r["name"], "kind": r["kind"], "side": r["side"], "length_km": r["length_km"],
+             "est_w": round(watts(r)) if watts(r) else None,
+             "wkg": round(watts(r) / kg, 2) if watts(r) else None,
              "gain_m": round(r["gain_m"]), "avg_pct": r["avg_pct"], "max_pct": r["max_pct"], "secs": r["secs"],
              "vam": r["vam"], "top_ele": r["top_ele"], "nth": r["nth"], "first_time": r["nth"] == 1,
              "best_vam": bool(r["vam"] and r["prev_best_vam"] and r["vam"] > r["prev_best_vam"])} for r in rows]

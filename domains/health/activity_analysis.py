@@ -25,7 +25,7 @@ import math
 import sqlite3
 from bisect import bisect_right
 
-VERSION = 5   # 4: HR zones from threshold HR (hr_zones) · 5: interval reps
+VERSION = 6   # 4: HR zones from threshold HR (hr_zones) · 5: interval reps · 6: estimated ride power
 MAX_GAP_S = 30
 MAX_SERIES = 600
 
@@ -678,7 +678,16 @@ def _signature(conn, act, sport) -> str:
     z = _zone_row(conn, sport if sport in ("ride", "run", "swim") else "run", act["date"])
     zsig = f"{z['valid_from']}:{z['max_hr']}:{z['threshold_hr']}:{z['ftp_w']}" if z is not None else "-"
     nstreams = conn.execute("SELECT COUNT(*) FROM activity_streams WHERE activity_id=?", (act["id"],)).fetchone()[0]
-    return f"v{VERSION}|{zsig}|{_plan_zone(conn, act['id'])}|{nstreams}"
+    extra = ""
+    if sport == "ride" and not is_indoor(act["activity_type"]):
+        try:
+            from domains.training.est_power import model_signature
+            wind = conn.execute("SELECT 1 FROM activity_wind WHERE activity_id=? AND result_json IS NOT NULL",
+                                (act["id"],)).fetchone()
+            extra = f"|w{1 if wind else 0}|{model_signature(conn, act['date'])}"
+        except sqlite3.OperationalError:
+            pass
+    return f"v{VERSION}|{zsig}|{_plan_zone(conn, act['id'])}|{nstreams}{extra}"
 
 
 def ensure_table(conn) -> None:
@@ -776,14 +785,29 @@ def _analyze(conn, act, sport) -> dict | None:
     pace = (_pace_card(sport, s1["spd"], s1.get("d"), grade_1hz, moving, s1.get("gap"), iv)
             if s1.get("spd") and has_dist and sport != "swim" else None)
     ftp = zrow["ftp_w"] if zrow is not None and sport == "ride" else None
-    power = _power_card(s1["pw"], moving, ftp, _weight(conn, act["date"]), indoor, sport) if s1.get("pw") else None
+    weight = _weight(conn, act["date"])
+    est = None
+    if sport == "ride" and not indoor and not s1.get("pw") and s1.get("spd") and grade_grid:
+        # no power meter on the road bike: estimate it (physics + the HR line learned on the trainer)
+        try:
+            from domains.training import est_power
+            est = est_power.estimate(conn, act, s1, moving, grade_1hz, weight)
+        except Exception:
+            est = None
+        if est:
+            s1["pw"] = est["watts"]
+            elev, grade_grid = _elev_card(sport, s1["d"], s1["alt"], secs, s1.get("hr"), s1["pw"])   # climbs get watts
+    power = _power_card(s1["pw"], moving, ftp, weight, indoor, sport) if s1.get("pw") else None
+    if power and est:
+        power["estimated"] = est["meta"]
+        power["verdict"] = "Estimated · " + power["verdict"]
     cadence = _cad_card(sport, s1["cad"], moving) if s1.get("cad") else None
     temp = [t for t, m in zip(s1.get("temp") or [], moving) if m and t is not None]
 
     try:
         from domains.training import efforts as eff
         found = eff.compute(sport if not indoor else "indoor", s1.get("d") if has_dist else None,
-                            (power or {}).get("bests") if sport == "ride" else None)
+                            (power or {}).get("bests") if sport == "ride" and not est else None)
         if indoor and sport == "ride" and power:          # trainer rides still count for power bests
             found = eff.compute("ride", None, power.get("bests"))
         eff.store(conn, act["id"], act["date"], sport, found)
@@ -817,16 +841,22 @@ def main() -> None:
     conn.row_factory = sqlite3.Row
     since = (date.today() - timedelta(days=args.days)).isoformat()
     ids = [r[0] for r in conn.execute("SELECT id FROM activities WHERE date >= ? ORDER BY date", (since,))]
-    done = 0
-    for aid in ids:
-        if analyze(conn, aid):
-            done += 1
-    try:
+    try:                                                     # wind first: the ride power estimate reads it
         from domains.health.ride_wind import compute as wind
         for aid in ([] if args.no_wind else ids):
             wind(conn, aid)
     except Exception as e:                                   # wind is best-effort (network)
         print(f"[activity_analysis] wind skipped: {e}")
+    done = 0
+    for aid in ids:
+        if analyze(conn, aid):
+            done += 1
+    try:                                                     # new roads / villages per ride (cached)
+        from domains.locations.ride_explore import get as explore
+        for aid in ids:
+            explore(conn, aid)
+    except Exception as e:
+        print(f"[activity_analysis] explore skipped: {e}")
     print(f"[activity_analysis] {done}/{len(ids)} activities analysed since {since}")
 
 

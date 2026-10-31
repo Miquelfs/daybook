@@ -58,11 +58,18 @@ export function ActivitySplitsChart({ splits, activityType }: Props) {
     (activityType ?? "").toLowerCase().includes("cycl") ||
     (activityType ?? "").toLowerCase().includes("ride");
 
+  // Rides: power per split when there's a meter, speed otherwise (the road bike has none,
+  // and plotting power alone left the chart empty)
+  const hasPower = isCycling && splits.some((s) => (s.avg_power_w ?? 0) > 0);
+  const mode: "pace" | "power" | "speed" = !isCycling ? "pace" : hasPower ? "power" : "speed";
+
   const data = splits.map((s, i) => {
     // Derive pace from time_s / distance_m if avg_pace_s_per_km missing
     let yValue: number | null = null;
-    if (isCycling) {
+    if (mode === "power") {
       yValue = s.avg_power_w ?? null;
+    } else if (mode === "speed") {
+      yValue = s.time_s && s.distance_m ? (s.distance_m / s.time_s) * 3.6 : null;
     } else {
       if (s.avg_pace_s_per_km) {
         yValue = s.avg_pace_s_per_km;
@@ -84,7 +91,8 @@ export function ActivitySplitsChart({ splits, activityType }: Props) {
   if (data.length === 0) return null;
 
   // For pace: Y-axis reversed so faster (lower s/km) is at top
-  const isPace = !isCycling;
+  const isPace = mode === "pace";
+  const fmtVal = (v: number) => (mode === "power" ? `${Math.round(v)} W` : `${v.toFixed(1)} km/h`);
 
   return (
     <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-2">
@@ -102,7 +110,7 @@ export function ActivitySplitsChart({ splits, activityType }: Props) {
             tickFormatter={(v) =>
               isPace
                 ? fmtPace(Number(v))
-                : `${Math.round(Number(v))}W`
+                : mode === "power" ? `${Math.round(Number(v))}W` : `${Math.round(Number(v))}`
             }
             tick={{ fill: "#52525B", fontSize: 10 }}
             tickLine={false}
@@ -116,7 +124,7 @@ export function ActivitySplitsChart({ splits, activityType }: Props) {
               const d = entry.payload;
               const lines: [string, string][] = [];
               if (isPace) lines.push([fmtPace(Number(value)), "Pace"]);
-              else lines.push([`${Math.round(Number(value))} W`, "Power"]);
+              else lines.push([fmtVal(Number(value)), mode === "power" ? "Power" : "Speed"]);
               if (d.hr) lines.push([`${d.hr} bpm`, "HR"]);
               if (d.distKm) lines.push([`${d.distKm} km`, "Distance"]);
               if (d.time) lines.push([fmtDur(d.time), "Time"]);
@@ -131,7 +139,7 @@ export function ActivitySplitsChart({ splits, activityType }: Props) {
                 <div style={TOOLTIP_STYLE.contentStyle} className="p-2 space-y-0.5">
                   <p style={TOOLTIP_STYLE.labelStyle} className="text-xs mb-1">{label}</p>
                   {isPace && val && <p className="text-white text-xs">{fmtPace(val)} pace</p>}
-                  {!isPace && val && <p className="text-white text-xs">{Math.round(val)} W</p>}
+                  {!isPace && val && <p className="text-white text-xs">{fmtVal(val)}</p>}
                   {d.hr && <p className="text-xs text-[#A1A1AA]">{d.hr} bpm</p>}
                   {d.distKm && <p className="text-xs text-[#A1A1AA]">{d.distKm} km</p>}
                   {d.time && <p className="text-xs text-[#A1A1AA]">{fmtDur(d.time)}</p>}
