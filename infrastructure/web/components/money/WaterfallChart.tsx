@@ -14,7 +14,7 @@ export function WaterfallChart({ data }: { data: WaterfallData }) {
   const net = data.savings;
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
       {/* Flow summary */}
       <div className="flex items-stretch gap-2 mb-5">
         <Flow label="Income" value={data.income} color="#22C55E" />

@@ -46,7 +46,7 @@ export function FoodWellnessImpact({ date }: { date: string }) {
 
   if (!data.enough) {
     return (
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
         <p className="text-[10px] uppercase tracking-widest text-[#8B5CF6] flex items-center gap-1.5">
           <Activity size={13} /> Food × how you feel
         </p>
@@ -61,7 +61,7 @@ export function FoodWellnessImpact({ date }: { date: string }) {
   const h = data.headline!;
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
       <button onClick={() => setOpen((v) => !v)}
         className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-[#111113] transition-colors">
         <Activity size={15} className="text-[#8B5CF6] shrink-0" />

@@ -43,7 +43,7 @@ export function DaySongs({ date }: { date: string }) {
             </>
           );
           const cls =
-            "bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors";
+            "bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors";
           return s.url ? (
             <a key={s.id} href={s.url} target="_blank" rel="noopener noreferrer" className={cls}>
               {inner}

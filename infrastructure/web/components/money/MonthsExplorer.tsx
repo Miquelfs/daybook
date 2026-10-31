@@ -59,7 +59,7 @@ export function MonthsExplorer({ goal }: { goal: number }) {
         <Toggle value={range} onChange={setRange} options={[[12, "12 mo"], [24, "24 mo"]]} />
       </div>
 
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 pt-4 pb-2">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 pt-4 pb-2">
         {view === "flows" ? (
           <FlowBars months={months} selected={selected?.month} onPick={pick} />
         ) : (
@@ -221,7 +221,7 @@ function MonthCard({ m, goal, onClose }: { m: MonthDetail; goal: number; onClose
   const net = m.income - m.spent;
   const hit = goal > 0 && net >= goal;
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm font-semibold text-[#FAFAFA]">{format(monthDate(m.month), "MMMM yyyy")}</p>
         <div className="flex items-center gap-3">
@@ -276,7 +276,7 @@ function TotalsCard({ months, goal }: { months: MonthDetail[]; goal: number }) {
   const first = format(monthDate(months[0].month), "MMM yyyy");
   const last = format(monthDate(months[months.length - 1].month), "MMM yyyy");
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
       <p className="text-sm font-semibold text-[#FAFAFA] mb-3">
         {months.length} months <span className="font-normal text-[#71717A]">· {first} – {last}</span>
       </p>
@@ -327,7 +327,7 @@ function SumRow({ label, months, total = false }: { label: string; months: Month
 function MonthTable({ months, selected, onPick }: { months: MonthDetail[]; selected?: string; onPick: (m: string) => void }) {
   const years = [...new Set(months.map((m) => m.month.slice(0, 4)))];
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
       <div className={`${ROW} py-2 text-[10px] text-[#52525B] uppercase tracking-widest border-b border-[#18181B]`}>
         <span>Month</span>
         <span className="text-right">Income</span>

@@ -102,7 +102,7 @@ function Ahead({ date }: { date: string }) {
           </div>
         ))}
 
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-1.5">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-1.5">
           {due.length > 0 && (
             <div className="divide-y divide-[#18181B] border-b border-[#18181B]">
               {due.map((t) => <TaskRow key={t.id} task={t} today={date} onEdit={setEditing} />)}
@@ -212,7 +212,7 @@ function DoneOn({ date }: { date: string }) {
   return (
     <section>
       <LaneHeader icon={ListTodo} label="Got done" />
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-1.5 divide-y divide-[#18181B]">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-1.5 divide-y divide-[#18181B]">
         {done.map((t) => <TaskRow key={t.id} task={t} today={date} />)}
       </div>
     </section>

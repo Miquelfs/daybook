@@ -128,15 +128,15 @@ export default function LoadIndexPage() {
 
       {/* KPI row */}
       <div className="grid grid-cols-3 gap-3 mb-8">
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Avg Fatigue</p>
           <p className="text-xl font-semibold tabular-nums">{avgFatigue ?? "—"}<span className="text-sm text-[#52525B]">/100</span></p>
         </div>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Coverage</p>
           <p className="text-xl font-semibold tabular-nums">{coverage}<span className="text-sm text-[#52525B]"> days</span></p>
         </div>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Correlation</p>
           <p className="text-sm font-semibold text-[#A1A1AA]">{pearsonNote ? pearsonNote.split(" ")[2] : "—"}</p>
           <p className="text-xs text-[#52525B]">fatigue↔energy</p>
@@ -147,7 +147,7 @@ export default function LoadIndexPage() {
       {Object.keys(statusCounts).length > 0 && (
         <div className="flex gap-3 mb-8">
           {Object.entries(statusCounts).map(([status, count]) => (
-            <div key={status} className="flex-1 bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3 text-center">
+            <div key={status} className="flex-1 bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-3 text-center">
               <div className="w-2 h-2 rounded-full mx-auto mb-1" style={{ background: STATUS_COLOR[status] ?? "#71717A" }} />
               <p className="text-lg font-bold tabular-nums" style={{ color: STATUS_COLOR[status] ?? "#71717A" }}>{count}</p>
               <p className="text-xs text-[#52525B] capitalize">{status}</p>
@@ -159,7 +159,7 @@ export default function LoadIndexPage() {
       {/* Main chart: fatigue + energy + mood */}
       <section className="mb-8">
         <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-4">Fatigue score vs. felt energy</h2>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
           {trend.length === 0 ? (
             <p className="text-sm text-[#52525B] text-center py-8">No data for this period</p>
           ) : (
@@ -232,7 +232,7 @@ export default function LoadIndexPage() {
       {/* Component breakdown chart */}
       <section className="mb-8">
         <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-4">Load components</h2>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
           <ResponsiveContainer width="100%" height={180}>
             <ComposedChart data={trend} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
               <CartesianGrid stroke="#18181B" vertical={false} />
@@ -259,7 +259,7 @@ export default function LoadIndexPage() {
       </section>
 
       {/* Explanation */}
-      <section className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-2">
+      <section className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-2">
         <h3 className="text-xs text-[#52525B] uppercase tracking-widest">How the model works</h3>
         <p className="text-sm text-[#A1A1AA]">Fatigue score = sum of four components (0–25 each):</p>
         <ul className="text-xs text-[#71717A] space-y-1 ml-3">

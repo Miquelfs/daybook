@@ -21,7 +21,7 @@ const HR_ZONE_COLORS = ["#1E3A5F", "#1A4731", "#713F12", "#7C2D12", "#450A0A"];
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-2 mb-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-4 pb-2 mb-4">
       <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">{title}</p>
       {children}
     </div>

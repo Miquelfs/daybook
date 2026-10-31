@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ChevronRight, Globe, PersonStanding, Database } from "lucide-react";
+import { ExploreTabs } from "@/components/explore/ExploreTabs";
+import { ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { ExploreMapConnected } from "@/components/ExploreMapConnected";
 import { TravelMapProvider } from "@/components/TravelMapContext";
@@ -81,17 +82,7 @@ export default async function ExplorePage({ searchParams }: Props) {
         </div>
 
         {/* Section tabs */}
-        <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mt-4 overflow-x-auto">
-          <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#27272A] text-[#FAFAFA] whitespace-nowrap">
-            <Globe size={13} />Travel
-          </span>
-          <Link href="/explore/movement" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <PersonStanding size={13} />Movement
-          </Link>
-          <Link href="/explore/databases" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <Database size={13} />Databases
-          </Link>
-        </div>
+        <div className="mt-4"><ExploreTabs active="/explore" /></div>
       </div>
 
       <TravelMapProvider>

@@ -89,7 +89,7 @@ export function ActivityStreaks() {
               <Link
                 key={d}
                 href={`/day/${d}`}
-                className="flex items-center gap-3 px-4 py-3 bg-[#0D0D0F] border border-[#27272A] rounded-xl hover:border-[#3F3F46] transition-colors"
+                className="flex items-center gap-3 px-4 py-3 bg-[#0D0D0F] border border-[#27272A] rounded-2xl hover:border-[#3F3F46] transition-colors"
               >
                 <span className="text-sm tabular-nums text-[#52525B] w-24 shrink-0">
                   {format(parseISO(d), "d MMM yyyy")}
@@ -119,24 +119,24 @@ export function ActivityStreaks() {
         <div className="space-y-6">
           {/* Key numbers */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Current streak</p>
               <p className="text-xl font-semibold tabular-nums">{streaks.current_streak}</p>
               <p className="text-xs text-[#52525B] mt-0.5">active {streaks.current_streak === 1 ? "day" : "days"}</p>
             </div>
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Longest streak</p>
               <p className="text-xl font-semibold tabular-nums">{streaks.longest_streak}</p>
               <p className="text-xs text-[#52525B] mt-0.5">
                 {streaks.longest_streak_end ? `ended ${format(parseISO(streaks.longest_streak_end), "d MMM yy")}` : "—"}
               </p>
             </div>
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Rest days now</p>
               <p className="text-xl font-semibold tabular-nums">{streaks.current_rest}</p>
               <p className="text-xs text-[#52525B] mt-0.5">since last activity</p>
             </div>
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Longest rest</p>
               <p className="text-xl font-semibold tabular-nums">{streaks.longest_rest}</p>
               <p className="text-xs text-[#52525B] mt-0.5">days without activity</p>
@@ -144,7 +144,7 @@ export function ActivityStreaks() {
           </div>
 
           {/* Frequency */}
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
             <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Frequency</p>
             <div className="grid grid-cols-3 gap-4">
               <div>
@@ -164,7 +164,7 @@ export function ActivityStreaks() {
 
           {/* Heatmap */}
           {streaks.heatmap_weeks.length > 0 && (
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Last 52 weeks</p>
               <div className="flex gap-0.5 overflow-x-auto pb-1 scrollbar-none">
                 {streaks.heatmap_weeks.map((w) => {
@@ -207,7 +207,7 @@ export function ActivityStreaks() {
                   <button
                     key={t.type}
                     onClick={() => setSelectedSport(t.type)}
-                    className="flex items-center gap-3 bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 hover:border-[#3F3F46] transition-colors text-left w-full"
+                    className="flex items-center gap-3 bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 hover:border-[#3F3F46] transition-colors text-left w-full"
                   >
                     <span className="text-lg w-7 shrink-0 text-center">{actIcon(t.type)}</span>
                     <div className="flex-1 min-w-0">

@@ -215,7 +215,7 @@ export function DecisionLog({ date }: Props) {
       </div>
 
       {showForm && (
-        <div className="mb-6 bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 flex flex-col gap-3">
+        <div className="mb-6 bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 flex flex-col gap-3">
           <div>
             <p className="text-xs text-[#52525B] mb-1.5 uppercase tracking-wide">Decision</p>
             <textarea

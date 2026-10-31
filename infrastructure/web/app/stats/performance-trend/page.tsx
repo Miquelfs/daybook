@@ -105,7 +105,7 @@ export default function PerformanceTrendPage() {
       ) : (
         <>
           {/* Scatter chart */}
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-2 mb-6">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-4 pb-2 mb-6">
             <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">All efforts — lower is faster</p>
             <ResponsiveContainer width="100%" height={180}>
               <ScatterChart margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
@@ -152,7 +152,7 @@ export default function PerformanceTrendPage() {
           </div>
 
           {/* List */}
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl divide-y divide-[#18181B]">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl divide-y divide-[#18181B]">
             {[...efforts].reverse().slice(0, 20).map((e) => (
               <div key={`${e.date}-${e.duration_seconds}`} className="flex items-center justify-between px-4 py-3">
                 <div>

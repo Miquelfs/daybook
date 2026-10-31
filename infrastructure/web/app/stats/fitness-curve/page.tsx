@@ -59,7 +59,7 @@ export default function FitnessCurvePage() {
 
       {/* Current state callout */}
       {latest && (
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 mb-6">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4 mb-6">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Today</p>
           <div className="grid grid-cols-3 gap-4">
             <div>
@@ -83,7 +83,7 @@ export default function FitnessCurvePage() {
 
       {/* Chart */}
       {days.length > 0 && (
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-2 mb-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-4 pb-2 mb-4">
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={days} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#18181B" vertical={false} />

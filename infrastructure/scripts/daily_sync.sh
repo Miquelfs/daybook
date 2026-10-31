@@ -100,14 +100,8 @@ curl -s -m 60 -o /dev/null "http://localhost:8000/locations/fun-facts" || true
 
 # Notion sync removed — money data now entered via iOS app directly.
 
-# Strava: cross-reference last 7 days of Garmin activities with Strava.
-# Skips gracefully if STRAVA_CLIENT_ID is not set or tokens are missing.
-if [[ -n "${STRAVA_CLIENT_ID:-}" ]]; then
-  log "Syncing Strava enrichment (last 7 days)..."
-  step strava_sync python -m domains.health.strava.strava_sync --days 7
-else
-  log "Skipping Strava sync (STRAVA_CLIENT_ID not set)"
-fi
+# Strava sync retired (2026-11): its API now refuses the token (403) and Garmin already
+# provides everything Daybook uses. Past Strava-sourced activities stay in the DB.
 
 # Weather: fetch last 3 days so today + yesterday are always covered.
 log "Syncing weather (last 3 days)..."

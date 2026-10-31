@@ -42,7 +42,7 @@ export function TabBar<T extends string>({ tabs, value, onChange }: {
   onChange: (t: T) => void;
 }) {
   return (
-    <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-xl p-1 w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-1 w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {tabs.map(({ key, label, icon: Icon }) => (
         <button key={key} onClick={() => onChange(key)}
           className={`shrink-0 flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
@@ -151,4 +151,60 @@ export function Chip({ children, href, accent = false, title }: {
   return href
     ? <Link href={href} title={title} className={cls}>{children}</Link>
     : <span title={title} className={cls}>{children}</span>;
+}
+
+/** Every page's header: back link, title, one-line subtitle, optional control on the right
+ *  (year picker, period selector), then the section tabs if the area has them. */
+export function PageHeader({ back = { href: "/", label: "Today" }, title, subtitle, right, tabs }: {
+  back?: { href: string; label: string } | null;
+  title: React.ReactNode;
+  subtitle?: React.ReactNode;
+  right?: React.ReactNode;
+  tabs?: React.ReactNode;
+}) {
+  return (
+    <header className="mb-6">
+      {back && (
+        <Link href={back.href} className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
+          ← {back.label}
+        </Link>
+      )}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          {subtitle && <p className="text-sm text-[#71717A] mt-0.5">{subtitle}</p>}
+        </div>
+        {right && <div className="shrink-0 mt-1">{right}</div>}
+      </div>
+      {tabs && <div className="mt-4">{tabs}</div>}
+    </header>
+  );
+}
+
+/** An area's sub-pages as tabs (Health · Explore · Aviation…) — links, same look as TabBar. */
+export function SectionTabs({ tabs, active }: {
+  tabs: readonly { href: string; label: string; icon?: LucideIcon }[];
+  active: string;
+}) {
+  return (
+    <nav className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-1 w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {tabs.map(({ href, label, icon: Icon }) => (
+        <Link key={href} href={href} aria-current={href === active ? "page" : undefined}
+              className={`shrink-0 flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                href === active ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
+          {Icon && <Icon size={13} />}{label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** The one loading state: a quiet block the size of what's coming. */
+export function Skeleton({ h = 160, className = "" }: { h?: number; className?: string }) {
+  return <div className={`rounded-2xl bg-[#18181B] animate-pulse ${className}`} style={{ height: h }} aria-busy="true" />;
+}
+
+/** The one empty state: a single faint line, not a card. */
+export function Empty({ children }: { children: React.ReactNode }) {
+  return <p className="text-xs text-[#52525B] py-2">{children}</p>;
 }

@@ -93,7 +93,7 @@ export function DayDuty({ date }: { date: string }) {
   return (
     <section>
       {header}
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${accent}` }}>
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden" style={{ borderLeft: `3px solid ${accent}` }}>
         <div className="px-4 py-3.5 flex items-end gap-3" style={{ background: `${accent}12` }}>
           <div className="flex-1 min-w-0">
             <p className="text-[10px] uppercase tracking-widest font-medium" style={{ color: ink(accent) }}>
@@ -174,7 +174,7 @@ function RestCard({ date, brief }: { date: string; brief: RosterBrief }) {
   const back = nd ? differenceInCalendarDays(parseISO(nd.date), parseISO(date)) : null;
   const nextLabel = nd ? (DUTY[nd.duty_type]?.label ?? nd.raw_code) : null;
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${d.color}` }}>
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden" style={{ borderLeft: `3px solid ${d.color}` }}>
       <div className="px-4 py-3.5 flex items-center gap-3" style={{ background: `${d.color}12` }}>
         <Icon size={20} strokeWidth={1.5} className="shrink-0" style={{ color: ink(d.color) }} />
         <div className="flex-1 min-w-0">

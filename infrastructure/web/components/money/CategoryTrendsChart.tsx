@@ -67,7 +67,7 @@ export function CategoryTrendsChart() {
       <p className="text-xs text-[#52525B] mb-3">
         {first} – {last} · {fmtAmount(grand)} across {rows.length} categories. ▲▼ compares the last 3 months with the months before.
       </p>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl divide-y divide-[#18181B]">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl divide-y divide-[#18181B]">
         {visible.map((r) => (
           <CategoryRow
             key={r.category}

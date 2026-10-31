@@ -277,14 +277,14 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
 
         {/* Stats row */}
         <div className="flex gap-4">
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex-1">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 flex-1">
             <p className="text-[10px] text-[#52525B] uppercase tracking-wider mb-1">Duration</p>
             <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">{session.effective_duration_min}<span className="text-sm font-normal text-[#52525B]"> min</span></p>
             {session.effective_duration_min !== session.duration_min && (
               <p className="text-[10px] text-[#52525B] mt-0.5">Planned {session.duration_min}m · adjusted by plan</p>
             )}
           </div>
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex-1">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 flex-1">
             <p className="text-[10px] text-[#52525B] uppercase tracking-wider mb-1">Discipline</p>
             <p className="text-xl">{sessionIcon(session.discipline, session.session_type)}</p>
             <p className="text-xs text-[#A1A1AA] capitalize mt-0.5">{session.discipline}</p>
@@ -1258,7 +1258,7 @@ export default function OmyraTab() {
         )}
 
         {!isLoading && active.length === 0 && (
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-8 text-center">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-8 text-center">
             <Target size={24} className="mx-auto text-[#3F3F46] mb-3" />
             <p className="text-sm text-[#52525B]">No active goals yet</p>
             <p className="text-xs text-[#3F3F46] mt-1">Add a race or event to get a personalised training plan</p>
@@ -1270,7 +1270,7 @@ export default function OmyraTab() {
 
       <section className="space-y-4">
         <p className="text-xs text-[#52525B] uppercase tracking-widest">Readiness</p>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
           <RaceReadinessPanel
             defaultRaceDate={(active[0] ?? done[0])?.race_date ?? ""}
             goalName={(active[0] ?? done[0])?.name ?? undefined}

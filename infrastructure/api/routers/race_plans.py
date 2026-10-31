@@ -2117,16 +2117,14 @@ class NutritionPlanGenerate(BaseModel):
 
 
 def _trained_carbs_g_h(conn, goal_id: int) -> Optional[int]:
-    """Best carbs/h actually logged on a gut-training session for this goal."""
-    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='fueling_logs'").fetchone():
-        return None
-    row = conn.execute(
-        """SELECT MAX(fl.carbs_g / (fl.duration_min/60.0)) AS best
-           FROM fueling_logs fl JOIN plan_sessions ps ON ps.id = fl.plan_session_id
-           WHERE ps.goal_id=? AND fl.carbs_g IS NOT NULL AND fl.duration_min>0""",
-        (goal_id,),
-    ).fetchone()
-    return round(row["best"]) if row and row["best"] else None
+    """Best carbs/h actually eaten on a completed session of this goal (Food log + legacy fueling logs)."""
+    from infrastructure.api.routers.nutrition import _session_carbs_g_h
+    rows = conn.execute(
+        """SELECT id, session_date, effective_duration_min, duration_min, completed_activity_id, status
+           FROM plan_sessions WHERE goal_id=? AND status='completed' AND discipline='cycling'
+             AND COALESCE(effective_duration_min, duration_min) >= 90""", (goal_id,)).fetchall()
+    best = max((v for v in (_session_carbs_g_h(conn, r) for r in rows) if v), default=None)
+    return round(best) if best else None
 
 
 @router.post("/goals/{goal_id}/nutrition-plan/generate")

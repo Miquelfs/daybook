@@ -6,6 +6,7 @@ import { Trash2, Pencil, Check, X, Receipt } from "lucide-react";
 import { moneyApi, fmtAmount, type Transaction, type TransactionPatch } from "@/lib/money-api";
 import { CATEGORY_EMOJI, EXPENSE_CATEGORIES, accountBadgeClass } from "./CategoryPills";
 import { ReceiptPanel } from "./ReceiptPanel";
+import { Skeleton } from "@/components/ui/kit";
 
 const ALL_CATEGORIES = [
   ...EXPENSE_CATEGORIES,
@@ -106,7 +107,7 @@ export function TransactionList({ start, end, category, account, limit = 50, sho
       )}
 
       {isLoading ? (
-        <p className="text-sm text-[#52525B] py-4 text-center">Loading…</p>
+        <Skeleton h={120} />
       ) : transactions.length === 0 ? (
         <p className="text-sm text-[#52525B] py-4 text-center">No transactions{hasFilters ? " match these filters" : ""}</p>
       ) : (

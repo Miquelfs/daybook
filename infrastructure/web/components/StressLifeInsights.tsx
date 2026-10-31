@@ -36,7 +36,7 @@ const fmtDur = (min: number) => (min >= 60 ? `${Math.round(min / 60)}h` : `${min
 
 function Card({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
       <div className="flex items-center gap-2 mb-3">
         {icon}
         <h3 className="text-sm font-semibold text-[#E4E4E7]">{title}</h3>
@@ -204,7 +204,7 @@ function Overview({ d }: { d: StressInsights }) {
   const o = d.overview;
   const diff = o.avg != null && o.prev_avg != null ? o.avg - o.prev_avg : null;
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[10px] uppercase tracking-[0.2em] text-[#71717A]">Average stress · last {d.days} days</p>

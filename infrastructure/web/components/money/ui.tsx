@@ -33,7 +33,7 @@ export function StatTile({ label, value, sub, tone = "plain" }: {
   tone?: keyof typeof TONE;
 }) {
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 min-w-0">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 min-w-0">
       <p className="text-[11px] text-[#52525B] uppercase tracking-widest mb-1 truncate">{label}</p>
       <p className={`text-xl font-semibold tabular-nums truncate ${TONE[tone]}`}>{value}</p>
       {sub && <p className="text-xs text-[#52525B] mt-0.5 truncate">{sub}</p>}

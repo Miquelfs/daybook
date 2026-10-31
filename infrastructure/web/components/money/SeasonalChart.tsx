@@ -13,7 +13,7 @@ export function SeasonalChart({ data }: { data: SeasonalData }) {
   const max = Math.max(...withData.map((m) => m.avg_expenses), 1);
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
       <div className="flex items-end gap-[3px]" style={{ height: `${MAX_BAR_PX + 34}px` }}>
         {data.months.map((m) => {
           const px = m.n_years > 0 ? Math.max((m.avg_expenses / max) * MAX_BAR_PX, 3) : 0;

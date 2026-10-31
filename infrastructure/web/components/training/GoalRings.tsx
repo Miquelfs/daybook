@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Skeleton } from "@/components/ui/kit";
 
 type GoalProgress = {
   id: number;
@@ -199,13 +200,13 @@ export function GoalRings() {
       </div>
 
       {isLoading ? (
-        <p className="text-xs text-[#52525B]">Loading goals…</p>
+        <Skeleton h={120} />
       ) : goals.length === 0 ? (
         <p className="text-xs text-[#52525B]">No goals set. Add one to track your weekly, monthly, or annual targets.</p>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {goals.map((g) => (
-            <div key={g.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-3 flex gap-3 items-center">
+            <div key={g.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-3 flex gap-3 items-center">
               <RingProgress pct={g.pct} size={56} />
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-[#A1A1AA] truncate">

@@ -169,7 +169,7 @@ export function ScreenTimeBlock({ date }: { date: string }) {
 
   return (
     <div
-      className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3 space-y-2.5 cursor-pointer hover:border-[#3F3F46] transition-colors"
+      className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-3 space-y-2.5 cursor-pointer hover:border-[#3F3F46] transition-colors"
       onClick={() => setEditing(true)}
       title="Tap to edit"
     >

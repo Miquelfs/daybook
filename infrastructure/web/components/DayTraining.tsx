@@ -300,7 +300,7 @@ function FuelingSection({ fueling }: { fueling: Fueling }) {
   const { during, pre, post, gut_training } = fueling;
   if (during.carbs_g_h === 0 && !pre && !post) {
     return (
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
         <p className="text-xs text-[#71717A]">⚡ Water only — no fuel needed for this one.</p>
       </div>
     );
@@ -317,13 +317,13 @@ function FuelingSection({ fueling }: { fueling: Fueling }) {
       )}
       <div className="grid grid-cols-3 gap-2">
         {pre && (
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-2.5">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-2.5">
             <p className="text-[10px] text-[#52525B] uppercase">Before</p>
             <p className="text-sm font-semibold text-[#FAFAFA] tabular-nums">{pre.carbs_g}g</p>
             <p className="text-[10px] text-[#71717A] mt-0.5">{pre.timing}</p>
           </div>
         )}
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-2.5">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-2.5">
           <p className="text-[10px] text-[#52525B] uppercase">During /h</p>
           <p className="text-sm font-semibold text-[#FAFAFA] tabular-nums">
             {during.carbs_g_h > 0 ? `${during.carbs_g_h}g` : "—"}
@@ -331,7 +331,7 @@ function FuelingSection({ fueling }: { fueling: Fueling }) {
           <p className="text-[10px] text-[#71717A] mt-0.5">{during.fluid_ml_h}ml{during.sodium_mg_h ? ` · ${during.sodium_mg_h}mg Na` : ""}</p>
         </div>
         {post && (
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-2.5">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-2.5">
             <p className="text-[10px] text-[#52525B] uppercase">After</p>
             <p className="text-sm font-semibold text-[#FAFAFA] tabular-nums">{post.carbs_g}g<span className="text-[10px] text-[#71717A]"> +{post.protein_g}g P</span></p>
             <p className="text-[10px] text-[#71717A] mt-0.5">{post.window}</p>
@@ -639,7 +639,7 @@ function SessionSheet({ session, date, onClose, onUpdate, disciplineZones }: {
 
         {/* Stats row */}
         {session.effective_duration_min !== session.duration_min && (
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-4">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 flex items-center gap-4">
             <div>
               <p className="text-[10px] text-[#52525B]">Planned</p>
               <p className="text-sm font-semibold text-[#A1A1AA] tabular-nums">{session.duration_min} min</p>
@@ -941,7 +941,7 @@ export function DayTraining({ initialPrescription, date, lead }: {
         )}
 
         {/* Readiness header + rest-day/sessions — one card, not two */}
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
           {ctx && <ReadinessHeader ctx={ctx} />}
 
           {sessions.length === 0 ? (

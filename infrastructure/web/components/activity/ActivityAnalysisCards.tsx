@@ -46,7 +46,7 @@ function Card({ title, headline, unit, aside, verdict, children }: {
   return (
     <section className="mb-8">
       <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">{title}</p>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
         <div className="flex items-baseline justify-between gap-3 mb-1">
           <span className="text-xl font-semibold tabular-nums">
             {headline}

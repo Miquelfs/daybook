@@ -51,19 +51,19 @@ export default async function CategoryPage({ params, searchParams }: Props) {
       {catData ? (
         <>
           <div className="grid grid-cols-3 gap-3 mb-6">
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Spent</p>
               <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">
                 {fmtAmount(catData.spent)}
               </p>
             </div>
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Budget</p>
               <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">
                 {catData.budget > 0 ? fmtAmount(catData.budget) : "—"}
               </p>
             </div>
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Left</p>
               <p
                 className={`text-xl font-semibold tabular-nums ${
@@ -126,7 +126,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
       {category === "Groceries" && (
         <Link
           href="/money/groceries"
-          className="flex items-center gap-3 mb-8 bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 hover:border-[#3F3F46] transition-colors"
+          className="flex items-center gap-3 mb-8 bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 hover:border-[#3F3F46] transition-colors"
         >
           <span className="text-xl">🧾</span>
           <div className="flex-1 min-w-0">

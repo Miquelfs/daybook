@@ -85,7 +85,7 @@ export function BudgetPlanner() {
           </button>
         </div>
 
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl divide-y divide-[#18181B]">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl divide-y divide-[#18181B]">
           {plan.rows.map((r) => (
             <PlanRow
               key={r.category}

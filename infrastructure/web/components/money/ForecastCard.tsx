@@ -48,19 +48,19 @@ export function ForecastCard() {
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-3">
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Pred. income</p>
           <p className="text-lg font-semibold text-[#22C55E] tabular-nums">{fmtAmount(predictedIncome)}</p>
           {pilotNetAvailable && (
             <p className="text-[10px] text-[#52525B] mt-1">From roster · net</p>
           )}
         </div>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Pred. spend</p>
           <p className="text-lg font-semibold text-[#FAFAFA] tabular-nums">{fmtAmount(forecast.predicted_spent)}</p>
           <p className="text-[10px] text-[#52525B] mt-1">3-mo avg</p>
         </div>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Pred. save</p>
           <p className={`text-lg font-semibold tabular-nums ${predictedSavings >= goal ? "text-[#22C55E]" : predictedSavings >= 0 ? "text-[#F59E0B]" : "text-[#EF4444]"}`}>
             {predictedSavings >= 0 ? "" : "−"}{fmtAmount(Math.abs(predictedSavings))}

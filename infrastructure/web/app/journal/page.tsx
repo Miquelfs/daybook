@@ -7,6 +7,8 @@ import { format, parseISO } from "date-fns";
 import { Search } from "lucide-react";
 import { correlationsApi } from "@/lib/correlations-api";
 import { moodEmoji } from "@/lib/api";
+import { Skeleton } from "@/components/ui/kit";
+import { PageHeader } from "@/components/ui/kit";
 
 const PAGE_SIZE = 20;
 
@@ -33,14 +35,7 @@ export default function JournalPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
-      {/* Header */}
-      <div className="mb-6">
-        <Link href="/" className="text-xs text-[#52525B] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
-          ← Today
-        </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">Journal</h1>
-        <p className="text-sm text-[#71717A] mt-0.5">Days with mood notes.</p>
-      </div>
+      <PageHeader title="Journal" subtitle={"Days with mood notes."} />
 
       {/* Search */}
       <div className="flex gap-2 mb-6">
@@ -82,7 +77,7 @@ export default function JournalPage() {
 
       {/* Loading */}
       {isFetching && (
-        <div className="text-center py-8 text-xs text-[#52525B]">Loading…</div>
+        <Skeleton h={120} />
       )}
 
       {/* Entries */}
@@ -103,7 +98,7 @@ export default function JournalPage() {
                 <Link
                   key={entry.date}
                   href={`/day/${entry.date}`}
-                  className="block bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4
+                  className="block bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4
                              hover:border-[#3F3F46] transition-colors"
                 >
                   <div className="flex items-start justify-between gap-3 mb-2">

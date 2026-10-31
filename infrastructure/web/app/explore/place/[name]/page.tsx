@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import type { PlaceDate } from "@/lib/api";
 import { ChevronLeft } from "lucide-react";
 import { PlacePinMap } from "@/components/PlacePinMap";
+import { Skeleton } from "@/components/ui/kit";
 
 const PAGE_SIZE = 10;
 
@@ -90,13 +91,13 @@ function PlacePageContent() {
 
       {/* KPI strip */}
       <div className="grid grid-cols-2 gap-4 mb-4">
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
           <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">Visits</p>
           <p className="text-2xl font-semibold text-[#F59E0B] tabular-nums">{totalDays}</p>
           <p className="text-xs text-[#52525B] mt-0.5">{totalDays === 1 ? "day" : "days"} recorded</p>
         </div>
         {avgMood && (
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
             <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">Avg mood here</p>
             <p className="text-2xl font-semibold text-[#F59E0B] tabular-nums">{avgMood}</p>
             <p className="text-xs text-[#52525B] mt-0.5">out of 10</p>
@@ -109,7 +110,7 @@ function PlacePageContent() {
         <div className="grid grid-cols-2 gap-4 mb-8">
           <Link
             href={`/day/${summary.first_visit}`}
-            className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 hover:border-[#3F3F46] transition-colors group"
+            className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 hover:border-[#3F3F46] transition-colors group"
           >
             <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">First visit</p>
             <p className="text-sm text-[#A1A1AA] group-hover:text-[#FAFAFA] transition-colors">
@@ -118,7 +119,7 @@ function PlacePageContent() {
           </Link>
           <Link
             href={`/day/${summary.last_visit}`}
-            className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 hover:border-[#3F3F46] transition-colors group"
+            className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 hover:border-[#3F3F46] transition-colors group"
           >
             <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">Last visit</p>
             <p className="text-sm text-[#A1A1AA] group-hover:text-[#FAFAFA] transition-colors">
@@ -134,7 +135,7 @@ function PlacePageContent() {
           Recent visits
         </h2>
         {isLoading ? (
-          <div className="h-40 flex items-center justify-center text-[#52525B]">Loading…</div>
+          <Skeleton h={160} />
         ) : visits.length === 0 ? (
           <p className="text-sm text-[#52525B]">No recorded visits yet.</p>
         ) : (

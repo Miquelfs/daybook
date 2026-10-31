@@ -108,7 +108,7 @@ export default function HeatmapPage() {
       </div>
 
       {/* Heatmap grid */}
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 overflow-x-auto">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 overflow-x-auto">
         {/* Month labels */}
         <div className="flex mb-1" style={{ gap: "2px" }}>
           {weeks.map((_, wi) => {

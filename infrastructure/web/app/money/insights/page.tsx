@@ -154,7 +154,7 @@ function Alerts({ ov, month }: { ov: MonthOverview; month: string }) {
           <Link
             key={a.category}
             href={`/money/category/${encodeURIComponent(a.category)}?month=${month}`}
-            className="flex items-center justify-between bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 hover:border-[#3F3F46] transition-colors"
+            className="flex items-center justify-between bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 hover:border-[#3F3F46] transition-colors"
           >
             <div>
               <p className={`text-sm font-medium ${over ? "text-[#EF4444]" : "text-[#F59E0B]"}`}>

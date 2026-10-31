@@ -144,7 +144,7 @@ export function DayRestaurants({ date }: { date: string }) {
               <Link
                 key={r.id}
                 href={`/explore/restaurants?id=${r.id}`}
-                className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors"
+                className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors"
               >
                 <span className="text-xl">{CUISINE_EMOJI[r.cuisine ?? ""] ?? "🍽"}</span>
                 <div className="flex-1 min-w-0">

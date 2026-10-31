@@ -165,7 +165,7 @@ function FlightRow({ f, onEdit, onDelete }: { f: PassengerFlight; onEdit: () => 
   const dist = f.distance_km != null ? `${Math.round(f.distance_km * 0.621371).toLocaleString()} mi` : null;
 
   return (
-    <div className="group relative bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden hover:border-[#3F3F46] transition-colors">
+    <div className="group relative bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden hover:border-[#3F3F46] transition-colors">
       {/* airline colour spine */}
       <div className="absolute inset-y-0 left-0 w-1" style={{ background: color }} />
       <div className="pl-4 pr-3 py-3 flex items-center gap-3">

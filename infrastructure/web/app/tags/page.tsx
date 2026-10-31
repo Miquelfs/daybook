@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { tagsApi, CATEGORY_LABELS } from "@/lib/tags-api";
 import type { Tag } from "@/lib/tags-api";
 import { Plus, Trash2, Lock, Check, X } from "lucide-react";
+import { PageHeader } from "@/components/ui/kit";
 
 const KNOWN_ORDER = ["work", "location", "social", "activity", "health", "emotion", "environment"];
 
@@ -38,15 +39,7 @@ export default function TagManagerPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
-      <div className="mb-8">
-        <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] transition-colors uppercase tracking-widest mb-2 inline-block">
-          ← Today
-        </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">Tags</h1>
-        <p className="text-xs text-[#52525B] mt-0.5">
-          rename, re-icon, move between categories, delete · system tags are locked
-        </p>
-      </div>
+      <PageHeader title="Tags" subtitle={"rename, re-icon, move between categories, delete · system tags are locked"} />
 
       {isLoading ? (
         <div className="h-40 bg-[#0D0D0F] rounded-xl animate-pulse" />
@@ -135,7 +128,7 @@ function TagRow({ tag, categories, onChanged }: { tag: Tag; categories: string[]
   });
 
   return (
-    <div className="flex items-center gap-2 bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-2 group">
+    <div className="flex items-center gap-2 bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-2 group">
       {/* Icon — editable emoji */}
       <input
         value={icon}

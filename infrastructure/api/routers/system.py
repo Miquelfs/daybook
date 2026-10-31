@@ -30,6 +30,7 @@ LEVELS = {"ok": 0, "warn": 1, "fail": 2}
 
 # Jobs worth alerting on, with how stale their last SUCCESS may get (hours).
 # Others are listed but never alert (weekly / optional / time-windowed jobs).
+RETIRED_JOBS = {"strava_sync"}   # removed from daily_sync.sh
 JOB_MAX_AGE_H = {
     "garmin_sync": 26, "overland_process": 26, "trip_detection": 26, "weather_sync": 26,
     "wellness_sync": 26, "intraday_hr_sync": 26, "compute_load_index": 26, "reflow": 26,
@@ -113,6 +114,8 @@ def system_status():
                 ).fetchall()
                 for r in rows:
                     base = r["job"].split(":")[0]
+                    if base in RETIRED_JOBS:      # no longer scheduled: its old failures aren't news
+                        continue
                     last = con.execute(
                         "SELECT status, message FROM job_runs WHERE job=? ORDER BY finished_at DESC, id DESC LIMIT 1",
                         (r["job"],),

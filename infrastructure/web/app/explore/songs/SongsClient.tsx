@@ -179,7 +179,7 @@ export function SongsClient({ initialSongs, initialStats: stats }: Props) {
       )}
 
       {/* Playlist export */}
-      <div className="flex items-center gap-2 flex-wrap mb-6 bg-[#0D0D0F] border border-[#27272A] rounded-xl p-3">
+      <div className="flex items-center gap-2 flex-wrap mb-6 bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-3">
         <span className="text-xs text-[#52525B] uppercase tracking-widest mr-1">
           {filterYear === "all" ? "All-time" : filterYear} playlist
         </span>
@@ -224,7 +224,7 @@ export function SongsClient({ initialSongs, initialStats: stats }: Props) {
         <div className="flex flex-col gap-2">
           {filtered.map((s) => (
             <div key={s.id}
-              className="group bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors">
+              className="group bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors">
               <span className="text-lg shrink-0">{s.url ? "▶️" : "🎵"}</span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-[#FAFAFA] truncate">

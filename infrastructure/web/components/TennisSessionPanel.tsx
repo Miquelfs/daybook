@@ -144,7 +144,7 @@ export function TennisSessionPanel({ activityId, initial }: Props) {
   // ── Edit view ───────────────────────────────────────────────────────────────
   const isMatch = draft.session_type === "match";
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 space-y-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4 space-y-4">
       {/* Session type */}
       <SegToggle
         value={draft.session_type}

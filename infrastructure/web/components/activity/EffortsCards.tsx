@@ -57,7 +57,7 @@ export function BestEffortsCard({ efforts, sport }: { efforts: ActivityEffort[];
   return (
     <section className="mb-8">
       <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Best efforts</p>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
         {(prs > 0 || podium > 0) && (
           <p className="px-4 pt-3 text-sm text-[#A1A1AA]">
             {prs > 0 && <>🥇 {prs} personal record{prs > 1 ? "s" : ""}</>}

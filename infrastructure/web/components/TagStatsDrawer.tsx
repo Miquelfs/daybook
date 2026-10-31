@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { correlationsApi } from "@/lib/correlations-api";
 import type { TagStats } from "@/lib/correlations-api";
 import { X } from "lucide-react";
+import { Skeleton } from "@/components/ui/kit";
 
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -72,22 +73,22 @@ export function TagStatsDrawer({ slug, onClose }: Props) {
         </div>
 
         {isLoading && (
-          <div className="py-12 text-center text-xs text-[#52525B]">Loading…</div>
+          <Skeleton h={160} />
         )}
 
         {stats && (
           <div className="space-y-6">
             {/* Usage stats */}
             <div className="grid grid-cols-3 gap-3">
-              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-3 text-center">
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-3 text-center">
                 <p className="text-xl font-semibold tabular-nums text-[#FAFAFA]">{stats.total_days_all}</p>
                 <p className="text-[10px] text-[#52525B] mt-0.5">Total days</p>
               </div>
-              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-3 text-center">
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-3 text-center">
                 <p className="text-xl font-semibold tabular-nums text-[#FAFAFA]">{stats.total_days_90d}</p>
                 <p className="text-[10px] text-[#52525B] mt-0.5">Last 90d</p>
               </div>
-              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-3 text-center">
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-3 text-center">
                 <p className="text-xl font-semibold tabular-nums text-[#FAFAFA]">
                   {stats.avg_gap_days != null ? `${stats.avg_gap_days}d` : "—"}
                 </p>

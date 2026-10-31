@@ -4,13 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { format } from "date-fns";
 import { activityIcon } from "@/lib/api";
+import { PageHeader } from "@/components/ui/kit";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const YEAR = new Date().getFullYear();
 
 function StatCard({ label, value, sub, href }: { label: string; value: string; sub?: string; href: string }) {
   return (
-    <Link href={href} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 hover:border-[#3F3F46] transition-colors block">
+    <Link href={href} className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 hover:border-[#3F3F46] transition-colors block">
       <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">{label}</p>
       <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">{value}</p>
       {sub && <p className="text-xs text-[#52525B] mt-0.5">{sub}</p>}
@@ -43,13 +44,7 @@ export default function StatsHub() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
-      <div className="mb-8">
-        <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
-          ← Today
-        </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">Stats</h1>
-        <p className="text-sm text-[#71717A] mt-0.5">Your Strava Premium replacement</p>
-      </div>
+      <PageHeader title="Stats" subtitle="Year totals, best efforts, fitness and volume" />
 
       {/* Year totals */}
       <section className="mb-8">
@@ -65,7 +60,7 @@ export default function StatsHub() {
       {/* Training status */}
       <section className="mb-8">
         <h2 className="text-xs text-[#52525B] uppercase tracking-widest mb-4">Training status</h2>
-        <Link href="/stats/relative-effort" className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 hover:border-[#3F3F46] transition-colors block">
+        <Link href="/stats/relative-effort" className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4 hover:border-[#3F3F46] transition-colors block">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">This week vs trailing avg</p>
@@ -100,7 +95,7 @@ export default function StatsHub() {
               All →
             </Link>
           </div>
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl divide-y divide-[#18181B]">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl divide-y divide-[#18181B]">
             {prs.slice(0, 5).map((pr: { target_label: string; duration_seconds: number; date: string; activity_name: string | null }) => {
               const s = Math.round(pr.duration_seconds);
               const h = Math.floor(s / 3600);

@@ -49,7 +49,7 @@ export default function AccountTransactionsPage() {
       </div>
 
       {bal?.balance != null && (
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 mb-6">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 mb-6">
           <p className="text-[11px] text-[#52525B] uppercase tracking-widest mb-1">Balance in Daybook</p>
           <p className={`text-2xl font-semibold tabular-nums ${bal.balance < 0 ? "text-[#EF4444]" : "text-[#FAFAFA]"}`}>
             {bal.balance < 0 ? "−" : ""}{fmtAmount(bal.balance)}

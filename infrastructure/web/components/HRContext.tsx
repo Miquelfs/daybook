@@ -130,7 +130,7 @@ export function HRContext({ days }: { days: number }) {
                 <Link
                   key={i}
                   href={`/day/${p.date}`}
-                  className="flex items-center gap-3 px-3 py-2 bg-[#0D0D0F] border border-[#27272A] rounded-xl hover:border-[#3F3F46] transition-colors"
+                  className="flex items-center gap-3 px-3 py-2 bg-[#0D0D0F] border border-[#27272A] rounded-2xl hover:border-[#3F3F46] transition-colors"
                 >
                   <span className="text-sm shrink-0">{cfg.icon}</span>
                   <div className="flex-1 min-w-0">

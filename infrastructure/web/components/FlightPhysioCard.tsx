@@ -61,7 +61,7 @@ export function FlightPhysioCard({ flightId }: { flightId: string }) {
         <Activity size={14} className="text-[#60A5FA]" />
         <p className="text-xs font-medium text-[#71717A] uppercase tracking-wider">Physiological load · Cirqa</p>
       </div>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-2">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-2">
         <Row icon="🛫" label="Takeoff" p={phase.takeoff} />
         <Row icon="🛬" label="Landing" p={phase.landing} />
         <p className="text-[11px] text-[#3F3F46]">Δ vs the day&apos;s median HR / stress, in the ~15 min around each phase.</p>

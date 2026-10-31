@@ -400,7 +400,7 @@ export default async function ActivityPage({ params }: Props) {
       {!analysis && !isGym && (
         <section className="mb-8">
           <SectionLabel>Details</SectionLabel>
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               <StatBlock label="Avg HR" value={activity.avg_heart_rate ? `${activity.avg_heart_rate} bpm` : null} />
               <StatBlock label="Max HR" value={activity.max_heart_rate ? `${activity.max_heart_rate} bpm` : null} />

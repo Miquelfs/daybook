@@ -34,7 +34,7 @@ export function StressByPlaceCard({ date }: { date: string }) {
   return (
     <section>
       <SectionLabel>Stress by place</SectionLabel>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-2.5">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-2.5">
         {data.buckets.map((b) => {
           const m = META[b.place] ?? { emoji: "•", label: b.place, color: "#A1A1AA" };
           return (

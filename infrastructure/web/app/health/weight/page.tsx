@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { HealthTabs } from "@/components/health/HealthTabs";
 import { WeightSection } from "@/components/health/WeightSection";
+import { PageHeader } from "@/components/ui/kit";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -64,13 +64,10 @@ function WeightAndFitnessAge() {
 export default function WeightPage() {
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20">
-      <div className="pt-8 pb-6">
-        <Link href="/health" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
-          ← Health
-        </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">Weight</h1>
-        <p className="text-sm text-[#71717A] mt-1">Weigh-ins, trend, the goal line and what it does for fitness age</p>
-        <HealthTabs active="/health/weight" />
+      <div className="pt-8">
+        <PageHeader back={{ href: "/health", label: "Health" }} title="Weight"
+                    subtitle="Weigh-ins, trend, the goal line and what it does for fitness age"
+                    tabs={<HealthTabs active="/health/weight" />} />
       </div>
 
       <WeightSection />

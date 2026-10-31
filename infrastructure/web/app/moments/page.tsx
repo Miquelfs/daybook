@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import type { DaySummary } from "@/lib/api";
 import Link from "next/link";
 import { X, Trash2 } from "lucide-react";
+import { PageHeader } from "@/components/ui/kit";
 
 function photoProxyUrl(path: string): string {
   const filename = path.replace(/^\/photos\//, "").replace(/^.*\//, "");
@@ -86,11 +87,7 @@ export default function MomentsPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20 pt-10">
-      <header className="mb-8">
-        <Link href="/" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Today</Link>
-        <h1 className="text-2xl font-semibold tracking-tight">Moments</h1>
-        <p className="text-sm text-[#71717A] mt-0.5">{photoCount} photo{photoCount !== 1 ? "s" : ""}</p>
-      </header>
+      <PageHeader title="Moments" subtitle={<>{photoCount} photo{photoCount !== 1 ? "s" : ""}</>} />
 
       {isLoading ? (
         <div className="space-y-10">

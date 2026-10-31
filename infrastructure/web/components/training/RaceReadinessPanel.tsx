@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { format, parseISO } from "date-fns";
+import { Skeleton } from "@/components/ui/kit";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -112,7 +113,7 @@ export default function RaceReadinessPanel({ defaultRaceDate, goalName, raceType
 
   useEffect(() => { load(defaultRaceDate); }, [defaultRaceDate]);
 
-  if (loading) return <div className="h-40 flex items-center justify-center text-zinc-500 text-sm">Loading…</div>;
+  if (loading) return <Skeleton h={160} />;
 
   return (
     <div className="space-y-5">

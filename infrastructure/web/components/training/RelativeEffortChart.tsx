@@ -6,6 +6,7 @@ import {
   Tooltip, ResponsiveContainer,
 } from "recharts";
 import { format, parseISO } from "date-fns";
+import { Skeleton } from "@/components/ui/kit";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -86,7 +87,7 @@ export default function RelativeEffortChart() {
       </div>
 
       {loading ? (
-        <div className="h-[160px] flex items-center justify-center text-[#52525B] text-sm">Loading…</div>
+        <Skeleton h={160} />
       ) : data.length === 0 ? (
         <div className="h-[160px] flex items-center justify-center text-[#52525B] text-sm">No relative effort data</div>
       ) : (

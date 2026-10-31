@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Globe, PersonStanding, Database } from "lucide-react";
+import { ExploreTabs } from "@/components/explore/ExploreTabs";
 import { api } from "@/lib/api";
 import { booksApi } from "@/lib/books-api";
 import { passengerFlightsApi } from "@/lib/passenger-flights-api";
@@ -25,17 +25,7 @@ export default async function DatabasesPage() {
         <p className="text-sm text-[#71717A] mt-0.5">Restaurants, books & flights</p>
 
         {/* Section tabs */}
-        <div className="flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 mt-4 overflow-x-auto">
-          <Link href="/explore" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <Globe size={13} />Travel
-          </Link>
-          <Link href="/explore/movement" className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-[#52525B] hover:text-[#A1A1AA] transition-colors whitespace-nowrap">
-            <PersonStanding size={13} />Movement
-          </Link>
-          <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-[#27272A] text-[#FAFAFA] whitespace-nowrap">
-            <Database size={13} />Databases
-          </span>
-        </div>
+        <div className="mt-4"><ExploreTabs active="/explore/databases" /></div>
       </div>
 
       <div className="flex flex-col gap-4">

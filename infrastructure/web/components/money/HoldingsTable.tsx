@@ -91,7 +91,7 @@ export function HoldingsTable({ holdings, liquidAccounts }: { holdings: Holding[
             </div>
           )}
 
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
             <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2 text-[10px] text-[#52525B] uppercase tracking-widest border-b border-[#18181B]">
               <span>Name</span>
               <span className="text-right">Value</span>

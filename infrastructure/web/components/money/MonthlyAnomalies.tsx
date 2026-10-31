@@ -23,7 +23,7 @@ export function MonthlyAnomalies({ data }: { data: MonthlyAnomalyReport }) {
 
   return (
     <div className="space-y-4">
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
         <p className="text-[10px] text-[#52525B] mb-3">
           monthly expenses · <span className="text-[#EF4444]">red</span> = statistical outlier (|z| ≥ 2)
         </p>

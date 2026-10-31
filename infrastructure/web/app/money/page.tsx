@@ -73,19 +73,19 @@ export default async function MoneyPage({ searchParams }: Props) {
         <>
           {/* Overview cards */}
           <div className={`grid grid-cols-3 gap-3 ${summary.total_income > 0 ? "mb-3" : "mb-6"}`}>
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Spent</p>
               <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">
                 {fmtAmount(summary.total_spent)}
               </p>
             </div>
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Budget</p>
               <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">
                 {fmtAmount(summary.total_budget)}
               </p>
             </div>
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
               <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Left</p>
               <p
                 className={`text-xl font-semibold tabular-nums ${
@@ -102,13 +102,13 @@ export default async function MoneyPage({ searchParams }: Props) {
           {/* Income + Savings row */}
           {summary.total_income > 0 && (
             <div className="grid grid-cols-2 gap-3 mb-6">
-              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
                 <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Income</p>
                 <p className="text-xl font-semibold text-[#22C55E] tabular-nums">
                   +{fmtAmount(summary.total_income)}
                 </p>
               </div>
-              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
                 <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Savings</p>
                 {(() => {
                   const savings = summary.total_income - summary.total_spent;
@@ -123,7 +123,7 @@ export default async function MoneyPage({ searchParams }: Props) {
           )}
 
           {/* Velocity bar: time vs budget */}
-          <div className="mb-8 bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+          <div className="mb-8 bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
             <div className="flex items-center justify-between text-xs text-[#52525B] mb-3">
               <span>Month progress</span>
               <span className={

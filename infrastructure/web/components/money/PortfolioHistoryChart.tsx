@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { moneyApi, fmtAmount, type PortfolioHistoryPoint, type PortfolioRange } from "@/lib/money-api";
+import { Skeleton } from "@/components/ui/kit";
 
 const RANGES: PortfolioRange[] = ["1M", "3M", "YTD", "1Y", "ALL"];
 const WORTH = "#22C55E";
@@ -87,7 +88,7 @@ export function PortfolioHistoryChart({ data: initial }: Props) {
         </div>
       </div>
       {loading ? (
-        <div className="h-[180px] flex items-center justify-center text-xs text-[#52525B]">Loading…</div>
+        <Skeleton h={180} />
       ) : (
         <div className="relative">
           <svg

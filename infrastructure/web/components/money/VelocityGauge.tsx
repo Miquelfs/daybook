@@ -40,7 +40,7 @@ export function VelocityGauge({ overview, bare = false }: { overview: MonthOverv
   const CX = 100, CY = 92, R = 80;
 
   return (
-    <div className={bare ? "" : "bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4"}>
+    <div className={bare ? "" : "bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4"}>
       <div className="flex items-center justify-between mb-1">
         <p className="text-xs text-[#52525B] uppercase tracking-widest">Spending pace</p>
         <div className="flex rounded-full border border-[#27272A] overflow-hidden text-[10px]">

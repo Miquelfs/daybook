@@ -92,7 +92,7 @@ export function ActivityNotes({ activityId, initialNotes, initialRating }: Props
   }
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 space-y-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4 space-y-4">
       {/* Rating row */}
       <div>
         <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">How did it feel?</p>

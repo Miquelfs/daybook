@@ -12,6 +12,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { format, parseISO, subWeeks, subMonths } from "date-fns";
+import { Skeleton } from "@/components/ui/kit";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -112,7 +113,7 @@ export function VolumeChart() {
       </div>
 
       {loading ? (
-        <div className="h-[220px] flex items-center justify-center text-zinc-500 text-sm">Loading…</div>
+        <Skeleton h={220} />
       ) : (
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={data} barSize={period === "week" ? 6 : 14}>
@@ -211,7 +212,7 @@ export function ProgressComparisonChart() {
       </div>
 
       {loading ? (
-        <div className="h-[220px] flex items-center justify-center text-zinc-500 text-sm">Loading…</div>
+        <Skeleton h={220} />
       ) : (
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={data} barSize={8} barGap={2}>

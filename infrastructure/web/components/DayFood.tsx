@@ -78,7 +78,7 @@ export function DayFood({ date }: { date: string }) {
         </Link>
       </div>
 
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
         {/* Collapsible summary header */}
         <button
           onClick={() => setOpen((v) => !v)}

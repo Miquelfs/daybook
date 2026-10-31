@@ -37,7 +37,9 @@ No `text-3xl`/`text-5xl`, no `text-[28px]`-style one-offs.
 
 ## Patterns
 
-- Page: back link → title + subtitle → tabs (`TabBar` / section tabs) → `<Hero>` → `<Block>`s.
+- Page: `<PageHeader title subtitle right tabs>` → `<Hero>` → `<Block>`s. An area's sub-pages use
+  `<SectionTabs>` (link tabs: `HealthTabs`, `ExploreTabs`); in-page switches use `<TabBar>`.
+- Loading: `<Skeleton h>` the size of what's coming — never a bare "Loading…". Empty: `<Empty>` one line.
 - Anything that names a day, place, activity or trip is a link to it.
 - Charts: recharts with `--viz-*` tokens, grid `var(--viz-grid)`, axis `var(--viz-axis)`, 10–11px ticks.
 - Icons: lucide, 13–16px, `strokeWidth` default; no emoji in UI chrome except a sport/activity icon.

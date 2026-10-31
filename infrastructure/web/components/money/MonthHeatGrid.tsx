@@ -22,7 +22,7 @@ export function MonthHeatGrid({ days, month }: { days: DailyTotal[]; month: stri
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
       <div className="grid grid-cols-7 gap-[2px] mb-1">
         {DOW.map((d) => (
           <span key={d} className="text-[9px] text-[#52525B] text-center">{d}</span>

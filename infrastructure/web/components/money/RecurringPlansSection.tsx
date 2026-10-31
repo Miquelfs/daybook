@@ -101,7 +101,7 @@ export function RecurringPlansSection({ plans, holdings, liquidAccounts }: Props
               <p className="text-[10px] text-[#3F3F46] mt-1">Set up DCA once, Daybook keeps your portfolio in sync.</p>
             </div>
           ) : (
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl divide-y divide-[#18181B]">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl divide-y divide-[#18181B]">
               {plans.map(p => {
                 const dueSoon = p.is_active && p.next_execution_date <= localISODate(new Date(Date.now() + 3*86400_000));
                 return (

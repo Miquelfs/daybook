@@ -161,7 +161,7 @@ export function StressEnergyTimeline({ date }: { date: string }) {
     return (
       <section id="stress-energy" className="scroll-mt-20">
         <SectionLabel>Stress &amp; energy</SectionLabel>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-6 text-center">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-6 text-center">
           <Activity size={18} className="text-[#3F3F46] mx-auto mb-1.5" />
           <p className="text-xs text-[#52525B]">No all-day wellness data for this day yet.</p>
           <p className="text-[11px] text-[#3F3F46] mt-0.5">Wear the CIRQA and it syncs each morning.</p>
@@ -196,7 +196,7 @@ export function StressEnergyTimeline({ date }: { date: string }) {
   return (
     <section id="stress-energy" className="scroll-mt-20">
       <SectionLabel>Stress &amp; energy</SectionLabel>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-3">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-3">
         <div className="h-52 cursor-pointer">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={merged} margin={{ top: 8, right: 4, bottom: 0, left: -24 }} onClick={onChartClick}>

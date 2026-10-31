@@ -33,6 +33,7 @@ import { localISODate } from "@/lib/dates";
 import { AviationTabs, isAviationTab, type AviationTab } from "@/components/aviation/AviationTabs";
 import { mainFunction, FUNCTION_LABEL, FUNCTION_SHORT, type TimeFunction } from "@/lib/flight-time";
 import { AreaPlan } from "@/components/plan/AreaPlan";
+import { Skeleton } from "@/components/ui/kit";
 
 const MAP_STYLE_KEY = "daybook_aviation_map_style";
 
@@ -764,7 +765,7 @@ export default function AviationPage() {
         </div>
       )}
       {tab === "stats" && !analytics && (
-        <div className="flex items-center justify-center h-32 text-[#52525B] text-sm">Loading analytics…</div>
+        <Skeleton h={128} />
       )}
 
       {tab === "punctuality" && <PunctualityTab />}

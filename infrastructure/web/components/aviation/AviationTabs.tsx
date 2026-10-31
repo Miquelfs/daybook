@@ -27,12 +27,12 @@ export function AviationTabs({ active, onSelect, className = "" }: {
   className?: string;
 }) {
   const cls = (t: AviationTab) =>
-    `flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-colors ${active === t
+    `shrink-0 flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${active === t
       ? "bg-[#27272A] text-[#FAFAFA]"
       : "text-[#52525B] hover:text-[#A1A1AA]"}`;
 
   return (
-    <nav className={`flex gap-0 bg-[#0D0D0F] border border-[#27272A] rounded-lg p-1 overflow-x-auto ${className}`}>
+    <nav className={`flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-xl p-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}>
       {AVIATION_TABS.map(({ id, label, Icon }) => {
         const body = <><Icon size={13} />{label}</>;
         if (id === "roster") {

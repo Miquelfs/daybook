@@ -86,13 +86,13 @@ export default function CorrelationPage() {
 
       {/* Correlation badges */}
       <div className="grid grid-cols-2 gap-3 mb-8">
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">HRV vs Pace</p>
           <p className={`text-2xl font-semibold tabular-nums ${hrvR.color}`}>{hrvR.label}</p>
           <p className="text-xs text-[#71717A] mt-1">Pearson r</p>
           <p className="text-xs text-[#52525B] mt-0.5">{hrvR.desc}</p>
         </div>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-2">Sleep Score vs Pace</p>
           <p className={`text-2xl font-semibold tabular-nums ${sleepR.color}`}>{sleepR.label}</p>
           <p className="text-xs text-[#71717A] mt-1">Pearson r</p>
@@ -102,7 +102,7 @@ export default function CorrelationPage() {
 
       {/* HRV scatter */}
       {hrvPoints.length >= 3 && (
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-2 mb-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-4 pb-2 mb-4">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">HRV → Pace</p>
           <p className="text-xs text-[#71717A] mb-3">Higher HRV should mean faster pace (lower value = faster)</p>
           <ResponsiveContainer width="100%" height={180}>
@@ -119,7 +119,7 @@ export default function CorrelationPage() {
 
       {/* Sleep scatter */}
       {sleepPoints.length >= 3 && (
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-2 mb-4">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-4 pb-2 mb-4">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Sleep Score → Pace</p>
           <p className="text-xs text-[#71717A] mb-3">Better sleep should mean faster pace (lower = faster)</p>
           <ResponsiveContainer width="100%" height={180}>

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Hero, Label } from "@/components/ui/kit";
+import { localISODate } from "@/lib/dates";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -25,6 +27,73 @@ interface Product {
   caffeine_mg: number; fluid_ml: number; notes: string | null; archived: boolean;
 }
 
+// ── Next fuel session: what to pack, from the product library ────────────────
+
+/** A pocket list hitting `total` grams: a bottle of drink mix per ~75 min (fluid + carbs), the rest
+ *  from the densest solid (gel / chew / bar), rounded up. */
+function packList(total: number, minutes: number, products: Product[]) {
+  const live = products.filter((p) => !p.archived && p.carbs_g > 0);
+  const drink = live.find((p) => p.kind === "drink_mix" && p.fluid_ml >= 400) ?? live.find((p) => p.kind === "drink_mix");
+  const solid = [...live.filter((p) => ["gel", "chew", "bar"].includes(p.kind))].sort((a, b) => b.carbs_g - a.carbs_g)[0];
+  const out: { name: string; qty: number; carbs: number }[] = [];
+  let left = total;
+  if (drink) {
+    const bottles = Math.max(1, Math.round(minutes / 75));
+    out.push({ name: drink.name, qty: bottles, carbs: bottles * drink.carbs_g });
+    left -= bottles * drink.carbs_g;
+  }
+  if (solid && left > 0) {
+    const n = Math.ceil(left / solid.carbs_g);
+    out.push({ name: solid.name, qty: n, carbs: n * solid.carbs_g });
+  }
+  return out;
+}
+
+function NextFuelCard({ goalId }: { goalId: number }) {
+  const { data: weeks } = useQuery<GutWeek[]>({
+    queryKey: ["fuel-gut-training", goalId],
+    queryFn: () => fetch(`/api/nutrition/gut-training?goal_id=${goalId}`).then((r) => (r.ok ? r.json() : [])),
+    staleTime: 60_000,
+  });
+  const { data: products } = useQuery<Product[]>({
+    queryKey: ["fuel-products"],
+    queryFn: () => fetch(`/api/nutrition/products`).then((r) => (r.ok ? r.json() : [])),
+  });
+  const today = localISODate();
+  const next = (weeks ?? []).find((w) => w.session_date >= today);
+  const last = [...(weeks ?? [])].reverse().find((w) => w.session_date < today);
+  if (!next) return null;
+  const total = Math.round((next.target_g_h * next.duration_min) / 60);
+  const pack = packList(total, next.duration_min, products ?? []);
+  return (
+    <Hero eyebrow={`Next fuel session · ${new Date(`${next.session_date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}`}
+          value={next.target_g_h} unit={`g carbs / h · ${next.session_type.replace(/^Cycling - /, "")} ${Math.round(next.duration_min / 6) / 10} h`}
+          sub={`${total} g in total — start eating at minute 20, a little every 20 min`}
+          right={<Link href={`/day/${next.session_date}`} className="text-xs text-[#F59E0B]">Open day →</Link>}>
+      {pack.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-[#27272A]">
+          <Label>Pack</Label>
+          <div className="mt-1.5 space-y-1">
+            {pack.map((p) => (
+              <p key={p.name} className="text-sm text-[#D4D4D8] flex justify-between gap-3">
+                <span><b className="tabular-nums">{p.qty}×</b> {p.name}</span>
+                <span className="text-xs text-[#71717A] tabular-nums">{Math.round(p.carbs)} g</span>
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+      <p className="text-xs text-[#71717A] mt-3">
+        {last
+          ? last.best_logged_g_h != null
+            ? <>Last time ({last.session_type.replace(/^Cycling - /, "")}): <b className={last.on_track ? "text-emerald-400" : "text-[#F59E0B]"}>{last.best_logged_g_h} g/h</b> of {last.target_g_h}.</>
+            : <>Last long ride had no fuel logged — log it in Food as &ldquo;On the bike&rdquo; (or with the time you ate) and it counts here.</>
+          : null}
+      </p>
+    </Hero>
+  );
+}
+
 // ── Gut-training ramp ────────────────────────────────────────────────────────
 
 function GutTrainingCard({ goalId }: { goalId: number }) {
@@ -38,7 +107,7 @@ function GutTrainingCard({ goalId }: { goalId: number }) {
   const maxG = 100;
 
   return (
-    <section className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-3">
+    <section className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-3">
       <div>
         <h3 className="text-sm font-semibold text-[#FAFAFA]">Gut training — carb intake ramp</h3>
         <p className="text-xs text-[#52525B] mt-0.5">Build to 90 g/h on your key long session each week. Target line rises as race day nears.</p>
@@ -53,10 +122,10 @@ function GutTrainingCard({ goalId }: { goalId: number }) {
                 {/* logged bar */}
                 <div
                   className="absolute inset-y-0 left-0 rounded"
-                  style={{ width: `${Math.min(100, (logged / maxG) * 100)}%`, background: w.on_track ? "#4ADE80" : "#F59E0B" }}
+                  style={{ width: `${Math.min(100, (logged / maxG) * 100)}%`, background: w.on_track ? "var(--viz-alt)" : "#F59E0B" }}
                 />
                 {/* target marker */}
-                <div className="absolute inset-y-0 w-0.5 bg-[#FAFAFA]" style={{ left: `${(w.target_g_h / maxG) * 100}%` }} title={`Target ${w.target_g_h} g/h`} />
+                <div className="absolute inset-y-0 w-0.5 bg-[#71717A]" style={{ left: `${(w.target_g_h / maxG) * 100}%` }} title={`Target ${w.target_g_h} g/h`} />
               </div>
               <span className="text-[10px] tabular-nums w-24 text-right text-[#71717A]">
                 {logged ? `${logged}` : "—"}<span className="text-[#3F3F46]"> / {w.target_g_h} g/h</span>
@@ -65,7 +134,7 @@ function GutTrainingCard({ goalId }: { goalId: number }) {
           );
         })}
       </div>
-      <p className="text-[10px] text-[#3F3F46]">White line = target · bar = best logged (green = on track)</p>
+      <p className="text-[10px] text-[#52525B]">Line = target · bar = what you ate (amber = below target). From your Food log: anything eaten during the ride or logged &ldquo;On the bike&rdquo;.</p>
     </section>
   );
 }
@@ -107,7 +176,7 @@ function SweatCard() {
   }
 
   return (
-    <section className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-3">
+    <section className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-3">
       <div>
         <h3 className="text-sm font-semibold text-[#FAFAFA]">Sweat rate</h3>
         <p className="text-xs text-[#52525B] mt-0.5">Weigh yourself before &amp; after a session (record fluid drunk). Repeat across conditions.</p>
@@ -201,7 +270,7 @@ function ProductCard() {
   }
 
   return (
-    <section className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-3">
+    <section className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-[#FAFAFA]">Product library</h3>
         <button onClick={() => setAdding((a) => !a)} className="text-xs text-[#F59E0B] hover:text-[#D97706]">
@@ -248,24 +317,17 @@ export default function FuelTab() {
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h2 className="text-base font-semibold text-[#FAFAFA]">Fuel — the fourth discipline</h2>
-          <p className="text-xs text-[#52525B]">Train your gut, know your sweat, plan race day.</p>
-        </div>
-        {goal && (
-          <Link href={`/race-plan/${goal.id}`}
-            className="text-xs px-3 py-1.5 bg-[#F59E0B] text-[#09090B] rounded-lg font-semibold hover:bg-[#D97706]">
-            Race-day nutrition plan →
-          </Link>
-        )}
-      </div>
-
+      {goal && <NextFuelCard goalId={goal.id} />}
       {goal ? <GutTrainingCard goalId={goal.id} /> : (
         <p className="text-xs text-[#52525B]">Create a race goal in Omyra to unlock gut-training tracking.</p>
       )}
       <SweatCard />
       <ProductCard />
+      {goal && (
+        <Link href={`/race-plan/${goal.id}`} className="block text-xs text-[#F59E0B] hover:underline">
+          Race-day nutrition plan →
+        </Link>
+      )}
     </section>
   );
 }

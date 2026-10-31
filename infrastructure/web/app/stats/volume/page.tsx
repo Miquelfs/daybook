@@ -102,22 +102,22 @@ export default function VolumePage() {
 
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-3 mb-6">
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-3">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Total</p>
           <p className="text-lg font-semibold tabular-nums">{currentMetric.fmt(total)}</p>
         </div>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-3">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Avg / period</p>
           <p className="text-lg font-semibold tabular-nums">{currentMetric.fmt(avg)}</p>
         </div>
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-3">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">Activities</p>
           <p className="text-lg font-semibold tabular-nums">{totalActivities}</p>
         </div>
       </div>
 
       {/* Bar chart */}
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-2">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-4 pb-2">
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#18181B" vertical={false} />

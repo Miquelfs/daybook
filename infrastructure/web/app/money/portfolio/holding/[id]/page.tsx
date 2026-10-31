@@ -63,7 +63,7 @@ export default async function HoldingDetailPage({ params }: Props) {
       <HoldingHistoryChart id={id} initial={history} />
 
       {h.cost_basis_eur !== null && (
-        <section className="mb-6 bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 grid grid-cols-2 gap-3">
+        <section className="mb-6 bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 grid grid-cols-2 gap-3">
           <div>
             <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Cost basis</p>
             <p className="text-sm text-[#D4D4D8] tabular-nums">{fmtAmount(h.cost_basis_eur)}</p>

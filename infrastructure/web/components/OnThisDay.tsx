@@ -82,7 +82,7 @@ export function OnThisDay({ entries, todayDate }: { entries: OnThisDayYear[]; to
       </div>
 
       {/* Selected year's detail */}
-      <div className="relative bg-[#0D0D0F] border border-[#27272A] rounded-xl pl-4 pr-4 py-3.5 overflow-hidden">
+      <div className="relative bg-[#0D0D0F] border border-[#27272A] rounded-2xl pl-4 pr-4 py-3.5 overflow-hidden">
         <div className="absolute inset-y-0 left-0 w-1" style={{ background: accent }} />
 
         <Link href={`/day/${y.date}`} className="flex items-center justify-between gap-3 mb-2 group">

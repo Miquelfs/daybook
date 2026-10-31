@@ -83,7 +83,7 @@ export function SportCurveSection({ sport, distanceM, avgSpeedMps }: Props) {
       <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">
         {isRide ? "Speed curve" : isSwim ? "Swim pace curve" : "Pace curve"}
       </p>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-3">
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
           {/* Recessive x labels at a few buckets */}
           {buckets

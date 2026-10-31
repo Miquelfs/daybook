@@ -14,6 +14,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { format, parseISO } from "date-fns";
+import { Skeleton } from "@/components/ui/kit";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -170,7 +171,7 @@ export default function FitnessFreshnessChart() {
 
       {/* Chart */}
       {loading ? (
-        <div className="h-[280px] flex items-center justify-center text-zinc-500 text-sm">Loading…</div>
+        <Skeleton h={280} />
       ) : (
         <ResponsiveContainer width="100%" height={280}>
           <ComposedChart data={tsbData} onClick={handleDayClick} style={{ cursor: "pointer" }}>

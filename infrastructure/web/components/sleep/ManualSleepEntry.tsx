@@ -46,7 +46,7 @@ export function ManualSleepEntry({ onSaved }: { onSaved?: () => void }) {
   }
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4">
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm font-semibold text-[#FAFAFA]">Log a night manually</p>
         <button onClick={() => setOpen(false)} className="text-[#52525B] hover:text-[#A1A1AA]">

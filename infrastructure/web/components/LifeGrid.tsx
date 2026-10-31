@@ -113,12 +113,13 @@ function buildSlices(
 
 // ── Late-year fill: cols 51–52 inherit from the nearest non-empty prior week ─
 // Birthday-anchored years can have sparse final weeks when the period's end_date
-// falls a few days before the cell's week_start. Walk back up to col 48.
+// falls a few days before the cell's week_start. Walk back up to col 48 — past weeks only.
 function fillWeek52(cells: LifeWeekCell[]): LifeWeekCell[] {
   const byKey = new Map(cells.map((c) => [`${c.row}:${c.col}`, c]));
   return cells.map((c) => {
     if (c.col < 51) return c;
     if (c.periods.length > 0) return c;
+    if (!c.is_past) return c;            // never paint the future (or this week) with an ongoing period
     for (let col = c.col - 1; col >= 48; col--) {
       const prev = byKey.get(`${c.row}:${col}`);
       if (prev && prev.periods.length > 0) return { ...c, periods: prev.periods };

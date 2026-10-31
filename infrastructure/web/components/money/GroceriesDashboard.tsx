@@ -7,6 +7,7 @@ import {
   moneyApi, fmtAmount, GROCERY_GROUPS, type GroceryProduct, type GroceryStores, type GrocerySummary, type GroceryWindow,
 } from "@/lib/money-api";
 import { groupStyle } from "./grocery-groups";
+import { Skeleton } from "@/components/ui/kit";
 
 const WINDOWS: { key: GroceryWindow; label: string }[] = [
   { key: "ticket", label: "Last ticket" },
@@ -18,7 +19,7 @@ const WINDOWS: { key: GroceryWindow; label: string }[] = [
 
 const AVOID = "#EC4899";
 const REST = "#3F3F46";
-const card = "bg-[#0D0D0F] border border-[#27272A] rounded-xl";
+const card = "bg-[#0D0D0F] border border-[#27272A] rounded-2xl";
 const h2 = "text-xs text-[#71717A] uppercase tracking-widest mb-3";
 
 export function GroceriesDashboard() {
@@ -39,7 +40,7 @@ export function GroceriesDashboard() {
     queryFn: () => moneyApi.groceryProducts(),
   });
 
-  if (isLoading) return <p className="text-sm text-[#52525B] py-8 text-center">Loading…</p>;
+  if (isLoading) return <Skeleton h={200} />;
 
   if (!products.length) {
     return (

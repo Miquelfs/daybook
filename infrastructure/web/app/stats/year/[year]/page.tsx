@@ -72,7 +72,7 @@ export default function YearPage() {
           { label: "Activities", value: `${data?.totals?.activities ?? "—"}` },
           { label: "Personal Records", value: `${data?.totals?.personal_records ?? "—"}` },
         ].map(({ label, value }) => (
-          <div key={label} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3">
+          <div key={label} className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3">
             <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">{label}</p>
             <p className="text-xl font-semibold tabular-nums">{value}</p>
           </div>
@@ -83,7 +83,7 @@ export default function YearPage() {
       {(data?.weeks?.length ?? 0) > 0 && (
         <div className="mb-8">
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Weekly distance</p>
-          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-3 pb-1">
+          <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-3 pb-1">
             <ResponsiveContainer width="100%" height={72}>
               <BarChart data={data!.weeks} margin={{ top: 0, right: 0, bottom: 0, left: -32 }}>
                 <Tooltip
@@ -111,7 +111,7 @@ export default function YearPage() {
           <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Monthly breakdown</p>
           <div className="grid grid-cols-3 gap-3">
             {data!.months.map((m) => (
-              <div key={m.month} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-3 py-3">
+              <div key={m.month} className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-3 py-3">
                 <p className="text-xs text-[#52525B] uppercase tracking-widest mb-1">{m.month_name}</p>
                 <p className="text-sm font-semibold tabular-nums">{m.hours}h</p>
                 <p className="text-xs text-[#52525B]">{m.activities} activities</p>

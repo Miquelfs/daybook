@@ -8,6 +8,7 @@ import { ChevronLeft, ChevronDown, Luggage } from "lucide-react";
 import { api } from "@/lib/api";
 import type { CountryStay } from "@/lib/api";
 import { FLAG } from "@/lib/flags";
+import { Skeleton } from "@/components/ui/kit";
 
 const DAYS_PREVIEW = 14; // day chips shown before "show all" on long stays
 
@@ -82,19 +83,19 @@ export default function CountryPage() {
       </h1>
 
       {isLoading ? (
-        <div className="h-40 flex items-center justify-center text-[#52525B]">Loading…</div>
+        <Skeleton h={160} />
       ) : !data || data.total_days === 0 ? (
         <p className="text-sm text-[#52525B]">No recorded days here yet.</p>
       ) : (
         <>
           {/* KPI strip */}
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
               <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">Days</p>
               <p className="text-2xl font-semibold text-[#F59E0B] tabular-nums">{data.total_days}</p>
               <p className="text-xs text-[#52525B] mt-0.5">{data.total_days === 1 ? "day" : "days"} recorded</p>
             </div>
-            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+            <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
               <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">Times</p>
               <p className="text-2xl font-semibold text-[#F59E0B] tabular-nums">{stays.length}</p>
               <p className="text-xs text-[#52525B] mt-0.5">separate {stays.length === 1 ? "stay" : "stays"}</p>
@@ -108,7 +109,7 @@ export default function CountryPage() {
                 <Link
                   key={label}
                   href={`/day/${d}`}
-                  className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 hover:border-[#3F3F46] transition-colors group"
+                  className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 hover:border-[#3F3F46] transition-colors group"
                 >
                   <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">{label}</p>
                   <p className="text-sm text-[#A1A1AA] group-hover:text-[#FAFAFA] transition-colors">

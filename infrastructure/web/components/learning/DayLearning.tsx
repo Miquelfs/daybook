@@ -61,7 +61,7 @@ function PlanLane({ d, date, isToday }: { d: LearningDay; date: string; isToday:
     return (
       <section>
         <LaneHeader icon={GraduationCap} label="Learning" action={link} />
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-1.5 divide-y divide-[#18181B]">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-1.5 divide-y divide-[#18181B]">
           {d.done_today.map((i) => <ItemLine key={i.id} item={i} done />)}
           {d.minutes_today > 0 && (
             <p className="text-xs text-[#71717A] py-2">{fmtMinutes(d.minutes_today)} studied</p>
@@ -75,7 +75,7 @@ function PlanLane({ d, date, isToday }: { d: LearningDay; date: string; isToday:
     return (
       <section>
         <LaneHeader icon={GraduationCap} label="Learning" action={link} />
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 text-sm text-[#71717A]">Starts {d.week_start}</div>
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 text-sm text-[#71717A]">Starts {d.week_start}</div>
       </section>
     );
   }
@@ -100,7 +100,7 @@ function PlanLane({ d, date, isToday }: { d: LearningDay; date: string; isToday:
   return (
     <section>
       <LaneHeader icon={GraduationCap} label="Learning" action={link} open onToggle={toggleOpen} />
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
         {d.phase && (
           <div className="px-4 pt-3 pb-1 flex items-baseline justify-between gap-3">
             <p className="text-xs text-[#A1A1AA] truncate">{d.phase.title}</p>

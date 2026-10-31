@@ -24,7 +24,7 @@ export function HeartHealthyPick({ date }: { date: string }) {
   const hero = data.hero;
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
       <button onClick={() => setOpen((v) => !v)}
         className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-[#111113] transition-colors">
         <HeartPulse size={15} className="text-[#F87171] shrink-0" />

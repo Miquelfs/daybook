@@ -406,7 +406,7 @@ function ExperimentCard({
   );
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-2">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-2">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
@@ -541,7 +541,7 @@ function ExperimentsPageInner() {
               const count = experiments.filter(e => e.status === st).length;
               const s = STATUS_STYLE[st];
               return (
-                <div key={st} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-3 text-center">
+                <div key={st} className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-3 text-center">
                   <p className={`text-xl font-bold tabular-nums ${s.text}`}>{count}</p>
                   <p className="text-xs text-[#52525B]">{s.label}</p>
                 </div>

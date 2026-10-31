@@ -13,7 +13,7 @@ export function EfficiencyTable({ data }: { data: EfficiencyData }) {
     return <p className="text-xs text-[#52525B]">Not enough history yet.</p>;
   }
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>

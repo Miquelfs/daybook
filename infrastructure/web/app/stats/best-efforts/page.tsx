@@ -88,7 +88,7 @@ export default function BestEffortsPage() {
           No PRs yet — run a synced activity with GPS streams to compute best efforts.
         </div>
       ) : (
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl divide-y divide-[#18181B]">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl divide-y divide-[#18181B]">
           {prs.map((pr) => (
             <div key={pr.target_label} className="flex items-center justify-between px-4 py-3">
               <div className="flex-1 min-w-0">

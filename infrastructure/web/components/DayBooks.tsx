@@ -41,7 +41,7 @@ export function DayBooks({ date }: { date: string }) {
               <a
                 key={b.id}
                 href={`/explore/books/${b.id}`}
-                className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors"
+                className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 flex items-center gap-3 hover:border-[#3F3F46] transition-colors"
               >
                 <span className="text-xl">📖</span>
                 <div className="flex-1 min-w-0">

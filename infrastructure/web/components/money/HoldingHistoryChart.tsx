@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { moneyApi, type HoldingHistoryPoint, type PortfolioRange } from "@/lib/money-api";
+import { Skeleton } from "@/components/ui/kit";
 
 const RANGES: PortfolioRange[] = ["1M", "3M", "YTD", "1Y", "ALL"];
 
@@ -71,7 +72,7 @@ export function HoldingHistoryChart({ id, initial }: Props) {
         </div>
       </div>
       {loading ? (
-        <div className="h-[180px] flex items-center justify-center text-xs text-[#52525B]">Loading…</div>
+        <Skeleton h={180} />
       ) : (
         <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="block">
           <defs>

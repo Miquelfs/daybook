@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { Skeleton } from "@/components/ui/kit";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -97,7 +98,7 @@ export default function RacePlanPage() {
     } finally { setGenerating(false); }
   }
 
-  if (loading) return <div className="p-6 text-sm text-[#52525B]">Loading…</div>;
+  if (loading) return <div className="p-6"><Skeleton h={220} /></div>;
 
   return (
     <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-4 print:text-black">

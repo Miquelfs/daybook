@@ -95,7 +95,7 @@ export function ActivitySplitsChart({ splits, activityType }: Props) {
   const fmtVal = (v: number) => (mode === "power" ? `${Math.round(v)} W` : `${v.toFixed(1)} km/h`);
 
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-2">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-4 pb-2">
       <ResponsiveContainer width="100%" height={160}>
         <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -8 }}>
           <CartesianGrid stroke="#18181B" vertical={false} />

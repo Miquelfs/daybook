@@ -19,6 +19,7 @@ import { TagStatsDrawer } from "@/components/TagStatsDrawer";
 import { StressLifeInsights } from "@/components/StressLifeInsights";
 import { type Tag as TagType } from "@/lib/tags-api";
 import { localISODate } from "@/lib/dates";
+import { Skeleton } from "@/components/ui/kit";
 
 const DAYS_OPTIONS = [
   { label: "30d", value: 30 },
@@ -464,7 +465,7 @@ export default function CorrelationsPage() {
               </div>
 
               {points.length >= 3 ? (
-                <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-2">
+                <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-4 pb-2">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-xs text-[#52525B] uppercase tracking-widest">
                       {result.metric_a.label} → {result.metric_b.label}
@@ -584,13 +585,13 @@ export default function CorrelationsPage() {
           </div>
 
           {periodFetching && (
-            <div className="text-center py-8 text-xs text-[#52525B]">Loading…</div>
+            <Skeleton h={120} />
           )}
 
           {!periodFetching && periodData && (
             <div className="space-y-3">
               {/* Main comparison card */}
-              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
                 <p className="text-xs text-[#52525B] uppercase tracking-widest mb-4">{periodData.label}</p>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -637,7 +638,7 @@ export default function CorrelationsPage() {
 
               {/* Same period last year */}
               {periodData.same_period_last_year.avg != null && (
-                <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 flex items-center justify-between">
+                <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 flex items-center justify-between">
                   <div>
                     <p className="text-[10px] text-[#52525B] mb-1">
                       Same {periodData.period} last year
@@ -682,7 +683,7 @@ export default function CorrelationsPage() {
             <>
               {/* Best day highlight */}
               {weeklyData?.best_weekday_mood && (
-                <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-4 flex items-center gap-4">
+                <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-4 flex items-center gap-4">
                   <span className="text-3xl">😄</span>
                   <div>
                     <p className="text-xs text-[#52525B] uppercase tracking-widest mb-0.5">Best day for mood</p>
@@ -698,7 +699,7 @@ export default function CorrelationsPage() {
               )}
 
               {/* Mood by weekday bar chart */}
-              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-3">
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-4 pb-3">
                 <p className="text-xs text-[#52525B] uppercase tracking-widest mb-4">Avg mood by day</p>
                 <ResponsiveContainer width="100%" height={160}>
                   <BarChart data={weekdayData} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
@@ -744,7 +745,7 @@ export default function CorrelationsPage() {
               {(weeklyData?.top_tags ?? []).length > 0 && (
                 <div>
                   <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Tag impact on mood</p>
-                  <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+                  <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
                     <div className="grid grid-cols-4 px-4 py-2 border-b border-[#27272A]">
                       <p className="text-[10px] text-[#52525B] uppercase col-span-2">Tag</p>
                       <p className="text-[10px] text-[#52525B] uppercase text-center">With / Without</p>
@@ -772,7 +773,7 @@ export default function CorrelationsPage() {
               )}
 
               {/* Energy by weekday */}
-              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 pt-4 pb-3">
+              <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 pt-4 pb-3">
                 <p className="text-xs text-[#52525B] uppercase tracking-widest mb-4">Avg energy by day</p>
                 <ResponsiveContainer width="100%" height={130}>
                   <BarChart data={weekdayData} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
@@ -1003,7 +1004,7 @@ function ExperimentsTab() {
             ? `#${exp.metric.slice(4)} rate`
             : (OUTCOME_METRICS.find(m => m.key === exp.metric)?.label ?? exp.metric);
           return (
-            <div key={exp.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-3">
+            <div key={exp.id} className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">

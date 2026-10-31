@@ -209,7 +209,7 @@ function AllocationCard({ title, slices: raw }: { title: string; slices: Allocat
   if (raw.length === 0) return null;
   const slices = foldSlices(raw);
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
       <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-3">{title}</p>
       <div className="flex items-center gap-3 mb-3">
         <Donut slices={slices} />
@@ -297,7 +297,7 @@ function RealizedSection({ trades, totalAllTime, totalYtd }: { trades: RealizedT
           <span className="text-[#52525B]"> all time · {totalYtd >= 0 ? "+" : ""}{fmtAmount(totalYtd)} YTD</span>
         </span>
       </div>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl divide-y divide-[#18181B]">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl divide-y divide-[#18181B]">
         {trades.slice(0, 15).map(t => {
           const pos = (t.realized_pnl_eur ?? 0) >= 0;
           const pct = t.cost_basis_sold_eur ? (t.proceeds_eur / t.cost_basis_sold_eur - 1) * 100 : null;
@@ -340,7 +340,7 @@ function LiquidStrip({ accounts }: { accounts: AccountBalance[] }) {
         <h2 className="text-xs text-[#71717A] uppercase tracking-widest">Cash &amp; liquid</h2>
         <span className="text-xs text-[#71717A] tabular-nums">{fmtAmount(total)}</span>
       </div>
-      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl divide-y divide-[#18181B]">
+      <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl divide-y divide-[#18181B]">
         {accounts.map(a => (
           <Link
             key={a.name}

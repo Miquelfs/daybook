@@ -55,7 +55,7 @@ export function FlightLoadCard({ date }: { date: string }) {
       <SectionLabel>Flight load</SectionLabel>
       <div className="flex flex-col gap-3">
         {data.flights.map((f, i) => (
-          <div key={i} className="bg-[#0D0D0F] border border-[#27272A] rounded-xl p-4 space-y-2">
+          <div key={i} className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4 space-y-2">
             <div className="flex items-center gap-2 text-sm font-medium text-[#FAFAFA]">
               <Plane size={14} className="text-[#60A5FA]" /> {f.leg}
             </div>

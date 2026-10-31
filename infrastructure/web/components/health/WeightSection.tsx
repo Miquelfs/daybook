@@ -53,7 +53,7 @@ function WeightTooltip({ active, payload }: any) {
 
 function Tile({ label, value, unit, sub }: { label: string; value: string; unit?: string; sub?: React.ReactNode }) {
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl px-4 py-3 min-w-0">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 min-w-0">
       <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">{label}</p>
       <p className="text-2xl font-semibold tabular-nums text-[#FAFAFA]">
         {value}{unit && <span className="text-sm text-[#71717A] ml-1">{unit}</span>}

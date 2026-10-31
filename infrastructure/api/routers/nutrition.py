@@ -256,6 +256,17 @@ def sweat_rate_summary(conn: DB):
 
 # ── Gut training tracker ─────────────────────────────────────────────────────
 
+def _session_carbs_g_h(conn, s) -> float | None:
+    """Carbs/h eaten on a session — from the Food log (eaten during the ride, or "On the bike"),
+    the same source the day view uses; legacy fueling_logs rows count too."""
+    if not s["completed_activity_id"] and s["status"] != "completed":
+        return None
+    from domains.training.ride_quality import ride_carbs
+    rc = ride_carbs(conn, s["id"], s["completed_activity_id"], s["session_date"])
+    mins = rc["minutes"] or s["effective_duration_min"] or s["duration_min"]
+    return round(rc["carbs_g"] / (mins / 60), 1) if rc["carbs_g"] and mins else None
+
+
 @router.get("/gut-training")
 def gut_training(conn: DB, goal_id: int = Query(...)):
     """
@@ -272,8 +283,8 @@ def gut_training(conn: DB, goal_id: int = Query(...)):
     # One qualifying long session per week (the longest brick/ride/run)
     rows = conn.execute(
         """SELECT id, session_date, week_number, session_type, discipline,
-                  effective_duration_min, duration_min
-           FROM plan_sessions WHERE goal_id=?
+                  effective_duration_min, duration_min, completed_activity_id, status
+           FROM plan_sessions WHERE goal_id=? AND status != 'displaced'
            ORDER BY week_number, COALESCE(effective_duration_min, duration_min) DESC""",
         (goal_id,),
     ).fetchall()
@@ -289,12 +300,7 @@ def gut_training(conn: DB, goal_id: int = Query(...)):
         s_date = date.fromisoformat(s["session_date"])
         weeks_to_race = max(0, (race_date - s_date).days // 7)
         target = fueling.gut_training_target(weeks_to_race)
-        logged = conn.execute(
-            """SELECT MAX(carbs_g / (duration_min/60.0)) AS best_gh
-               FROM fueling_logs WHERE plan_session_id=? AND carbs_g IS NOT NULL AND duration_min>0""",
-            (s["id"],),
-        ).fetchone()
-        best_gh = round(logged["best_gh"], 1) if logged and logged["best_gh"] else None
+        best_gh = _session_carbs_g_h(conn, s)
         out.append({
             "week": week,
             "session_date": s["session_date"],

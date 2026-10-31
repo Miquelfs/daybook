@@ -115,7 +115,7 @@ export function FlightStats({ a, onSelect }: { a: FlightAnalytics; onSelect?: (f
           items={a.top_countries.map((x) => ({ label: x.country, count: x.count }))} />
 
         {/* Flights per year */}
-        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+        <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
           <div className="px-4 py-2.5 text-xs font-semibold uppercase tracking-widest"
             style={{ color: ACCENTS.sky }}>Flights per year</div>
           <div className="px-4 py-3 flex items-end gap-1.5 h-[168px]">
@@ -237,7 +237,7 @@ function BarCard({ title, accent, items }: {
 }) {
   const max = Math.max(1, ...items.map((i) => i.count));
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
       <div className="px-4 py-2.5 text-xs font-semibold uppercase tracking-widest" style={{ color: accent }}>
         {title}
       </div>
@@ -277,7 +277,7 @@ function SplitCard({ title, data, accent, onPick }: {
   const entries = Object.entries(data).sort(([, a], [, b]) => b - a);
   const total = entries.reduce((s, [, n]) => s + n, 0);
   return (
-    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-xl overflow-hidden">
+    <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl overflow-hidden">
       <div className="px-4 py-2.5 text-xs font-semibold uppercase tracking-widest" style={{ color: accent }}>
         {title}
       </div>
