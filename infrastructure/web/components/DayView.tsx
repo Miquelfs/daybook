@@ -24,6 +24,7 @@ import { ApiOffline } from "@/components/ApiOffline";
 import { DayAddFAB } from "@/components/DayAddFAB";
 import { DayTraining } from "@/components/DayTraining";
 import { AheadStrip } from "@/components/plan/AheadStrip";
+import { Chapter, Fold } from "@/components/ui/kit";
 import { format } from "date-fns";
 import { cookies } from "next/headers";
 import { todayIn } from "@/lib/dates";
@@ -93,75 +94,70 @@ export async function DayView({ date }: { date: string }) {
     <>
       <DayHeader date={date} />
 
+      {/* One shape for every day: Now → Plan → Body → The day → Reflect. Sections hide when
+          empty; long ones fold to a preview. */}
       <div className="flex flex-col gap-12 mt-10">
         {/* What now? — only on today, before everything else */}
         {date === localToday && <NowCard date={date} />}
 
-        <MorningBrief
-          sleep={day.sleep}
-          stats={day.daily_stats}
-          hrv={day.hrv}
-          loadIndex={day.load_index}
-          brief={morningBriefData?.brief ?? null}
-          aiAvailable={aiStatus?.ollama_available ?? false}
-        />
+        {/* The day's structure, lane by lane: tasks, the duty that frames it, training,
+            learning. On a past day they become the record of what happened. */}
+        <Chapter title={date === localToday ? "Plan" : "The plan"}>
+          {/* Tasks first: adding one should be one tap from the top */}
+          <AheadStrip date={date} isToday={date === localToday} />
+          <DayDuty date={date} />
+          <DayTraining initialPrescription={trainingDay} date={date} lead={<RecoveryCard date={date} />} />
+          <DayLearning date={date} isToday={date === localToday} />
+        </Chapter>
 
-        {/* The day's structure — what it holds, lane by lane: tasks, the duty
-            that frames it, training, learning. Each lane hides itself when empty;
-            on a past day they become the record of what happened. */}
-        <section>
-          {/* "Day plan", not "Today" — the page header already says Today */}
-          <SectionLabel>{date === localToday ? "Day plan" : "The day"}</SectionLabel>
-          <div className="flex flex-col gap-8">
-            {/* Tasks first: adding one should be one tap from the top */}
-            <AheadStrip date={date} isToday={date === localToday} />
-            <DayDuty date={date} />
-            <DayTraining initialPrescription={trainingDay} date={date} lead={<RecoveryCard date={date} />} />
-            <DayLearning date={date} isToday={date === localToday} />
-          </div>
-        </section>
+        {/* Body: how you slept and recovered, how the day loaded you, how much you moved */}
+        <Chapter title="Body">
+          <MorningBrief
+            sleep={day.sleep}
+            stats={day.daily_stats}
+            hrv={day.hrv}
+            loadIndex={day.load_index}
+            brief={morningBriefData?.brief ?? null}
+            aiAvailable={aiStatus?.ollama_available ?? false}
+          />
+          <StressEnergyTimeline date={date} />
+          <MovementBlock
+            date={date}
+            activities={day.activities}
+            stats={day.daily_stats}
+            screenTimeSlot={<ScreenTimeBlock date={date} />}
+          />
+        </Chapter>
 
-        <DayPassengerFlights date={date} />
+        {/* The day: where you were and what happened — compact, each opens fully */}
+        <Chapter title="The day">
+          <section>
+            <SectionLabel>Where I was</SectionLabel>
+            <LocationSection date={date} initialTracks={tracks} editable={isEditable} />
+            <DayPlaces date={date} />
+          </section>
+          <section>
+            <SectionLabel>Photo of the day</SectionLabel>
+            <PhotoOfDay date={date} initialPhotoUrl={day.photo_url ?? null} initialCaption={day.subjective.photo_caption ?? null} />
+          </section>
+          <Fold max={260}><DayFood date={date} /></Fold>
+          <Fold max={200}><DaySpendSummary date={date} /></Fold>
+          <Fold max={200}><DayRestaurants date={date} /></Fold>
+          <DayBooks date={date} />
+          <DayPassengerFlights date={date} />
+        </Chapter>
 
-        <MovementBlock
-          date={date}
-          activities={day.activities}
-          stats={day.daily_stats}
-          screenTimeSlot={<ScreenTimeBlock date={date} />}
-        />
-
-        <StressEnergyTimeline date={date} />
-
-        <DaySpendSummary date={date} />
-
-        <DayFood date={date} />
-
-        <DayRestaurants date={date} />
-        <DayBooks date={date} />
-
-        <section>
-          <SectionLabel>Photo of the day</SectionLabel>
-          <PhotoOfDay date={date} initialPhotoUrl={day.photo_url ?? null} initialCaption={day.subjective.photo_caption ?? null} />
-        </section>
-
-        <section>
-          <SectionLabel>Where I was</SectionLabel>
-          <LocationSection date={date} initialTracks={tracks} editable={isEditable} />
-          <DayPlaces date={date} />
-        </section>
-
-        <Questionnaire date={date} initial={day.subjective} initialTags={day.tags ?? []} initialCompanions={day.companions ?? []} />
-
-        <div className="flex justify-end">
-          <Link href="/journal" className="text-xs text-[#52525B] hover:text-[#A1A1AA] transition-colors">
-            Browse journal →
-          </Link>
-        </div>
-
-        <section>
-          <SectionLabel>On this day</SectionLabel>
-          <OnThisDay entries={yearEntries} todayDate={date} />
-        </section>
+        {/* Reflect: the evening questions, then the same day in other years */}
+        <Chapter title="Reflect">
+          <Questionnaire date={date} initial={day.subjective} initialTags={day.tags ?? []} initialCompanions={day.companions ?? []} />
+          <section>
+            <SectionLabel>On this day</SectionLabel>
+            <Fold max={240}><OnThisDay entries={yearEntries} todayDate={date} /></Fold>
+            <div className="flex justify-end mt-2">
+              <Link href="/journal" className="text-xs text-[#52525B] hover:text-[#A1A1AA] transition-colors">Browse journal →</Link>
+            </div>
+          </section>
+        </Chapter>
       </div>
 
       <DayAddFAB date={date} />

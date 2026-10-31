@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 
 // Daybook's UI kit — the visual language of Omyra / Training / Health / Plan, for every page.
@@ -207,4 +208,53 @@ export function Skeleton({ h = 160, className = "" }: { h?: number; className?: 
 /** The one empty state: a single faint line, not a card. */
 export function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-xs text-[#52525B] py-2">{children}</p>;
+}
+
+/** A chapter of a long page (the day view: Plan · Body · The day · Reflect) — one level above
+ *  section titles: a short ink title on a hairline, its sections spaced beneath. */
+export function Chapter({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="flex items-center gap-3 mb-5">
+        <h2 className="text-sm font-semibold tracking-tight text-[#FAFAFA] shrink-0">{title}</h2>
+        <span className="flex-1 h-px bg-[#27272A]" />
+      </div>
+      <div className="flex flex-col gap-8">{children}</div>
+    </section>
+  );
+}
+
+/** Caps a long section at `max` px with a soft fade and "Show all" — compact by default,
+ *  everything one tap away. Short content renders untouched. */
+export function Fold({ max = 220, children }: { max?: number; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [tall, setTall] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [empty, setEmpty] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => { setTall(el.scrollHeight > max + 40); setEmpty(el.childElementCount === 0); };
+    const mo = new MutationObserver(check);
+    mo.observe(el, { childList: true });
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => { ro.disconnect(); mo.disconnect(); };
+  }, [max]);
+  const clipped = tall && !open;
+  return (
+    // an empty section (it rendered nothing) takes no room in the page's gaps
+    <div className={empty ? "hidden" : undefined}>
+      <div ref={ref} className="overflow-hidden transition-[max-height] duration-300"
+           style={clipped ? { maxHeight: max, WebkitMaskImage: "linear-gradient(#000 70%, transparent)", maskImage: "linear-gradient(#000 70%, transparent)" } : undefined}>
+        {children}
+      </div>
+      {tall && (
+        <button onClick={() => setOpen((v) => !v)} className="mt-1 text-xs text-[#71717A] hover:text-[#A1A1AA]">
+          {open ? "Show less" : "Show all"}
+        </button>
+      )}
+    </div>
+  );
 }
