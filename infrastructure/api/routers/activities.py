@@ -508,6 +508,19 @@ def get_activity_story(
     return out
 
 
+@router.get("/{activity_id}/profile")
+def get_activity_profile(
+    activity_id: str,
+    conn: Annotated[sqlite3.Connection, Depends(get_db)],
+):
+    """Elevation along the ride with the cols, climbs and villages it passed, at their km (null without streams)."""
+    from domains.locations.ride_profile import profile
+    try:
+        return profile(conn, activity_id)
+    except Exception:
+        return None
+
+
 @router.get("/{activity_id}/wind")
 def get_activity_wind(
     activity_id: str,

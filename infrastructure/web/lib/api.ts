@@ -1091,6 +1091,7 @@ export const api = {
   activityImpact: (id: string) =>
     get<{ impact: ActivityImpact | null }>(`/activities/${id}/impact`).then((r) => r.impact),
   activityStory: (id: string) => get<ActivityStory>(`/activities/${id}/story`),
+  activityProfile: (id: string) => get<RideProfile | null>(`/activities/${id}/profile`),
   activities: (start: string, end: string) =>
     get<Activity[]>(`/activities?start=${start}&end=${end}`),
   syncStatus: () => get<SyncStatus[]>("/activities/sync-status"),
@@ -1635,6 +1636,14 @@ export type ClimbAscent = {
   /** Physics from gain, length and time (no power meter on the road bike). */
   est_w?: number | null; wkg?: number | null;
 };
+
+/** Something a ride went past, at its km. A col that tops a named climb carries the climb's numbers. */
+export type ProfileMarker = {
+  kind: "col" | "climb" | "village"; km: number; name: string; ele: number | null; first: boolean;
+  from_km?: number; gain_m?: number; avg_pct?: number; length_km?: number;
+};
+/** GET /activities/{id}/profile — elevation along the ride with its cols, climbs and villages. */
+export type RideProfile = { km: number; profile: [number, number][]; markers: ProfileMarker[] };
 
 /** GET /activities/{id}/story — what this activity explored and how it sits in the plan. */
 export type ActivityStory = {

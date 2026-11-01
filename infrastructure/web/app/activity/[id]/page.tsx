@@ -1,9 +1,10 @@
 import { api, fmtDuration, fmtDistance, fmtPace, activityIcon } from "@/lib/api";
-import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis, ActivityImpact, ActivityEffort, ActivityStory } from "@/lib/api";
+import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis, ActivityImpact, ActivityEffort, ActivityStory, RideProfile } from "@/lib/api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ActivityHero } from "@/components/activity/ActivityHero";
 import { HighlightsCard } from "@/components/activity/HighlightsCard";
+import { RideProfileCard } from "@/components/activity/RideProfileCard";
 import { ActivityWind } from "@/components/ActivityWind";
 import { ActivityAnalysisCards } from "@/components/activity/ActivityAnalysisCards";
 import { TrainingImpactCard } from "@/components/activity/TrainingImpactCard";
@@ -235,11 +236,12 @@ export default async function ActivityPage({ params }: Props) {
     notFound();
   }
 
-  const [analysis, impact, efforts, story] = await Promise.all([
+  const [analysis, impact, efforts, story, rideProfile] = await Promise.all([
     api.activityAnalysis(decodedId).catch((): ActivityAnalysis | null => null),
     api.activityImpact(decodedId).catch((): ActivityImpact | null => null),
     api.activityEfforts(decodedId).catch((): ActivityEffort[] => []),
     api.activityStory(decodedId).catch((): ActivityStory | null => null),
+    api.activityProfile(decodedId).catch((): RideProfile | null => null),
   ]);
 
   const date = activity.date;
@@ -322,6 +324,9 @@ export default async function ActivityPage({ params }: Props) {
                        : /ftp|20\s*min/i.test(activity.name ?? "")}
                      sessionId={activity.plan_session?.id ?? null} />
       )}
+
+      {/* Elevation coloured by gradient, with the cols, climbs and villages along it */}
+      {rideProfile && <RideProfileCard ride={rideProfile} elevation={analysis?.elevation} />}
 
       {/* Achievements: plan streak, new road, villages */}
       {story && <HighlightsCard story={story} />}
