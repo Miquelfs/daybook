@@ -12,7 +12,7 @@ Plan ahead — the future side of the daybook.
   tracked_habits    tags you chose to track as habits (goals / experiments track theirs too).
   planned_trips     trips you're about to take — name, dates, who, a budget, a one-line
                     outline per day (planned_trip_days), a checklist (tasks with
-                    planned_trip_id) and a board of bookings (planned_trip_items).
+                    planned_trip_id) and a board of bookings (planned_trip_cards).
                     Once the trip happens and is detected, its name and companions
                     carry over and its page shows the plan.
   activity_companions / trip_companions
@@ -137,7 +137,7 @@ def migrate(conn) -> None:
             PRIMARY KEY (planned_id, date)
         );
 
-        CREATE TABLE IF NOT EXISTS planned_trip_items (     -- bookings & to-dos on the trip board
+        CREATE TABLE IF NOT EXISTS planned_trip_cards (     -- bookings & to-dos on the trip board
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             planned_id  INTEGER NOT NULL REFERENCES planned_trips(id) ON DELETE CASCADE,
             name        TEXT    NOT NULL,
@@ -153,7 +153,7 @@ def migrate(conn) -> None:
             url         TEXT,
             created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         );
-        CREATE INDEX IF NOT EXISTS idx_planned_trip_items ON planned_trip_items(planned_id, date);
+        CREATE INDEX IF NOT EXISTS idx_planned_trip_cards ON planned_trip_cards(planned_id, date);
 
         CREATE TABLE IF NOT EXISTS planned_trip_companions (
             planned_id INTEGER NOT NULL REFERENCES planned_trips(id) ON DELETE CASCADE,

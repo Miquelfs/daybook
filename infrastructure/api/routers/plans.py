@@ -474,7 +474,7 @@ def add_trip_item(planned_id: int, body: TripItemIn, conn: DB):
 
 @router.patch("/planned-trip-items/{item_id}", status_code=204)
 def update_trip_item(item_id: int, body: TripItemIn, conn: DB):
-    if conn.execute("SELECT 1 FROM planned_trip_items WHERE id=?", (item_id,)).fetchone() is None:
+    if conn.execute("SELECT 1 FROM planned_trip_cards WHERE id=?", (item_id,)).fetchone() is None:
         raise HTTPException(status_code=404, detail="Item not found")
     trip_board.save_item(conn, 0, _item_fields(body, True), item_id)
 

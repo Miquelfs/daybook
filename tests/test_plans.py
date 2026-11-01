@@ -439,6 +439,14 @@ class PlannedTripsTest(unittest.TestCase):
         self.assertEqual(bike["cost_eur"], 168.02)                                       # NT$6,000 at 35.71
         self.assertEqual((b["totals"]["booked"], b["totals"]["to_book"]), (5, ["Plan Day1 Taipei"]))
 
+    def test_migrate_alongside_the_old_trip_items_table(self):
+        import sqlite3 as sq
+        c = sq.connect(":memory:")
+        c.execute("CREATE TABLE planned_trip_items (id INTEGER PRIMARY KEY, planned_id INTEGER, kind TEXT, text TEXT)")
+        c.execute("CREATE TABLE contacts(id INTEGER PRIMARY KEY, name TEXT)")
+        migrate(c)                                      # the reverted trip-document table must not break startup
+        self.assertIn("date", {r[1] for r in c.execute("PRAGMA table_info(planned_trip_cards)")})
+
     def test_task_time_orders_within_the_day(self):
         c = db()
         c.executemany("INSERT INTO tasks (title, due_date, due_time) VALUES (?, '2026-07-02', ?)",

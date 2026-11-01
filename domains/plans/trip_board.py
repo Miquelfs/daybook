@@ -5,7 +5,7 @@ and, day by day, what the rest of the daybook knows about it: the ride planned
 (its GPX course from the tour block) and the one ridden, the night's sleep, and
 what you spent.
 
-Items are plain rows (planned_trip_items): a name, kinds ("Flights, Transportation"),
+Items are plain rows (planned_trip_cards): a name, kinds ("Flights, Transportation"),
 the day it sits on (a stay runs to its check-out), where, the price in € and/or the
 trip's currency, what's paid, booked or not. Items dated before the trip, or not
 dated, sit in a "Before" column.
@@ -25,10 +25,10 @@ FIELDS = ("name", "kinds", "date", "end_date", "place", "price_eur", "price_loca
 
 
 def items(conn: sqlite3.Connection, planned_id: int) -> list[dict]:
-    if not _has_table(conn, "planned_trip_items"):
+    if not _has_table(conn, "planned_trip_cards"):
         return []
     return [dict(r) | {"booked": bool(r["booked"])} for r in conn.execute(
-        "SELECT * FROM planned_trip_items WHERE planned_id=? ORDER BY date IS NOT NULL, date, id", (planned_id,))]
+        "SELECT * FROM planned_trip_cards WHERE planned_id=? ORDER BY date IS NOT NULL, date, id", (planned_id,))]
 
 
 def save_item(conn: sqlite3.Connection, planned_id: int, fields: dict, item_id: int | None = None) -> int:
@@ -37,18 +37,18 @@ def save_item(conn: sqlite3.Connection, planned_id: int, fields: dict, item_id: 
         vals["booked"] = 1 if vals["booked"] else 0
     if item_id is None:
         vals["planned_id"] = planned_id
-        cur = conn.execute(f"INSERT INTO planned_trip_items ({', '.join(vals)}) VALUES ({', '.join('?' * len(vals))})",
+        cur = conn.execute(f"INSERT INTO planned_trip_cards ({', '.join(vals)}) VALUES ({', '.join('?' * len(vals))})",
                            list(vals.values()))
         item_id = cur.lastrowid
     elif vals:
-        conn.execute(f"UPDATE planned_trip_items SET {', '.join(f'{k}=?' for k in vals)} WHERE id=?",
+        conn.execute(f"UPDATE planned_trip_cards SET {', '.join(f'{k}=?' for k in vals)} WHERE id=?",
                      [*vals.values(), item_id])
     conn.commit()
     return item_id
 
 
 def delete_item(conn: sqlite3.Connection, item_id: int) -> None:
-    conn.execute("DELETE FROM planned_trip_items WHERE id=?", (item_id,))
+    conn.execute("DELETE FROM planned_trip_cards WHERE id=?", (item_id,))
     conn.commit()
 
 
@@ -99,7 +99,7 @@ def import_notion_csv(conn: sqlite3.Connection, planned_id: int, text: str) -> d
     headers = list(rows[0])
     local_col = next((h for h in headers if h.startswith("Price ") and h != "Price EUR"), None)
     existing = {r["name"].strip().lower(): r["id"] for r in conn.execute(
-        "SELECT id, name FROM planned_trip_items WHERE planned_id=?", (planned_id,))}
+        "SELECT id, name FROM planned_trip_cards WHERE planned_id=?", (planned_id,))}
     notes = {d for (d,) in conn.execute("SELECT date FROM planned_trip_days WHERE planned_id=?", (planned_id,))}
     added = updated = named = 0
     rates = []
