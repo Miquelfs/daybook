@@ -37,6 +37,8 @@
      use as color-mix(in srgb, <hex> var(--accent-ink), black) */
   --accent-ink: 100%;
   --viz-stress: #F97316; --viz-energy: #22D3EE; --viz-calm: #34D399; --viz-mid: #FBBF24; --viz-hot: #F87171;
+  /* route grade bands (stage profiles): downhill · flat · 1–3 · 3–6 · 6–10 · 10 %+ */
+  --viz-g0: #3B4A5C; --viz-g1: #2F5A3C; --viz-g2: #3F8F55; --viz-g3: #C9A13B; --viz-g4: #D9773A; --viz-g5: #D9483B;
 }
 html[data-theme="light"] {
   --viz-i1: #B5AB95; --viz-i2: #FDBA74; --viz-i3: #FB923C; --viz-i4: #F97316;
@@ -46,6 +48,7 @@ html[data-theme="light"] {
   --viz-deep: #1E3A8A; --viz-rem: #0284C7; --viz-light: #93C5FD; --viz-mood: #6D28D9;
   --accent-ink: 62%;
   --viz-stress: #C2410C; --viz-energy: #0E7490; --viz-calm: #047857; --viz-mid: #A16207; --viz-hot: #B91C1C;
+  --viz-g0: #BCCCDC; --viz-g1: #A9D3A5; --viz-g2: #6BAF6B; --viz-g3: #EDC15A; --viz-g4: #E58E45; --viz-g5: #C94A3A;
 }
 
 html {

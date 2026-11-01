@@ -409,6 +409,36 @@ class PlannedTripsTest(unittest.TestCase):
         pt.set_day(c, pid, "2026-11-11", "  ")
         self.assertIsNone(pt.detail(c, pid, TODAY)["days"][1]["note"])
 
+    def test_notion_board_import_and_days(self):
+        from domains.plans import planned_trips as pt, trip_board as tb
+        c = db()
+        pid = pt.save(c, {"name": "Taiwan", "start_date": "2026-11-10", "end_date": "2026-11-19"}, [])
+        csv = ("\ufeffName,Booked,Date,Day,Description,Elevation,Kms,Notes,Paid,Paid EUR,Paid NTD,Place,Price EUR,"
+               "Price NTD,Type,URL\n"
+               "Flights: BCN-TPE Etihad,Yes,10/11/2026,DAY 0: Vols,,,,,€139.76,€139.76,,El Prat,€139.76,,\"Flights, Transportation\",\n"
+               "Hotel 1: CHECK inn,Yes,11/11/2026 → 13/11/2026,DAY 1: Taipei,,,,Pay 7/11,€0.00,,,Luzhou,€57.00,,Accomodation,\n"
+               "Tren 138 Kaohsiung-Taipei,Yes,17/11/2026,DAY 7: Kenting - Kaohsiung - Taipei,,,,,€41.08,,\"NT$1,467.00\",,,"
+               "\"NT$1,467.00\",\"Train, Transportation\",\n"
+               "Bike Rental,Yes,12/11/2026,DAY 2: Taipei,,,,,€0.00,,,Shilin,,\"NT$6,000.00\",Logistics,\n"
+               "Ubigi Data Plan,Yes,30/10/2026,Pre-Departure,,,,,€11.77,€11.77,,,€11.77,,Logistics,\n"
+               "Plan Day1 Taipei,No,,Pre-Departure,,,,,€0.00,,,,,,Need to do,\n")
+        out = tb.import_notion_csv(c, pid, csv)
+        self.assertEqual((out["added"], out["days_named"], out["currency"], out["fx_rate"]), (6, 4, "NTD", 35.71))
+        self.assertEqual(tb.import_notion_csv(c, pid, csv)["updated"], 6)               # matched by name
+        hotel = next(i for i in tb.items(c, pid) if i["name"].startswith("Hotel"))
+        self.assertEqual((hotel["date"], hotel["end_date"], hotel["notes"]), ("2026-11-11", "2026-11-13", "Pay 7/11"))
+        c.execute("INSERT INTO sleep VALUES ('2026-11-12', 25200)")
+        c.execute("INSERT INTO activities (id, date, activity_type, distance_meters, elevation_gain_meters, duration_seconds) "
+                  "VALUES ('g1', '2026-11-12', 'cycling', 50200, 930, 9000)")
+        b = tb.board(c, pt.detail(c, pid, TODAY), None, date(2026, 11, 20))
+        self.assertEqual([i["name"] for i in b["before"]], ["Plan Day1 Taipei", "Ubigi Data Plan"])
+        d12 = b["days"][2]
+        self.assertEqual((d12["note"], d12["sleep"]["hours"], d12["ride"]["ridden"]["km"]), ("Taipei", 7.0, 50.2))
+        self.assertEqual(b["days"][0]["note"], "Vols")
+        bike = next(i for i in d12["items"] if i["name"] == "Bike Rental")
+        self.assertEqual(bike["cost_eur"], 168.02)                                       # NT$6,000 at 35.71
+        self.assertEqual((b["totals"]["booked"], b["totals"]["to_book"]), (5, ["Plan Day1 Taipei"]))
+
     def test_task_time_orders_within_the_day(self):
         c = db()
         c.executemany("INSERT INTO tasks (title, due_date, due_time) VALUES (?, '2026-07-02', ?)",

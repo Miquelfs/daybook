@@ -1,10 +1,11 @@
 """
 Planned trips — light on purpose (the daybook isn't a travel planner): name,
-dates, destination, who's coming, a budget, one line per day (planned_trip_days)
-and a checklist (tasks with planned_trip_id). Passenger flights logged inside
-the window show up on their own. Once you're back and trip detection finds the
-real trip (overlapping dates), adopt() hands it the name and the companions,
-and that trip's page shows the plan next to what actually happened.
+dates, destination, who's coming, a budget, one line per day (planned_trip_days),
+a checklist (tasks with planned_trip_id) and a board of bookings (trip_board).
+Passenger flights logged inside the window show up on their own. Once you're
+back and trip detection finds the real trip (overlapping dates), adopt() hands
+it the name and the companions, and that trip's page shows the plan next to
+what actually happened.
 
 Nightly (daily_sync.sh, after trip_detection): python -m domains.plans.planned_trips
 """
@@ -102,7 +103,7 @@ def get(conn: sqlite3.Connection, planned_id: int, today: date) -> dict | None:
 
 
 def save(conn: sqlite3.Connection, fields: dict, contact_ids: list[int] | None, planned_id: int | None = None) -> int:
-    cols = ("name", "destination", "start_date", "end_date", "notes", "budget")
+    cols = ("name", "destination", "start_date", "end_date", "notes", "budget", "currency", "fx_rate")
     vals = {k: fields[k] for k in cols if k in fields}
     if planned_id is None:
         cur = conn.execute(f"INSERT INTO planned_trips ({', '.join(vals)}) VALUES ({', '.join('?' * len(vals))})",

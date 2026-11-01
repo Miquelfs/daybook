@@ -77,6 +77,32 @@ class BlockTest(unittest.TestCase):
                                "FROM plan_sessions ORDER BY id").fetchall()
         self.assertEqual([tuple(r) for r in after], [tuple(r) for r in self.before])
 
+    def test_travel_days(self):
+        b = blocks.create(self.c, 1, "Taiwan", "2026-11-12", "2026-11-17",
+                          [{"date": d, "km": km, "climb_m": cl} for d, km, cl in TAIWAN if "2026-11-12" <= d <= "2026-11-17"])
+        b = blocks.set_travel(self.c, b["id"], [{"date": "2026-11-09", "mode": "z2"}, {"date": "2026-11-10", "mode": "rest"},
+                                                {"date": "2026-11-11", "mode": "rest"}])
+        self.assertEqual((b["start_date"], b["riding_start"], len(b["travel"])), ("2026-11-09", "2026-11-12", 3))
+        early = self.c.execute("SELECT session_type, intensity_zone, effective_duration_min FROM plan_sessions "
+                               "WHERE status='pending' AND session_date BETWEEN '2026-11-09' AND '2026-11-11'").fetchall()
+        self.assertEqual([tuple(r) for r in early], [(blocks.TRAVEL_TYPE, "Z2", blocks.TRAVEL_Z2_MIN)])
+        with self.assertRaises(ValueError):                       # a riding day can't be a travel day
+            blocks.set_travel(self.c, b["id"], [{"date": "2026-11-12", "mode": "rest"}])
+        b = blocks.set_travel(self.c, b["id"], [])                # back to the plain block
+        self.assertEqual(b["start_date"], "2026-11-12")
+        blocks.delete(self.c, b["id"])
+        after = self.c.execute("SELECT id, session_date, status, effective_duration_min, intensity_zone "
+                               "FROM plan_sessions ORDER BY id").fetchall()
+        self.assertEqual([tuple(r) for r in after], [tuple(r) for r in self.before])
+
+    def test_replan_leaves_travel_days_alone(self):
+        b = blocks.create(self.c, 1, "Taiwan", "2026-11-12", "2026-11-17", [{"date": "2026-11-12", "km": 50, "climb_m": 900}])
+        blocks.set_travel(self.c, b["id"], [{"date": "2026-11-09", "mode": "z2"}, {"date": "2026-11-10", "mode": "rest"}])
+        rf.reflow_goal(self.c, 1)
+        early = self.c.execute("SELECT session_type FROM plan_sessions WHERE status='pending' AND session_date "
+                               "BETWEEN '2026-11-09' AND '2026-11-11'").fetchall()
+        self.assertEqual([r[0] for r in early], [blocks.TRAVEL_TYPE])
+
     def test_no_overlapping_blocks(self):
         self.make()
         with self.assertRaises(ValueError):

@@ -506,12 +506,17 @@ def _session_actual(conn: sqlite3.Connection, activity_id: Optional[str]) -> Opt
 
 def _course_summary(conn: sqlite3.Connection, session_id: int, full: bool = False) -> Optional[dict]:
     """The GPX course a session follows (tour days). Lists get the numbers; the day view also gets map + profile."""
-    from domains.training.blocks import course_for
+    from domains.training.blocks import course_for, stage_of
     c = course_for(conn, session_id)
     if not c:
         return None
-    if not full:
-        c = {k: v for k, v in c.items() if k not in ("polyline", "profile")}
+    if not full:                                  # lists keep the profile (small) for the stage strip, not the map
+        c = {k: v for k, v in c.items() if k != "polyline"}
+    c["stage"] = stage_of(conn, session_id)
+    day = conn.execute("SELECT session_date FROM plan_sessions WHERE id=?", (session_id,)).fetchone()
+    if day:
+        from domains.training.gpx_course import daylight
+        c["daylight"] = daylight(c, day[0])
     return c
 
 
@@ -1178,6 +1183,25 @@ def create_training_block(goal_id: int, body: BlockCreate, conn: DB):
         raise HTTPException(status_code=409, detail=str(e))
     except ET.ParseError as e:
         raise HTTPException(status_code=422, detail=f"GPX could not be read: {e}")
+
+
+class TravelDay(BaseModel):
+    date: str
+    mode: str                            # z2 | rest
+
+
+class TravelSet(BaseModel):
+    days: list[TravelDay] = []
+
+
+@router.put("/blocks/{block_id}/travel")
+def set_block_travel(block_id: int, body: TravelSet, conn: DB):
+    """Travel days around a tour (flights, arrival): an easy Z2 spin or rest instead of the plan."""
+    from domains.training import blocks
+    try:
+        return blocks.set_travel(conn, block_id, [d.model_dump() for d in body.days])
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.delete("/blocks/{block_id}", status_code=200)

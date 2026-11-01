@@ -150,6 +150,12 @@ export type PlanCourse = {
   climbs: { km: number; length_km: number; gain_m: number; avg_pct: number; max_200m_pct: number; start_min: number; minutes: number }[];
   tunnels: { from_km: number; to_km: number; length_km: number; peak_m: number }[];
   polyline?: string; profile?: [number, number][];
+  descent_m?: number | null;
+  start?: [number, number];
+  /** Where the day sits in its tour. */
+  stage?: { n: number; of: number; block: string; total_km: number; share_pct: number } | null;
+  /** Sunrise / sunset at the start, local time, on the day it's ridden. */
+  daylight?: { sunrise: string; sunset: string } | null;
 };
 
 export type LinkedPlanSession = {

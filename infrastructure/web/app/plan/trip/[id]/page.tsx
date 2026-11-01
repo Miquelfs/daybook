@@ -4,14 +4,21 @@ import { use, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { addDays, format, parseISO } from "date-fns";
-import { ArrowLeft, ArrowRight, Pencil, Plane, Plus } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Columns3, ListChecks, Pencil, Plane, Plus } from "lucide-react";
 import { plansApi, PLAN_KEYS, type Task } from "@/lib/plans-api";
 import { localISODate } from "@/lib/dates";
 import { Avatar } from "@/components/plan/Avatar";
 import { TaskRow } from "@/components/plan/TaskRow";
 import { TaskSheet } from "@/components/plan/TaskSheet";
 import { PlannedTripSheet } from "@/components/plan/TripsAhead";
-import { Block, Label, Panel } from "@/components/plan/ui";
+import { Block, Empty, Label, Panel, Skeleton, TabBar } from "@/components/plan/ui";
+import { ImportBoardButton, TripBoardStats, TripBoardView, TripDaysView } from "@/components/trip/TripBoard";
+
+const TABS = [
+  { key: "board", label: "Board", icon: Columns3 },
+  { key: "days", label: "Day by day", icon: CalendarDays },
+  { key: "checklist", label: "Checklist", icon: ListChecks },
+] as const;
 
 /** One line for one day — saved when you leave the field. */
 function DayLine({ tripId, date, index, initial }: { tripId: number; date: string; index: number; initial: string | null }) {
@@ -49,6 +56,8 @@ export default function PlannedTripPage({ params }: { params: Promise<{ id: stri
   const [task, setTask] = useState<Task | "new" | null>(null);
   const [quick, setQuick] = useState("");
   const { data: t, isLoading } = useQuery({ queryKey: ["planned-trip", id], queryFn: () => plansApi.plannedTrip(id) });
+  const { data: board } = useQuery({ queryKey: ["trip-board", id], queryFn: () => plansApi.tripBoard(id) });
+  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("board");
 
   async function addItem() {
     if (!quick.trim()) return;
@@ -65,7 +74,7 @@ export default function PlannedTripPage({ params }: { params: Promise<{ id: stri
   const pct = t.checklist_total ? Math.round((t.checklist_done / t.checklist_total) * 100) : 0;
 
   return (
-    <main className="max-w-2xl mx-auto px-4 pb-24 pt-8 space-y-8">
+    <main className="max-w-3xl mx-auto px-4 pb-24 pt-8 space-y-8">
       <div>
         <Link href="/plan?tab=calendar" className="inline-flex items-center gap-1 text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest mb-3">
           <ArrowLeft size={12} /> Plan
@@ -130,6 +139,26 @@ export default function PlannedTripPage({ params }: { params: Promise<{ id: stri
         </div>
       </Panel>
 
+      {board && (board.totals.items > 0 || board.totals.planned_km > 0) && <TripBoardStats board={board} />}
+
+      <TabBar tabs={TABS} value={tab} onChange={setTab} />
+
+      {tab === "board" && (
+        <Block title="Board" note="Bookings and to-dos by day; the day's ride comes from the tour's GPX." action={<ImportBoardButton tripId={id} />}>
+          {!board ? <Skeleton h={240} /> : board.totals.items === 0 && !board.days.some((d) => d.ride) ? (
+            <Empty>No cards yet. Import the Notion board (CSV export) or add cards day by day.</Empty>
+          ) : null}
+          {board && <TripBoardView trip={t} board={board} />}
+        </Block>
+      )}
+
+      {tab === "days" && (
+        <Block title="Day by day" note="What you planned next to what happened: the ride, the night's sleep, what you spent.">
+          {!board ? <Skeleton h={240} /> : <TripDaysView trip={t} board={board} />}
+        </Block>
+      )}
+
+      {tab === "checklist" && <>
       <Block title="Checklist" note="Bookings, packing, things to sort before you go.">
         <Panel className="px-4 py-1">
           <div className="divide-y divide-[#18181B]">
@@ -146,7 +175,7 @@ export default function PlannedTripPage({ params }: { params: Promise<{ id: stri
         </Panel>
       </Block>
 
-      <Block title="Day by day" note="One line per day — enough to remember the shape of it.">
+      <Block title="Day titles" note="One line per day — it heads the day's column on the board.">
         <Panel className="px-4 py-1 divide-y divide-[#18181B]">
           {t.days.map((d, i) => <DayLine key={d.date} tripId={id} date={d.date} index={i} initial={d.note} />)}
         </Panel>
@@ -180,6 +209,7 @@ export default function PlannedTripPage({ params }: { params: Promise<{ id: stri
           <Panel className="p-4 text-sm text-[#A1A1AA] whitespace-pre-line">{t.notes}</Panel>
         </Block>
       )}
+      </>}
 
       {editing && <PlannedTripSheet trip={t} onClose={() => { setEditing(false); qc.invalidateQueries({ queryKey: ["planned-trip", id] }); }} />}
       {task && (

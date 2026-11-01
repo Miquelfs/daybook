@@ -22,6 +22,9 @@ GET    /people/{id}          — one person for a year (?year=): calendar, frequ
 GET    /planned-trips        — trips ahead (POST to plan one; GET / PATCH / DELETE /planned-trips/{id})
 PUT    /planned-trips/{id}/days/{date}       — the one-line outline for a day of the trip
 GET    /planned-trips/for-trip/{start}/{end} — the plan a detected trip came from
+GET    /planned-trips/{id}/board             — bookings by day + the ride, sleep and spending of each day
+POST   /planned-trips/{id}/items             — a booking / to-do on the board (PATCH / DELETE /planned-trip-items/{id})
+POST   /planned-trips/{id}/import            — load a Notion board CSV export ({csv})
 GET    /calendar/marks       — ?month=YYYY-MM[&plan=1]: trips, events, achievements, birthdays per day
                                (+ tasks, notes, goal deadlines with plan=1 — Plan → Calendar)
 GET    /birthdays            — everyone with a birthday, soonest first
@@ -45,6 +48,7 @@ from domains.plans import goals as goals_mod
 from domains.plans import habits as habits_mod
 from domains.plans import people as people_mod
 from domains.plans import planned_trips as trips_mod
+from domains.plans import trip_board
 from domains.plans.metrics import METRICS, Ctx, catalog
 from infrastructure.api.db import get_db
 from infrastructure.api.models.plans import (
@@ -363,7 +367,27 @@ class PlannedTripIn(BaseModel):
     end_date: str | None = None
     notes: str | None = None
     budget: float | None = None
+    currency: str | None = None
+    fx_rate: float | None = None
     contact_ids: list[int] | None = None
+
+
+class TripItemIn(BaseModel):
+    name: str | None = None
+    kinds: str | None = None
+    date: str | None = None
+    end_date: str | None = None
+    place: str | None = None
+    price_eur: float | None = None
+    price_local: float | None = None
+    paid_eur: float | None = None
+    booked: bool | None = None
+    notes: str | None = None
+    url: str | None = None
+
+
+class TripImportIn(BaseModel):
+    csv: str
 
 
 class DayNoteIn(BaseModel):
@@ -417,6 +441,55 @@ def set_planned_day(planned_id: int, day: str, body: DayNoteIn, conn: DB):
     if not trip["start_date"] <= d <= trip["end_date"]:
         raise HTTPException(status_code=422, detail="day is outside the trip")
     trips_mod.set_day(conn, planned_id, d, body.note)
+
+
+@router.get("/planned-trips/{planned_id}/board")
+def planned_trip_board(planned_id: int, conn: DB):
+    trip = trips_mod.detail(conn, planned_id, date.today())
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Planned trip not found")
+    with _ctx(conn) as ctx:
+        return trip_board.board(conn, trip, ctx.money(), date.today())
+
+
+def _item_fields(body: TripItemIn, partial: bool) -> dict:
+    fields = body.model_dump(exclude_unset=partial)
+    for f in ("date", "end_date"):
+        if fields.get(f):
+            fields[f] = _iso(fields[f], f)
+    if "name" in fields and not (fields["name"] or "").strip():
+        raise HTTPException(status_code=422, detail="name cannot be empty")
+    return fields
+
+
+@router.post("/planned-trips/{planned_id}/items", status_code=201)
+def add_trip_item(planned_id: int, body: TripItemIn, conn: DB):
+    if trips_mod.get(conn, planned_id, date.today()) is None:
+        raise HTTPException(status_code=404, detail="Planned trip not found")
+    fields = {k: v for k, v in _item_fields(body, False).items() if v is not None}
+    if not fields.get("name"):
+        raise HTTPException(status_code=422, detail="name is required")
+    return {"id": trip_board.save_item(conn, planned_id, fields)}
+
+
+@router.patch("/planned-trip-items/{item_id}", status_code=204)
+def update_trip_item(item_id: int, body: TripItemIn, conn: DB):
+    if conn.execute("SELECT 1 FROM planned_trip_items WHERE id=?", (item_id,)).fetchone() is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    trip_board.save_item(conn, 0, _item_fields(body, True), item_id)
+
+
+@router.delete("/planned-trip-items/{item_id}", status_code=204)
+def delete_trip_item(item_id: int, conn: DB):
+    trip_board.delete_item(conn, item_id)
+
+
+@router.post("/planned-trips/{planned_id}/import")
+def import_trip_board(planned_id: int, body: TripImportIn, conn: DB):
+    try:
+        return trip_board.import_notion_csv(conn, planned_id, body.csv)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.patch("/planned-trips/{planned_id}")

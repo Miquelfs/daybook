@@ -202,6 +202,7 @@ def parse(gpx: str, fallback_name: str | None = None) -> dict:
     return {
         "name": name or fallback_name or "Course",
         "km": round(km, 1), "climb_m": round(ascent), "climb_raw_m": round(raw_ascent),
+        "descent_m": round(_ascent(fixed[::-1])) if has_ele else 0,
         "high_m": round(max(fixed)) if has_ele else None, "has_elevation": has_ele,
         "minutes": minutes, "avg_kmh": round(km / (secs / 3600), 1) if secs else None,
         "tss": estimate_tss(minutes, ascent, km),
@@ -237,3 +238,34 @@ def structure(course: dict, label: str) -> list[dict]:
                       "duration_min": total - t, "zone": "Z2",
                       "cue": f"{course['km']:.0f} km · +{course['climb_m']} m — conversational Z2, keep eating"})
     return steps
+
+
+def daylight(course: dict, day: str) -> dict | None:
+    """Sunrise / sunset (local time at the start) on the day the course is ridden — NOAA approximation, ±2 min."""
+    from datetime import date as _date, datetime, timedelta, timezone
+    if not course.get("start"):
+        return None
+    lat, lon = course["start"]
+    d = _date.fromisoformat(day)
+    try:
+        from zoneinfo import ZoneInfo
+        from domains.locations.tz_lookup import _tf
+        name = _tf.timezone_at(lat=lat, lng=lon)
+        tz = ZoneInfo(name) if name else None
+    except Exception:                               # no timezonefinder → whole hours from the longitude
+        tz = None
+    tz = tz or timezone(timedelta(hours=round(lon / 15)))
+    n = d.timetuple().tm_yday
+    g = 2 * math.pi / 365 * (n - 1)
+    eq = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g)
+                   - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    decl = (0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g) - 0.006758 * math.cos(2 * g)
+            + 0.000907 * math.sin(2 * g) - 0.002697 * math.cos(3 * g) + 0.00148 * math.sin(3 * g))
+    cos_h = (math.cos(math.radians(90.833)) / (math.cos(math.radians(lat)) * math.cos(decl))
+             - math.tan(math.radians(lat)) * math.tan(decl))
+    if not -1 <= cos_h <= 1:
+        return None
+    ha = math.degrees(math.acos(cos_h))
+    midnight = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+    at = lambda mins: (midnight + timedelta(minutes=mins)).astimezone(tz).strftime("%H:%M")
+    return {"sunrise": at(720 - 4 * (lon + ha) - eq), "sunset": at(720 - 4 * (lon - ha) - eq)}

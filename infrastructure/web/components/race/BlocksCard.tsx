@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bike, Plus, Trash2, X } from "lucide-react";
 import { useVisualViewport, sheetViewportStyle } from "@/lib/useVisualViewport";
+import { GradeProfile, loadLabel } from "@/components/training/StageProfile";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -12,7 +13,10 @@ type Block = {
   id: number; kind: string; name: string; start_date: string; end_date: string;
   riding_days: number; done: number; total_km: number; total_climb_m: number; planned_hours: number;
   ride_days?: { session_id: number; date: string; status: string; minutes: number;
-                course: { name: string; km: number; climb_m: number; climb_raw_m: number; tss: number; tunnels: number } | null }[];
+                course: { name: string; km: number; climb_m: number; climb_raw_m: number; tss: number; tunnels: number;
+                          profile?: [number, number][] } | null }[];
+  travel?: { date: string; mode: "z2" | "rest" }[];
+  riding_start?: string;
   projection?: { before?: Snap; after_block?: Snap; after_recovery?: Snap; fitness_gain?: number; block_tss: number } | null;
   recovery?: { level: "provisional" | "light" | "standard" | "deep"; from: string; to: string;
                settled: { on: string; actual_tss: number; planned_tss: number | null; form_end: number | null } | null };
@@ -118,13 +122,14 @@ export function BlocksCard({ goalId }: { goalId: number }) {
                 {b.ride_days && b.ride_days.some((d) => d.course) && (
                   <div className="mt-2 space-y-0.5">
                     {b.ride_days.map((d) => (
-                      <p key={d.session_id} className="text-[11px] tabular-nums flex gap-2">
+                      <div key={d.session_id}>
+                      <p className="text-[11px] tabular-nums flex gap-2">
                         <span className="w-20 shrink-0 text-[#71717A]">{fmt(d.date)}</span>
                         <span className="flex-1 min-w-0 truncate text-[#A1A1AA]">
                           {d.status === "completed" ? "✓ " : ""}{d.course ? `${d.course.name} · ${d.course.km} km · +${d.course.climb_m} m` : "typed in"}
                           {d.course?.tunnels ? " · ⚠ tunnel" : ""}
                         </span>
-                        <span className="shrink-0 text-[#71717A]">{hm(d.minutes)}{d.course ? ` · ${d.course.tss}` : ""}</span>
+                        <span className="shrink-0 text-[#71717A]">{hm(d.minutes)}{d.course ? ` · ${loadLabel(d.course.tss)}` : ""}</span>
                         {d.status !== "completed" && (
                           <label className="shrink-0 text-[#F59E0B] cursor-pointer hover:underline">
                             {replacing === d.session_id ? "…" : d.course ? "replace" : "add route"}
@@ -133,9 +138,14 @@ export function BlocksCard({ goalId }: { goalId: number }) {
                           </label>
                         )}
                       </p>
+                      {d.course?.profile && d.course.profile.length > 2 && (
+                        <div className="ml-[5.5rem] mb-1.5 rounded overflow-hidden"><GradeProfile profile={d.course.profile} compact height={24} /></div>
+                      )}
+                      </div>
                     ))}
                   </div>
                 )}
+                <TravelDays block={b} onSaved={refresh} />
                 {b.recovery && (
                   <p className="text-[11px] text-[#A1A1AA] mt-2">
                     {RECOVERY_TEXT[b.recovery.level]} ({fmt(b.recovery.from)} – {fmt(b.recovery.to)})
@@ -156,6 +166,62 @@ export function BlocksCard({ goalId }: { goalId: number }) {
       {listErr && <p className="text-xs text-[#F87171] mt-2">{listErr}</p>}
       {adding && <AddBlockSheet goalId={goalId} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); refresh(); }} />}
     </section>
+  );
+}
+
+const TRAVEL_MODES = [["plan", "Plan"], ["z2", "Easy Z2"], ["rest", "Rest"]] as const;
+
+/** The days before the riding (flights, arrival, no bike yet): keep the plan, ride an easy Z2, or rest. */
+function TravelDays({ block, onSaved }: { block: Block; onSaved: () => void }) {
+  const first = block.riding_start ?? block.start_date;
+  const before = Array.from({ length: 5 }, (_, i) => addDays(first, i - 5));
+  const riding = new Set((block.ride_days ?? []).map((d) => d.date));
+  const inside = daysBetween(first, block.end_date).filter((d) => !riding.has(d));
+  const [modes, setModes] = useState<Record<string, string>>(
+    () => Object.fromEntries((block.travel ?? []).map((t) => [t.date, t.mode])));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function pick(d: string, mode: string) {
+    const next = { ...modes, [d]: mode };
+    if (mode === "plan") delete next[d];
+    setModes(next); setBusy(true); setErr(null);
+    try {
+      const r = await fetch(`${BASE}/race-plans/blocks/${block.id}/travel`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days: Object.entries(next).map(([date, m]) => ({ date, mode: m })) }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? "Couldn't save");
+      onSaved();
+    } catch (e) { setErr(e instanceof Error ? e.message : "Couldn't save"); }
+    finally { setBusy(false); }
+  }
+  const earliest = Object.keys(modes).filter((d) => d < first).sort()[0];
+  return (
+    <div className="mt-2.5 pt-2.5 border-t border-[#27272A] space-y-1">
+      <p className="text-[9px] uppercase tracking-widest text-[#52525B]">Travel days {busy ? "· saving…" : ""}</p>
+      {[...before, ...inside].map((d) => {
+        const m = modes[d] ?? (d >= first ? "rest" : earliest && d > earliest ? "rest" : "plan");
+        const options = d >= first ? TRAVEL_MODES.slice(1) : TRAVEL_MODES;
+        return (
+          <div key={d} className="flex items-center gap-2 text-[11px]">
+            <span className="w-20 shrink-0 text-[#71717A] tabular-nums">{fmt(d)}</span>
+            <div className="flex gap-1">
+              {options.map(([k, label]) => (
+                <button key={k} onClick={() => pick(d, k)} disabled={busy}
+                  className={`px-2 py-0.5 rounded-full border transition-colors ${m === k
+                    ? "border-[#F59E0B] text-[#F59E0B] bg-[#F59E0B]/10" : "border-[#27272A] text-[#52525B] hover:text-[#A1A1AA]"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      <p className="text-[11px] text-[#71717A]">
+        Easy Z2 = one optional 45-min conversational spin; the plan&apos;s harder sessions step aside from the first travel day on.
+      </p>
+      {err && <p className="text-[11px] text-[#F87171]">{err}</p>}
+    </div>
   );
 }
 

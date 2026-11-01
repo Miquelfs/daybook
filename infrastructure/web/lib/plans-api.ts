@@ -1,6 +1,8 @@
 // Plan ahead — goals (automatic progress), tasks, notes that resurface, birthdays.
 // Client-side only: everything goes through the Next.js /api proxy.
 
+import type { PlanCourse } from "@/lib/api";
+
 /** A key from GET /goals/meta (domains/plans/metrics.py) — "manual", "ride_km", "sleep_hours", … */
 export type GoalMetric = string;
 export type MetricKind = "sum" | "ceiling" | "avg" | "level" | "best" | "streak" | "manual";
@@ -248,6 +250,9 @@ export interface PlannedTrip {
   end_date: string;
   notes: string | null;
   budget: number | null;
+  /** The board's local currency (e.g. NTD) and how many of it make €1. */
+  currency: string | null;
+  fx_rate: number | null;
   adopted_start: string | null;
   adopted_end: string | null;
   nights: number;
@@ -266,7 +271,50 @@ export interface PlannedTripDetail extends PlannedTrip {
              flight_number: string | null; airline: string | null; dep_time: string | null; arr_time: string | null }[];
 }
 
-export type PlannedTripIn = Partial<Pick<PlannedTrip, "name" | "destination" | "start_date" | "end_date" | "notes" | "budget">> & {
+/** A booking / to-do on the trip board (like a card on a Notion board). */
+export interface TripItem {
+  id: number;
+  name: string;
+  kinds: string | null;          // "Flights, Transportation"
+  date: string | null;
+  end_date: string | null;       // a stay's check-out
+  place: string | null;
+  price_eur: number | null;
+  price_local: number | null;    // in the trip's currency
+  paid_eur: number | null;
+  booked: boolean;
+  notes: string | null;
+  url: string | null;
+  cost_eur: number | null;       // € price, else local at the trip's rate, else paid
+}
+export type TripItemIn = Partial<Omit<TripItem, "id" | "cost_eur">>;
+
+/** One day of the board: its cards plus what the rest of the daybook knows about it. */
+export interface TripBoardDay {
+  date: string;
+  note: string | null;
+  items: TripItem[];
+  ride: {
+    planned: { session_id: number; type: string; minutes: number; zone: string; status: string;
+               course: PlanCourse | null } | null;
+    ridden: { activity_id: string; km: number; climb_m: number; minutes: number } | null;
+  } | null;
+  sleep: { hours: number; score: number | null } | null;
+  spend: { name: string; eur: number; category: string | null }[];
+}
+
+export interface TripBoard {
+  before: TripItem[];
+  days: TripBoardDay[];
+  after: TripItem[];
+  totals: {
+    items: number; booked: number; to_book: string[];
+    planned_eur: number; paid_eur: number; spent_eur: number;
+    planned_km: number; ridden_km: number; climb_m: number; sleep_avg_h: number | null;
+  };
+}
+
+export type PlannedTripIn = Partial<Pick<PlannedTrip, "name" | "destination" | "start_date" | "end_date" | "notes" | "budget" | "currency" | "fx_rate">> & {
   contact_ids?: number[];
 };
 
@@ -296,6 +344,13 @@ export const plansApi = {
     req<void>("PUT", `/api/planned-trips/${id}/days/${day}`, { note }),
   planForTrip: (start: string, end: string) =>
     req<PlannedTripDetail | null>("GET", `/api/planned-trips/for-trip/${start}/${end}`),
+  tripBoard: (id: number) => req<TripBoard>("GET", `/api/planned-trips/${id}/board`),
+  addTripItem: (id: number, body: TripItemIn) => req<{ id: number }>("POST", `/api/planned-trips/${id}/items`, body),
+  updateTripItem: (itemId: number, body: TripItemIn) => req<void>("PATCH", `/api/planned-trip-items/${itemId}`, body),
+  deleteTripItem: (itemId: number) => req<void>("DELETE", `/api/planned-trip-items/${itemId}`),
+  importTripBoard: (id: number, csv: string) =>
+    req<{ added: number; updated: number; days_named: number; currency?: string; fx_rate?: number }>(
+      "POST", `/api/planned-trips/${id}/import`, { csv }),
   createPlannedTrip: (body: PlannedTripIn) => req<PlannedTrip>("POST", "/api/planned-trips", body),
   updatePlannedTrip: (id: number, body: PlannedTripIn) => req<PlannedTrip>("PATCH", `/api/planned-trips/${id}`, body),
   deletePlannedTrip: (id: number) => req<void>("DELETE", `/api/planned-trips/${id}`),

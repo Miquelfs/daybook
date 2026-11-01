@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { CourseCard } from "@/components/training/CourseCard";
+import { StageStrip } from "@/components/training/StageProfile";
 import { useFitnessSummary } from "@/components/activity/TrainingImpactCard";
 import type { PlanCourse } from "@/lib/api";
 import { sessionIcon } from "@/lib/sport";
@@ -878,8 +879,9 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
                         <button
                           key={s.id}
                           onClick={() => setSelectedSession(s)}
-                          className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg bg-[#18181B] hover:bg-[#27272A] transition-colors"
+                          className="w-full text-left block px-3 py-2 rounded-lg bg-[#18181B] hover:bg-[#27272A] transition-colors"
                         >
+                          <div className="flex items-center gap-2">
                           <span className="text-sm">{sessionIcon(s.discipline, s.session_type)}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs text-[#A1A1AA] truncate">{s.session_type}</p>
@@ -893,6 +895,8 @@ function GoalCard({ goal, onRefresh }: { goal: RaceGoal; onRefresh: () => void }
                             {s.effective_duration_min}m
                           </span>
                           <span className="text-[#3F3F46] text-xs">›</span>
+                          </div>
+                          {s.course && <div className="mt-1.5"><StageStrip course={s.course} /></div>}
                         </button>
                       ))}
                     </div>

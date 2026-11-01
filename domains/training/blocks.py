@@ -110,9 +110,31 @@ def ensure_courses(conn) -> None:
 def course_for(conn, session_id: int) -> dict | None:
     try:
         r = conn.execute("SELECT course_json FROM session_courses WHERE session_id=?", (session_id,)).fetchone()
-        return json.loads(r[0]) if r else None
+        c = json.loads(r[0]) if r else None
     except (sqlite3.OperationalError, ValueError):
         return None
+    if c and c.get("descent_m") is None and c.get("profile"):    # courses stored before descent was kept
+        c["descent_m"] = max(0, round(c["climb_m"] - (c["profile"][-1][1] - c["profile"][0][1])))
+    return c
+
+
+def stage_of(conn, session_id: int) -> dict | None:
+    """Where a routed tour day sits in its tour: stage n of N and its share of the distance."""
+    s = conn.execute("SELECT goal_id, session_date FROM plan_sessions WHERE id=?", (session_id,)).fetchone()
+    b = block_for(conn, s["session_date"]) if s else None
+    if not b:
+        return None
+    rows = conn.execute(
+        "SELECT p.id, c.course_json FROM plan_sessions p JOIN session_courses c ON c.session_id = p.id "
+        "WHERE p.goal_id=? AND p.session_type LIKE ? AND p.session_date BETWEEN ? AND ? ORDER BY p.session_date",
+        (s["goal_id"], f"Cycling - {b['kind'].title()} day", b["start_date"], b["end_date"])).fetchall()
+    ids = [r["id"] for r in rows]
+    if session_id not in ids:
+        return None
+    kms = [json.loads(r["course_json"]).get("km") or 0 for r in rows]
+    total = sum(kms) or 1
+    return {"n": ids.index(session_id) + 1, "of": len(ids), "block": b["name"], "total_km": round(total),
+            "share_pct": round(kms[ids.index(session_id)] / total * 100)}
 
 
 def estimate_minutes(km: float, climb_m: float) -> int:
@@ -223,8 +245,82 @@ def delete(conn, block_id: int) -> None:
         conn.execute("UPDATE plan_sessions SET status='pending', schedule_note=NULL WHERE id=? AND status='displaced'",
                      (sid,))
     _restore_recovery(conn, ch.get("recovery", []))
+    _undo_travel(conn, ch.get("travel") or {})
     conn.execute("DELETE FROM training_blocks WHERE id=?", (block_id,))
     conn.commit()
+
+
+# ── travel days around the riding: an easy Z2 or nothing ─────────────────────
+
+TRAVEL_TYPE = "Cycling - Travel easy"
+TRAVEL_MAX_BEFORE = 7
+TRAVEL_Z2_MIN = 45
+
+
+def _undo_travel(conn, tr: dict) -> None:
+    for sid in tr.get("sessions", []):
+        conn.execute("DELETE FROM plan_sessions WHERE id=? AND status != 'completed'", (sid,))
+    for sid in tr.get("displaced", []):
+        conn.execute("UPDATE plan_sessions SET status='pending', schedule_note=NULL WHERE id=? AND status='displaced'",
+                     (sid,))
+
+
+def set_travel(conn, block_id: int, days: list[dict]) -> dict:
+    """Travel days of a tour: [{date, mode: 'z2'|'rest'}]. Days before the block (up to a week) pull its
+    start back, so the plan steps aside there too; a 'z2' day gets one short easy ride, a 'rest' day nothing.
+    Replaces any earlier travel days; delete() undoes it with the rest of the block."""
+    ensure_table(conn)
+    b = conn.execute("SELECT * FROM training_blocks WHERE id=?", (block_id,)).fetchone()
+    if not b:
+        raise ValueError("block not found")
+    from domains.training.reflow import _ensure_columns
+    _ensure_columns(conn)
+    ch = json.loads(b["changes_json"] or "{}")
+    old = ch.get("travel") or {}
+    _undo_travel(conn, old)
+    start = old.get("orig_start") or b["start_date"]
+    earliest = (date.fromisoformat(start) - timedelta(days=TRAVEL_MAX_BEFORE)).isoformat()
+    riding = {r[0] for r in conn.execute("SELECT session_date FROM plan_sessions WHERE id IN ({})".format(
+        ",".join("?" * len(ch.get("tour_sessions", [])))), ch.get("tour_sessions", []))}
+    wanted = {}
+    for d in days:
+        if d.get("mode") not in ("z2", "rest"):
+            continue
+        if not (earliest <= d["date"] <= b["end_date"]) or d["date"] in riding:
+            raise ValueError(f"{d['date']} can't be a travel day")
+        wanted[d["date"]] = d["mode"]
+    new_start = min([start, *wanted])
+    tr: dict = {"orig_start": start, "days": [{"date": k, "mode": v} for k, v in sorted(wanted.items())],
+                "displaced": [], "sessions": []}
+    # the plan steps aside on the days the block now also covers
+    for r in conn.execute(
+            "SELECT id, session_date, session_type, discipline, effective_duration_min, duration_min, intensity_zone "
+            "FROM plan_sessions WHERE goal_id=? AND status='pending' AND session_date BETWEEN ? AND ? "
+            "AND lower(session_type) != 'race day'",
+            (b["goal_id"], new_start, (date.fromisoformat(start) - timedelta(days=1)).isoformat())).fetchall():
+        conn.execute("UPDATE plan_sessions SET status='displaced', schedule_note=? WHERE id=?",
+                     (f"Travel: {b['name']}", r["id"]))
+        tr["displaced"].append(r["id"])
+    for d, mode in sorted(wanted.items()):
+        if mode != "z2":
+            continue
+        mins = TRAVEL_Z2_MIN
+        cur = conn.execute(
+            """INSERT INTO plan_sessions (goal_id, session_date, original_date, week_number, session_type, discipline,
+                   duration_min, intensity_zone, is_optional, effective_duration_min, eff_override, status,
+                   structure_json, is_displaced, role, schedule_note)
+               VALUES (?,?,?,?,?, 'cycling', ?, 'Z2', 1, ?, ?, 'pending', ?, 1, 'easy', ?)""",
+            (b["goal_id"], d, d, _week_number_for(conn, b["goal_id"], d), TRAVEL_TYPE, mins, mins, mins,
+             json.dumps([{"kind": "steady", "label": "Easy spin — travel days", "duration_min": mins, "zone": "Z2",
+                          "cue": "Conversational only, nothing harder: legs moving, fresh for the tour. "
+                                 "Skip it if travel gets in the way"}]),
+             f"Travel: {b['name']} — easy Z2 only"))
+        tr["sessions"].append(cur.lastrowid)
+    ch["travel"] = tr
+    conn.execute("UPDATE training_blocks SET start_date=?, changes_json=? WHERE id=?",
+                 (new_start, json.dumps(ch), block_id))
+    conn.commit()
+    return get(conn, block_id)
 
 
 def get(conn, block_id: int) -> dict:
@@ -244,14 +340,18 @@ def _out(conn, b) -> dict:
         c = course_for(conn, s["id"])
         ride_days.append({"session_id": s["id"], "date": s["session_date"], "status": s["status"],
                           "minutes": s["effective_duration_min"],
-                          "course": {k: c[k] for k in ("name", "km", "climb_m", "climb_raw_m", "high_m", "tss", "avg_kmh")}
+                          "course": {k: c.get(k) for k in ("name", "km", "climb_m", "climb_raw_m", "high_m", "tss",
+                                                            "avg_kmh", "profile")}
                           | {"tunnels": len(c["tunnels"]), "climbs": len(c["climbs"])} if c else None})
+    ch = json.loads(b["changes_json"] or "{}")
     return {"id": b["id"], "goal_id": b["goal_id"], "kind": b["kind"], "name": b["name"],
             "start_date": b["start_date"], "end_date": b["end_date"], "days": days, "ride_days": ride_days,
             "riding_days": len(sessions), "done": done,
             "total_km": round(sum(float(d.get("km") or 0) for d in days)),
             "total_climb_m": int(sum(float(d.get("climb_m") or 0) for d in days)),
             "planned_hours": round(sum(s["effective_duration_min"] or 0 for s in sessions) / 60, 1),
+            "travel": (ch.get("travel") or {}).get("days", []),
+            "riding_start": (ch.get("travel") or {}).get("orig_start") or b["start_date"],
             "recovery": _recovery_out(b),
             "projection": projection(conn, b)}
 
