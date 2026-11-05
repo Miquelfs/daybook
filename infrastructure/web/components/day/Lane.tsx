@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, type LucideIcon } from "lucide-react";
 
-// The day-plan section is four lanes — Duty, Training, Learning, Tasks — that all
+// The day-plan section is three lanes — Duty, Training, Tasks — that all
 // open the same way: a line icon, a small grey label, and a quiet link on the right,
 // then one rounded-xl card. Each lane renders its own header so it can disappear
 // when empty. A lane can fold away (`collapsible`); the choice is remembered per device.

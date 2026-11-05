@@ -9,6 +9,9 @@
 # Scheduled nightly by launchd (make backup-pull-install); run by hand with
 #   make backup-pull
 #
+# It also mirrors data/photos/ (the phone uploads live only on the Pi) into
+# $DEST/photos/ — additive, never --delete, so a photo removed on the Pi stays here.
+#
 # Restoring is a deliberate, manual act — never sync these back to the Pi as
 # part of a deploy (see CLAUDE.md: the Pi is the source of truth).
 
@@ -16,6 +19,7 @@ set -euo pipefail
 
 PI_HOST="${DAYBOOK_PI_HOST:-pi@daybook-pi}"
 PI_DIR="${DAYBOOK_PI_BACKUP_DIR:-daybook/data/backups/}"
+PI_PHOTOS="${DAYBOOK_PI_PHOTOS_DIR:-daybook/data/photos/}"
 DEST="${DAYBOOK_BACKUP_DIR:-$HOME/Backups/daybook}"
 KEEP_RECENT=30
 STALE_DAYS=3
@@ -37,22 +41,41 @@ log "Pulling $PI_HOST:$PI_DIR → $DEST"
 
 # Snapshots are immutable (timestamped names), so never re-copy an existing one.
 # Skip in-progress files (.part, hidden temp snapshots) the Pi may be writing.
-pulled="$(rsync -a --ignore-existing --partial --timeout=120 \
-  --exclude='.*' --exclude='*.part' --out-format='%n' \
-  -e "ssh -o BatchMode=yes -o ConnectTimeout=20" \
-  "$PI_HOST:$PI_DIR" "$DEST/")" \
+# An interrupted transfer stays in .rsync-partial/ (resumed next run), never under
+# the snapshot's own name — with plain --partial a dropped link left a truncated
+# file that --ignore-existing then skipped forever.
+SSH="ssh -o BatchMode=yes -o ConnectTimeout=20"
+rsync -a --ignore-existing --partial-dir=.rsync-partial --timeout=120 \
+  --exclude='.*' --exclude='*.part' -e "$SSH" \
+  "$PI_HOST:$PI_DIR" "$DEST/" \
   || fail "Could not pull backups from the Pi (is it reachable over Tailscale?)"
 
-# Check every newly pulled snapshot is a complete gzip.
-while IFS= read -r f; do
-  [[ "$f" == *.db.gz ]] || continue
-  if gzip -t "$DEST/$f" 2>/dev/null; then
+# Check every snapshot not yet known good — not only this run's: a run that died
+# mid-pull used to leave files nobody ever checked. Good ones are listed in
+# .verified; corrupt ones are removed (re-pulled next run while the Pi still has them).
+VERIFIED="$DEST/.verified"
+touch "$VERIFIED"
+for path in "$DEST"/*.db.gz; do
+  [[ -f "$path" ]] || continue
+  f="$(basename "$path")"
+  grep -qxF "$f" "$VERIFIED" && continue
+  if gzip -t "$path" 2>/dev/null; then
+    echo "$f" >> "$VERIFIED"
     log "    Pulled: $f"
   else
     log "    Corrupt snapshot, removing: $f"
-    rm -f "$DEST/$f"
+    rm -f "$path"
   fi
-done <<< "$pulled"
+done
+
+# Photos: additive mirror. A failure here is reported but doesn't skip retention.
+mkdir -p "$DEST/photos"
+if ! rsync -a --partial-dir=.rsync-partial --timeout=120 -e "$SSH" \
+     "$PI_HOST:$PI_PHOTOS" "$DEST/photos/"; then
+  log "ERROR: photo pull failed"
+  notify "Could not pull photos from the Pi"
+fi
+log "    Photos: $(find "$DEST/photos" -type f -not -path '*/.rsync-partial/*' | wc -l | tr -d ' ') files, $(du -sh "$DEST/photos" | cut -f1)"
 
 # Retention + staleness check.
 status=0
@@ -100,6 +123,12 @@ if (( status == 2 )); then
   fail "The Pi hasn't made a new backup in over $STALE_DAYS days — check its backup cron."
 elif (( status != 0 )); then
   fail "Backup retention step failed (exit $status) — see the log."
+fi
+
+# Forget pruned snapshots in the verified list.
+if [[ -s "$VERIFIED" ]]; then
+  while IFS= read -r f; do [[ -f "$DEST/$f" ]] && echo "$f"; done < "$VERIFIED" > "$VERIFIED.tmp"
+  mv "$VERIFIED.tmp" "$VERIFIED"
 fi
 
 log "Done."

@@ -10,7 +10,6 @@ import { LocationSection } from "@/components/LocationSection";
 import { DayPlaces } from "@/components/explore/DayPlaces";
 import { DaySpendSummary } from "@/components/money/DaySpendSummary";
 import { DayDuty } from "@/components/day/DayDuty";
-import { DayLearning } from "@/components/learning/DayLearning";
 import { DayPassengerFlights } from "@/components/DayPassengerFlights";
 import { DayRestaurants } from "@/components/DayRestaurants";
 import { DayBooks } from "@/components/DayBooks";
@@ -103,7 +102,7 @@ export async function DayView({ date }: { date: string }) {
         />
 
         {/* The day's structure — what it holds, lane by lane: tasks, the duty
-            that frames it, training, learning. Each lane hides itself when empty;
+            that frames it, training. Each lane hides itself when empty;
             on a past day they become the record of what happened. */}
         <section>
           {/* "Day plan", not "Today" — the page header already says Today */}
@@ -113,7 +112,6 @@ export async function DayView({ date }: { date: string }) {
             <AheadStrip date={date} isToday={date === localToday} />
             <DayDuty date={date} />
             <DayTraining initialPrescription={trainingDay} date={date} lead={<RecoveryCard date={date} />} />
-            <DayLearning date={date} isToday={date === localToday} />
           </div>
         </section>
 
