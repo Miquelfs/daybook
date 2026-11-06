@@ -225,8 +225,9 @@ NEAR_M = 80
 
 def match_course(conn, name: str | None, points: list) -> dict | None:
     """The course this ride followed: Coll's own name for it, else ≥ 70 % of the ride on its line."""
+    # on a tie (the same road twice) the route that's on Coll wins: it's the one Coll could have followed
     rows = conn.execute("SELECT id, name, polyline FROM coll_courses WHERE status='ready' AND polyline IS NOT NULL "
-                        "ORDER BY id DESC").fetchall()
+                        "ORDER BY on_device DESC, id DESC").fetchall()
     if name and name.strip().lower() not in GENERIC_NAMES:
         for r in rows:
             if r["name"].strip().lower() == name.strip().lower():

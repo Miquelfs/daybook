@@ -200,6 +200,8 @@ export type FuelingLog = {
 };
 
 export type ActivityDetail = Activity & {
+  /** JSON; for a Coll ride: {source: "coll", ride_id, course: {id, name, how} | null, …} */
+  raw_payload?: string | null;
   moving_time_seconds: number | null;
   avg_speed_mps: number | null;
   avg_power_watts: number | null;

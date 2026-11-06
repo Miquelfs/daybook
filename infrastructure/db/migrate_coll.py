@@ -52,6 +52,17 @@ CREATE TABLE IF NOT EXISTS coll_rides (
     received_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 CREATE INDEX IF NOT EXISTS coll_rides_activity ON coll_rides(activity_id);
+
+-- What Coll reported at the end of its last sync (domains/coll/device_state.py)
+CREATE TABLE IF NOT EXISTS coll_device (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    seen_at       TEXT,
+    firmware      TEXT,
+    free_kb       INTEGER,
+    battery_pct   INTEGER,
+    rides_waiting INTEGER,
+    have_json     TEXT                               -- [{id, pack_sha1}] the packs on its flash
+);
 """
 
 

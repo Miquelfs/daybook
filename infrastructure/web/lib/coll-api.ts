@@ -43,8 +43,22 @@ export interface CollCourse {
   created_at: string;
   built_at: string | null;
   /** list only */
-  synced?: boolean;
+  synced?: boolean;                 // offered to Coll at its next sync
   fuel_plan_now?: string | null;
+  /** list only: is it really on Coll? "yes" = Coll reported this exact pack */
+  on_coll?: "yes" | "next sync" | "old version" | "no";
+  /** list only: rides Coll recorded on this route, newest first */
+  rides?: { id: number; activity_id: string | null; status: "activity" | "merged"; date: string | null }[];
+}
+
+/** What Coll reported at the end of its last sync. */
+export interface CollDevice {
+  seen_at: string | null;
+  firmware: string | null;
+  free_kb: number | null;
+  battery_pct: number | null;
+  rides_waiting: number | null;
+  have: { id: number; pack_sha1: string }[];
 }
 
 export interface CollCourseDetail extends Omit<CollCourse, "turns"> {
@@ -139,6 +153,7 @@ export const COLL_KEYS = {
   settings: ["coll", "settings"] as const,
   map: ["coll", "map"] as const,
   rides: ["coll", "rides"] as const,
+  device: ["coll", "device"] as const,
 };
 
 export const collApi = {
@@ -153,6 +168,7 @@ export const collApi = {
   remove: (id: number) => req<void>("DELETE", `/api/coll/courses/${id}`),
   putSettings: (body: { fuel_plan?: string | null; fuel_product_id?: number | null }) =>
     req<CollSettings>("PUT", "/api/coll/settings", body),
+  device: () => req<CollDevice | null>("GET", `${API}/coll/device`),
   mapLines: () => req<CollMapLine[]>("GET", `${API}/coll/courses/map`),
   rides: () => req<CollRide[]>("GET", `${API}/coll/rides`),
   reimportRide: (id: number) => req<CollRide>("POST", `/api/coll/rides/${id}/reimport`),

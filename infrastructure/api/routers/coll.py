@@ -5,6 +5,8 @@ Device (header X-Coll-Token = COLL_TOKEN from .env; no token configured = closed
 GET    /coll/sync                    — settings digest + the courses to keep on the device
 GET    /coll/settings                — profile, HR zones, timezone, fuel plan, race cut-offs
 GET    /coll/courses/{id}/pack       — the .coll bytes; ETag = pack_sha1, 304 on If-None-Match
+POST   /coll/device                  — end of every sync: {have: [{id, pack_sha1}], firmware?, free_kb?,
+                                       battery_pct?, rides_waiting?} → what's really on Coll
 POST   /coll/rides                   — the ride as the body (GPX, or the .clg ride log); header
                                        X-Coll-Ride-Id (start, UTC ISO) → 201 {activity_id, …};
                                        the same id again → 200 {…, duplicate: true}
@@ -12,7 +14,9 @@ POST   /coll/rides                   — the ride as the body (GPX, or the .clg 
 Web (like the rest of the API, no token):
 POST   /coll/courses                 — {name?, gpx, goal_id?, session_id?} → 202, starts a build;
                                        the same GPX again → 200 with the existing course
-GET    /coll/courses                 — list
+GET    /coll/courses                 — list, each with its path: on_coll (yes / next sync / old version /
+                                       no) and the rides that followed it
+GET    /coll/device                  — Coll's last report
 GET    /coll/courses/map             — every built course's line, for the overview map
 GET    /coll/courses/{id}            — detail: summary, turn prompts, polyline, map (turn and
                                        waypoint positions read from the pack)
@@ -38,6 +42,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPExcep
 from pydantic import BaseModel
 
 from domains.coll import courses as C
+from domains.coll import device_state as D
 from domains.coll import fuel as F
 from domains.coll import packread
 from domains.coll import rides as R
@@ -113,6 +118,22 @@ def course_pack(cid: int, conn: DB, if_none_match: Annotated[Optional[str], Head
                     headers={"ETag": f'"{etag}"', "Content-Disposition": f'attachment; filename="course-{cid}.coll"'})
 
 
+class DeviceReport(BaseModel):
+    have: list[dict] = []
+    firmware: Optional[str] = None
+    free_kb: Optional[int] = None
+    battery_pct: Optional[int] = None
+    rides_waiting: Optional[int] = None
+
+
+@router.post("/device", dependencies=[Device])
+def device_report(body: DeviceReport, conn: DB):
+    try:
+        return D.report(conn, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 @router.post("/rides", status_code=201, dependencies=[Device])
 def upload_ride(conn: DB, response: Response, background: BackgroundTasks,
                 body: Annotated[bytes, Body(media_type="application/gpx+xml")],
@@ -173,8 +194,15 @@ def create_course(body: CourseIn, conn: DB, response: Response):
 @router.get("/courses")
 def list_courses(conn: DB):
     on_device = {c["id"]: c for c in C.device_courses(conn, default_fuel=S._setting(conn, S.FUEL_KEY))}
-    return [{**c, "synced": c["id"] in on_device, "fuel_plan_now": (on_device.get(c["id"]) or {}).get("fuel_plan")}
+    dev = D.state(conn)
+    return [{**c, "synced": c["id"] in on_device, "fuel_plan_now": (on_device.get(c["id"]) or {}).get("fuel_plan"),
+             **D.steps(conn, c, set(on_device), dev)}
             for c in C.list_courses(conn)]
+
+
+@router.get("/device")
+def device_state(conn: DB):
+    return D.state(conn)
 
 
 @router.get("/courses/map")

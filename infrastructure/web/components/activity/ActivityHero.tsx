@@ -14,10 +14,12 @@ function split(v: string): { value: string; unit?: string } {
  * and the rest as chips — built from the kit so it reads like the rest of Daybook.
  */
 export function ActivityHero({
-  icon, title, typeLabel, when, source, strava, plan, stats, chips, polyline, newRoad, newKm, children,
+  icon, title, typeLabel, when, source, strava, plan, route, stats, chips, polyline, newRoad, newKm, children,
 }: {
   icon: string; title: string; typeLabel: string; color?: string; when: string; source: string | null;
   strava?: boolean; plan?: { label: string; href: string } | null;
+  /** the Coll route this ride followed */
+  route?: { label: string; href: string } | null;
   stats: HeroStat[]; chips: (string | null | false | undefined)[];
   polyline?: string | null; newRoad?: string[]; newKm?: number | null;
   children?: React.ReactNode;
@@ -52,6 +54,7 @@ export function ActivityHero({
         <div className="flex flex-wrap gap-1.5 mt-3">
           <Chip><span className="capitalize">{typeLabel}</span></Chip>
           {plan && <Chip accent href={plan.href}>✓ {plan.label}</Chip>}
+          {route && <Chip href={route.href}>Route · {route.label}</Chip>}
         </div>
 
         {shown.length > 0 && (

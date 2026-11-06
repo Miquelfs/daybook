@@ -567,6 +567,38 @@ class Rides(unittest.TestCase):
         self.assertEqual(R.calories(3600, 140, 700, {}), 700)
 
 
+class RoutePath(unittest.TestCase):
+    """imported → converted → on Coll (as Coll reports it) → ridden"""
+
+    def test_on_coll_only_when_coll_says_so(self):
+        from domains.coll import device_state as D
+        c = rides_db()
+        cache = str(tmpdir())
+        seed_cache(cache)
+        try:
+            up, _ = C.create(c, "Inca loop", GPX)
+            off, _ = C.create(c, "Spare", ride_gpx(5))
+            while C.build_next(c, cache, log=lambda m: None) is not None:
+                pass
+        finally:
+            shutil.rmtree(cache, ignore_errors=True)
+        C.update(c, off["id"], {"on_device": False})
+        course = C.get(c, up["id"])
+        listed = {x["id"] for x in C.device_courses(c)}
+        self.assertEqual(D.steps(c, course, listed, D.state(c))["on_coll"], "next sync")     # offered, not taken
+        D.report(c, {"have": [{"id": up["id"], "pack_sha1": "an older build"}], "battery_pct": 81})
+        self.assertEqual(D.steps(c, course, listed, D.state(c))["on_coll"], "old version")
+        dev = D.report(c, {"have": [{"id": up["id"], "pack_sha1": course["pack_sha1"]}], "firmware": "0.1"})
+        self.assertEqual((dev["firmware"], dev["battery_pct"]), ("0.1", None))
+        self.assertEqual(D.steps(c, course, listed, dev)["on_coll"], "yes")
+        self.assertEqual(D.steps(c, C.get(c, off["id"]), listed, dev)["on_coll"], "no")
+        r, _ = R.ingest(c, coll_ride(), "x", "Europe/Madrid")                              # rides it
+        self.assertEqual(D.steps(c, course, listed, dev)["rides"],
+                         [{"id": r["id"], "activity_id": r["activity_id"], "status": "activity", "date": "2026-12-05"}])
+        with self.assertRaises(ValueError):
+            D.report(c, {"have": [{"id": "x"}]})
+
+
 class Token(unittest.TestCase):
     def test_closed_without_a_token(self):
         self.assertFalse(S.token_ok("anything", None))

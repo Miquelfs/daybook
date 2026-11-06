@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, RefreshCw, Trash2, Upload } from "lucide-react";
@@ -18,6 +18,45 @@ interface Goal { id: number; name: string; race_date: string; status: string }
 
 function fmtDate(d: string) {
   return new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
+
+function ago(iso: string) {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 2) return "just now";
+  if (m < 90) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  return h < 36 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
+}
+
+/** The route's path: imported → converted for Coll → on Coll → ridden. */
+function Path({ c }: { c: CollCourse }) {
+  const ridden = c.rides?.[0];
+  const steps: { label: string; state: "done" | "now" | "todo" | "bad" }[] = [
+    { label: "Imported", state: "done" },
+    c.status === "ready" ? { label: "Converted", state: "done" }
+      : c.status === "failed" ? { label: "Conversion failed", state: "bad" }
+      : { label: c.status === "building" ? "Converting…" : "Waiting to convert", state: "now" },
+    c.on_coll === "yes" ? { label: "On Coll", state: "done" }
+      : c.on_coll === "next sync" ? { label: "Next sync", state: c.status === "ready" ? "now" : "todo" }
+      : c.on_coll === "old version" ? { label: "Old version on Coll", state: "now" }
+      : { label: c.on_device ? "Not yet on Coll" : "Off Coll", state: "todo" },
+    ridden ? { label: `Ridden ${ridden.date ? fmtDate(ridden.date) : ""}`.trim(), state: "done" } : { label: "Ride it", state: "todo" },
+  ];
+  const tone = { done: "text-[#A1A1AA]", now: "text-[#F59E0B]", todo: "text-[#52525B]", bad: "text-rose-400" };
+  return (
+    <p className="text-[11px] mt-1 flex flex-wrap items-center gap-x-1.5">
+      {steps.map((st, i) => (
+        <span key={i} className={tone[st.state]}>
+          {i > 0 && <span className="text-[#3F3F46] mr-1.5">→</span>}
+          {st.state === "done" ? "✓ " : ""}{st.label}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+function routeDate(c: CollCourse): string | null {
+  return c.session_date ?? null;
 }
 
 function statusLine(c: CollCourse): React.ReactNode {
@@ -43,6 +82,7 @@ export function CollTab() {
   const { data: settings } = useQuery({ queryKey: COLL_KEYS.settings, queryFn: collApi.settings });
   const { data: lines } = useQuery({ queryKey: COLL_KEYS.map, queryFn: collApi.mapLines });
   const { data: rides } = useQuery({ queryKey: COLL_KEYS.rides, queryFn: collApi.rides });
+  const { data: device } = useQuery({ queryKey: COLL_KEYS.device, queryFn: collApi.device });
   const { data: goals } = useQuery<Goal[]>({
     queryKey: ["race-goals"], queryFn: () => fetch(`${API}/race-plans/goals`).then((r) => r.json()),
   });
@@ -50,6 +90,27 @@ export function CollTab() {
   const [msg, setMsg] = useState<string | null>(null);
   const [raceGoal, setRaceGoal] = useState<number | "">("");
   const file = useRef<HTMLInputElement>(null);
+  const [showPast, setShowPast] = useState(false);
+
+  const scrollTo = useRef<number | null>(null);
+  const pick = (id: number) => {
+    setOpen(id);
+    scrollTo.current = id;
+  };
+  useEffect(() => {          // after the list renders (also on a deep link, before the data is in)
+    const id = scrollTo.current;
+    const el = id != null ? document.getElementById(`coll-course-${id}`) : null;
+    if (el) {
+      scrollTo.current = null;
+      setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    }
+  });
+
+  // /omyra?tab=coll&course=7 (e.g. from a ride's "Route" chip) opens that route
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.search).get("course"));
+    if (id) pick(id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["coll"] });
@@ -74,16 +135,15 @@ export function CollTab() {
 
   if (!courses || !settings) return <Skeleton h={320} />;
 
-  const onColl = courses.filter((c) => c.synced);
-  const planned = courses.filter((c) => c.auto);
-  const uploads = courses.filter((c) => !c.auto);
-  const next = onColl.filter((c) => c.session_date).sort((a, b) => (a.session_date! < b.session_date! ? -1 : 1))[0];
+  const onColl = courses.filter((c) => c.on_coll === "yes");
+  const waiting = courses.filter((c) => c.on_coll === "next sync" || c.on_coll === "old version");
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  // dated routes first (soonest first), then undated uploads; past planned days tucked away
+  const sorted = [...courses].sort((a, b) => (routeDate(a) ?? "9999").localeCompare(routeDate(b) ?? "9999") || b.id - a.id);
+  const past = sorted.filter((c) => routeDate(c) && routeDate(c)! < yesterday);
+  const current = sorted.filter((c) => !past.includes(c));
+  const next = current.find((c) => routeDate(c));
   const activeGoals = (goals ?? []).filter((g) => g.status === "active");
-
-  const pick = (id: number) => {
-    setOpen(id);
-    setTimeout(() => document.getElementById(`coll-course-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-  };
 
   const list = (items: CollCourse[]) => (
     <Panel className="divide-y divide-[#18181B]">
@@ -97,14 +157,11 @@ export function CollTab() {
                 {c.session_date && <span className="text-[#71717A] font-normal"> · {fmtDate(c.session_date)}</span>}
               </p>
               <p className="text-xs text-[#71717A] mt-0.5 truncate">{statusLine(c)}</p>
-              {c.synced && c.fuel_plan_now && <p className="text-xs text-[#52525B] mt-0.5">Fuel {c.fuel_plan_now}</p>}
+              <Path c={c} />
             </div>
-            <span className={`text-[10px] uppercase tracking-widest mt-1 ${c.synced ? "text-[#F59E0B]" : "text-[#52525B]"}`}>
-              {c.synced ? "on Coll" : c.on_device ? (c.status === "ready" ? "later" : "") : "off"}
-            </span>
             {open === c.id ? <ChevronUp size={14} className="text-[#52525B] mt-1" /> : <ChevronDown size={14} className="text-[#52525B] mt-1" />}
           </button>
-          {open === c.id && <CourseDetail id={c.id} settings={settings} onChange={refresh} onGone={() => { setOpen(null); refresh(); }} />}
+          {open === c.id && <CourseDetail id={c.id} rides={c.rides ?? []} settings={settings} onChange={refresh} onGone={() => { setOpen(null); refresh(); }} />}
         </div>
       ))}
     </Panel>
@@ -112,8 +169,15 @@ export function CollTab() {
 
   return (
     <div className="space-y-8">
-      <Hero eyebrow="On Coll" value={onColl.length} unit={onColl.length === 1 ? "course" : "courses"}
-            sub={next ? <>Next: {next.name} · {fmtDate(next.session_date!)}</> : "Routed sessions land here on their own"}>
+      <Hero eyebrow="On Coll" value={onColl.length} unit={onColl.length === 1 ? "route" : "routes"}
+            sub={<>
+              {device?.seen_at ? `Coll synced ${ago(device.seen_at)}` : "Coll hasn't synced yet"}
+              {waiting.length > 0 && ` · ${waiting.length} waiting for the next sync`}
+              {device?.battery_pct != null && ` · battery ${device.battery_pct}%`}
+              {device?.free_kb != null && ` · ${Math.round(device.free_kb / 1024)} MB free`}
+              {device?.firmware && ` · ${device.firmware}`}
+              {next && <> · next ride {next.name}, {fmtDate(routeDate(next)!)}</>}
+            </>}>
         {!settings.token_configured && (
           <p className="text-xs text-rose-400 mt-3">COLL_TOKEN isn&apos;t set in the Pi&apos;s .env — Coll can&apos;t sync yet.</p>
         )}
@@ -125,22 +189,18 @@ export function CollTab() {
         </Block>
       )}
 
-      <Block title="Planned rides"
-             note="Every session with a GPX route becomes a course with its own fuel plan. Coll keeps yesterday to three weeks ahead.">
-        {planned.length ? list(planned) : <Empty>No routed sessions yet — add a GPX to a tour day or a ride in the plan.</Empty>}
-      </Block>
-
-      <Block title="Uploaded courses" note="Anything else: a race course, a loop from home. Stays on Coll until switched off."
+      <Block title="Routes"
+             note="Import a GPX (or give a planned day a route in the plan) → Daybook converts it for Coll → Coll takes it at its next sync at home → the ride comes back here."
              action={
                <button onClick={() => file.current?.click()} className={`${small} text-[#F59E0B] hover:text-[#F59E0B]`}>
-                 <Upload size={13} />GPX
+                 <Upload size={13} />Import GPX
                </button>
              }>
         <input ref={file} type="file" accept=".gpx,application/gpx+xml" multiple className="hidden"
                onChange={(e) => upload(e.target.files)} />
         {activeGoals.length > 0 && (
           <label className="flex items-center gap-2 text-xs text-[#71717A] mb-3">
-            Upload as the course of
+            Import as the course of
             <select value={raceGoal} onChange={(e) => setRaceGoal(e.target.value ? Number(e.target.value) : "")}
                     className="bg-[#18181B] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-[#A1A1AA]">
               <option value="">no race</option>
@@ -149,7 +209,15 @@ export function CollTab() {
           </label>
         )}
         {msg && <p className="text-xs text-[#71717A] mb-3">{msg}</p>}
-        {uploads.length ? list(uploads) : <Empty>No uploads.</Empty>}
+        {current.length ? list(current) : <Empty>No routes yet — import a GPX, or add one to a ride in the plan.</Empty>}
+        {past.length > 0 && (
+          <div className="mt-3">
+            <button onClick={() => setShowPast(!showPast)} className={small}>
+              {showPast ? <ChevronUp size={12} /> : <ChevronDown size={12} />}Past planned days ({past.length})
+            </button>
+            {(showPast || past.some((c) => c.id === open)) && <div className="mt-2">{list(past)}</div>}
+          </div>
+        )}
       </Block>
 
       <RidesBlock rides={rides ?? []} onChange={refresh} />
@@ -159,8 +227,8 @@ export function CollTab() {
   );
 }
 
-function CourseDetail({ id, settings, onChange, onGone }: {
-  id: number; settings: CollSettings; onChange: () => void; onGone: () => void;
+function CourseDetail({ id, rides, settings, onChange, onGone }: {
+  id: number; rides: NonNullable<CollCourse["rides"]>; settings: CollSettings; onChange: () => void; onGone: () => void;
 }) {
   const qc = useQueryClient();
   const { data: c } = useQuery({ queryKey: COLL_KEYS.course(id), queryFn: () => collApi.course(id) });
@@ -201,6 +269,20 @@ function CourseDetail({ id, settings, onChange, onGone }: {
       {c.status === "ready" && c.polyline && (
         <CollMap lines={mapLine} selected={c.id}
                  pack={c.map} turns={c.turns} focus={focus} height="340px" />
+      )}
+
+      {rides.length > 0 && (
+        <p className="text-xs text-[#71717A]">
+          Ridden:{" "}
+          {rides.map((r, i) => (
+            <span key={r.id}>
+              {i > 0 && " · "}
+              {r.activity_id ? <Link href={`/activity/${r.activity_id}`} className="underline hover:text-[#A1A1AA]">
+                {r.date ? fmtDate(r.date) : "ride"}</Link> : "ride"}
+              {r.status === "merged" && " (the watch's activity)"}
+            </span>
+          ))}
+        </p>
       )}
 
       {c.session_id && (

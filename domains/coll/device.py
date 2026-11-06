@@ -10,6 +10,9 @@ Pretend to be Coll: run the device's sync against Daybook, from the Mac, before 
   4. POST /coll/rides                each ride file given (.gpx from Coll / the simulator, or a .clg
                                      log) not sent before, with X-Coll-Ride-Id = its start time
 
+  5. POST /coll/device               what it now holds (pack ids + sha1), firmware, free space,
+                                     rides still waiting — so Daybook shows a route as really on Coll
+
 Its "flash" is data/coll-device/ (packs, settings.json, sent.json), so a second run downloads
 nothing and uploads nothing, as on the device.
 
@@ -190,6 +193,19 @@ def run(db: Daybook, rides: list[str], flash: Path) -> int:
         else:
             print(f"  ride {rid}  !! {code} {r}")
             problems += 1
+
+    have = [{"id": int(f.stem), "pack_sha1": hashlib.sha1(f.read_bytes()).hexdigest()} for f in packs.glob("*.coll")]
+    used = sum(f.stat().st_size for f in flash.rglob("*") if f.is_file())
+    code, rep = db.json("POST", "/coll/device", body=json.dumps({
+        "have": have, "firmware": "emulator (domains/coll/device.py)",
+        "free_kb": max(0, (12 * 1024 * 1024 - used) // 1024),            # ~12 MB files area on the XIAO
+        "rides_waiting": sum(1 for p in files if ride_id(p, p.read_bytes()) not in sent),
+    }).encode(), headers={"Content-Type": "application/json"})
+    if code == 200:
+        print(f"report        ↑ holds {len(have)} pack(s) · Daybook marks them as on Coll")
+    else:
+        print(f"report        !! {code} {rep}")
+        problems += 1
 
     print("OK — everything Coll needs works" if not problems else f"{problems} problem(s)")
     return problems

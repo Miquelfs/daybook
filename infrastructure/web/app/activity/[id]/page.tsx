@@ -21,6 +21,17 @@ import { FitFileCard } from "@/components/activity/FitFileCard";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
 import { ColSign, hms, ordinal } from "@/components/training/ColSign";
 
+/** A ride Coll recorded on one of its routes → that route on the Coll tab. */
+function collRoute(a: ActivityDetail): { label: string; href: string } | null {
+  if (a.source !== "coll" || !a.raw_payload) return null;
+  try {
+    const c = JSON.parse(a.raw_payload)?.course;
+    return c?.id ? { label: c.name, href: `/omyra?tab=coll&course=${c.id}` } : null;
+  } catch {
+    return null;
+  }
+}
+
 interface Props {
   params: Promise<{ id: string }>;
 }
@@ -283,6 +294,7 @@ export default async function ActivityPage({ params }: Props) {
           activity.start_time ? ` · ${activity.start_time.slice(11, 16)}` : ""}`}
         source={activity.source}
         strava={!!activity.strava_id}
+        route={collRoute(activity)}
         plan={activity.plan_session ? {
           label: `${activity.plan_session.session_type.replace(/^(Cycling|Running|Swimming|Strength) - /, "")} · week ${activity.plan_session.week_number}`,
           href: `/day/${date}`,

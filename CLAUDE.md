@@ -118,7 +118,7 @@ the firmware). Course builds run in their own process (`python -m domains.coll.w
 endpoints need `COLL_TOKEN` in the Pi's `.env` (not synced by deploy — `.env` is excluded). Rides Coll uploads
 (`POST /coll/rides`, GPX or `.clg`; `domains/coll/rides.py`, `collog.py` vendored from `ciclocomputer/tools/`) become
 `source='coll'` activities; when the watch recorded the same ride, the Garmin activity wins (`reconcile` runs after the
-Garmin sync). `make coll-device RIDES=…` on the Mac plays the device's sync against the Pi — use it to test end to end.
+Garmin sync). Coll reports what it holds at the end of each sync (`POST /coll/device`), so the Coll tab shows each route's path: imported → converted → on Coll → ridden. `make coll-device RIDES=…` on the Mac plays the device's sync against the Pi — use it to test end to end.
 
 ## Key Directories
 
