@@ -16,7 +16,7 @@ from domains.coll import packread
 from domains.coll import rides as R
 from domains.coll.coursepack import osm
 from domains.coll.coursepack import gpx as G
-from infrastructure.db.migrate_coll import SCHEMA
+from infrastructure.db.migrate_coll import migrate as migrate_coll
 from tests.helpers import tmpdir
 
 # A junction near Inca: the course rides east on Ma-1 for ~430 m, then turns left (north)
@@ -88,7 +88,7 @@ def db() -> sqlite3.Connection:
                                     zones_json TEXT NOT NULL, PRIMARY KEY (valid_from, sport));
         CREATE TABLE race_nutrition_plans (goal_id INTEGER PRIMARY KEY, plan_json TEXT NOT NULL);
     """)
-    c.executescript(SCHEMA)
+    migrate_coll(c)
     return c
 
 
@@ -636,6 +636,287 @@ class Brief(unittest.TestCase):
         self.assertEqual(b["date"], "2026-12-06")
         self.assertIn("sunset", b["daylight"])
         self.assertEqual(b["along"], [])                                  # not converted yet: no pack
+
+
+# ── a 30 km route with a climb, ridden: the review, the learning, the weather ─────────────
+
+ROUTE_LAT, ROUTE_LON0 = 39.70, 2.80
+M_PER_DEG_LON = 111_320 * __import__("math").cos(__import__("math").radians(ROUTE_LAT))
+
+
+def _route_ele(km: float) -> float:
+    """flat to km 10, up 300 m to km 15 (6 %), down to km 20, flat to km 30"""
+    if km <= 10:
+        return 100.0
+    if km <= 15:
+        return 100 + (km - 10) * 60
+    if km <= 20:
+        return 400 - (km - 15) * 60
+    return 100.0
+
+
+def _route_pt(km: float) -> tuple[float, float]:
+    return ROUTE_LAT, ROUTE_LON0 + km * 1000 / M_PER_DEG_LON
+
+
+def route_gpx(name="Test col") -> str:
+    pts = "".join(f'<trkpt lat="{_route_pt(k / 20)[0]:.6f}" lon="{_route_pt(k / 20)[1]:.6f}"><ele>{_route_ele(k / 20):.1f}</ele></trkpt>'
+                  for k in range(601))
+    return ('<?xml version="1.0"?><gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">'
+            f'<trk><name>{name}</name><trkseg>{pts}</trkseg></trk></gpx>')
+
+
+def _speed_kmh(km: float) -> float:
+    return 12.0 if 10 < km <= 15 else 40.0 if 15 < km <= 20 else 30.0
+
+
+def route_ride_log(start=START, name="Test col", fuel_at_timer=(1200, 3000), stop_at_km=10.0, stop_s=300) -> bytes:
+    """Coll's .clg of the route: 30 / 12 / 40 / 30 km/h, a 5 min stop at km 10, fuel presses at those timer seconds."""
+    b = bytearray(b"CLG1" + struct.pack("<qH", start, len(name.encode())) + name.encode())
+    km, t, timer, stopped = 0.0, 0, 0, False
+    while km < 30.0:
+        if not stopped and km >= stop_at_km:
+            t += stop_s
+            stopped = True
+            flags = 1 | 4
+        else:
+            flags = 1
+        if timer in fuel_at_timer:
+            flags |= 8                                   # kFuel, item 0
+        la, lo = _route_pt(km)
+        v = _speed_kmh(km)
+        hr = 160 if 10 < km <= 15 else 130
+        b += struct.pack("<IiiiHBBHBB", t, round(la * 1e7), round(lo * 1e7), round(_route_ele(km) * 100),
+                         round(v / 3.6 * 100), hr, 85, 0xFFFF, flags, 9)
+        km += v / 3600
+        t += 1
+        timer += 1
+    return bytes(b)
+
+
+def ready_route(c, gpx=None, name="Test col", fuel_plan="Gel:20:25"):
+    from domains.training import gpx_course
+    gpx = gpx or route_gpx(name)
+    up, _ = C.create(c, name, gpx)
+    c.execute("UPDATE coll_courses SET status='ready', polyline=?, summary_json=?, fuel_plan=? WHERE id=?",
+              (gpx_course.parse(gpx)["polyline"], json.dumps({"km": 30.0}), fuel_plan, up["id"]))
+    c.commit()
+    return up["id"]
+
+
+class Review(unittest.TestCase):
+    """A ride of a route against its plan."""
+
+    def setUp(self):
+        self.c = rides_db()
+        self.cid = ready_route(self.c)
+
+    def test_fuel_reminder_by_reminder(self):
+        from domains.coll import review as RV
+        f = RV.fuel("Gel:20:25,Drink:15", [{"timer": 1200, "item": 0}, {"timer": 3000, "item": 0},
+                                            {"timer": 900, "item": 1}], 72 * 60)
+        gel, drink = f["items"]
+        self.assertEqual((gel["taken"], gel["expected"], gel["on_time"], gel["late"], gel["avg_late_min"]), (2, 3, 1, 1, 10))
+        self.assertEqual(gel["overdue_at_end_min"], 2)              # due at 70 min, never taken
+        self.assertEqual((drink["taken"], drink["expected"], drink["overdue_at_end_min"]), (1, 4, 42))
+        self.assertEqual((f["carbs_g"], f["planned_carbs_g"]), (50, 75))
+        self.assertEqual(f["carbs_g_h"], 42)
+        self.assertIn({"item": "Gel", "due_min": 70, "taken_min": None, "late_min": None}, f["timeline"])
+        self.assertIsNone(RV.fuel(None, [], 3600))
+
+    def test_a_ride_against_its_route(self):
+        from domains.coll import review as RV
+        ride, _ = R.ingest(self.c, route_ride_log(), "r1", "Europe/Madrid")
+        self.assertEqual(ride["course_id"], self.cid)
+        self.assertEqual(ride["summary"]["fuel_plan"], "Gel:20:25")
+        self.assertEqual([e["timer"] for e in ride["summary"]["fuel_taken"]], [1200, 3000])
+        rv = RV.store(self.c, ride["activity_id"], self.cid)
+        self.assertAlmostEqual(rv["covered_km"], 30, delta=1)
+        self.assertAlmostEqual(rv["moving_min"], 72, delta=3)        # 20 + 25 + 7.5 + 20
+        self.assertAlmostEqual(rv["stopped_min"], 5, delta=1)
+        self.assertGreater(rv["predicted_min"], rv["moving_min"])   # the touring model is slower than this rider
+        self.assertLess(rv["delta_min"], 0)
+        self.assertEqual([s["to_km"] for s in rv["sections"]], [15.0, 25.0, 30.0])
+        self.assertTrue(all(s["ridden"] for s in rv["sections"]))
+        up = rv["climbs"][0]
+        self.assertAlmostEqual(up["moving_min"], 25, delta=2)
+        self.assertAlmostEqual(up["vam"], 720, delta=60)            # 300 m in 25 min
+        self.assertEqual(up["avg_hr"], 160)
+        self.assertEqual((rv["fuel"]["source"], rv["fuel"]["items"][0]["taken"]), ("coll", 2))
+        got = RV.get(self.c, ride["activity_id"])
+        self.assertTrue(got["climbs"][0]["is_best"])
+        self.assertEqual(got["rides_of_route"], 1)
+        self.assertEqual(RV.rides(self.c, self.cid)[0]["delta_min"], rv["delta_min"])
+
+    def test_the_next_brief_learns_from_it(self):
+        from domains.coll import brief as B
+        from domains.coll import review as RV
+        ride, _ = R.ingest(self.c, route_ride_log(), "r1", "Europe/Madrid")
+        RV.store(self.c, ride["activity_id"], self.cid)
+        self.assertIsNone(B.learned(self.c, date(2026, 12, 5)))      # not before the ride itself
+        lr = B.learned(self.c, date(2026, 12, 6))
+        self.assertEqual((lr["rides"], lr["factor"]), (1, 1.2))     # much faster than predicted: capped at +20 %
+        p = B.pace(self.c, date(2026, 12, 6))
+        self.assertEqual(p["kmh"], round(p["base_kmh"] * 1.2, 1))
+
+    def test_the_watch_ride_of_the_route_is_found(self):
+        from domains.coll import review as RV
+        ride, _ = R.ingest(self.c, route_ride_log(), "r1", "Europe/Madrid")
+        aid = ride["activity_id"]
+        self.c.executemany("INSERT INTO days (date) VALUES (?)", [("2026-12-20",), ("2026-12-21",)])
+        self.c.execute("""INSERT INTO activities (id, date, source, activity_type, name, start_time, duration_seconds,
+                              moving_time_seconds, distance_meters, polyline, raw_payload)
+                          SELECT 'g1', '2026-12-20', 'garmin', 'road_biking', 'Morning ride', '2026-12-20 10:00:00',
+                                 duration_seconds, moving_time_seconds, distance_meters, polyline, '{}'
+                          FROM activities WHERE id=?""", (aid,))
+        self.c.execute("INSERT INTO activity_streams SELECT 'g1', stream_type, data_json FROM activity_streams WHERE activity_id=?",
+                       (aid,))
+        self.c.execute("""INSERT INTO activities (id, date, source, activity_type, name, polyline, raw_payload)
+                          VALUES ('g2', '2026-12-21', 'garmin', 'cycling', 'Elsewhere', ?, '{}')""",
+                       (__import__("domains.health.geo", fromlist=["encode"]).encode([(41.0, 2.0), (41.01, 2.01)]),))
+        self.c.commit()
+        RV.scan(self.c, days=3650)
+        rows = dict(self.c.execute("SELECT activity_id, course_id FROM coll_reviews").fetchall())
+        self.assertEqual(rows["g1"], self.cid)
+        self.assertEqual(rows[aid], self.cid)
+        self.assertIsNone(rows["g2"])                                # looked at, no route
+        self.assertEqual(len(RV.rides(self.c, self.cid)), 2)
+
+
+class Weather(unittest.TestCase):
+    """The forecast along the route at the time you're there."""
+
+    def setUp(self):
+        from domains.coll import brief as B
+        self.c = rides_db()
+        self.cid = ready_route(self.c)
+        self.day = date.today().isoformat()
+        self.course = B.load(self.c, self.cid)
+        self.br = B.build(self.c, {**self.course, "session_date": self.day}, None)
+
+    def fake(self, wind_from=90.0, rain_from_hour=None, temp=15.0):
+        def fetch(points, day):
+            hours = [f"{day}T{h:02d}:00" for h in range(24)]
+            return [{"time": hours, "temperature_2m": [temp - p["ele"] / 150 for _ in hours],
+                     "precipitation_probability": [80 if rain_from_hour is not None and h >= rain_from_hour else 5
+                                                   for h in range(24)],
+                     "precipitation": [0.0] * 24, "wind_speed_10m": [30.0] * 24,
+                     "wind_direction_10m": [wind_from] * 24, "wind_gusts_10m": [45.0] * 24} for p in points]
+        return fetch
+
+    def test_a_headwind_costs_time(self):
+        from domains.coll import weather as W
+        w = W.for_course(self.c, {**self.course, "start_time": "08:00"}, self.br, "UTC", fetch=self.fake(90))   # from the east
+        self.assertEqual(w["status"], "ok")
+        self.assertGreater(w["wind_min"], 5)
+        self.assertEqual((w["headwind"][0]["from_km"], w["headwind"][0]["to_km"]), (0, 30))
+        self.assertIn("headwind km 0-30", w["line"])
+        self.assertLess(w["summits"][0]["temp"], w["temp_max"])      # colder at the top
+        tail = W.along(self.c, {**self.course}, self.br, W.raw(self.c, self.course, self.br, refresh=True,
+                                                                 fetch=self.fake(270))[0], "08:00", "UTC")
+        self.assertLess(tail["wind_min"], 0)
+        self.assertTrue(tail["tailwind"])
+
+    def test_rain_and_the_line_coll_shows(self):
+        from domains.coll import weather as W
+        w = W.for_course(self.c, self.course, self.br, "UTC", fetch=self.fake(0, rain_from_hour=9))
+        self.assertIsNotNone(w["rain"])
+        self.assertGreater(w["rain"]["from_km"], 0)
+        self.assertIn("rain from km", w["line"])
+        self.assertEqual(self.c.execute("SELECT line FROM coll_weather WHERE course_id=?", (self.cid,)).fetchone()[0], w["line"])
+        self.assertLessEqual(len(w["line"]), 64)
+
+    def test_only_inside_the_forecast(self):
+        from domains.coll import weather as W
+        from datetime import timedelta
+        far = {**self.br, "date": (date.today() + timedelta(days=40)).isoformat()}
+        w = W.for_course(self.c, self.course, far, "UTC", fetch=self.fake())
+        self.assertEqual(w["status"], "too_far")
+        self.assertIn("available_from", w)
+        self.assertEqual(W.for_course(self.c, self.course, {**self.br, "date": None}, "UTC")["status"], "no_date")
+
+        def down(points, day):
+            raise OSError("offline")
+        self.assertEqual(W.for_course(self.c, self.course, self.br, "UTC", fetch=down)["status"], "unavailable")
+        W.for_course(self.c, self.course, self.br, "UTC", fetch=self.fake())
+        self.assertEqual(W.for_course(self.c, self.course, self.br, "UTC", refresh=True, fetch=down)["status"], "stale")
+
+    def test_wind_physics(self):
+        from domains.coll import weather as W
+        v0 = 30 / 3.6
+        self.assertLess(W.speed_with_wind(v0, 0, 5, 84), v0)
+        self.assertGreater(W.speed_with_wind(v0, 0, -5, 84), v0)
+        climb = 12 / 3.6
+        self.assertGreater(W.speed_with_wind(climb, 6, 5, 84) / climb, W.speed_with_wind(v0, 0, 5, 84) / v0)  # hurts less uphill
+        self.assertEqual(W.speed_with_wind(v0, 0, 0.1, 84), v0)
+
+    def test_the_brief_takes_the_wind(self):
+        from domains.coll import weather as W
+        w = W.for_course(self.c, self.course, self.br, "UTC", fetch=self.fake(90))
+        br = dict(self.br)
+        W.apply(br, w)
+        self.assertEqual(br["est_minutes"], w["riding_min"])
+        self.assertTrue(br["daylight"]["with_wind"])
+        self.assertEqual(br["est_minutes_still"], self.br["est_minutes"])
+
+
+class DeviceDebug(unittest.TestCase):
+    """Firmware over Wi-Fi, the sync log, the ride screens."""
+
+    def test_firmware_builds(self):
+        from domains.coll import firmware as FW
+        c, d = db(), tmpdir()
+        try:
+            with self.assertRaises(ValueError):
+                FW.add(c, "0.2.0", b"not an image" * 200, root=d)
+            with self.assertRaises(ValueError):
+                FW.add(c, "two", b"\xe9" + b"\0" * 2000, root=d)
+            for v in ("0.1.0", "0.10.0", "0.2.0", "0.3.0", "0.4.0", "0.5.0"):
+                FW.add(c, v, b"\xe9" + v.encode() * 500, notes=f"build {v}", root=d)
+            self.assertEqual([f["version"] for f in FW.listing(c)], ["0.10.0", "0.5.0", "0.4.0", "0.3.0", "0.2.0"])
+            self.assertFalse(FW.path("0.1.0", d).exists())          # the oldest went
+            self.assertEqual(FW.offer(c)["url"], "/coll/firmware/0.10.0")
+            self.assertEqual(S.sync(c)["firmware"]["version"], "0.10.0")
+            self.assertEqual(FW.state("0.9.1", FW.latest(c)), "update offered")
+            self.assertEqual(FW.state("0.10.0", FW.latest(c)), "up to date")
+            self.assertEqual(FW.state(None, None), "none")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_sync_log_grouped_into_syncs(self):
+        from domains.coll import device_state as D
+        c = db()
+        for kind, st in (("auth", 401), ("sync", 200), ("pack", 200), ("ride", 422), ("device", 200), ("auth", 401),
+                         ("sync", 200), ("device", 200)):
+            D.log(c, kind, st, kind, 100)
+        h = D.history(c)
+        self.assertEqual(len(h), 2)
+        self.assertEqual([x["kind"] for x in h[1]["steps"]], ["auth", "sync", "pack", "ride", "device"])
+        self.assertEqual([x["kind"] for x in h[0]["steps"]], ["auth", "sync", "device"])
+        self.assertEqual((h[1]["errors"], h[1]["up_bytes"], h[1]["down_bytes"]), (2, 100, 400))
+
+    def test_screens(self):
+        c = db()
+        self.assertEqual(len(S.parse_screens(S.DEFAULT_SCREENS)), 7)
+        for bad in ("list:speed,watts", "map:speed", "list", "list:" + ",".join(["speed"] * 6), "nope", "",
+                    ";".join(["map"] * 9)):
+            with self.assertRaises(ValueError, msg=bad):
+                S.parse_screens(bad)
+        before = S.digest(S.build(c))
+        self.assertIsNone(S.build(c)["screens"])
+        S.set_screens(c, " list:speed,hr ; map ")
+        self.assertEqual(S.build(c)["screens"], "list:speed,hr;map")
+        self.assertNotEqual(S.digest(S.build(c)), before)              # Coll downloads the settings again
+        S.set_screens(c, S.DEFAULT_SCREENS)
+        self.assertIsNone(S.build(c)["screens"])
+        ids = [f[0] for f in S.FIELDS]
+        from pathlib import Path
+        src = Path.home() / "Desktop/ciclocomputer/firmware/lib/core/screens.cpp"
+        fw = src.read_text() if src.exists() else None
+        if fw:                                                         # the same names as the firmware
+            for i in ids:
+                self.assertIn(f'{{"{i}", ', fw)
+            self.assertIn(S.DEFAULT_SCREENS.split(";")[0], fw)
 
 
 class Token(unittest.TestCase):

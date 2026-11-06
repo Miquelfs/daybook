@@ -20,6 +20,7 @@ import { PlannedVsActual } from "@/components/PlannedVsActual";
 import { FitFileCard } from "@/components/activity/FitFileCard";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
 import { ColSign, hms, ordinal } from "@/components/training/ColSign";
+import { ActivityRouteReview } from "@/components/omyra/coll/RideReview";
 
 /** A ride Coll recorded on one of its routes → that route on the Coll tab. */
 function collRoute(a: ActivityDetail): { label: string; href: string } | null {
@@ -404,6 +405,11 @@ export default async function ActivityPage({ params }: Props) {
         />
       )}
 
+
+      {/* A ride of a Coll route: time by section, climbs and fuel against the route's plan */}
+      {activity.polyline && (
+        <div className="mb-8"><ActivityRouteReview activityId={decodedId} /></div>
+      )}
 
       {/* Splits (only when they carry distance — gym laps don't) */}
       {splitsWithDistance.length > 0 && (

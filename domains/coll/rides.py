@@ -16,6 +16,10 @@ Rides Coll recorded → Daybook activities (ciclocomputer/docs/DAYBOOK.md §5).
                 (reconcile). A watch recording that stopped early doesn't overlap enough,
                 so both stay.
 
+  fuel          a .clg log marks each "taken" press (ridelog.h kFuel + the item); the presses,
+                the recording time and the fuel plan Coll had for the route are kept in the
+                ride's summary for the review (review.py)
+
 The raw upload is kept (gzip) in coll_rides, so a ride can be re-imported after a fix.
 Nothing here imports FastAPI: finish() runs the post-import steps with lazy imports.
 """
@@ -93,10 +97,31 @@ def parse_gpx(data: bytes) -> dict:
 
 
 def decode_upload(raw: bytes) -> tuple[str, dict]:
-    """(format, parsed). A .clg log starts with CLG1; anything else is read as GPX."""
+    """(format, parsed). A .clg log starts with CLG1; anything else is read as GPX.
+    A log also gives its fuel presses [{t (s since start), timer (recording s), item}] and timer_s."""
     if raw[:4] == b"CLG1":
-        return "clg", parse_gpx(collog.to_gpx(raw).encode())
+        parsed = parse_gpx(collog.to_gpx(raw).encode())
+        start, _, records = collog.read(raw)
+        taken = [{"t": round(r["time"] - start), "timer": i, "item": r["fuel"]}
+                 for i, r in enumerate(records) if r["fuel"] is not None]
+        return "clg", {**parsed, "fuel_taken": taken, "timer_s": len(records)}
     return "gpx", parse_gpx(raw)
+
+
+def _fuel_plan(conn, course: dict | None) -> str | None:
+    """The plan Coll had for this ride: the route's (as /coll/sync gives it), else the default."""
+    try:
+        from domains.coll import fuel as F
+        from domains.coll import settings as S
+        default = S._setting(conn, S.FUEL_KEY)
+        if course:
+            from domains.coll.courses import get
+            c = get(conn, course["id"])
+            if c:
+                return F.for_course(conn, c, default)["fuel_plan"]
+        return default
+    except Exception:                                        # noqa: BLE001 — no plan, no fuel review
+        return None
 
 
 # ── streams and summary ─────────────────────────────────────────────────────
@@ -376,6 +401,9 @@ def _store(conn, ride_id: str, fmt: str, raw: bytes, parsed: dict, tz: str, row_
     start = datetime.fromtimestamp(pts[0][0], ZoneInfo(tz)).replace(tzinfo=None)
     summary = {**summary, "course": course, "calories": calories(summary["moving_s"], summary["avg_hr"],
                                                                  summary["work_kj"], _profile(conn))}
+    if "fuel_taken" in parsed:
+        summary.update({"fuel_taken": parsed["fuel_taken"], "timer_s": parsed["timer_s"],
+                        "fuel_plan": _fuel_plan(conn, course)})
     aid = activity_id_for(pts[0][0])
     twin = find_twin(conn, start, summary["duration_s"], tz, exclude=aid)
     if twin is None:
@@ -467,8 +495,9 @@ def raw(conn, rid: int) -> tuple[bytes, str] | None:
 # ── after the import (API process) ──────────────────────────────────────────
 
 def finish(conn, activity_id: str, day: str, log=print) -> None:
-    """Metrics (hr TSS, zones, best efforts), the analysis cache, the planned-session link,
-    then the training load from that day on — each step on its own, a failure doesn't stop the rest."""
+    """Metrics (hr TSS, zones, best efforts), the analysis cache, the planned-session link, the
+    review against its route, then the training load from that day on — each step on its own,
+    a failure doesn't stop the rest."""
     try:
         from domains.health.fit_import import recompute
         recompute(conn, activity_id)
@@ -480,6 +509,11 @@ def finish(conn, activity_id: str, day: str, log=print) -> None:
         conn.commit()
     except Exception as e:                                   # noqa: BLE001
         log(f"coll ride {activity_id}: session link failed: {e}")
+    try:
+        from domains.coll import review
+        review.after_ride(conn, activity_id, log=log)
+    except Exception as e:                                   # noqa: BLE001
+        log(f"coll ride {activity_id}: review failed: {e}")
     try:
         back = max(3, (date.today() - date.fromisoformat(day)).days + 3)
         subprocess.Popen(["nice", "-n", "10", sys.executable, "-m", "domains.health.compute_training_load",

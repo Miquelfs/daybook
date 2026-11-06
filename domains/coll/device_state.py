@@ -61,3 +61,45 @@ def steps(conn: sqlite3.Connection, course: dict, listed: set[int], dev: dict | 
         """SELECT r.id, r.activity_id, r.status, a.date AS date FROM coll_rides r
            LEFT JOIN activities a ON a.id = r.activity_id WHERE r.course_id=? ORDER BY r.start_utc DESC""", (cid,))]
     return {"on_coll": on, "rides": rides}
+
+
+# ── the sync log: every device request, for debugging the first weeks with the hardware ─────
+
+LOG_KEEP = 1000
+SESSION_GAP_S = 600                 # requests further apart than this are separate syncs
+
+
+def log(conn: sqlite3.Connection, kind: str, status: int, detail: str | None = None, nbytes: int | None = None) -> None:
+    try:
+        conn.execute("INSERT INTO coll_sync_log (kind, status, detail, bytes) VALUES (?,?,?,?)",
+                     (kind, int(status), (detail or None) and str(detail)[:300], nbytes))
+        conn.execute("DELETE FROM coll_sync_log WHERE id <= (SELECT MAX(id) FROM coll_sync_log) - ?", (LOG_KEEP,))
+        conn.commit()
+    except sqlite3.Error:
+        pass                         # the log never breaks a sync
+
+
+def history(conn: sqlite3.Connection, limit: int = 300) -> list[dict]:
+    """The log grouped into syncs, newest first: each a run of requests around one /coll/sync
+    (a refused token just before it belongs to it; one after a finished sync starts the next)."""
+    try:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM coll_sync_log ORDER BY id DESC LIMIT ?", (limit,))]
+    except sqlite3.OperationalError:
+        return []
+    rows.reverse()
+    out: list[dict] = []
+    ts = lambda s: datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()   # noqa: E731
+    for r in rows:
+        cur = out[-1] if out else None
+        has_sync = cur is not None and any(x["kind"] == "sync" for x in cur["steps"])
+        if cur is None or ts(r["at"]) - ts(cur["ended"]) > SESSION_GAP_S or (r["kind"] in ("sync", "auth") and has_sync):
+            cur = {"started": r["at"], "ended": r["at"], "steps": [], "errors": 0, "down_bytes": 0, "up_bytes": 0}
+            out.append(cur)
+        cur["ended"] = r["at"]
+        cur["steps"].append({k: r[k] for k in ("at", "kind", "status", "detail", "bytes")})
+        if r["status"] >= 400:
+            cur["errors"] += 1
+        if r["bytes"]:
+            cur["up_bytes" if r["kind"] == "ride" else "down_bytes"] += r["bytes"]
+    out.reverse()
+    return out

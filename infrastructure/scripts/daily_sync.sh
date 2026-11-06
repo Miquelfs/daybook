@@ -179,6 +179,8 @@ step garmin_activity_detail_sync python -m domains.health.garmin.garmin_activity
 # Compute per-activity metrics: NP, IF, EF, decoupling, MMP curves.
 log "Computing per-activity metrics (last 7 days)..."
 step compute_activity_metrics python -m domains.health.compute_activity_metrics --days 7
+step coll_review python -m domains.coll.review
+step coll_weather python -m domains.coll.weather
 step activity_analysis python -m domains.health.activity_analysis --days 7
 # Cols climbed (OpenStreetMap passes along new rides/runs/hikes) — retries next night if OSM is down.
 step cols_sync python -m domains.locations.cols

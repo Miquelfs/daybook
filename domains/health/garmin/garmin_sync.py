@@ -395,6 +395,14 @@ def sync_activities(client, conn, start: str, end: str, force: bool, fetch_strea
                     print(f"  coll ride {coll_id} → merged into {garmin_id}", file=sys.stderr)
             except Exception as e:                       # noqa: BLE001
                 print(f"  WARN coll reconcile: {e}", file=sys.stderr)
+            # rides of a Coll route (the watch's too) against the route's plan (domains/coll/review.py)
+            try:
+                from domains.coll.review import scan
+                n = scan(conn, days=30, log=lambda m: print(f"  WARN {m}", file=sys.stderr))
+                if n:
+                    print(f"  coll: {n} ride(s) reviewed against their route", file=sys.stderr)
+            except Exception as e:                       # noqa: BLE001
+                print(f"  WARN coll review: {e}", file=sys.stderr)
 
         _log(conn, "garmin", "activities", "ok", count)
         return count

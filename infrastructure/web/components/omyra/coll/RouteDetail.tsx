@@ -9,6 +9,7 @@ import {
 import { Block, Empty, Hero, Panel, Skeleton, Stat, Stats, Toggle } from "@/components/ui/kit";
 import { GradeProfile } from "@/components/training/StageProfile";
 import { CollMap } from "@/components/omyra/CollMap";
+import { WeatherPanel } from "./WeatherPanel";
 import { collApi, COLL_KEYS, turnText, type CollCourse, type CollSettings } from "@/lib/coll-api";
 import {
   field, fmtDate, fmtDur, fmtKm, FuelChips, Group, quiet, routeSteps, Select, Stepper, whenText,
@@ -112,12 +113,20 @@ export function RouteDetail({ course, settings, onBack, onChange }: {
           <Stat label="Climbing" value={`+${b.climb_m.toLocaleString("en-GB")}`} unit="m"
                 sub={b.high_m != null ? `high point ${b.high_m} m` : undefined} />
           <Stat label="Riding time" value={fmtDur(b.est_minutes)}
-                sub={b.pace.source === "your rides" ? `your pace, ${b.pace.rides} rides` : "touring estimate"} />
+                sub={(b.pace.learned ? `your pace, ${b.pace.learned.factor >= 1 ? "+" : "−"}${Math.abs(Math.round((b.pace.learned.factor - 1) * 100))} % from ${b.pace.learned.rides} route ride${b.pace.learned.rides === 1 ? "" : "s"}`
+                      : b.pace.source === "your rides" ? `your pace, ${b.pace.rides} rides` : "touring estimate")
+                     + (b.est_minutes_still != null && b.est_minutes_still !== b.est_minutes ? " · with the wind" : "")} />
           <Stat label="Carbs to carry" value={b.carry ? b.carry.carbs_g.toLocaleString("en-GB") : "—"} unit={b.carry ? "g" : undefined}
                 sub={b.carry?.carbs_g_h ? `${b.carry.carbs_g_h} g/h` : undefined} />
           <Stat label="Daylight" value={b.daylight ? b.daylight.sunset : "—"} unit={b.daylight ? "sunset" : undefined}
-                sub={b.daylight ? (b.daylight.needs_lights ? "longer than the day: lights" : `start by ${b.daylight.latest_start}`) : "no date"} />
+                sub={b.daylight ? (b.daylight.needs_lights ? "longer than the day: lights" : `start by ${b.daylight.latest_start}${b.daylight.with_wind ? " (wind in)" : ""}`) : "no date"} />
         </Stats>
+      )}
+
+      {b && day && (
+        <WeatherPanel w={c.weather} km={b.km} start={c.start_time}
+                      onStart={(v) => save({ start_time: v })}
+                      onRefresh={async () => { qc.setQueryData(COLL_KEYS.course(id), await collApi.refreshWeather(id)); }} />
       )}
 
       <div className="grid gap-8 md:grid-cols-2">
@@ -251,19 +260,26 @@ export function RouteDetail({ course, settings, onBack, onChange }: {
         </Block>
       )}
 
-      {b?.attempts && b.attempts.length > 0 && (
-        <Block title="Your rides on it">
+      {c.reviews.length > 0 && (
+        <Block title="Your rides on it" note="Each against the plan as it read that day — the next brief learns from them.">
           <Panel className="divide-y divide-[#18181B]">
-            {b.attempts.map((a) => (
+            {c.reviews.map((a) => (
               <Link key={a.activity_id} href={`/activity/${a.activity_id}`}
                     className="px-4 py-2.5 flex items-center gap-3 hover:bg-[#18181B] transition-colors">
-                <span className="text-sm font-medium flex-1">{fmtDate(a.date)}</span>
-                <span className="text-xs text-[#A1A1AA] tabular-nums">
-                  {a.moving_time_seconds ? fmtDur(a.moving_time_seconds / 60) : "—"}
-                  {a.distance_meters && a.moving_time_seconds ? ` · ${(a.distance_meters / a.moving_time_seconds * 3.6).toFixed(1)} km/h` : ""}
-                  {a.avg_heart_rate ? ` · ${a.avg_heart_rate} bpm` : ""}
-                </span>
-                <span className="text-[10px] uppercase tracking-widest text-[#52525B]">{a.source === "coll" ? "Coll" : "watch"}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{fmtDate(a.date)}{a.name ? <span className="text-[#71717A] font-normal"> · {a.name}</span> : null}</p>
+                  <p className="text-xs text-[#71717A] tabular-nums">
+                    {a.covered_km != null && a.route_km != null && a.covered_km < a.route_km - 2 ? `${fmtKm(a.covered_km)} of ${fmtKm(a.route_km)} km · ` : ""}
+                    {a.moving_min != null ? `rode ${fmtDur(a.moving_min)}` : ""}{a.predicted_min != null ? ` · plan ${fmtDur(a.predicted_min)}` : ""}
+                    {a.fuel_g_h != null ? ` · ${a.fuel_g_h} g/h` : ""}
+                  </p>
+                </div>
+                {a.delta_min != null && (
+                  <span className={`text-xs tabular-nums ${a.delta_min < -2 ? "text-emerald-400" : "text-[#A1A1AA]"}`}>
+                    {a.delta_min === 0 ? "on plan" : `${a.delta_min > 0 ? "+" : "−"}${fmtDur(Math.abs(a.delta_min))}`}
+                  </span>
+                )}
+                <span className="text-[10px] uppercase tracking-widest text-[#52525B] w-10 text-right">{a.source === "coll" ? "Coll" : "watch"}</span>
               </Link>
             ))}
           </Panel>

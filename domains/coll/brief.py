@@ -5,7 +5,9 @@ along the way, what to carry, the daylight on the day, and how it went the times
   terrain      gpx_course.parse on the route's GPX (tunnel-corrected climbing, climbs, a
                500 m profile for the gradient chart)
   riding time  gpx_course's speed-by-gradient model, scaled to your pace: the average moving
-               speed of your outdoor rides over the last 6 months against the model's flat speed
+               speed of your outdoor rides over the last 6 months against the model's flat speed,
+               then corrected by how your last rides of routes went against their briefs
+               (review.py): the median of up to 5 rides in the last year, ±20 % at most
   along        the pack's waypoints (feeds, summits, warnings) at their km on the route; a climb
                whose top is near a summit waypoint takes its name
   carry        the route's fuel plan (fuel.for_course) over the riding time: how many of each
@@ -67,20 +69,53 @@ def _m(a, b) -> float:
     return math.hypot(dx, dy)
 
 
-def pace(conn: sqlite3.Connection, today: date | None = None) -> dict:
-    """Your outdoor riding speed: moving-time average of the last 6 months' rides over 20 km."""
+def base_pace(conn: sqlite3.Connection, today: date | None = None) -> dict:
+    """Your outdoor riding speed: moving-time average of the 6 months' rides over 20 km before today."""
     today = today or date.today()
     q = ",".join("?" * len(RIDE_TYPES))
     try:
         r = conn.execute(f"""SELECT SUM(distance_meters), SUM(moving_time_seconds), COUNT(*) FROM activities
                              WHERE source IN ('garmin','coll') AND lower(activity_type) IN ({q})
-                               AND date >= ? AND distance_meters >= 20000 AND moving_time_seconds >= 1800""",
-                         (*RIDE_TYPES, (today - timedelta(days=PACE_DAYS)).isoformat())).fetchone()
+                               AND date >= ? AND date < ? AND distance_meters >= 20000 AND moving_time_seconds >= 1800""",
+                         (*RIDE_TYPES, (today - timedelta(days=PACE_DAYS)).isoformat(), today.isoformat())).fetchone()
     except sqlite3.OperationalError:
         r = None
     if r and r[1] and r[2] >= 3:
         return {"kmh": round(r[0] / r[1] * 3.6, 1), "rides": r[2], "source": "your rides"}
     return {"kmh": MODEL_FLAT_KMH, "rides": 0, "source": "touring model"}
+
+
+LEARN_RIDES, LEARN_DAYS, LEARN_MIN_KM, LEARN_CLAMP = 5, 365, 20, (0.8, 1.2)
+
+
+def learned(conn: sqlite3.Connection, before: date) -> dict | None:
+    """How your rides of routes went against what the brief would have said that day:
+    >1 = faster than predicted. Only reviews before `before`, so a ride never predicts itself."""
+    try:
+        rows = conn.execute(
+            """SELECT r.model_s, r.base_kmh, r.moving_s, r.date, c.name FROM coll_reviews r
+               JOIN coll_courses c ON c.id = r.course_id
+               WHERE r.covered_km >= ? AND r.model_s > 0 AND r.moving_s > 0 AND r.base_kmh > 0
+                 AND r.date < ? AND r.date >= ? ORDER BY r.date DESC LIMIT ?""",
+            (LEARN_MIN_KM, before.isoformat(), (before - timedelta(days=LEARN_DAYS)).isoformat(), LEARN_RIDES)).fetchall()
+    except sqlite3.OperationalError:
+        return None
+    if not rows:
+        return None
+    ratios = sorted(r["model_s"] * MODEL_FLAT_KMH / r["base_kmh"] / r["moving_s"] for r in rows)
+    n = len(ratios)
+    med = ratios[n // 2] if n % 2 else (ratios[n // 2 - 1] + ratios[n // 2]) / 2
+    f = min(LEARN_CLAMP[1], max(LEARN_CLAMP[0], med))
+    return {"factor": round(f, 3), "rides": n, "last": rows[0]["name"], "last_date": rows[0]["date"]}
+
+
+def pace(conn: sqlite3.Connection, today: date | None = None) -> dict:
+    """Your pace for a route: the 6-month average, corrected by how your route rides went."""
+    today = today or date.today()
+    b = base_pace(conn, today)
+    lr = learned(conn, today)
+    kmh = round(b["kmh"] * lr["factor"], 1) if lr else b["kmh"]
+    return {**b, "kmh": kmh, "base_kmh": b["kmh"], "learned": lr}
 
 
 def carry(fuel_plan: str | None, minutes: int | None) -> dict | None:
@@ -119,8 +154,32 @@ def _cutoffs(spec: str | None, stops: list[dict]) -> list[dict]:
     return sorted(out, key=lambda c: (c["km"] is None, c["km"] or 0))
 
 
+def daylight(dl: dict, riding_min: float, wind: bool = False) -> dict:
+    """Sunrise / sunset and the latest start that still finishes in daylight (riding + 10 % stops)."""
+    sh, sm = map(int, dl["sunset"].split(":"))
+    rh, rm = map(int, dl["sunrise"].split(":"))
+    latest = sh * 60 + sm - riding_min * STOPS
+    return {"sunrise": dl["sunrise"], "sunset": dl["sunset"], "latest_start": _hm(latest) if latest > 0 else None,
+            "needs_lights": latest < rh * 60 + rm,             # can't fit between sunrise and sunset
+            "with_wind": wind}
+
+
 def _hm(minutes: float) -> str:
     return f"{int(minutes // 60):02d}:{int(minutes % 60):02d}"
+
+
+def load(conn: sqlite3.Connection, cid: int, full: bool = True) -> dict | None:
+    """The course row build() needs (GPX, pack when full, cut-offs, its day)."""
+    r = conn.execute("""SELECT c.id, c.name, c.gpx, c.gpx_sha1, c.pack_sha1, c.cutoffs, c.start_time, c.goal_id,
+                               c.session_id, g.race_date, p.session_date, CASE WHEN ? THEN c.pack END AS pack
+                        FROM coll_courses c LEFT JOIN race_goals g ON g.id = c.goal_id
+                                            LEFT JOIN plan_sessions p ON p.id = c.session_id WHERE c.id=?""",
+                     (1 if full else 0, cid)).fetchone()
+    if r is None:
+        return None
+    d = dict(r)
+    d["pack"] = bytes(d["pack"]) if d["pack"] is not None else None
+    return d
 
 
 def build(conn: sqlite3.Connection, course: dict, fuel_plan: str | None, today: date | None = None,
@@ -154,11 +213,7 @@ def build(conn: sqlite3.Connection, course: dict, fuel_plan: str | None, today: 
         from domains.training import gpx_course
         dl = gpx_course.daylight(t, day)
         if dl:
-            sh, sm = map(int, dl["sunset"].split(":"))
-            latest = sh * 60 + sm - est * STOPS
-            rh, rm = map(int, dl["sunrise"].split(":"))
-            light = {**dl, "latest_start": _hm(latest) if latest > 0 else None,
-                     "needs_lights": latest < rh * 60 + rm}          # can't fit between sunrise and sunset
+            light = daylight(dl, est)
     attempts = []
     try:
         attempts = [dict(r) for r in conn.execute(

@@ -28,7 +28,7 @@ DATA = ROOT / "data" / "coll"
 CACHE = ROOT / "data" / "coursepack-cache"
 PACK_FORMAT = "COL1"                     # coursepack/pack.py magic; a new one rebuilds everything
 STATUSES = ("pending", "building", "ready", "failed")
-LIST_COLS = ("id, name, goal_id, session_id, auto, status, error, progress, pack_sha1, on_device, cutoffs, fuel_plan, "
+LIST_COLS = ("id, name, goal_id, session_id, auto, status, error, progress, pack_sha1, on_device, cutoffs, fuel_plan, start_time, "
              "summary_json, created_at, built_at, "
              "(SELECT session_date FROM plan_sessions p WHERE p.id = coll_courses.session_id) AS session_date")
 # Planned-session courses ride along from the day before (a ride past midnight) to three weeks out;
@@ -246,7 +246,7 @@ def pack(conn: sqlite3.Connection, cid: int) -> tuple[bytes, str] | None:
     return (bytes(r["pack"]), r["pack_sha1"]) if r and r["pack"] is not None else None
 
 
-EDITABLE = ("name", "on_device", "goal_id", "session_id", "cutoffs", "fuel_plan")
+EDITABLE = ("name", "on_device", "goal_id", "session_id", "cutoffs", "fuel_plan", "start_time")
 
 
 def update(conn: sqlite3.Connection, cid: int, fields: dict) -> dict | None:
@@ -282,7 +282,7 @@ def device_courses(conn: sqlite3.Connection, today: date | None = None, default_
     today = today or date.today()
     lo, hi = (today - timedelta(days=DEVICE_DAYS_BEFORE)).isoformat(), (today + timedelta(days=DEVICE_DAYS_AHEAD)).isoformat()
     rows = conn.execute(
-        """SELECT c.id, c.name, c.goal_id, c.session_id, c.auto, c.pack_sha1, c.summary_json, c.cutoffs, c.fuel_plan,
+        """SELECT c.id, c.name, c.goal_id, c.session_id, c.auto, c.pack_sha1, c.summary_json, c.cutoffs, c.fuel_plan, c.start_time,
                   length(c.pack) AS bytes, g.name AS goal, g.race_date, p.session_date
            FROM coll_courses c LEFT JOIN race_goals g ON g.id = c.goal_id
                                LEFT JOIN plan_sessions p ON p.id = c.session_id
@@ -292,11 +292,16 @@ def device_courses(conn: sqlite3.Connection, today: date | None = None, default_
              AND (c.session_id IS NULL OR c.goal_id IS NOT NULL OR p.session_date BETWEEN ? AND ?)
            ORDER BY COALESCE(p.session_date, g.race_date, '9999'), c.id""", (lo, lo, hi)).fetchall()
     out = []
+    try:
+        wx = {r[0]: r[1] for r in conn.execute("SELECT course_id, line FROM coll_weather WHERE day >= ?", (lo,))}
+    except sqlite3.OperationalError:
+        wx = {}
     for r in rows:
         s = json.loads(r["summary_json"] or "{}")
         f = fuel.for_course(conn, {**dict(r), "km": s.get("km")}, default_fuel)
         out.append({"id": r["id"], "name": r["name"], "km": s.get("km"), "pack_sha1": r["pack_sha1"],
                     "bytes": r["bytes"], "date": r["session_date"] or r["race_date"], "goal": r["goal"],
                     "race_date": r["race_date"], "cutoffs": r["cutoffs"],
-                    "fuel_plan": f["fuel_plan"], "fuel_source": f["source"], "fuel_note": f["note"]})
+                    "fuel_plan": f["fuel_plan"], "fuel_source": f["source"], "fuel_note": f["note"],
+                    "start_time": r["start_time"], "weather": wx.get(r["id"])})
     return out

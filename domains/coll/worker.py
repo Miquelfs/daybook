@@ -41,6 +41,14 @@ def main() -> None:
                 r = conn.execute("SELECT name, status, error FROM coll_courses WHERE id=?", (cid,)).fetchone()
                 if r:
                     log(f"course {cid} {r['name']!r}: {r['status']}" + (f" — {r['error']}" if r["error"] else ""))
+                if r and r["status"] == "ready":
+                    try:                             # your earlier rides of it, against its plan
+                        from domains.coll import review
+                        n = review.scan_course(conn, cid, log=log)
+                        if n:
+                            log(f"course {cid}: {n} earlier ride(s) reviewed")
+                    except Exception as e:           # noqa: BLE001
+                        log(f"course {cid}: review scan failed: {e}")
         finally:
             conn.close()
 

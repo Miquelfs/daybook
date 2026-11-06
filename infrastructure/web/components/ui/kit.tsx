@@ -12,7 +12,7 @@ export function Panel({ children, className = "" }: { children: React.ReactNode;
 
 export function Block({ title, note, action, tone, children }: {
   title: React.ReactNode;
-  note?: string;
+  note?: React.ReactNode;
   action?: React.ReactNode;
   /** Only for state that needs attention (overdue). */
   tone?: "warn";

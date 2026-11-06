@@ -6,6 +6,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Block, Panel, Stat, Stats } from "@/components/ui/kit";
 import { collApi, COLL_KEYS, type CollDevice, type CollSettings } from "@/lib/coll-api";
 import { ago, field, FuelChips, Group, Select } from "./parts";
+import { ScreensEditor } from "./ScreensEditor";
+import { FirmwarePanel, SyncLog } from "./DeviceDebug";
 
 const FLASH_KB = 12 * 1024;          // the files area of the XIAO's 16 MB flash
 
@@ -29,6 +31,15 @@ export function DeviceView({ device, settings: s }: { device: CollDevice | null;
       qc.invalidateQueries({ queryKey: ["coll"] });
     } catch (e) {
       setErr((e as Error).message);
+    }
+  }
+  const [screensErr, setScreensErr] = useState<string | null>(null);
+  async function putScreens(screens: string | null) {
+    setScreensErr(null);
+    try {
+      qc.setQueryData(COLL_KEYS.settings, await collApi.putSettings({ screens }));
+    } catch (e) {
+      setScreensErr((e as Error).message);
     }
   }
 
@@ -75,6 +86,19 @@ export function DeviceView({ device, settings: s }: { device: CollDevice | null;
             {s.token_configured ? "Device token set on the Pi — Coll can sync." : "No COLL_TOKEN in the Pi's .env: Coll can't sync yet."}
           </p>
         </Panel>
+      </Block>
+
+      <Block title="Sync log" note="Every request Coll makes, grouped by sync — open one to see each step.">
+        <SyncLog />
+      </Block>
+
+      <Block title="Ride screens" note="The pages Coll shows while riding, in order (PAGE cycles them). Map, Climb and Fuel only appear when the ride has a route or a plan.">
+        <ScreensEditor s={s} onSave={putScreens} />
+        {screensErr && <p className="text-xs text-rose-400 mt-2">{screensErr}</p>}
+      </Block>
+
+      <Block title="Firmware">
+        <FirmwarePanel running={device?.firmware ?? null} />
       </Block>
 
       <Block title="Rider" note="From Daybook — weight, age, ride zones, timezone. Changes reach Coll at its next sync.">

@@ -119,6 +119,12 @@ endpoints need `COLL_TOKEN` in the Pi's `.env` (not synced by deploy — `.env` 
 (`POST /coll/rides`, GPX or `.clg`; `domains/coll/rides.py`, `collog.py` vendored from `ciclocomputer/tools/`) become
 `source='coll'` activities; when the watch recorded the same ride, the Garmin activity wins (`reconcile` runs after the
 Garmin sync). Coll reports what it holds at the end of each sync (`POST /coll/device`), so the Coll tab shows each route's path: imported → converted → on Coll → ridden. `make coll-device RIDES=…` on the Mac plays the device's sync against the Pi — use it to test end to end.
+After a ride, `domains/coll/review.py` compares each ride of a route (Coll's or the watch's, ≥ 70 % on its line) with the
+brief as it read that day — sections, climbs, fuel presses from the `.clg` — and `brief.pace` learns from the last 5.
+`weather.py` (Open-Meteo, ≤ 16 days) puts the forecast along a dated route at your ETA per km; its one-liner goes to Coll in
+`/coll/sync`. Device page: sync log (`coll_sync_log`, every device request), firmware over Wi-Fi (`data/coll-firmware/`,
+offered in `/coll/sync`), ride screens (`settings.screens`, same grammar as `firmware/lib/core/screens.h`). Nightly:
+`coll_review`, `coll_weather` steps.
 
 ## Key Directories
 

@@ -10,11 +10,14 @@ Pretend to be Coll: run the device's sync against Daybook, from the Mac, before 
   4. POST /coll/rides                each ride file given (.gpx from Coll / the simulator, or a .clg
                                      log) not sent before, with X-Coll-Ride-Id = its start time
 
-  5. POST /coll/device               what it now holds (pack ids + sha1), firmware, free space,
+  5. GET  /coll/firmware/{version}   when /coll/sync offers a build newer than the one it runs:
+                                     checks the sha1 and "installs" it (firmware.txt), as the OTA would
+  6. POST /coll/device               what it now holds (pack ids + sha1), firmware, free space,
                                      rides still waiting — so Daybook shows a route as really on Coll
 
-Its "flash" is data/coll-device/ (packs, settings.json, sent.json), so a second run downloads
-nothing and uploads nothing, as on the device.
+Its "flash" is data/coll-device/ (packs, settings.json, sent.json, firmware.txt), so a second run
+downloads nothing and uploads nothing, as on the device. Every request shows on the Coll tab's
+sync log.
 
   python3 -m domains.coll.device --url http://daybook-pi:8000 --token … [ride.gpx | dir …]
   make coll-device RIDES=~/Desktop/ciclocomputer/sim/out    (fetches the token from the Pi)
@@ -86,11 +89,18 @@ def ride_files(args: list[str]) -> list[Path]:
     return out
 
 
+def vkey(v: str | None) -> tuple:
+    try:
+        return tuple(int(x) for x in (v or "").split("."))
+    except ValueError:
+        return (-1,)
+
+
 def fmt_km(c: dict) -> str:
     return f"{c.get('km') or 0:.1f} km"
 
 
-def run(db: Daybook, rides: list[str], flash: Path) -> int:
+def run(db: Daybook, rides: list[str], flash: Path, firmware: str = "0.0.1") -> int:
     problems = 0
     packs = flash / "packs"
     packs.mkdir(parents=True, exist_ok=True)
@@ -142,6 +152,8 @@ def run(db: Daybook, rides: list[str], flash: Path) -> int:
         fuel, src, cut = c.get("fuel_plan"), c.get("fuel_source"), c.get("cutoffs")
         extra = (f" ({src})" if fuel and src else "") + (f" · cut-offs {cut}" if cut else "")
         print(f"                 fuel {fuel or '—'}{extra}")
+        if c.get("weather"):
+            print(f"                 weather at the start: {c['weather']}")
     for f in packs.glob("*.coll"):
         if int(f.stem) not in listed:
             f.unlink()
@@ -162,6 +174,7 @@ def run(db: Daybook, rides: list[str], flash: Path) -> int:
             print(f"settings      ↓ {pr.get('weight_kg')} kg · {pr.get('age')} y · {pr.get('sex')} · "
                   f"zones {s.get('hr_zones')} · max {s.get('max_hr')} · {s.get('timezone')} · "
                   f"default fuel {s.get('fuel_plan') or '—'}")
+            print(f"              screens {s.get('screens') or 'Coll default'}")
 
     sent_file = flash / "sent.json"
     sent = json.loads(sent_file.read_text()) if sent_file.exists() else {}
@@ -194,10 +207,31 @@ def run(db: Daybook, rides: list[str], flash: Path) -> int:
             print(f"  ride {rid}  !! {code} {r}")
             problems += 1
 
+    fw_file = flash / "firmware.txt"
+    running = fw_file.read_text().strip() if fw_file.exists() else firmware
+    offer = sync.get("firmware")
+    if not offer:
+        print(f"firmware      {running} · no build offered")
+    elif vkey(offer["version"]) <= vkey(running):
+        print(f"firmware      {running} · up to date (offered {offer['version']})")
+    else:
+        st, hdr, data = db.call("GET", offer["url"])
+        sha = hashlib.sha1(data).hexdigest() if st == 200 else None
+        if st != 200:
+            print(f"firmware      !! {offer['url']} gave {st}")
+            problems += 1
+        elif sha != offer["sha1"] or len(data) != offer["bytes"] or data[:1] != b"\xe9":
+            print(f"firmware      !! {offer['version']}: sha1 / size / image check failed — not installed")
+            problems += 1
+        else:
+            fw_file.write_text(offer["version"])
+            print(f"firmware      ↓ {offer['version']} ({len(data) // 1024} KB, sha1 ok) · installed, was {running}")
+            running = offer["version"]
+
     have = [{"id": int(f.stem), "pack_sha1": hashlib.sha1(f.read_bytes()).hexdigest()} for f in packs.glob("*.coll")]
     used = sum(f.stat().st_size for f in flash.rglob("*") if f.is_file())
     code, rep = db.json("POST", "/coll/device", body=json.dumps({
-        "have": have, "firmware": "emulator (domains/coll/device.py)",
+        "have": have, "firmware": running, "battery_pct": 87,
         "free_kb": max(0, (12 * 1024 * 1024 - used) // 1024),            # ~12 MB files area on the XIAO
         "rides_waiting": sum(1 for p in files if ride_id(p, p.read_bytes()) not in sent),
     }).encode(), headers={"Content-Type": "application/json"})
@@ -218,6 +252,7 @@ def main() -> None:
     ap.add_argument("--token", default=os.environ.get("COLL_TOKEN"))
     ap.add_argument("--flash", default=str(FLASH), help="where the pretend device keeps its files")
     ap.add_argument("--forget", action="store_true", help="wipe the pretend device first (download/upload again)")
+    ap.add_argument("--firmware", default="0.0.1", help="the version the pretend device runs before any update")
     a = ap.parse_args()
     if not a.token:
         sys.exit("no token: --token or COLL_TOKEN (make coll-device fetches it from the Pi)")
@@ -225,7 +260,7 @@ def main() -> None:
     if a.forget and flash.exists():
         for f in sorted(flash.rglob("*"), reverse=True):
             f.unlink() if f.is_file() else f.rmdir()
-    sys.exit(1 if run(Daybook(a.url, a.token), a.rides, flash) else 0)
+    sys.exit(1 if run(Daybook(a.url, a.token), a.rides, flash, a.firmware) else 0)
 
 
 if __name__ == "__main__":

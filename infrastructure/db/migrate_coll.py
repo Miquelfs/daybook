@@ -63,11 +63,58 @@ CREATE TABLE IF NOT EXISTS coll_device (
     rides_waiting INTEGER,
     have_json     TEXT                               -- [{id, pack_sha1}] the packs on its flash
 );
+
+-- Each ride of a route against its plan (domains/coll/review.py). course_id NULL: looked at, no route.
+CREATE TABLE IF NOT EXISTS coll_reviews (
+    activity_id   TEXT PRIMARY KEY,
+    course_id     INTEGER REFERENCES coll_courses(id) ON DELETE CASCADE,
+    date          TEXT,
+    covered_km    REAL,
+    model_s       REAL,                              -- touring-model seconds over the covered part, at its flat speed
+    base_kmh      REAL,                              -- your 6-month pace on the day (before learning)
+    moving_s      REAL,                              -- what you rode it in, moving
+    version       INTEGER NOT NULL DEFAULT 1,
+    review_json   TEXT,
+    computed_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE INDEX IF NOT EXISTS coll_reviews_course ON coll_reviews(course_id);
+
+-- The forecast along a dated route (domains/coll/weather.py): the raw hourly answer per sample point,
+-- and the one-line summary Coll gets with the course.
+CREATE TABLE IF NOT EXISTS coll_weather (
+    course_id     INTEGER PRIMARY KEY REFERENCES coll_courses(id) ON DELETE CASCADE,
+    day           TEXT NOT NULL,
+    fetched_at    TEXT NOT NULL,
+    raw_json      TEXT NOT NULL,
+    line          TEXT
+);
+
+-- Every device request (domains/coll/device_state.py): what went out, what came back, errors.
+CREATE TABLE IF NOT EXISTS coll_sync_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    kind          TEXT NOT NULL,                     -- sync | settings | pack | ride | device | firmware | auth
+    status        INTEGER NOT NULL,
+    detail        TEXT,
+    bytes         INTEGER
+);
+
+-- Firmware images for Coll to install over Wi-Fi (domains/coll/firmware.py); files in data/coll-firmware/
+CREATE TABLE IF NOT EXISTS coll_firmware (
+    version       TEXT PRIMARY KEY,
+    sha1          TEXT NOT NULL,
+    bytes         INTEGER NOT NULL,
+    notes         TEXT,
+    uploaded_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
 """
 
 
 def migrate(conn) -> None:
     conn.executescript(SCHEMA)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(coll_courses)")}
+    if "start_time" not in cols:                     # when you set off (HH:MM): the forecast's ETAs
+        conn.execute("ALTER TABLE coll_courses ADD COLUMN start_time TEXT")
     conn.commit()
 
 
@@ -75,4 +122,4 @@ if __name__ == "__main__":
     c = get_connection()
     migrate(c)
     c.close()
-    print("coll_courses, coll_rides ready")
+    print("coll tables ready")
