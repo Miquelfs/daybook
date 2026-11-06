@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, Mountain, MountainSnow, CalendarRange, List, Zap, TrendingUp, Map, Droplet, Flame, Plus } from "lucide-react";
+import { Activity, Mountain, MountainSnow, CalendarRange, List, Zap, TrendingUp, Map, Droplet, Flame, Plus, Navigation } from "lucide-react";
 import { RaceCockpit } from "@/components/race/RaceCockpit";
 import OmyraTab from "@/components/training/OmyraTab";
 import FuelTab from "@/components/training/FuelTab";
@@ -12,6 +12,7 @@ import TrainingLogCalendar from "@/components/training/TrainingLogCalendar";
 import { VolumeChart, ProgressComparisonChart } from "@/components/training/ProgressChart";
 import { TrainingRouteMap } from "@/components/training/TrainingRouteMap";
 import { ColsTab } from "@/components/omyra/ColsTab";
+import { CollTab } from "@/components/omyra/CollTab";
 import { TrainingOverview } from "@/components/omyra/TrainingOverview";
 import { AddActivitySheet } from "@/components/omyra/AddActivitySheet";
 import { AreaPlan } from "@/components/plan/AreaPlan";
@@ -28,6 +29,7 @@ const TABS = [
   { key: "map", label: "Map", icon: Map },
   { key: "cols", label: "Cols", icon: MountainSnow },
   { key: "fuel", label: "Fuel", icon: Droplet },
+  { key: "coll", label: "Coll", icon: Navigation },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 const KEYS = TABS.map((t) => t.key) as readonly string[];
@@ -44,7 +46,7 @@ function Block({ title, note, children }: { title: string; note?: string; childr
 
 // Omyra — training as its own home: Training overview first (with the Mallorca 312
 // banner), then the race cockpit, the plan and the analytics.
-// Deep links: /omyra?tab=race|plan|log|load|progress|streaks|map|fuel, /omyra?plan=next (→ race).
+// Deep links: /omyra?tab=race|plan|log|load|progress|streaks|map|fuel|coll, /omyra?plan=next (→ race).
 export function OmyraHub() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("training");
@@ -115,6 +117,7 @@ export function OmyraHub() {
       )}
       {tab === "map" && <TrainingRouteMap />}
       {tab === "cols" && <ColsTab />}
+      {tab === "coll" && <CollTab />}
 
       {showAdd && (
         <AddActivitySheet onClose={() => setShowAdd(false)} onSaved={() => {

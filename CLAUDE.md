@@ -109,6 +109,14 @@ One style across Daybook: follow `infrastructure/web/DESIGN.md` and build from `
 stats `text-lg`, grey uppercase section titles, amber as the only accent; no gradients, glows or oversized
 cards. Anything naming a day, place, activity or trip links to it.
 
+## Coll (the bike computer)
+
+Coll (`~/Desktop/ciclocomputer`) syncs with Daybook through `/coll/*` (`infrastructure/api/routers/coll.py`,
+`domains/coll/`, Omyra → Coll tab). Contract: `ciclocomputer/docs/DAYBOOK.md`. `domains/coll/coursepack/` is
+vendored from `ciclocomputer/tools/coursepack` — change it there and copy it over (the pack format is shared with
+the firmware). Course builds run in their own process (`python -m domains.coll.worker`), never in the API. Device
+endpoints need `COLL_TOKEN` in the Pi's `.env` (not synced by deploy — `.env` is excluded).
+
 ## Key Directories
 
 - `infrastructure/web/` — Next.js frontend

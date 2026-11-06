@@ -101,6 +101,28 @@ class TourBlockTest(unittest.TestCase):
                          "pending")
 
 
+class CollTest(unittest.TestCase):
+    """Routed tour days become courses on Coll, the bike computer; deleting the tour removes them."""
+
+    def test_routed_days_go_to_coll(self):
+        from infrastructure.db.migrate_coll import SCHEMA
+        c = _db()
+        c.executescript(SCHEMA)
+        gpx, other = _gpx("Day A", 20, lambda x: 10.0), _gpx("Day B", 25, lambda x: 10.0)
+        b = blocks.create(c, 10, "Pyrenees", "2026-12-05", "2026-12-08",
+                          [{"date": "2026-12-06", "gpx": gpx}, {"date": "2026-12-07", "km": 60},
+                           {"date": "2026-12-08", "gpx": gpx}])
+        rows = c.execute("SELECT name, session_id, auto, status FROM coll_courses ORDER BY id").fetchall()
+        self.assertEqual([(r["name"], r["auto"], r["status"]) for r in rows],
+                         [("Pyrenees · Day A", 1, "pending"), ("Pyrenees · Day A", 1, "pending")])
+        sid = b["ride_days"][0]["session_id"]
+        blocks.replace_course(c, sid, other)
+        self.assertEqual(c.execute("SELECT name FROM coll_courses WHERE session_id=?", (sid,)).fetchone()[0],
+                         "Pyrenees · Day B")
+        blocks.delete(c, b["id"])
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM coll_courses").fetchone()[0], 0)
+
+
 class AfterTheTripTest(unittest.TestCase):
     def _block(self):
         c = _db()

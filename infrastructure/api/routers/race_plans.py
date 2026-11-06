@@ -1131,6 +1131,15 @@ def delete_b_race(b_id: int, conn: DB):
     return {"deleted": b_id}
 
 
+def _coll_kick(conn) -> None:
+    """Routed days just became Coll courses: start the pack builder (its own process)."""
+    try:
+        from domains.coll.courses import kick_if_needed
+        kick_if_needed(conn)
+    except Exception:                                # Coll must never fail a plan change
+        pass
+
+
 @router.post("/courses/parse")
 def parse_courses(body: CourseParse):
     """Preview GPX courses before adding a tour: distance, tunnel-corrected climbing, climbs, time, load."""
@@ -1164,7 +1173,9 @@ def replace_session_course(session_id: int, body: CourseReplace, conn: DB):
     from domains.training import blocks
     _row(conn, "plan_sessions", session_id)
     try:
-        return blocks.replace_course(conn, session_id, body.gpx)
+        out = blocks.replace_course(conn, session_id, body.gpx)
+        _coll_kick(conn)
+        return out
     except ET.ParseError as e:
         raise HTTPException(status_code=422, detail=f"GPX could not be read: {e}")
     except ValueError as e:
@@ -1177,8 +1188,10 @@ def create_training_block(goal_id: int, body: BlockCreate, conn: DB):
     from domains.training import blocks
     _row(conn, "race_goals", goal_id)
     try:
-        return blocks.create(conn, goal_id, body.name.strip() or "Tour", body.start_date, body.end_date,
-                             [d.model_dump() for d in body.days], "camp" if body.kind == "camp" else "tour")
+        out = blocks.create(conn, goal_id, body.name.strip() or "Tour", body.start_date, body.end_date,
+                            [d.model_dump() for d in body.days], "camp" if body.kind == "camp" else "tour")
+        _coll_kick(conn)
+        return out
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ET.ParseError as e:

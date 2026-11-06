@@ -46,6 +46,7 @@ from infrastructure.api.routers import food as food_module
 from infrastructure.api.routers import wellness as wellness_module
 from infrastructure.api.routers import system as system_module
 from infrastructure.api.routers import plans as plans_module
+from infrastructure.api.routers import coll as coll_module
 from infrastructure.api.routers import ask as ask_module
 
 VERSION = "0.1.0"
@@ -154,6 +155,7 @@ app.include_router(nutrition_module.router)
 app.include_router(food_module.router)
 app.include_router(wellness_module.router)
 app.include_router(plans_module.router)
+app.include_router(coll_module.router)
 app.include_router(ask_module.router)
 
 _photos_dir = ROOT / "data" / "photos"
@@ -247,6 +249,13 @@ def _run_migrations() -> None:
     _conn16 = _get_conn()
     _migrate_live_cues(_conn16)
     _conn16.close()
+    from infrastructure.db.migrate_coll import migrate as _migrate_coll
+    _conn_c = _get_conn()
+    _migrate_coll(_conn_c)
+    from domains.coll import courses as _coll_courses
+    if _coll_courses.needs_build(_conn_c):          # builds interrupted by a restart / power cut
+        _coll_courses.kick()
+    _conn_c.close()
     from infrastructure.db.migrate_ask import migrate as _migrate_ask
     _conn_a = _get_conn()
     _migrate_ask(_conn_a)

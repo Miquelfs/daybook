@@ -107,6 +107,16 @@ def ensure_courses(conn) -> None:
         created_at   TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')))""")
 
 
+def _to_coll(conn, session_id: int, gpx: str, name: str) -> None:
+    """Every routed day becomes a course on Coll, the bike computer (built by its worker;
+    the API request that called us kicks it). Never lets Coll break the plan."""
+    try:
+        from domains.coll.courses import attach_session
+        attach_session(conn, session_id, gpx, name)
+    except sqlite3.OperationalError:                 # no coll_courses table (tests, old DB)
+        pass
+
+
 def course_for(conn, session_id: int) -> dict | None:
     try:
         r = conn.execute("SELECT course_json FROM session_courses WHERE session_id=?", (session_id,)).fetchone()
@@ -212,6 +222,7 @@ def create(conn, goal_id: int, name: str, start: str, end: str, days: list[dict]
         if course:
             conn.execute("INSERT OR REPLACE INTO session_courses (session_id, name, course_json) VALUES (?,?,?)",
                          (cur.lastrowid, course["name"], json.dumps(course)))
+            _to_coll(conn, cur.lastrowid, d["gpx"], f"{name} · {course['name']}")
         d.pop("gpx", None)                       # the course lives in session_courses, not in days_json
 
     # 3. the week after: a provisional standard recovery, sized for real once you're back (settle)
@@ -241,6 +252,11 @@ def delete(conn, block_id: int) -> None:
         gone = conn.execute("DELETE FROM plan_sessions WHERE id=? AND status != 'completed'", (sid,)).rowcount
         if gone:
             conn.execute("DELETE FROM session_courses WHERE session_id=?", (sid,))
+            try:
+                from domains.coll.courses import detach_session
+                detach_session(conn, sid)
+            except sqlite3.OperationalError:
+                pass
     for sid in ch.get("displaced", []):
         conn.execute("UPDATE plan_sessions SET status='pending', schedule_note=NULL WHERE id=? AND status='displaced'",
                      (sid,))
@@ -507,6 +523,7 @@ def replace_course(conn, session_id: int, gpx: str) -> dict:
                   f"{(b['kind'] if b else 'tour').title()}: {name} — {course['name']}", session_id))
     conn.execute("INSERT OR REPLACE INTO session_courses (session_id, name, course_json) VALUES (?,?,?)",
                  (session_id, course["name"], json.dumps(course)))
+    _to_coll(conn, session_id, gpx, f"{name} · {course['name']}")
     if b:
         days = json.loads(b["days_json"] or "[]")
         days = [d for d in days if d.get("date") != s["session_date"]] + [

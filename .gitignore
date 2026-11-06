@@ -23,6 +23,8 @@ build/
 # data landing zones (local only, never committed)
 data/raw/
 data/backups/
+data/coll/
+data/coursepack-cache/
 
 # node / next.js
 node_modules/
