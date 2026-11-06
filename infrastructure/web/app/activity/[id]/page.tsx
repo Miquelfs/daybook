@@ -275,13 +275,14 @@ export default async function ActivityPage({ params }: Props) {
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20">
-      {/* Back link */}
-      <div className="pt-6 mb-6">
-        <Link
-          href={`/day/${date}`}
-          className="text-sm text-[#52525B] hover:text-white transition-colors"
-        >
-          ← {date}
+      {/* Back: to the day, or to the list to compare it with similar ones */}
+      <div className="pt-6 mb-6 flex items-center justify-between gap-4">
+        <Link href={`/day/${date}`} className="text-sm text-[#52525B] hover:text-[#A1A1AA] transition-colors">
+          ← {new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}
+        </Link>
+        <Link href={`/activities?like=${encodeURIComponent(decodedId)}`}
+              className="text-sm text-[#52525B] hover:text-[#A1A1AA] transition-colors">
+          Compare with similar →
         </Link>
       </div>
 

@@ -536,6 +536,10 @@ export function TrainingOverview({ onOpenRace }: { onOpenRace: () => void }) {
               {showAll ? "Show less" : `Show all ${acts.length}`}
             </button>
           )}
+          <Link href={`/activities${filter ? `?sport=${filter === "cycling" ? "ride" : filter === "running" ? "run" : "swim"}` : ""}`}
+                className="block w-full text-center text-xs text-[#71717A] hover:text-[#A1A1AA] py-2.5">
+            Every activity — sort, filter, compare →
+          </Link>
         </Panel>
       </Section>
 

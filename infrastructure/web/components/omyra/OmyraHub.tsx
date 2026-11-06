@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, Mountain, MountainSnow, CalendarRange, List, Zap, TrendingUp, Map, Droplet, Flame, Plus, Navigation } from "lucide-react";
+import { Activity, Mountain, MountainSnow, CalendarRange, List, Zap, TrendingUp, Map, Droplet, Flame, Plus } from "lucide-react";
 import { RaceCockpit } from "@/components/race/RaceCockpit";
 import OmyraTab from "@/components/training/OmyraTab";
 import FuelTab from "@/components/training/FuelTab";
@@ -13,6 +13,7 @@ import { VolumeChart, ProgressComparisonChart } from "@/components/training/Prog
 import { TrainingRouteMap } from "@/components/training/TrainingRouteMap";
 import { ColsTab } from "@/components/omyra/ColsTab";
 import { CollTab } from "@/components/omyra/CollTab";
+import { CollLogo } from "@/components/omyra/coll/CollLogo";
 import { TrainingOverview } from "@/components/omyra/TrainingOverview";
 import { AddActivitySheet } from "@/components/omyra/AddActivitySheet";
 import { AreaPlan } from "@/components/plan/AreaPlan";
@@ -29,10 +30,10 @@ const TABS = [
   { key: "map", label: "Map", icon: Map },
   { key: "cols", label: "Cols", icon: MountainSnow },
   { key: "fuel", label: "Fuel", icon: Droplet },
-  { key: "coll", label: "Coll", icon: Navigation },
 ] as const;
-type Tab = (typeof TABS)[number]["key"];
-const KEYS = TABS.map((t) => t.key) as readonly string[];
+// Coll (the bike computer) is its own place, entered by its badge in the header — not a tab
+type Tab = (typeof TABS)[number]["key"] | "coll";
+const KEYS = [...TABS.map((t) => t.key), "coll"] as readonly string[];
 
 function Block({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
   return (
@@ -47,6 +48,7 @@ function Block({ title, note, children }: { title: string; note?: string; childr
 // Omyra — training as its own home: Training overview first (with the Mallorca 312
 // banner), then the race cockpit, the plan and the analytics.
 // Deep links: /omyra?tab=race|plan|log|load|progress|streaks|map|fuel|coll, /omyra?plan=next (→ race).
+// Coll opens full-page (its own header, back to Omyra) from the round badge next to Log.
 export function OmyraHub() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("training");
@@ -67,6 +69,27 @@ export function OmyraHub() {
     window.scrollTo({ top: 0 });
   }
 
+  if (tab === "coll") {
+    return (
+      <>
+        <header className="mb-6">
+          <button onClick={() => select("training")}
+                  className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-3">
+            ← Omyra
+          </button>
+          <div className="flex items-center gap-3">
+            <CollLogo size={48} />
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Coll</h1>
+              <p className="text-sm text-[#71717A] mt-0.5">Your bike computer — routes out, rides back</p>
+            </div>
+          </div>
+        </header>
+        <CollTab />
+      </>
+    );
+  }
+
   return (
     <>
       <div className="mb-6">
@@ -75,10 +98,17 @@ export function OmyraHub() {
             <h1 className="text-2xl font-semibold tracking-tight">Omyra</h1>
             <p className="text-sm text-[#71717A] mt-0.5">Training, Mallorca 312 & everything in between</p>
           </div>
-          <button onClick={() => setShowAdd(true)}
-                  className="inline-flex items-center gap-1 text-xs bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#F59E0B] hover:bg-[#F59E0B]/20 rounded-lg px-3 py-1.5 transition-colors">
-            <Plus size={13} />Log
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setShowAdd(true)}
+                    className="inline-flex items-center gap-1 text-xs bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#F59E0B] hover:bg-[#F59E0B]/20 rounded-lg px-3 py-1.5 transition-colors">
+              <Plus size={13} />Log
+            </button>
+            <button onClick={() => select("coll")} title="Open Coll — the bike computer"
+                    className="group flex flex-col items-center gap-0.5 rounded-full transition-transform hover:scale-105 active:scale-95">
+              <CollLogo size={40} />
+              <span className="text-[10px] uppercase tracking-widest text-[#71717A] group-hover:text-[#A1A1AA]">Coll</span>
+            </button>
+          </div>
         </div>
         <div className="flex gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-1 w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {TABS.map(({ key, label, icon: Icon }) => (
@@ -117,7 +147,6 @@ export function OmyraHub() {
       )}
       {tab === "map" && <TrainingRouteMap />}
       {tab === "cols" && <ColsTab />}
-      {tab === "coll" && <CollTab />}
 
       {showAdd && (
         <AddActivitySheet onClose={() => setShowAdd(false)} onSaved={() => {

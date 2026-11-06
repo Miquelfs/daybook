@@ -32,3 +32,22 @@ export function sessionIcon(discipline: string | null | undefined, sessionType?:
   if (d === "swimming" || d === "swim" || t.startsWith("swim")) return "🏊";
   return "🏋️";
 }
+
+/** Groups for filtering and comparing activities: the activity list's chips, "similar" matches. */
+export type SportFamily = "ride" | "run" | "swim" | "walk" | "racket" | "strength" | "snow" | "other";
+
+export const FAMILY_LABEL: Record<SportFamily, string> = {
+  ride: "Ride", run: "Run", swim: "Swim", walk: "Walk & hike", racket: "Tennis & padel",
+  strength: "Gym & mobility", snow: "Snow", other: "Other",
+};
+
+export function sportFamily(activityType: string | null): SportFamily {
+  const t = (activityType ?? "").toLowerCase();
+  if (/tennis|padel|paddel|pickleball|squash|badminton|racquet/.test(t)) return "racket";
+  const s = sportOf(t);
+  if (s !== "other") return s;
+  if (/walk|hik|trek/.test(t)) return "walk";
+  if (/strength|gym|weight|yoga|pilates|stretch|mobility|hiit|crossfit|stop_?watch|workout/.test(t)) return "strength";
+  if (/ski|snow/.test(t)) return "snow";
+  return "other";
+}

@@ -253,10 +253,11 @@ def list_activities(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
     sport: Optional[str] = Query(None),
-    limit: int = Query(50),
+    limit: int = Query(50, ge=1, le=3000),
     offset: int = Query(0),
 ):
-    """Paginated activity list with optional sport filter."""
+    """Paginated activity list with optional sport filter. Each row carries the temperature
+    where and when it happened (temp_c) once the activity's weather has been fetched."""
     if not end:
         end = date.today().isoformat()
     if not start:
@@ -290,6 +291,9 @@ def list_activities(
             params.append(sport)
 
     where = " AND ".join(clauses)
+    has_wind = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='activity_wind'").fetchone()
+    temp_col = ("(SELECT json_extract(w.result_json, '$.temp.avg') FROM activity_wind w WHERE w.activity_id = activities.id)"
+                if has_wind else "NULL")
 
     rows = conn.execute(
         f"""
@@ -300,7 +304,8 @@ def list_activities(
             avg_heart_rate, max_heart_rate,
             avg_speed_mps, avg_power_watts, calories,
             training_stress_score, strava_id,
-            CASE WHEN polyline IS NOT NULL THEN 1 ELSE 0 END AS has_polyline
+            CASE WHEN polyline IS NOT NULL THEN 1 ELSE 0 END AS has_polyline,
+            {temp_col} AS temp_c
         FROM activities
         WHERE {where}
         ORDER BY date DESC, start_time DESC
