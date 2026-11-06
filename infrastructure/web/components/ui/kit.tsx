@@ -208,3 +208,20 @@ export function Skeleton({ h = 160, className = "" }: { h?: number; className?: 
 export function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-xs text-[#52525B] py-2">{children}</p>;
 }
+
+/** An on/off switch (amber when on) with its label — instead of a bare checkbox. */
+export function Toggle({ on, onChange, label, disabled = false }: {
+  on: boolean; onChange: (on: boolean) => void; label?: React.ReactNode; disabled?: boolean;
+}) {
+  return (
+    <button type="button" role="switch" aria-checked={on} disabled={disabled} onClick={() => onChange(!on)}
+            className="inline-flex items-center gap-2 text-xs text-[#A1A1AA] disabled:opacity-50">
+      <span className={`relative w-8 h-[18px] rounded-full border transition-colors ${
+        on ? "bg-[#F59E0B]/20 border-[#F59E0B]" : "bg-[#18181B] border-[#3F3F46]"}`}>
+        <span className={`absolute top-[2px] w-3 h-3 rounded-full transition-all ${
+          on ? "left-[16px] bg-[#F59E0B]" : "left-[2px] bg-[#52525B]"}`} />
+      </span>
+      {label}
+    </button>
+  );
+}

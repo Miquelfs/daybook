@@ -41,6 +41,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Response
 from pydantic import BaseModel
 
+from domains.coll import brief as B
 from domains.coll import courses as C
 from domains.coll import device_state as D
 from domains.coll import fuel as F
@@ -80,7 +81,22 @@ def _course(conn, cid: int) -> dict:
             geo = packread.geometry(p[0])
         except (ValueError, IndexError, UnicodeDecodeError):
             geo = None
-    return {**c, "fuel": F.for_course(conn, c, S._setting(conn, S.FUEL_KEY)), "map": geo}
+    fuel = F.for_course(conn, c, S._setting(conn, S.FUEL_KEY))
+    return {**c, "fuel": fuel, "map": geo, "brief": _brief(conn, c, fuel["fuel_plan"], full=True)}
+
+
+def _brief(conn, c: dict, fuel_plan: str | None, full: bool) -> dict | None:
+    r = conn.execute("""SELECT c.gpx, c.gpx_sha1, c.pack_sha1, c.cutoffs, g.race_date,
+                               CASE WHEN ? THEN c.pack END AS pack
+                        FROM coll_courses c LEFT JOIN race_goals g ON g.id = c.goal_id WHERE c.id=?""",
+                     (1 if full else 0, c["id"])).fetchone()
+    if r is None:
+        return None
+    try:
+        return B.build(conn, {**c, **dict(r), "pack": bytes(r["pack"]) if r["pack"] is not None else None},
+                       fuel_plan, full=full)
+    except Exception:                                       # noqa: BLE001 — the brief is extra, never a 500
+        return None
 
 
 def _finish_ride(activity_id: str, day: str) -> None:
@@ -195,9 +211,13 @@ def create_course(body: CourseIn, conn: DB, response: Response):
 def list_courses(conn: DB):
     on_device = {c["id"]: c for c in C.device_courses(conn, default_fuel=S._setting(conn, S.FUEL_KEY))}
     dev = D.state(conn)
-    return [{**c, "synced": c["id"] in on_device, "fuel_plan_now": (on_device.get(c["id"]) or {}).get("fuel_plan"),
-             **D.steps(conn, c, set(on_device), dev)}
-            for c in C.list_courses(conn)]
+    default = S._setting(conn, S.FUEL_KEY)
+    out = []
+    for c in C.list_courses(conn):
+        fuel = (on_device.get(c["id"]) or {}).get("fuel_plan") or F.for_course(conn, c, default)["fuel_plan"]
+        out.append({**c, "synced": c["id"] in on_device, "fuel_plan_now": fuel,
+                    **D.steps(conn, c, set(on_device), dev), "brief": _brief(conn, c, fuel, full=False)})
+    return out
 
 
 @router.get("/device")

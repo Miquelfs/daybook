@@ -3,6 +3,8 @@
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+import type { ProfileMarker } from "@/lib/api";
+
 export type CollStatus = "pending" | "building" | "ready" | "failed";
 
 export interface CollTurn {
@@ -17,6 +19,28 @@ export interface CollFuel {
   fuel_plan: string | null;
   source: "course" | "race nutrition plan" | "planned session" | "race targets" | "default" | null;
   note: string;
+}
+
+/** The route as a rider reads it (domains/coll/brief.py). The list carries the light part. */
+export interface CollBrief {
+  date: string | null;
+  km: number; climb_m: number; descent_m: number; high_m: number | null;
+  est_minutes: number;
+  pace: { kmh: number; rides: number; source: "your rides" | "touring model" };
+  carry: { items: { name: string; every_min: number; count: number; carbs_g: number | null }[];
+           carbs_g: number; carbs_g_h: number | null } | null;
+  profile: [number, number][];
+  /** detail only */
+  climbs?: { km: number; top_km: number; length_km: number; gain_m: number; avg_pct: number; max_200m_pct: number;
+             name: string | null; est_min: number }[];
+  markers?: ProfileMarker[];
+  along?: { km: number; kind: CollWaypointKind; name: string; off_m: number }[];
+  cutoffs?: { km: number | null; at: string; name: string | null }[];
+  daylight?: { sunrise: string; sunset: string; latest_start: string | null; needs_lights: boolean } | null;
+  tunnels?: { from_km: number; to_km: number; length_km: number; peak_m: number }[];
+  attempts?: { activity_id: string; date: string; moving_time_seconds: number | null; distance_meters: number | null;
+               avg_heart_rate: number | null; source: string; status: "activity" | "merged" }[];
+  has_elevation?: boolean;
 }
 
 export interface CollCourse {
@@ -47,6 +71,7 @@ export interface CollCourse {
   fuel_plan_now?: string | null;
   /** list only: is it really on Coll? "yes" = Coll reported this exact pack */
   on_coll?: "yes" | "next sync" | "old version" | "no";
+  brief?: CollBrief | null;
   /** list only: rides Coll recorded on this route, newest first */
   rides?: { id: number; activity_id: string | null; status: "activity" | "merged"; date: string | null }[];
 }
@@ -61,7 +86,7 @@ export interface CollDevice {
   have: { id: number; pack_sha1: string }[];
 }
 
-export interface CollCourseDetail extends Omit<CollCourse, "turns"> {
+export interface CollCourseDetail extends Omit<CollCourse, "turns" | "brief"> {
   summary: {
     km?: number; matched_pct?: number; turns?: number; keeps?: number; roundabouts?: number; bytes?: number;
     tunnels?: { from_km: number; to_km: number; length_km: number; peak_m: number }[];
@@ -74,6 +99,7 @@ export interface CollCourseDetail extends Omit<CollCourse, "turns"> {
   fuel: CollFuel;
   /** read from the pack: where each prompt (same order as turns) and waypoint is; null until built */
   map: CollPackMap | null;
+  brief: CollBrief | null;
 }
 
 export type CollWaypointKind = "poi" | "feed" | "summit" | "hazard";

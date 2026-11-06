@@ -252,8 +252,15 @@ def daylight(course: dict, day: str) -> dict | None:
         from domains.locations.tz_lookup import _tf
         name = _tf.timezone_at(lat=lat, lng=lon)
         tz = ZoneInfo(name) if name else None
-    except Exception:                               # no timezonefinder → whole hours from the longitude
+    except Exception:                               # no timezonefinder → your timezone, else hours from the longitude
         tz = None
+    if tz is None:
+        try:
+            from zoneinfo import ZoneInfo
+            from infrastructure.db.usertime import current_tz
+            tz = ZoneInfo(current_tz())
+        except Exception:                           # noqa: BLE001
+            tz = None
     tz = tz or timezone(timedelta(hours=round(lon / 15)))
     n = d.timetuple().tm_yday
     g = 2 * math.pi / 365 * (n - 1)

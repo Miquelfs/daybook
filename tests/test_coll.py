@@ -599,6 +599,45 @@ class RoutePath(unittest.TestCase):
             D.report(c, {"have": [{"id": "x"}]})
 
 
+class Brief(unittest.TestCase):
+    """The route as a rider reads it."""
+
+    def test_what_to_carry(self):
+        from domains.coll import brief as B
+        c = B.carry("Gel:25:25,Drink:20", 240)
+        self.assertEqual([(x["name"], x["count"], x["carbs_g"]) for x in c["items"]], [("Gel", 9, 225), ("Drink", 12, None)])
+        self.assertEqual((c["carbs_g"], c["carbs_g_h"]), (225, 56))
+        self.assertIsNone(B.carry(None, 240))
+
+    def test_cutoffs_by_km_or_waypoint(self):
+        from domains.coll import brief as B
+        stops = [{"km": 50.8, "kind": "hazard", "name": "Temps tall 312", "off_m": 0}]
+        self.assertEqual(B._cutoffs("225@19:00 Sa Granja; Temps tall@13:30", stops),
+                         [{"km": 50.8, "at": "13:30", "name": "Temps tall"}, {"km": 225.0, "at": "19:00", "name": "Sa Granja"}])
+
+    def test_your_pace_or_the_model(self):
+        from domains.coll import brief as B
+        c = rides_db()
+        self.assertEqual(B.pace(c, date(2026, 12, 10))["source"], "touring model")
+        for i in range(3):
+            R.ingest(c, coll_ride(start=START + i * 86400), f"r{i}", "Europe/Madrid")
+        c.execute("UPDATE activities SET distance_meters=30000, moving_time_seconds=3600")   # 30 km/h
+        p = B.pace(c, date(2026, 12, 10))
+        self.assertEqual((p["kmh"], p["rides"], p["source"]), (30.0, 3, "your rides"))
+
+    def test_a_route_brief(self):
+        from domains.coll import brief as B
+        c = rides_db()
+        up, _ = C.create(c, "Inca loop", GPX)
+        row = dict(c.execute("SELECT * FROM coll_courses WHERE id=?", (up["id"],)).fetchone())
+        b = B.build(c, {**row, "session_date": "2026-12-06"}, "Gel:20:25")
+        self.assertAlmostEqual(b["km"], 0.9, delta=0.1)
+        self.assertGreater(b["est_minutes"], 0)
+        self.assertEqual(b["date"], "2026-12-06")
+        self.assertIn("sunset", b["daylight"])
+        self.assertEqual(b["along"], [])                                  # not converted yet: no pack
+
+
 class Token(unittest.TestCase):
     def test_closed_without_a_token(self):
         self.assertFalse(S.token_ok("anything", None))
