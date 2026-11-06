@@ -1,5 +1,6 @@
 import { ActivityMap } from "@/components/ActivityMap";
 import { Chip, Panel, Stat } from "@/components/ui/kit";
+import { CollMark } from "@/components/omyra/coll/CollLogo";
 
 export type HeroStat = { label: string; value: string | null };
 
@@ -47,14 +48,16 @@ export function ActivityHero({
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold tracking-tight truncate">{title}</h1>
             <p className="text-xs text-[#71717A] mt-0.5">
-              {when}{source ? <span className="capitalize"> · {source}</span> : null}{strava ? " · Strava" : ""}
+              {when}{source === "coll"
+                ? <span className="inline-flex items-center gap-1 align-middle"> · <CollMark size={12} /> Coll</span>
+                : source ? <span className="capitalize"> · {source}</span> : null}{strava ? " · Strava" : ""}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-1.5 mt-3">
           <Chip><span className="capitalize">{typeLabel}</span></Chip>
           {plan && <Chip accent href={plan.href}>✓ {plan.label}</Chip>}
-          {route && <Chip href={route.href}>Route · {route.label}</Chip>}
+          {route && <Chip href={route.href}><span className="inline-flex items-center gap-1.5"><CollMark size={14} />{route.label}</span></Chip>}
         </div>
 
         {shown.length > 0 && (

@@ -280,9 +280,9 @@ export default async function ActivityPage({ params }: Props) {
         <Link href={`/day/${date}`} className="text-sm text-[#52525B] hover:text-[#A1A1AA] transition-colors">
           ← {new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}
         </Link>
-        <Link href={`/activities?like=${encodeURIComponent(decodedId)}`}
+        <Link href={`/activities?from=${encodeURIComponent(decodedId)}`}
               className="text-sm text-[#52525B] hover:text-[#A1A1AA] transition-colors">
-          Compare with similar →
+          All activities →
         </Link>
       </div>
 

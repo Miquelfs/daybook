@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, X } from "lucide-react";
-import { Empty, Hero, Panel, Pill, Skeleton } from "@/components/ui/kit";
+import { ArrowDown, ArrowUp, Check, GitCompareArrows, X } from "lucide-react";
+import { ActionButton, Empty, Hero, Panel, Pill, Skeleton } from "@/components/ui/kit";
 import { activityIcon } from "@/lib/api";
 import { FAMILY_LABEL, SPORT_COLORS, sportFamily, sportOf, type SportFamily } from "@/lib/sport";
 import { localISODate } from "@/lib/dates";
@@ -14,7 +14,8 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 interface Row {
   id: string; date: string; source: string; activity_type: string | null; name: string | null; start_time: string | null;
   duration_seconds: number | null; moving_time_seconds: number | null; distance_meters: number | null;
-  elevation_gain_meters: number | null; avg_heart_rate: number | null; avg_speed_mps: number | null;
+  elevation_gain_meters: number | null; avg_heart_rate: number | null; max_heart_rate: number | null;
+  avg_speed_mps: number | null; calories: number | null;
   avg_power_watts: number | null; training_stress_score: number | null; temp_c: number | null;
 }
 
@@ -94,13 +95,21 @@ function Diff({ r, ref_ }: { r: Row; ref_: Row }) {
   return <p className="text-[11px] text-[#71717A] tabular-nums flex gap-2 justify-end">{parts}</p>;
 }
 
-function ActivityLine({ r, ref_, pinned = false }: { r: Row; ref_: Row | null; pinned?: boolean }) {
+function ActivityLine({ r, ref_, mark, picking, picked, onPick }: {
+  r: Row; ref_: Row | null; mark?: "from" | "similar";
+  picking: boolean; picked: boolean; onPick: () => void;
+}) {
   const d = new Date(`${r.date}T12:00:00`);
   const km = (r.distance_meters ?? 0) > 50 ? r.distance_meters! / 1000 : null;
   const color = SPORT_COLORS[sportOf(r.activity_type)];
-  return (
-    <Link href={`/activity/${encodeURIComponent(r.id)}`}
-          className={`px-4 py-2.5 flex items-center gap-3 hover:bg-[#18181B] transition-colors ${pinned ? "bg-[#F59E0B]/10" : ""}`}>
+  const inner = (
+    <>
+      {picking && (
+        <span className={`w-5 h-5 shrink-0 rounded-full border flex items-center justify-center transition-colors ${
+          picked ? "bg-[#F59E0B] border-[#F59E0B] text-[#0D0D0F]" : "border-[#3F3F46]"}`}>
+          {picked && <Check size={12} strokeWidth={3} />}
+        </span>
+      )}
       <div className="w-11 shrink-0 bg-[#18181B] rounded-xl py-1.5 text-center relative">
         <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full" style={{ background: color }} />
         <p className="text-sm font-semibold leading-none tabular-nums">{d.getDate()}</p>
@@ -111,7 +120,8 @@ function ActivityLine({ r, ref_, pinned = false }: { r: Row; ref_: Row | null; p
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">
           <span className="mr-1.5">{activityIcon(r.activity_type)}</span>{r.name ?? (r.activity_type ?? "Activity").replace(/_/g, " ")}
-          {pinned && <span className="ml-2 text-[10px] uppercase tracking-widest text-[#F59E0B]">this one</span>}
+          {mark === "from" && <span className="ml-2 text-[10px] uppercase tracking-widest text-[#F59E0B]">you came from here</span>}
+          {mark === "similar" && <span className="ml-2 text-[10px] uppercase tracking-widest text-[#F59E0B]">similar to this</span>}
         </p>
         <p className="text-xs text-[#71717A] tabular-nums truncate">
           {[km != null ? `${km >= 100 ? Math.round(km) : km.toFixed(1)} km` : null, secs(r) ? dur(secs(r)) : null,
@@ -122,29 +132,112 @@ function ActivityLine({ r, ref_, pinned = false }: { r: Row; ref_: Row | null; p
       </div>
       <div className="shrink-0 text-right">
         <p className="text-sm font-semibold tabular-nums">{pace(r) ?? (r.training_stress_score ? `${Math.round(r.training_stress_score)} TSS` : "")}</p>
-        {ref_ && !pinned && <Diff r={r} ref_={ref_} />}
+        {ref_ && ref_.id !== r.id && <Diff r={r} ref_={ref_} />}
       </div>
-    </Link>
+    </>
+  );
+  const cls = `px-4 py-2.5 flex items-center gap-3 hover:bg-[#18181B] transition-colors ${
+    mark ? "bg-[#F59E0B]/10" : picked ? "bg-[#18181B]" : ""}`;
+  return picking
+    ? <button id={`a-${r.id}`} onClick={onPick} className={`w-full text-left ${cls}`}>{inner}</button>
+    : <Link id={`a-${r.id}`} href={`/activity/${encodeURIComponent(r.id)}`} className={cls}>{inner}</Link>;
+}
+
+/** The picked activities side by side: one column each, the first is the reference the others are measured against. */
+function CompareTable({ rows, onClose, onRemove }: { rows: Row[]; onClose: () => void; onRemove: (id: string) => void }) {
+  const ref_ = rows[0];
+  const sportSet = new Set(rows.map((r) => sportOf(r.activity_type)));
+  type Metric = { label: string; v: (r: Row) => number | null; fmt: (r: Row) => string | null; better?: "high" | "low" };
+  const all: Metric[] = [
+    { label: "Distance", v: (r) => (r.distance_meters ?? 0) > 50 ? r.distance_meters! : null,
+      fmt: (r) => (r.distance_meters ?? 0) > 50 ? `${(r.distance_meters! / 1000).toFixed(1)} km` : null },
+    { label: "Moving time", v: (r) => secs(r) || null, fmt: (r) => secs(r) ? dur(secs(r)) : null },
+    { label: sportSet.size === 1 && sportSet.has("ride") ? "Speed" : "Pace", v: (r) => speed(r) || null, fmt: pace, better: "high" },
+    { label: "Climb", v: (r) => r.elevation_gain_meters, fmt: (r) => r.elevation_gain_meters ? `+${Math.round(r.elevation_gain_meters)} m` : null },
+    { label: "Avg heart rate", v: (r) => r.avg_heart_rate, fmt: (r) => r.avg_heart_rate ? `${r.avg_heart_rate} bpm` : null },
+    { label: "Max heart rate", v: (r) => r.max_heart_rate, fmt: (r) => r.max_heart_rate ? `${r.max_heart_rate} bpm` : null },
+    { label: "Power", v: (r) => r.avg_power_watts, fmt: (r) => r.avg_power_watts ? `${r.avg_power_watts} W` : null, better: "high" },
+    { label: "Speed per beat", v: (r) => speed(r) && r.avg_heart_rate ? (speed(r) * 3600) / r.avg_heart_rate : null,
+      fmt: (r) => speed(r) && r.avg_heart_rate ? `${((speed(r) * 3600) / r.avg_heart_rate).toFixed(1)} m/beat` : null, better: "high" },
+    { label: "Load", v: (r) => r.training_stress_score, fmt: (r) => r.training_stress_score ? `${Math.round(r.training_stress_score)} TSS` : null },
+    { label: "Temperature", v: (r) => r.temp_c, fmt: (r) => r.temp_c != null ? `${Math.round(r.temp_c)}°C` : null },
+    { label: "Calories", v: (r) => r.calories, fmt: (r) => r.calories ? `${r.calories} kcal` : null },
+  ];
+  const metrics = all.filter((m) => rows.some((r) => m.v(r) != null));
+
+  return (
+    <Panel className="overflow-hidden">
+      <div className="px-4 py-3 flex items-center justify-between border-b border-[#18181B]">
+        <p className="text-xs uppercase tracking-widest text-[#52525B]">Side by side · against the first</p>
+        <button onClick={onClose} className="text-xs text-[#71717A] hover:text-[#A1A1AA] inline-flex items-center gap-1"><X size={12} />Close</button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm tabular-nums">
+          <thead>
+            <tr className="border-b border-[#18181B]">
+              <th className="w-28" />
+              {rows.map((r, i) => (
+                <th key={r.id} className="px-3 py-2.5 text-left font-normal align-top min-w-[120px]">
+                  <Link href={`/activity/${encodeURIComponent(r.id)}`} className="text-sm font-medium hover:underline block truncate max-w-[160px]">
+                    {activityIcon(r.activity_type)} {r.name ?? "Activity"}
+                  </Link>
+                  <span className="text-xs text-[#71717A]">
+                    {new Date(`${r.date}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })}
+                    {i === 0 ? " · reference" : ""}
+                  </span>
+                  <button onClick={() => onRemove(r.id)} className="ml-1.5 text-[#52525B] hover:text-rose-400 align-middle" title="Take it out"><X size={11} /></button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#18181B]">
+            {metrics.map((m) => {
+              const vals = rows.map((r) => m.v(r));
+              const nums = vals.filter((v): v is number => v != null);
+              const best = m.better && nums.length > 1 ? (m.better === "high" ? Math.max(...nums) : Math.min(...nums)) : null;
+              return (
+                <tr key={m.label}>
+                  <td className="px-4 py-2 text-[10px] uppercase tracking-widest text-[#52525B] whitespace-nowrap">{m.label}</td>
+                  {rows.map((r, i) => {
+                    const v = vals[i], v0 = vals[0];
+                    const pct = i > 0 && v != null && v0 ? Math.round(((v - v0) / v0) * 100) : null;
+                    return (
+                      <td key={r.id} className="px-3 py-2">
+                        <span className={best != null && v === best ? "font-semibold text-emerald-400" : "text-[#D4D4D8]"}>{m.fmt(r) ?? "—"}</span>
+                        {pct != null && pct !== 0 && <span className="text-[11px] text-[#71717A] ml-1.5">{pct > 0 ? "+" : ""}{pct}%</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 
-/** Every activity, filterable and sortable — and "like this one": the activities similar to the one you came from. */
+/** Every activity, filterable and sortable. Compare: pick 2–4 to see them side by side, or one to find similar ones. */
 export function ActivityList() {
   const [family, setFamily] = useState<SportFamily | null>(null);
   const [period, setPeriod] = useState<Period>("12m");
   const [sort, setSort] = useState<SortKey>("date");
   const [asc, setAsc] = useState(false);
-  const [likeId, setLikeId] = useState<string | null>(null);
-  const [similar, setSimilar] = useState(true);
+  const [fromId, setFromId] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [showCompare, setShowCompare] = useState(false);
+  const [similarTo, setSimilarTo] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(60);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
-    const like = p.get("like");
     const sp = p.get("sport") as SportFamily | null;
     if (sp && sp in FAMILY_LABEL) setFamily(sp);
-    if (like) { setLikeId(like); setPeriod("all"); }
+    const from = p.get("from");
+    if (from) setFromId(from);
   }, []);
 
   const [start, end] = periodRange(period);
@@ -153,9 +246,16 @@ export function ActivityList() {
     queryFn: () => fetch(`${BASE}/training/activities?${new URLSearchParams({ start, end, limit: "3000" })}`).then((r) => r.json()),
   });
   const rows = useMemo(() => (Array.isArray(data) ? data : []), [data]);
-  const ref_ = likeId ? rows.find((r) => r.id === likeId) ?? null : null;
-  useEffect(() => { if (ref_ && family === null) setFamily(sportFamily(ref_.activity_type)); }, [ref_]); // eslint-disable-line react-hooks/exhaustive-deps
+  const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
 
+  // came from an activity older than the period: widen to all time; then bring it into view
+  useEffect(() => {
+    if (!fromId || !data) return;
+    if (!byId.has(fromId) && period !== "all") { setPeriod("all"); return; }
+    if (byId.has(fromId)) requestAnimationFrame(() => document.getElementById(`a-${fromId}`)?.scrollIntoView({ block: "center" }));
+  }, [fromId, data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const simRef = similarTo ? byId.get(similarTo) ?? null : null;
   const present = useMemo(() => {
     const n: Partial<Record<SportFamily, number>> = {};
     rows.forEach((r) => { const f = sportFamily(r.activity_type); n[f] = (n[f] ?? 0) + 1; });
@@ -164,88 +264,117 @@ export function ActivityList() {
 
   const shown = useMemo(() => {
     let out = rows.filter((r) => !family || sportFamily(r.activity_type) === family);
-    if (ref_ && similar) {
-      const base = (ref_.distance_meters ?? 0) > 1000 ? "distance" : "time";
-      const v0 = value(ref_, base);
-      if (v0) out = out.filter((r) => Math.abs(value(r, base) - v0) <= SIMILAR * v0);
+    if (simRef) {
+      const base = (simRef.distance_meters ?? 0) > 1000 ? "distance" : "time";
+      const v0 = value(simRef, base);
+      const fam = sportFamily(simRef.activity_type);
+      out = rows.filter((r) => sportFamily(r.activity_type) === fam && v0 && Math.abs(value(r, base) - v0) <= SIMILAR * v0);
     }
     const needle = q.trim().toLowerCase();
     if (needle) out = out.filter((r) => `${r.name ?? ""} ${r.activity_type ?? ""}`.toLowerCase().includes(needle));
     return [...out].sort((a, b) => (value(a, sort) - value(b, sort)) * (asc ? 1 : -1));
-  }, [rows, family, ref_, similar, q, sort, asc]);
+  }, [rows, family, simRef, q, sort, asc]);
+
+  function pick(id: string) {
+    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length >= 4 ? p : [...p, id]));
+  }
+  function startPicking() {
+    setPicking(true);
+    if (fromId && byId.has(fromId) && !picked.length) setPicked([fromId]);
+  }
+  function stopPicking() {
+    setPicking(false); setPicked([]); setShowCompare(false);
+  }
 
   const km = shown.reduce((a, r) => a + (r.distance_meters ?? 0), 0) / 1000;
   const hours = shown.reduce((a, r) => a + secs(r), 0) / 3600;
   const years = Array.from(new Set(rows.map((r) => r.date.slice(0, 4)))).sort().reverse();
-  const backHref = ref_ ? `/activity/${encodeURIComponent(ref_.id)}` : "/omyra";
+  const from = fromId ? byId.get(fromId) ?? null : null;
+  const pickedRows = picked.map((id) => byId.get(id)).filter((r): r is Row => !!r);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-16">
       <header>
-        <Link href={backHref} className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
-          ← {ref_ ? ref_.name ?? "The activity" : "Omyra"}
+        <Link href={from ? `/activity/${encodeURIComponent(from.id)}` : "/omyra"}
+              className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">
+          ← {from ? from.name ?? "The activity" : "Omyra"}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">Activities</h1>
-        <p className="text-sm text-[#71717A] mt-0.5">
-          {ref_ ? <>Compared with <Link href={backHref} className="hover:underline">{ref_.name ?? "this activity"}</Link> · {new Date(`${ref_.date}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</>
-            : "Everything you've done — filter, sort, compare"}
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Activities</h1>
+            <p className="text-sm text-[#71717A] mt-0.5">Everything you&apos;ve done — filter, sort, compare</p>
+          </div>
+          <div className="shrink-0 mt-1">
+            {picking
+              ? <button onClick={stopPicking} className="text-xs text-[#71717A] hover:text-[#A1A1AA] inline-flex items-center gap-1"><X size={12} />Done comparing</button>
+              : <ActionButton icon={GitCompareArrows} onClick={startPicking}>Compare</ActionButton>}
+          </div>
+        </div>
       </header>
 
       {!data ? <Skeleton h={480} /> : (
         <>
-          <Hero eyebrow={family ? FAMILY_LABEL[family] : "All sports"} value={shown.length} unit={shown.length === 1 ? "activity" : "activities"}
-                sub={[km >= 1 ? `${Math.round(km).toLocaleString("en-GB")} km` : null, hours ? `${Math.round(hours)} h` : null,
-                      ref_ && similar ? `within ±${SIMILAR * 100} % of its ${(ref_.distance_meters ?? 0) > 1000 ? "distance" : "time"}` : null]
-                      .filter(Boolean).join(" · ")} />
+          {showCompare && pickedRows.length >= 2 ? (
+            <CompareTable rows={pickedRows} onClose={() => setShowCompare(false)}
+                          onRemove={(id) => { const left = picked.filter((x) => x !== id); setPicked(left); if (left.length < 2) setShowCompare(false); }} />
+          ) : (
+            <Hero eyebrow={simRef ? `Similar to ${simRef.name ?? "this one"}` : family ? FAMILY_LABEL[family] : "All sports"}
+                  value={shown.length} unit={shown.length === 1 ? "activity" : "activities"}
+                  sub={[km >= 1 ? `${Math.round(km).toLocaleString("en-GB")} km` : null, hours ? `${Math.round(hours)} h` : null,
+                        simRef ? `same sport, within ±${SIMILAR * 100} % of its ${(simRef.distance_meters ?? 0) > 1000 ? "distance" : "time"}` : null]
+                        .filter(Boolean).join(" · ")} />
+          )}
 
-          <div className="space-y-3">
-            <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <Pill on={family === null} onClick={() => setFamily(null)}>All</Pill>
-              {present.map(({ f, n }) => (
-                <Pill key={f} on={family === f} onClick={() => setFamily(family === f ? null : f)}>
-                  {FAMILY_LABEL[f]} <span className="opacity-60 tabular-nums">{n}</span>
-                </Pill>
-              ))}
+          {picking && !showCompare && (
+            <p className="text-xs text-[#71717A]">
+              Pick up to 4 to see side by side (the first is the reference), or one to find the ones like it.
+            </p>
+          )}
+
+          {simRef ? (
+            <div className="flex items-center gap-3">
+              <Pill on onClick={() => setSimilarTo(null)}>Similar to {simRef.name ?? "this one"} <X size={11} /></Pill>
             </div>
-            <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {(["3m", "12m", "all"] as Period[]).map((p) => (
-                <Pill key={p} on={period === p} onClick={() => setPeriod(p)}>{p === "3m" ? "3 months" : p === "12m" ? "12 months" : "All time"}</Pill>
-              ))}
-              {years.slice(0, 6).map((y) => <Pill key={y} on={period === `y${y}`} onClick={() => setPeriod(`y${y}` as Period)}>{y}</Pill>)}
-            </div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <div className="flex items-center gap-1 text-xs">
-                <span className="text-[#52525B] uppercase tracking-widest text-[10px] mr-1">Sort</span>
-                {SORTS.map((x) => (
-                  <button key={x.key} onClick={() => (sort === x.key ? setAsc(!asc) : (setSort(x.key), setAsc(false)))}
-                          className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded transition-colors ${
-                            sort === x.key ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
-                    {x.label}{sort === x.key && (asc ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
-                  </button>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <Pill on={family === null} onClick={() => setFamily(null)}>All</Pill>
+                {present.map(({ f, n }) => (
+                  <Pill key={f} on={family === f} onClick={() => setFamily(family === f ? null : f)}>
+                    {FAMILY_LABEL[f]} <span className="opacity-60 tabular-nums">{n}</span>
+                  </Pill>
                 ))}
               </div>
-              {ref_ && (
-                <Pill on={similar} onClick={() => setSimilar(!similar)}>Similar {(ref_.distance_meters ?? 0) > 1000 ? "distance" : "length"}</Pill>
-              )}
-              {likeId && (
-                <button className="inline-flex items-center gap-1 text-xs text-[#71717A] hover:text-[#A1A1AA]"
-                        onClick={() => { setLikeId(null); window.history.replaceState(null, "", "/activities"); }}>
-                  <X size={12} />Stop comparing
-                </button>
-              )}
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search names…"
-                     className="ml-auto w-40 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-1 text-xs text-[#FAFAFA] placeholder:text-[#52525B] focus:outline-none focus:border-[#52525B]" />
+              <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {(["3m", "12m", "all"] as Period[]).map((p) => (
+                  <Pill key={p} on={period === p} onClick={() => setPeriod(p)}>{p === "3m" ? "3 months" : p === "12m" ? "12 months" : "All time"}</Pill>
+                ))}
+                {years.slice(0, 6).map((y) => <Pill key={y} on={period === `y${y}`} onClick={() => setPeriod(`y${y}` as Period)}>{y}</Pill>)}
+              </div>
             </div>
-          </div>
-
-          {ref_ && (
-            <Panel className="overflow-hidden"><ActivityLine r={ref_} ref_={ref_} pinned /></Panel>
           )}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-1 text-xs overflow-x-auto [scrollbar-width:none]">
+              <span className="text-[#52525B] uppercase tracking-widest text-[10px] mr-1">Sort</span>
+              {SORTS.map((x) => (
+                <button key={x.key} onClick={() => (sort === x.key ? setAsc(!asc) : (setSort(x.key), setAsc(false)))}
+                        className={`shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded transition-colors ${
+                          sort === x.key ? "bg-[#27272A] text-[#FAFAFA]" : "text-[#52525B] hover:text-[#A1A1AA]"}`}>
+                  {x.label}{sort === x.key && (asc ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
+                </button>
+              ))}
+            </div>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search names…"
+                   className="ml-auto w-40 bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-1 text-xs text-[#FAFAFA] placeholder:text-[#52525B] focus:outline-none focus:border-[#52525B]" />
+          </div>
 
           {shown.length === 0 ? <Empty>Nothing matches — widen the period or the filter.</Empty> : (
             <Panel className="overflow-hidden divide-y divide-[#18181B]">
-              {shown.filter((r) => r.id !== ref_?.id).slice(0, limit).map((r) => <ActivityLine key={r.id} r={r} ref_={ref_} />)}
+              {(simRef ? [simRef, ...shown.filter((r) => r.id !== simRef.id)] : shown).slice(0, limit).map((r) => (
+                <ActivityLine key={r.id} r={r} ref_={simRef ?? (picking && pickedRows[0] ? pickedRows[0] : null)}
+                              mark={simRef?.id === r.id ? "similar" : fromId === r.id && !picking ? "from" : undefined}
+                              picking={picking} picked={picked.includes(r.id)} onPick={() => pick(r.id)} />
+              ))}
               {shown.length > limit && (
                 <button onClick={() => setLimit(limit + 100)} className="w-full text-xs text-[#71717A] hover:text-[#A1A1AA] py-2.5">
                   Show more ({shown.length - limit} left)
@@ -254,6 +383,30 @@ export function ActivityList() {
             </Panel>
           )}
         </>
+      )}
+
+      {/* The compare bar: what's picked, and what to do with it */}
+      {picking && picked.length > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[600] w-[calc(100%-2rem)] max-w-xl">
+          <Panel className="px-4 py-3 flex items-center gap-3">
+            <p className="text-sm flex-1 min-w-0 truncate">
+              <span className="font-semibold tabular-nums">{picked.length}</span>
+              <span className="text-[#71717A]"> picked · {pickedRows.map((r) => r.name ?? "Activity").join(", ")}</span>
+            </p>
+            {picked.length === 1 && (
+              <button className="text-xs text-[#A1A1AA] hover:text-[#FAFAFA] shrink-0"
+                      onClick={() => { setSimilarTo(picked[0]); setShowCompare(false); window.scrollTo({ top: 0 }); }}>
+                Find similar
+              </button>
+            )}
+            {picked.length >= 2 && (
+              <ActionButton icon={GitCompareArrows} onClick={() => { setShowCompare(true); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+                Compare {picked.length}
+              </ActionButton>
+            )}
+            <button onClick={() => { setPicked([]); setShowCompare(false); }} className="text-[#52525B] hover:text-[#A1A1AA] shrink-0" title="Clear"><X size={14} /></button>
+          </Panel>
+        </div>
       )}
     </div>
   );

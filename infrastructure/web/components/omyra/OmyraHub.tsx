@@ -77,13 +77,9 @@ export function OmyraHub() {
                   className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-3">
             ← Omyra
           </button>
-          <div className="flex items-center gap-3">
-            <CollLogo size={48} />
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Coll</h1>
-              <p className="text-sm text-[#71717A] mt-0.5">Your bike computer — routes out, rides back</p>
-            </div>
-          </div>
+          <h1 className="sr-only">Coll</h1>
+          <CollLogo size={52} wordmark />
+          <p className="text-sm text-[#71717A] mt-2">Your bike computer — routes out, rides back</p>
         </header>
         <CollTab />
       </>
@@ -104,7 +100,7 @@ export function OmyraHub() {
               <Plus size={13} />Log
             </button>
             <button onClick={() => select("coll")} title="Open Coll — the bike computer"
-                    className="group flex flex-col items-center gap-0.5 rounded-full transition-transform hover:scale-105 active:scale-95">
+                    className="group flex flex-col items-center gap-0.5 transition-transform hover:scale-105 active:scale-95">
               <CollLogo size={40} />
               <span className="text-[10px] uppercase tracking-widest text-[#71717A] group-hover:text-[#A1A1AA]">Coll</span>
             </button>

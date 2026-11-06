@@ -1,32 +1,40 @@
 /**
- * Coll's mark: a round badge with a col — the saddle between two peaks the Mallorca 312 is
- * named for — and the switchback road climbing to it, the rider a dot on top. Ink badge, white
- * ridge, amber road (the one accent). The same on paper and ink themes: it's a logo.
+ * Coll's mark (brand file: public/coll/coll-logo.svg): a hill on navy, the dotted road up its
+ * side and you — the orange dot — at the top. Rounded square, the brand's own colours on both
+ * themes (it's a logo, not themed UI). `wordmark` adds COLL in Space Grotesk-style caps.
  */
-export function CollLogo({ size = 40, className = "", title = "Coll" }: { size?: number; className?: string; title?: string }) {
+import { Space_Grotesk } from "next/font/google";
+
+const grotesk = Space_Grotesk({ subsets: ["latin"], weight: ["700"], display: "swap" });
+
+export const COLL_BRAND = { navy: "#1B3A6B", hill: "#2F5FA3", ground: "#0C1F3D", road: "#F4F5F2", accent: "#E8742A", ink: "#0B1626" };
+
+export function CollMark({ size = 40, className = "", title = "Coll" }: { size?: number; className?: string; title?: string }) {
+  const b = COLL_BRAND;
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" className={className} role="img" aria-label={title}>
+    <svg width={size} height={size} viewBox="0 0 160 160" className={`shrink-0 ${className}`} role="img" aria-label={title}
+         style={{ borderRadius: size * (48 / 220), overflow: "hidden", display: "block" }}>
       <title>{title}</title>
-      <defs>
-        <clipPath id="coll-badge"><circle cx="32" cy="32" r="30" /></clipPath>
-      </defs>
-      <circle cx="32" cy="32" r="31" fill="#141416" />
-      <g clipPath="url(#coll-badge)">
-        {/* the far ridge, faint */}
-        <path d="M-2 40 L12 30 L20 34 L30 26 L44 33 L52 28 L66 36 L66 66 L-2 66 Z" fill="#1F1F23" />
-        {/* the two peaks and the col between them */}
-        <path d="M-2 50 L17 22 C24 33 40 33 47 17 L66 50 L66 66 L-2 66 Z" fill="#2A2A30" />
-        <path d="M-2 50 L17 22 C24 33 40 33 47 17 L66 50" fill="none" stroke="#F4F4F5"
-              strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
-        {/* snow on the high peak */}
-        <path d="M44 22.6 L47 17 L50.2 22.6 L48.3 21.6 L47 23.2 L45.6 21.7 Z" fill="#F4F4F5" />
-        {/* the switchback road, up to the col (the low point of the saddle) */}
-        <path d="M27 64 L37 57.5 L24 52 L37 46 L27 41 L34 36.5 L32 31.5" fill="none" stroke="#F59E0B"
-              strokeWidth="2.6" strokeLinejoin="round" strokeLinecap="round" />
-      </g>
-      {/* the rider, on the col */}
-      <circle cx="32" cy="30" r="3.4" fill="#F59E0B" stroke="#141416" strokeWidth="1.6" />
-      <circle cx="32" cy="32" r="30.5" fill="none" stroke="#3F3F46" strokeWidth="1" />
+      <rect width="160" height="160" rx="35" fill={b.navy} />
+      <path d="M-10 128 C 28 128 46 52 86 52 C 122 52 138 128 170 128 L170 170 L-10 170 Z" fill={b.hill} />
+      <path d="M-10 152 C 36 152 66 100 112 100 C 138 100 152 124 170 128 L170 170 L-10 170 Z" fill={b.ground} />
+      <path d="M24 146 C 56 142 62 96 84 62" fill="none" stroke={b.road} strokeWidth={size < 64 ? 6 : 5}
+            strokeLinecap="round" strokeDasharray={size < 64 ? "1 12" : "1 11"} />
+      <circle cx="86" cy="54" r={size < 64 ? 9 : 8} fill={b.accent} />
     </svg>
+  );
+}
+
+/** The mark with COLL beside it, for headers. */
+export function CollLogo({ size = 40, wordmark = false, className = "" }: { size?: number; wordmark?: boolean; className?: string }) {
+  if (!wordmark) return <CollMark size={size} className={className} />;
+  return (
+    <span className={`inline-flex items-center gap-3 ${className}`}>
+      <CollMark size={size} />
+      <span className={`${grotesk.className} font-bold leading-none text-[#FAFAFA]`}
+            style={{ fontSize: size * 0.62, letterSpacing: "0.04em" }}>
+        COLL
+      </span>
+    </span>
   );
 }

@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Block, Panel, Stat, Stats } from "@/components/ui/kit";
 import { collApi, COLL_KEYS, type CollReview } from "@/lib/coll-api";
 import { fmtDate, fmtDur, fmtKm } from "./parts";
+import { CollMark } from "./CollLogo";
 
 const signed = (m: number) => (m === 0 ? "on plan" : `${m > 0 ? "+" : "−"}${fmtDur(Math.abs(m))}`);
 
@@ -22,7 +23,7 @@ export function RideReview({ review: r }: { review: CollReview }) {
 
   return (
     <div className="space-y-8">
-      <Block title="Against the plan"
+      <Block title={<span className="inline-flex items-center gap-2"><CollMark size={16} />Against the plan</span>}
              note={<>On <Link href={`/omyra?tab=coll&course=${r.course_id}`} className="underline hover:text-[#A1A1AA]">{r.course_name}</Link>
                {partial ? ` · km ${fmtKm(r.from_km)}–${fmtKm(r.to_km)} of ${fmtKm(r.route_km)}` : ""}
                {` · planned at ${r.pace.kmh} km/h`}

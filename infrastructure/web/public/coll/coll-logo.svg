@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
+  <title>Coll</title>
+  <clipPath id="r"><rect width="160" height="160" rx="35"/></clipPath>
+  <g clip-path="url(#r)">
+    <rect width="160" height="160" fill="#1B3A6B"/>
+    <path d="M-10 128 C 28 128 46 52 86 52 C 122 52 138 128 170 128 L170 170 L-10 170 Z" fill="#2F5FA3"/>
+    <path d="M-10 152 C 36 152 66 100 112 100 C 138 100 152 124 170 128 L170 170 L-10 170 Z" fill="#0C1F3D"/>
+    <path d="M24 146 C 56 142 62 96 84 62" fill="none" stroke="#F4F5F2" stroke-width="5" stroke-linecap="round" stroke-dasharray="1 11"/>
+    <circle cx="86" cy="54" r="8" fill="#E8742A"/>
+  </g>
+</svg>
