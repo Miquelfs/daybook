@@ -386,6 +386,16 @@ def sync_activities(client, conn, start: str, end: str, force: bool, fetch_strea
 
             count += 1
 
+        # A ride Coll also recorded gives way to the watch's activity (domains/coll/rides.py)
+        if count:
+            try:
+                from domains.coll.rides import reconcile
+                from infrastructure.db.usertime import current_tz
+                for coll_id, garmin_id in reconcile(conn, current_tz()):
+                    print(f"  coll ride {coll_id} → merged into {garmin_id}", file=sys.stderr)
+            except Exception as e:                       # noqa: BLE001
+                print(f"  WARN coll reconcile: {e}", file=sys.stderr)
+
         _log(conn, "garmin", "activities", "ok", count)
         return count
     except Exception as e:

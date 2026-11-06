@@ -8,7 +8,7 @@ VENV  := $(ROOT)/.venv
 PY    := $(VENV)/bin/python
 WEB   := $(ROOT)/infrastructure/web
 
-.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-strava sync-strava-full strava-auth import-tracks geocode-tracks aviation-init import-full-csv import-aerolink api web dev prod kill cron-install cron-remove verify backup backup-cron-install backup-pull backup-pull-install backup-pull-remove storage-report clean-pyc deploy deploy-api deploy-deps _ship-code _health test help
+.PHONY: setup db-init money-db-init sync-garmin sync-garmin-full sync-strava sync-strava-full strava-auth import-tracks geocode-tracks aviation-init import-full-csv import-aerolink api web dev prod kill cron-install cron-remove verify backup backup-cron-install backup-pull backup-pull-install backup-pull-remove storage-report clean-pyc deploy deploy-api deploy-deps _ship-code _health test help coll-device
 
 PI_HOST ?= pi@daybook-pi
 PI_DIR  ?= ~/daybook
@@ -314,6 +314,16 @@ _health:
 # tests that need FastAPI skip themselves when it isn't installed.
 test:
 	python3 -m unittest discover -s tests -t . -v
+
+# ── Coll ──────────────────────────────────────────────────────────────────────
+# Pretend to be Coll against the Pi: sync, download + check packs, upload rides
+# (domains/coll/device.py). The token is read from the Pi's .env.
+#   make coll-device RIDES=~/Desktop/ciclocomputer/sim/out
+COLL_URL ?= http://daybook-pi:8000
+coll-device:
+	@COLL_TOKEN=$$(ssh $(PI_HOST) "grep '^COLL_TOKEN=' $(PI_DIR)/.env | cut -d= -f2-"); \
+	[ -n "$$COLL_TOKEN" ] || { echo "no COLL_TOKEN in the Pi's .env"; exit 1; }; \
+	COLL_TOKEN=$$COLL_TOKEN python3 -m domains.coll.device --url $(COLL_URL) $(RIDES)
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 

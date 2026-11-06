@@ -115,7 +115,10 @@ Coll (`~/Desktop/ciclocomputer`) syncs with Daybook through `/coll/*` (`infrastr
 `domains/coll/`, Omyra → Coll tab). Contract: `ciclocomputer/docs/DAYBOOK.md`. `domains/coll/coursepack/` is
 vendored from `ciclocomputer/tools/coursepack` — change it there and copy it over (the pack format is shared with
 the firmware). Course builds run in their own process (`python -m domains.coll.worker`), never in the API. Device
-endpoints need `COLL_TOKEN` in the Pi's `.env` (not synced by deploy — `.env` is excluded).
+endpoints need `COLL_TOKEN` in the Pi's `.env` (not synced by deploy — `.env` is excluded). Rides Coll uploads
+(`POST /coll/rides`, GPX or `.clg`; `domains/coll/rides.py`, `collog.py` vendored from `ciclocomputer/tools/`) become
+`source='coll'` activities; when the watch recorded the same ride, the Garmin activity wins (`reconcile` runs after the
+Garmin sync). `make coll-device RIDES=…` on the Mac plays the device's sync against the Pi — use it to test end to end.
 
 ## Key Directories
 

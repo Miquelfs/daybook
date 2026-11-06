@@ -104,7 +104,7 @@ def _build_daily_tss(conn, start: date, end: date) -> dict[str, dict[str, float]
                   a.avg_heart_rate
            FROM activities a
            LEFT JOIN activity_detail ad ON ad.activity_id = a.id
-           WHERE a.source='garmin'
+           WHERE a.source IN ('garmin', 'coll')     -- Coll rides the watch also recorded are merged away
              AND a.date >= ? AND a.date <= ?
              AND (a.duration_seconds IS NOT NULL AND a.duration_seconds > 0)
            ORDER BY a.date""",

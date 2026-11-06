@@ -58,6 +58,50 @@ export interface CollCourseDetail extends Omit<CollCourse, "turns"> {
   turns: CollTurn[];
   polyline: string | null;
   fuel: CollFuel;
+  /** read from the pack: where each prompt (same order as turns) and waypoint is; null until built */
+  map: CollPackMap | null;
+}
+
+export type CollWaypointKind = "poi" | "feed" | "summit" | "hazard";
+
+export interface CollPackMap {
+  km: number;
+  turns: { at: number; lat: number; lon: number }[];
+  waypoints: { kind: CollWaypointKind; lat: number; lon: number; name: string }[];
+}
+
+/** /coll/courses/map — every built course's line */
+export interface CollMapLine {
+  id: number;
+  name: string;
+  goal_id: number | null;
+  polyline: string;
+  session_date: string | null;
+  synced: boolean;
+}
+
+export interface CollRideSummary {
+  start_utc: string; points: number; segments: number;
+  duration_s: number; moving_s: number; distance_m: number; ascent_m: number | null;
+  avg_hr: number | null; max_hr: number | null; avg_power: number | null; max_power: number | null;
+  avg_cadence: number | null; work_kj: number | null; max_speed_mps: number | null; calories: number | null;
+  course: { id: number; name: string; how: "name" | "map"; frac?: number } | null;
+}
+
+/** A ride Coll uploaded. status "merged": the watch recorded it too, and its activity is the one that counts. */
+export interface CollRide {
+  id: number;
+  ride_id: string;
+  activity_id: string | null;
+  status: "activity" | "merged";
+  course_id: number | null;
+  name: string | null;
+  start_utc: string;
+  format: "gpx" | "clg";
+  summary: CollRideSummary | null;
+  received_at: string;
+  activity_date?: string | null;
+  activity_name?: string | null;
 }
 
 export interface CollProduct { id: number; name: string; kind: string; carbs_g: number; caffeine_mg: number; fluid_ml: number }
@@ -93,6 +137,8 @@ export const COLL_KEYS = {
   courses: ["coll", "courses"] as const,
   course: (id: number) => ["coll", "course", id] as const,
   settings: ["coll", "settings"] as const,
+  map: ["coll", "map"] as const,
+  rides: ["coll", "rides"] as const,
 };
 
 export const collApi = {
@@ -107,6 +153,10 @@ export const collApi = {
   remove: (id: number) => req<void>("DELETE", `/api/coll/courses/${id}`),
   putSettings: (body: { fuel_plan?: string | null; fuel_product_id?: number | null }) =>
     req<CollSettings>("PUT", "/api/coll/settings", body),
+  mapLines: () => req<CollMapLine[]>("GET", `${API}/coll/courses/map`),
+  rides: () => req<CollRide[]>("GET", `${API}/coll/rides`),
+  reimportRide: (id: number) => req<CollRide>("POST", `/api/coll/rides/${id}/reimport`),
+  removeRide: (id: number) => req<void>("DELETE", `/api/coll/rides/${id}`),
 };
 
 /** What Coll will announce: "km 63.8 · LEFT onto Ma-10". */

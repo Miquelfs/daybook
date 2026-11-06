@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, RefreshCw, Trash2, Upload } from "lucide-react";
+import { CollMap } from "@/components/omyra/CollMap";
 import { Block, Empty, Hero, Panel, Skeleton, Stat, Stats } from "@/components/ui/kit";
 import {
-  collApi, COLL_KEYS, turnText, type CollCourse, type CollCourseDetail, type CollSettings,
+  collApi, COLL_KEYS, turnText, type CollCourse, type CollRide, type CollSettings,
 } from "@/lib/coll-api";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -40,6 +41,8 @@ export function CollTab() {
     refetchInterval: (q) => (q.state.data?.some((c) => c.status === "pending" || c.status === "building") ? 5000 : false),
   });
   const { data: settings } = useQuery({ queryKey: COLL_KEYS.settings, queryFn: collApi.settings });
+  const { data: lines } = useQuery({ queryKey: COLL_KEYS.map, queryFn: collApi.mapLines });
+  const { data: rides } = useQuery({ queryKey: COLL_KEYS.rides, queryFn: collApi.rides });
   const { data: goals } = useQuery<Goal[]>({
     queryKey: ["race-goals"], queryFn: () => fetch(`${API}/race-plans/goals`).then((r) => r.json()),
   });
@@ -77,10 +80,15 @@ export function CollTab() {
   const next = onColl.filter((c) => c.session_date).sort((a, b) => (a.session_date! < b.session_date! ? -1 : 1))[0];
   const activeGoals = (goals ?? []).filter((g) => g.status === "active");
 
+  const pick = (id: number) => {
+    setOpen(id);
+    setTimeout(() => document.getElementById(`coll-course-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+
   const list = (items: CollCourse[]) => (
     <Panel className="divide-y divide-[#18181B]">
       {items.map((c) => (
-        <div key={c.id}>
+        <div key={c.id} id={`coll-course-${c.id}`} className="scroll-mt-4">
           <button onClick={() => setOpen(open === c.id ? null : c.id)}
                   className="w-full text-left px-4 py-2.5 flex items-start gap-3">
             <div className="flex-1 min-w-0">
@@ -111,6 +119,12 @@ export function CollTab() {
         )}
       </Hero>
 
+      {lines && lines.length > 0 && (
+        <Block title="Map" note="Grey: on Coll now · dashed: not on Coll (off, or outside the three-week window). Tap a course to open it.">
+          <CollMap lines={lines} selected={open} onSelect={pick} />
+        </Block>
+      )}
+
       <Block title="Planned rides"
              note="Every session with a GPX route becomes a course with its own fuel plan. Coll keeps yesterday to three weeks ahead.">
         {planned.length ? list(planned) : <Empty>No routed sessions yet — add a GPX to a tour day or a ride in the plan.</Empty>}
@@ -138,6 +152,8 @@ export function CollTab() {
         {uploads.length ? list(uploads) : <Empty>No uploads.</Empty>}
       </Block>
 
+      <RidesBlock rides={rides ?? []} onChange={refresh} />
+
       <SettingsBlock settings={settings} onChange={refresh} />
     </div>
   );
@@ -150,6 +166,9 @@ function CourseDetail({ id, settings, onChange, onGone }: {
   const { data: c } = useQuery({ queryKey: COLL_KEYS.course(id), queryFn: () => collApi.course(id) });
   const [err, setErr] = useState<string | null>(null);
   const [allTurns, setAllTurns] = useState(false);
+  const [focus, setFocus] = useState<number | null>(null);
+  const mapLine = useMemo(() => (c?.polyline ? [{ id: c.id, name: c.name, polyline: c.polyline, synced: c.on_device }] : []),
+                          [c?.id, c?.name, c?.polyline, c?.on_device]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!c) return <div className="px-4 pb-4"><Skeleton h={80} /></div>;
 
@@ -177,6 +196,11 @@ function CourseDetail({ id, settings, onChange, onGone }: {
                 sub={s.waypoint_kinds ? `${s.waypoint_kinds.feed} feed · ${s.waypoint_kinds.summit} top` : undefined} />
           <Stat label="Tunnels" value={s.tunnels?.length ?? 0} sub={s.has_elevation === false ? "no elevation" : "fixed"} />
         </Stats>
+      )}
+
+      {c.status === "ready" && c.polyline && (
+        <CollMap lines={mapLine} selected={c.id}
+                 pack={c.map} turns={c.turns} focus={focus} height="340px" />
       )}
 
       {c.session_id && (
@@ -215,10 +239,11 @@ function CourseDetail({ id, settings, onChange, onGone }: {
           <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1">What Coll will say</p>
           <div className="bg-[#18181B] rounded-xl divide-y divide-[#27272A]">
             {turns.map((t, i) => (
-              <div key={i} className="px-3 py-1.5 flex gap-3 text-xs">
+              <button key={i} onClick={() => setFocus(i)} disabled={!c.map}
+                      className={`w-full text-left px-3 py-1.5 flex gap-3 text-xs hover:bg-[#27272A]/50 ${focus === i ? "bg-[#27272A]/60" : ""}`}>
                 <span className="text-[#52525B] w-16 shrink-0 tabular-nums">km {(t.at / 1000).toFixed(1)}</span>
                 <span className={t.kind === 1 ? "text-[#F59E0B]" : "text-[#A1A1AA]"}>{turnText(t)}</span>
-              </div>
+              </button>
             ))}
           </div>
           {c.turns.length > 12 && (
@@ -226,7 +251,9 @@ function CourseDetail({ id, settings, onChange, onGone }: {
               {allTurns ? "Fewer" : `All ${c.turns.length}`}
             </button>
           )}
-          {(s.keeps ?? 0) > 0 && <p className="text-xs text-[#52525B] mt-1">KEEP prompts (amber) are the ones worth checking against the map.</p>}
+          <p className="text-xs text-[#52525B] mt-1">
+            Tap a prompt to see it on the map.{(s.keeps ?? 0) > 0 && " KEEP prompts (amber) are the ones worth checking."}
+          </p>
         </div>
       )}
 
@@ -296,6 +323,78 @@ function SettingsBlock({ settings: s, onChange }: { settings: CollSettings; onCh
         </div>
         {err && <p className="text-xs text-rose-400">{err}</p>}
       </Panel>
+    </Block>
+  );
+}
+
+function fmtDur(s: number) {
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return h ? `${h}h${String(m).padStart(2, "0")}` : `${m} min`;
+}
+
+function RidesBlock({ rides, onChange }: { rides: CollRide[]; onChange: () => void }) {
+  const [busy, setBusy] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function act(id: number, f: () => Promise<unknown>) {
+    setBusy(id);
+    setErr(null);
+    try {
+      await f();
+      onChange();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Block title="Rides from Coll"
+           note="Coll uploads each ride when it's home on Wi-Fi; it becomes an activity like the watch's. If the watch recorded the same ride, the watch's activity counts.">
+      {err && <p className="text-xs text-rose-400 mb-2">{err}</p>}
+      {rides.length ? (
+        <Panel className="divide-y divide-[#18181B]">
+          {rides.map((r) => {
+            const s = r.summary;
+            const day = r.activity_date ?? r.start_utc.slice(0, 10);
+            return (
+              <div key={r.id} className="px-4 py-2.5 flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">
+                    {r.activity_id ? (
+                      <Link href={`/activity/${r.activity_id}`} className="hover:underline">{r.activity_name ?? r.name ?? "Ride"}</Link>
+                    ) : (r.name ?? "Ride")}
+                    <span className="text-[#71717A] font-normal"> · <Link href={`/day/${day}`} className="hover:underline">{fmtDate(day)}</Link></span>
+                  </p>
+                  {s && (
+                    <p className="text-xs text-[#71717A] mt-0.5 truncate">
+                      {(s.distance_m / 1000).toFixed(1)} km · {fmtDur(s.moving_s)} moving
+                      {s.ascent_m != null && ` · ${s.ascent_m} m up`}
+                      {s.avg_hr != null && ` · HR ${s.avg_hr}`}
+                      {s.avg_power != null && ` · ${s.avg_power} W`}
+                      {s.course && <> · followed <span className="text-[#A1A1AA]">{s.course.name}</span></>}
+                    </p>
+                  )}
+                  {r.status === "merged" && <p className="text-xs text-[#52525B] mt-0.5">The watch recorded it too: its activity counts.</p>}
+                </div>
+                <span className="text-[10px] uppercase tracking-widest mt-1 text-[#52525B]">{r.format}</span>
+                <button className={small} disabled={busy === r.id} title="Import again from the uploaded file"
+                        onClick={() => act(r.id, () => collApi.reimportRide(r.id))}>
+                  <RefreshCw size={12} className={busy === r.id ? "animate-spin" : ""} />
+                </button>
+                <button className={`${small} hover:text-rose-400`} disabled={busy === r.id} title="Forget this ride"
+                        onClick={() => confirm(`Forget this ride${r.status === "activity" ? " and its activity" : ""}?`) &&
+                          act(r.id, () => collApi.removeRide(r.id))}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </Panel>
+      ) : (
+        <Empty>No rides yet. Until the hardware is here, <code>make coll-device RIDES=…</code> on the Mac plays Coll&apos;s part.</Empty>
+      )}
     </Block>
   );
 }

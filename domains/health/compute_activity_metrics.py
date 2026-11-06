@@ -561,7 +561,7 @@ def main() -> None:
             """SELECT id, date, activity_type, moving_time_seconds,
                       avg_power_watts, avg_heart_rate
                FROM activities
-               WHERE source='garmin' AND date >= ?
+               WHERE source IN ('garmin', 'coll') AND date >= ?
                ORDER BY date DESC""",
             (cutoff,)
         ).fetchall()
