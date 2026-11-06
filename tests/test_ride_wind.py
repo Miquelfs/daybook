@@ -84,6 +84,30 @@ class WindTest(unittest.TestCase):
         w = rw.compute(self.c, "a1", fetcher=_wind(20, 0), force=True)
         self.assertEqual(w["source"], "streams")
 
+    def test_temperature_along_the_ride(self):
+        hours = [f"2026-10-1{d}T{h:02d}:00" for d in (2, 3) for h in range(24)]
+        one = {"hourly": {"time": hours, "wind_speed_10m": [10] * 48, "wind_direction_10m": [0] * 48,
+                          "wind_gusts_10m": [15] * 48, "temperature_2m": [10 + h % 24 for h in range(48)],
+                          "apparent_temperature": [8 + h % 24 for h in range(48)],
+                          "relative_humidity_2m": [70] * 48, "precipitation": [0.5 if h % 24 == 8 else 0 for h in range(48)]}}
+        self.c.execute("INSERT INTO activity_streams VALUES ('a1','directairtemperature',?)", (json.dumps([24.0] * 50),))
+        w = rw.compute(self.c, "a1", fetcher=lambda url: json.dumps([one] * 3))
+        t = w["temp"]
+        self.assertEqual((t["min"], t["max"]), (17, 18))          # 07:00–08:30 UTC → 17 °C then 18 °C
+        self.assertAlmostEqual(t["feels"], t["avg"] - 2, delta=0.01)
+        self.assertEqual((t["humidity"], t["rain_mm"], t["wet_hours"]), (70, 0.5, 1))
+        self.assertTrue(t["profile_km"])
+        self.assertEqual(t["sensor"], {"avg": 24.0, "min": 24, "max": 24})
+
+    def test_old_cache_gets_temperature(self):
+        rw.ensure_table(self.c)
+        self.c.execute("INSERT INTO activity_wind (activity_id, result_json) VALUES ('a1', ?)", (json.dumps({"wind_kmh": 5}),))
+        w = rw.compute(self.c, "a1", fetcher=_wind(20, 0))
+        self.assertEqual(w["v"], rw.VERSION)
+        fail = lambda url: (_ for _ in ()).throw(OSError("down"))
+        self.c.execute("UPDATE activity_wind SET result_json=? WHERE activity_id='a1'", (json.dumps({"wind_kmh": 5}),))
+        self.assertEqual(rw.compute(self.c, "a1", fetcher=fail), {"wind_kmh": 5})   # offline: the old one stays
+
     def test_utc_start(self):
         self.assertEqual(rw._start_utc("2026-10-12T09:00:00+02:00").hour, 7)
         self.assertEqual(rw._start_utc("2026-10-12 07:00:00").hour, 7)

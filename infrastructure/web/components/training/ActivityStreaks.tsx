@@ -5,16 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import { localISODate } from "@/lib/dates";
+import { activityIcon } from "@/lib/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-const ACTIVITY_ICON: Record<string, string> = {
-  running: "🏃", cycling: "🚴", swimming: "🏊", hiking: "🥾",
-  walking: "🚶", strength_training: "🏋️", yoga: "🧘", rowing: "🚣",
-  skiing: "⛷", snowboarding: "🏂", surfing: "🏄", tennis: "🎾",
-  soccer: "⚽", basketball: "🏀", elliptical: "⚙️",
-};
-function actIcon(t: string) { return ACTIVITY_ICON[t.toLowerCase()] ?? "🏅"; }
+const actIcon = (t: string) => activityIcon(t);   // one icon set: lib/api.ts
 
 type StreakData = {
   current_streak: number;

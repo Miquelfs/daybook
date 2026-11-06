@@ -12,7 +12,14 @@ provider as the daily weather; free, no key; archive for older dates).
     headwind = speed·cos(Δ) (positive = into the wind), crosswind = speed·|sin(Δ)|.
     Time-weighted when timestamps exist.
 
-Result is cached per activity in activity_wind. Indoor/virtual activities → None.
+  - Temperature (same request): hourly 2 m temperature, feels-like, humidity and rain
+    at the same points, at the time you were there — min / max / time-weighted average,
+    a per-km temperature line and the rain that fell during the activity. Next to it,
+    what the watch's own sensor read (directairtemperature) when it has one: it reads
+    warm against the wrist and in the sun, so the model's number leads.
+
+Result is cached per activity in activity_wind (v2 adds temperature; older cached
+results are recomputed once). Indoor/virtual activities → None.
 """
 
 from __future__ import annotations
@@ -28,6 +35,9 @@ FORECAST = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"
 STEP_M = 250
 HEAD_KMH = 5.0          # |component| above this counts as head-/tailwind
+VERSION = 2             # 2: temperature, feels-like, humidity, rain
+HOURLY = ("wind_speed_10m,wind_direction_10m,wind_gusts_10m,"
+          "temperature_2m,apparent_temperature,relative_humidity_2m,precipitation")
 
 
 def _tables(conn) -> set[str]:
@@ -140,10 +150,10 @@ def _resample(pts, step_m=STEP_M):
 # ── wind ─────────────────────────────────────────────────────────────────────
 
 def _fetch_wind(points: list[tuple[float, float]], day: str, fetcher=None) -> list[dict]:
-    """Hourly wind per point (UTC hours) → [{"YYYY-MM-DDTHH:00" → (speed, from, gust)}]."""
+    """Hourly weather per point (UTC hours) → [{"YYYY-MM-DDTHH:00" → {s, w, g, t, feel, rh, rain}}]."""
     old = date.fromisoformat(day) < date.today() - timedelta(days=6)
     q = {"latitude": ",".join(f"{p[0]:.4f}" for p in points), "longitude": ",".join(f"{p[1]:.4f}" for p in points),
-         "hourly": "wind_speed_10m,wind_direction_10m,wind_gusts_10m", "wind_speed_unit": "kmh",
+         "hourly": HOURLY, "wind_speed_unit": "kmh",
          "timezone": "GMT", "start_date": day,
          "end_date": (date.fromisoformat(day) + timedelta(days=1)).isoformat()}
     url = f"{ARCHIVE if old else FORECAST}?{urllib.parse.urlencode(q)}"
@@ -158,9 +168,12 @@ def _fetch_wind(points: list[tuple[float, float]], day: str, fetcher=None) -> li
     out = []
     for d in data:
         h = d.get("hourly") or {}
-        out.append({t: (s, w, g) for t, s, w, g in zip(h.get("time", []), h.get("wind_speed_10m", []),
-                                                         h.get("wind_direction_10m", []), h.get("wind_gusts_10m", []))
-                    if s is not None and w is not None})
+        times = h.get("time", [])
+        col = lambda k: (h.get(k) or [None] * len(times)) + [None] * max(0, len(times) - len(h.get(k) or []))  # noqa: E731
+        rows = zip(times, col("wind_speed_10m"), col("wind_direction_10m"), col("wind_gusts_10m"),
+                   col("temperature_2m"), col("apparent_temperature"), col("relative_humidity_2m"), col("precipitation"))
+        out.append({t: {"s": s, "w": w, "g": g, "t": te, "feel": fe, "rh": rh, "rain": rn}
+                    for t, s, w, g, te, fe, rh, rn in rows if s is not None and w is not None})
     return out
 
 
@@ -170,10 +183,10 @@ class _NoWind(Exception):
 
 def compute(conn: sqlite3.Connection, activity_id: str, fetcher=None, force: bool = False) -> dict | None:
     ensure_table(conn)
-    if not force:
-        c = conn.execute("SELECT result_json FROM activity_wind WHERE activity_id=?", (activity_id,)).fetchone()
-        if c:
-            return json.loads(c[0]) if c[0] else None
+    c = conn.execute("SELECT result_json FROM activity_wind WHERE activity_id=?", (activity_id,)).fetchone()
+    cached = json.loads(c[0]) if c and c[0] else None
+    if not force and c and (cached is None or cached.get("v", 1) >= VERSION):
+        return cached
     act = conn.execute("SELECT * FROM activities WHERE id=?", (activity_id,)).fetchone()
     if not act:
         return None
@@ -184,7 +197,7 @@ def compute(conn: sqlite3.Connection, activity_id: str, fetcher=None, force: boo
         try:
             result = _compute(conn, act, fetcher)
         except _NoWind:
-            return None                       # network / provider hiccup — don't cache, retry next view
+            return cached                     # network / provider hiccup — keep what we had, retry next view
     conn.execute("INSERT OR REPLACE INTO activity_wind (activity_id, result_json) VALUES (?, ?)",
                  (activity_id, json.dumps(result) if result else None))
     conn.commit()
@@ -220,6 +233,9 @@ def _compute(conn, act, fetcher) -> dict | None:
         raise _NoWind("no hourly wind returned")
 
     segs, head_t = [], {"head": 0.0, "tail": 0.0, "cross": 0.0}
+    tw, t_sum, feel_sum, rh_sum, rh_w, t_lo, t_hi = 0.0, 0.0, 0.0, 0.0, 0.0, None, None
+    rain_hours: dict[str, float] = {}
+    t_km: list[tuple[float, float]] = []
     tot_w, sum_head, sum_speed, gust_max = 0.0, 0.0, 0.0, 0.0
     dist = 0.0
     for a, b in zip(pts, pts[1:]):
@@ -233,7 +249,19 @@ def _compute(conn, act, fetcher) -> dict | None:
         w = winds[k].get(hour) or next(iter(winds[k].values()), None)
         if not w:
             continue
-        speed, wfrom, gust = w
+        speed, wfrom, gust = w["s"], w["w"], w["g"]
+        if w.get("t") is not None:
+            tw += dt
+            t_sum += w["t"] * dt
+            feel_sum += (w["feel"] if w.get("feel") is not None else w["t"]) * dt
+            t_lo = w["t"] if t_lo is None else min(t_lo, w["t"])
+            t_hi = w["t"] if t_hi is None else max(t_hi, w["t"])
+            t_km.append((dist / 1000, w["t"]))
+        if w.get("rh") is not None:
+            rh_sum += w["rh"] * dt
+            rh_w += dt
+        if w.get("rain") is not None:
+            rain_hours.setdefault(hour, w["rain"])              # each hour you were out, once
         head, cross = components(wfrom, speed, _bearing(a, b))
         kind = "head" if head > HEAD_KMH else "tail" if head < -HEAD_KMH else "cross"
         head_t[kind] += dt
@@ -272,7 +300,7 @@ def _compute(conn, act, fetcher) -> dict | None:
     if bucket:
         profile.append(round(sum(bucket) / len(bucket), 1))
 
-    dirs = [w[1] for wk in winds for w in wk.values()]
+    dirs = [w["w"] for wk in winds for w in wk.values()]
     mean_from = (math.degrees(math.atan2(sum(math.sin(math.radians(x)) for x in dirs),
                                          sum(math.cos(math.radians(x)) for x in dirs))) + 360) % 360 if dirs else None
     return {
@@ -285,4 +313,39 @@ def _compute(conn, act, fetcher) -> dict | None:
         "profile_km": profile,
         "source": "streams" if conn.execute("SELECT 1 FROM activity_streams WHERE activity_id=? AND stream_type="
                                             "'directlatitude'", (act["id"],)).fetchone() else "polyline",
+        "temp": _temperature(tw, t_sum, feel_sum, rh_sum, rh_w, t_lo, t_hi, rain_hours, t_km, _sensor(conn, act["id"])),
+        "v": VERSION,
     }
+
+
+def _sensor(conn, aid: str) -> dict | None:
+    """What the watch's own thermometer read (Garmin: directairtemperature)."""
+    r = conn.execute("SELECT data_json FROM activity_streams WHERE activity_id=? AND stream_type='directairtemperature'",
+                     (aid,)).fetchone()
+    if not r:
+        return None
+    try:
+        v = [x for x in json.loads(r[0]) if isinstance(x, (int, float))]
+    except (TypeError, ValueError):
+        return None
+    if len(v) < 10:
+        return None
+    return {"avg": round(sum(v) / len(v), 1), "min": round(min(v)), "max": round(max(v))}
+
+
+def _temperature(tw, t_sum, feel_sum, rh_sum, rh_w, t_lo, t_hi, rain_hours, t_km, sensor) -> dict | None:
+    if not tw:
+        return {"sensor": sensor} if sensor else None
+    prof, bucket, cur = [], [], 1.0                              # one value per km, like the wind strip
+    for km, t in t_km:
+        bucket.append(t)
+        if km >= cur:
+            prof.append(round(sum(bucket) / len(bucket), 1))
+            bucket, cur = [], cur + 1
+    if bucket:
+        prof.append(round(sum(bucket) / len(bucket), 1))
+    rain = sum(v for v in rain_hours.values() if v)
+    return {"avg": round(t_sum / tw, 1), "min": round(t_lo), "max": round(t_hi),
+            "feels": round(feel_sum / tw, 1), "humidity": round(rh_sum / rh_w) if rh_w else None,
+            "rain_mm": round(rain, 1), "wet_hours": sum(1 for v in rain_hours.values() if v and v >= 0.2),
+            "profile_km": prof, "sensor": sensor}

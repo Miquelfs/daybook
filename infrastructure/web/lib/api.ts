@@ -1522,16 +1522,45 @@ export function moodEmoji(mood: number | null): string {
   return "😭";
 }
 
+/** One icon per sport, everywhere (lists, cards, the activity header). Garmin type keys, first match wins:
+ *  the specific ones (table tennis, padel, mountain bike, open water) before the general (tennis, bike, swim). */
+const ACTIVITY_ICONS: [RegExp, string][] = [
+  [/table_?tennis|ping_?pong/, "🏓"],
+  [/padel|paddel|paddle_?ball|pickleball|squash|racquet/, "🎾"],
+  [/tennis/, "🎾"],
+  [/badminton/, "🏸"],
+  [/mountain_?bik|mtb|enduro|downhill/, "🚵"],
+  [/cycl|bik|ride|gravel|velo/, "🚴"],
+  [/run|jog|treadmill|track/, "🏃"],
+  [/open_?water/, "🌊"],
+  [/swim/, "🏊"],
+  [/hik|trek|mountaineer/, "🥾"],
+  [/walk/, "🚶"],
+  [/strength|gym|weight|crossfit|hiit/, "🏋️"],
+  [/yoga|pilates|stretch|mobility|breath/, "🧘"],
+  [/snowboard/, "🏂"],
+  [/ski|snow/, "⛷️"],
+  [/kayak|canoe/, "🛶"],
+  [/row/, "🚣"],
+  [/surf|sup|stand_?up|paddl/, "🏄"],
+  [/elliptical|stair|step/, "🪜"],
+  [/climb|boulder/, "🧗"],
+  [/golf/, "⛳"],
+  [/soccer|football|futsal/, "⚽"],
+  [/basketball/, "🏀"],
+  [/volleyball/, "🏐"],
+  [/box|kickbox|martial/, "🥊"],
+  [/dance|zumba/, "💃"],
+  [/skat/, "⛸️"],
+  [/multi_?sport|triathlon|duathlon/, "🏅"],
+  [/stop_?watch|timer/, "⏱️"],
+  [/sail/, "⛵"],
+  [/fly|glid|paraglid/, "🪂"],
+];
+
 export function activityIcon(type: string | null): string {
   const t = type?.toLowerCase() ?? "";
-  if (t.includes("run")) return "🏃";
-  if (t.includes("cycl") || t.includes("bik") || t.includes("ride")) return "🚴";
-  if (t.includes("swim")) return "🏊";
-  if (t.includes("walk") || t.includes("hike")) return "🚶";
-  if (t.includes("strength") || t.includes("gym") || t.includes("weight")) return "🏋";
-  if (t.includes("yoga") || t.includes("pilates")) return "🧘";
-  if (t.includes("ski") || t.includes("snow")) return "⛷️";
-  return "⚡";
+  return ACTIVITY_ICONS.find(([re]) => re.test(t))?.[1] ?? "💪";
 }
 
 export function fmtPace(speed_mps: number | null, activity_type: string | null): string {

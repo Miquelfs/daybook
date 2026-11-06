@@ -13,6 +13,74 @@ interface Wind {
   worst_head: { km: number; from_km: number; to_km: number; avg_kmh: number } | null;
   profile_km: number[];
   source: "streams" | "polyline";
+  /** v2: the temperature where and when you were out (null on older results / no data) */
+  temp?: {
+    avg?: number; min?: number; max?: number; feels?: number; humidity?: number | null;
+    rain_mm?: number; wet_hours?: number; profile_km?: number[];
+    sensor: { avg: number; min: number; max: number } | null;
+  } | null;
+}
+
+/** Temperature along the route, per km: a thin line, warmest and coldest labelled. */
+function TempLine({ prof }: { prof: number[] }) {
+  if (prof.length < 3) return null;
+  const lo = Math.min(...prof), hi = Math.max(...prof);
+  if (hi - lo < 1) return null;
+  const W = 1000, H = 36;
+  const y = (t: number) => 4 + (1 - (t - lo) / (hi - lo)) * (H - 8);
+  const d = prof.map((t, i) => `${i ? "L" : "M"}${((i / (prof.length - 1)) * W).toFixed(1)},${y(t).toFixed(1)}`).join("");
+  return (
+    <div className="mt-3">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="block w-full" style={{ height: H }}>
+        <path d={d} fill="none" stroke="var(--viz-hot)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      </svg>
+      <div className="flex justify-between text-[10px] text-[#52525B] mt-0.5 tabular-nums">
+        <span>{prof[0]}°</span><span>temperature along the way</span><span>{prof[prof.length - 1]}°</span>
+      </div>
+    </div>
+  );
+}
+
+function Temperature({ t }: { t: NonNullable<Wind["temp"]> }) {
+  const has = t.avg != null;
+  return (
+    <div className="mb-4 pb-4 border-b border-[#18181B]">
+      {has && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div>
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Temperature</p>
+            <p className="text-lg font-semibold tabular-nums">
+              {t.min === t.max ? `${t.min}` : `${t.min}–${t.max}`}<span className="text-xs font-normal text-[#71717A] ml-1">°C</span>
+            </p>
+            <p className="text-xs text-[#71717A] tabular-nums">avg {t.avg}°</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Feels like</p>
+            <p className="text-lg font-semibold tabular-nums">{Math.round(t.feels ?? t.avg!)}<span className="text-xs font-normal text-[#71717A] ml-1">°C</span></p>
+            <p className="text-xs text-[#71717A]">wind and humidity in</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Humidity</p>
+            <p className="text-lg font-semibold tabular-nums">{t.humidity ?? "—"}{t.humidity != null && <span className="text-xs font-normal text-[#71717A] ml-1">%</span>}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-[#52525B] uppercase tracking-widest">Rain</p>
+            <p className="text-lg font-semibold tabular-nums">
+              {t.rain_mm ? <>{t.rain_mm}<span className="text-xs font-normal text-[#71717A] ml-1">mm</span></> : "Dry"}
+            </p>
+            {!!t.wet_hours && <p className="text-xs text-[#71717A]">{t.wet_hours} wet hour{t.wet_hours > 1 ? "s" : ""}</p>}
+          </div>
+        </div>
+      )}
+      {t.profile_km && <TempLine prof={t.profile_km} />}
+      {t.sensor && (
+        <p className="text-xs text-[#71717A] mt-3 tabular-nums">
+          The watch read {t.sensor.avg}° on average ({t.sensor.min}–{t.sensor.max}°)
+          {has ? " — its sensor sits against your wrist and in the sun, so it reads warm." : "."}
+        </p>
+      )}
+    </div>
+  );
 }
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -55,8 +123,9 @@ export function ActivityWind({ activityId, isOutdoor }: { activityId: string; is
 
   return (
     <section className="mb-8">
-      <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Wind</p>
+      <p className="text-xs text-[#52525B] uppercase tracking-widest mb-3">Weather</p>
       <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-4">
+        {w.temp && <Temperature t={w.temp} />}
         <div className="flex items-baseline justify-between gap-3 mb-1">
           <span className="text-xl font-semibold tabular-nums">
             {w.wind_kmh} km/h
@@ -124,7 +193,7 @@ export function ActivityWind({ activityId, isOutdoor }: { activityId: string; is
           </>
         )}
         <p className="text-[10px] text-[#3F3F46] mt-3">
-          Open-Meteo hourly 10 m wind along the route{w.source === "polyline" ? " (route timing estimated)" : ""}.
+          Open-Meteo hourly weather along the route, at the time you were there{w.source === "polyline" ? " (route timing estimated)" : ""}.
         </p>
       </div>
     </section>
