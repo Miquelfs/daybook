@@ -1,10 +1,11 @@
 "use client";
 
 import { use, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { addDays, format, parseISO } from "date-fns";
-import { ArrowLeft, ArrowRight, CalendarDays, Columns3, ListChecks, Pencil, Plane, Plus } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CalendarDays, Columns3, ListChecks, Pencil, Plane, Plus } from "lucide-react";
 import { plansApi, PLAN_KEYS, type Task } from "@/lib/plans-api";
 import { localISODate } from "@/lib/dates";
 import { Avatar } from "@/components/plan/Avatar";
@@ -13,8 +14,10 @@ import { TaskSheet } from "@/components/plan/TaskSheet";
 import { PlannedTripSheet } from "@/components/plan/TripsAhead";
 import { Block, Empty, Label, Panel, Skeleton, TabBar } from "@/components/plan/ui";
 import { ImportBoardButton, TripBoardStats, TripBoardView, TripDaysView } from "@/components/trip/TripBoard";
+import { TripStory } from "@/components/trip/TripStory";
 
 const TABS = [
+  { key: "journal", label: "Journal", icon: BookOpen },
   { key: "board", label: "Board", icon: Columns3 },
   { key: "days", label: "Day by day", icon: CalendarDays },
   { key: "checklist", label: "Checklist", icon: ListChecks },
@@ -57,7 +60,11 @@ export default function PlannedTripPage({ params }: { params: Promise<{ id: stri
   const [quick, setQuick] = useState("");
   const { data: t, isLoading } = useQuery({ queryKey: ["planned-trip", id], queryFn: () => plansApi.plannedTrip(id) });
   const { data: board } = useQuery({ queryKey: ["trip-board", id], queryFn: () => plansApi.tripBoard(id) });
-  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("board");
+  // ?tab=journal (Today links there while you're away); otherwise the journal once the trip has
+  // started, the board before.
+  const asked = useSearchParams().get("tab");
+  const [picked, setTab] = useState<(typeof TABS)[number]["key"] | null>(
+    TABS.some((x) => x.key === asked) ? (asked as (typeof TABS)[number]["key"]) : null);
 
   async function addItem() {
     if (!quick.trim()) return;
@@ -70,6 +77,7 @@ export default function PlannedTripPage({ params }: { params: Promise<{ id: stri
   if (!t) return <main className="max-w-2xl mx-auto px-4 pt-8 text-sm text-[#71717A]">Trip not found.</main>;
 
   const past = t.end_date < today;
+  const tab = picked ?? (t.start_date <= today ? "journal" : "board");
   const dayN = t.ongoing ? t.days.findIndex((d) => d.date === today) + 1 : null;
   const pct = t.checklist_total ? Math.round((t.checklist_done / t.checklist_total) * 100) : 0;
 
@@ -142,6 +150,14 @@ export default function PlannedTripPage({ params }: { params: Promise<{ id: stri
       {board && (board.totals.items > 0 || board.totals.planned_km > 0) && <TripBoardStats board={board} />}
 
       <TabBar tabs={TABS} value={tab} onChange={setTab} />
+
+      {tab === "journal" && (
+        t.start_date > today ? (
+          <Block title="Journal" note="From the first day: write moments, or just add photos — each finds its day, time and place from your track. Afterwards it becomes the trip's story, and you can download it.">
+            <Empty>Opens on {format(parseISO(t.start_date), "EEE d MMM")}.</Empty>
+          </Block>
+        ) : <TripStory start={t.start_date} end={t.end_date} name={t.name} />
+      )}
 
       {tab === "board" && (
         <Block title="Board" note="Bookings and to-dos by day; the day's ride comes from the tour's GPX." action={<ImportBoardButton tripId={id} />}>

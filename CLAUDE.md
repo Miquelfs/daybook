@@ -126,6 +126,18 @@ brief as it read that day — sections, climbs, fuel presses from the `.clg` —
 offered in `/coll/sync`), ride screens (`settings.screens`, same grammar as `firmware/lib/core/screens.h`). Nightly:
 `coll_review`, `coll_weather` steps.
 
+## Trips & the travel journal
+
+Trips are detected nightly (`trips`, keyed by dates and rebuilt) or planned ahead (`planned_trips`: board, day
+lines, checklist). The journal (`domains/travel/`, `/travel/*`, proxy `app/api/travel/[...path]`) adds **moments**:
+title, a few lines, photos (`data/photos/moments/`, 2048 px + thumbnail). Moments are keyed by **day**, never by
+trip id, so the planned trip's Journal tab and the detected trip's page show the same story. Where/when fill
+themselves: the photo's EXIF GPS/time, else the Overland point nearest that minute (`place.py`); a moment logged
+before Overland uploads is placed on the next read. Dropped photos group into moments (≤ 60 min, ≤ 1.5 km).
+`trip_stories` (cover, summary) is keyed by the first day and found by overlap. `components/trip/TripStory.tsx`
+renders it; `book.py` renders the same story as a standalone HTML book (inline SVG map, no tiles/scripts) and
+the export zip (index.html + photos/ + route.gpx + trip.json) — keep the export dependency-free.
+
 ## Key Directories
 
 - `infrastructure/web/` — Next.js frontend

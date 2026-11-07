@@ -1611,6 +1611,25 @@ def _trip_row_to_dict(r: sqlite3.Row, con: sqlite3.Connection) -> dict:
         "SELECT COUNT(*) FROM passenger_flights WHERE date BETWEEN ? AND ?",
         (t["start_date"], range_end),
     ).fetchone()[0]
+    # The travel journal (domains/travel): moments logged in the window, and its cover.
+    t["moment_count"] = 0
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='moments'").fetchone():
+        t["moment_count"] = con.execute(
+            "SELECT COUNT(*) FROM moments WHERE date BETWEEN ? AND ?", (t["start_date"], range_end),
+        ).fetchone()[0]
+        from domains.travel.journal import story_row
+        srow = story_row(con, t["start_date"], range_end) or {}
+        cover = None
+        if srow.get("cover_photo_id"):
+            cover = con.execute("SELECT thumb_path, path FROM moment_photos WHERE id=?",
+                                (srow["cover_photo_id"],)).fetchone()
+        if cover is None and t["moment_count"]:
+            cover = con.execute(
+                """SELECT p.thumb_path, p.path FROM moment_photos p JOIN moments m ON m.id = p.moment_id
+                   WHERE m.date BETWEEN ? AND ? ORDER BY m.date, m.taken_at, p.sort LIMIT 1""",
+                (t["start_date"], range_end)).fetchone()
+        if cover is not None:
+            t["cover_photo_path"] = cover[0] or cover[1]
     return t
 
 

@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, ImagePlus } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { api, type TracksGeoJSON } from "@/lib/api";
 import { TripJourney } from "@/components/TripJourney";
 import { TripExpenses } from "@/components/TripExpenses";
@@ -11,7 +11,7 @@ import { WithPicker } from "@/components/plan/WithPicker";
 import { TripPlan } from "@/components/plan/TripPlan";
 import { Flag } from "@/components/Flag";
 import { localISODate } from "@/lib/dates";
-import { Hero, Stat } from "@/components/ui/kit";
+import { TripStory } from "@/components/trip/TripStory";
 
 interface Props {
   params: Promise<{ start: string; end: string }>;
@@ -23,16 +23,12 @@ function fmtRange(start: string, end: string): string {
   return `${s} – ${e}`;
 }
 
-function photoProxy(path: string): string {
-  return `/api/photos/${path.split("/").pop()}`;
-}
-
 export default async function TripDetailPage({ params }: Props) {
   const { start, end } = await params;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) notFound();
 
-  // Fetch the trip first so we know its return day, then pull tracks/days for
+  // Fetch the trip first so we know its return day, then pull the tracks for
   // the full span — the trip window includes the travel-home day (return_date)
   // even though the route key is the last away night (end).
   const trip = await api.trip(start, end).catch(() => null);
@@ -49,16 +45,18 @@ export default async function TripDetailPage({ params }: Props) {
   // Tracks per day — the exact request the day page makes. One /tracks-range call
   // for the whole trip can outlast the server-fetch timeout on the Pi and come
   // back empty; per day, a slow or failed day only blanks itself.
-  const [perDay, days] = await Promise.all([
-    Promise.all(tripDates.map((d) =>
-      api.tracks(d)
-        .then((g) => g.features.map((f) => ({ ...f, properties: { ...f.properties, date: d } })))
-        .catch(() => []))),
-    api.range(start, rangeEnd).catch(() => []),
-  ]);
+  const perDay = await Promise.all(tripDates.map((d) =>
+    api.tracks(d)
+      .then((g) => g.features.map((f) => ({ ...f, properties: { ...f.properties, date: d } })))
+      .catch(() => [])));
   const tracks: TracksGeoJSON = { type: "FeatureCollection", features: perDay.flat() };
 
-  const withPhotos = days.filter((d) => d.photo_path);
+  const away = trip.n_nights;
+  const furthest = trip.max_distance_from_home_km != null
+    ? `${Math.round(trip.max_distance_from_home_km).toLocaleString("en-GB")} km from home` : null;
+  const sub = [trip.home_at_start ? `from ${trip.home_at_start}` : null, furthest,
+               trip.passenger_flight_count ? `${trip.passenger_flight_count} flight${trip.passenger_flight_count === 1 ? "" : "s"}` : null]
+    .filter(Boolean).join(" · ");
 
   return (
     <main className="max-w-2xl mx-auto px-4 pb-20 pt-8">
@@ -76,21 +74,11 @@ export default async function TripDetailPage({ params }: Props) {
         <p className="text-sm text-[#71717A] mt-1">{fmtRange(trip.start_date, rangeEnd)}</p>
       </div>
 
-      <Hero className="mb-8" eyebrow="Away from home" value={trip.n_nights} unit={trip.n_nights === 1 ? "night" : "nights"}
-            sub={trip.home_at_start ? `from ${trip.home_at_start}` : undefined}
-            right={trip.cover_photo_path ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={photoProxy(trip.cover_photo_path)} alt="" className="w-16 h-16 rounded-xl object-cover border border-[#27272A]" />
-            ) : undefined}>
-        <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-[#27272A]">
-          <Stat plain label="Days" value={tripDates.length} />
-          <Stat plain label="Furthest" value={trip.max_distance_from_home_km != null ? Math.round(trip.max_distance_from_home_km).toLocaleString("en-GB") : "—"}
-                unit={trip.max_distance_from_home_km != null ? "km" : undefined} />
-          <Stat plain label="Flights" value={trip.passenger_flight_count} />
-        </div>
-      </Hero>
-
       <div className="flex flex-col gap-8">
+        {/* The story: cover, hero, the trip in a few lines, route + moments, day by day, export */}
+        <TripStory start={trip.start_date} end={rangeEnd} name={trip.name}
+                   hero={{ eyebrow: "Away from home", value: away, unit: away === 1 ? "night" : "nights", sub: sub || undefined }} />
+
         <section>
           <SectionLabel>With</SectionLabel>
           <WithPicker trip={{ start: trip.start_date, end: trip.end_date }} />
@@ -98,58 +86,13 @@ export default async function TripDetailPage({ params }: Props) {
 
         <TripPlan start={trip.start_date} end={trip.end_date} />
 
-        {/* Interactive day-by-day journey */}
-        <section>
-          <SectionLabel>Where I went</SectionLabel>
-          <TripJourney dates={tripDates} geojson={tracks} />
-        </section>
-
         {/* Spending across the trip */}
         <TripExpenses start={trip.start_date} end={rangeEnd} />
 
-        {/* Photos, tap to open the day (add/replace there) */}
+        {/* Every stop, day by day, on the detailed map */}
         <section>
-          <SectionLabel>Photos</SectionLabel>
-          {withPhotos.length > 0 ? (
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-              {withPhotos.map((d) => (
-                <Link
-                  key={d.date}
-                  href={`/day/${d.date}`}
-                  className="relative aspect-square rounded-xl overflow-hidden border border-[#27272A] group"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={photoProxy(d.photo_path!)}
-                    alt={d.photo_caption ?? d.date}
-                    className="w-full h-full object-cover group-hover:opacity-90 transition-opacity"
-                  />
-                  <span className="absolute bottom-1 left-1.5 text-[10px] text-white/90 tabular-nums drop-shadow">
-                    {new Date(d.date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-[#52525B]">No photos yet for these days.</p>
-          )}
-
-          {/* Add photos: photos live per-day, so link into each day of the trip */}
-          <div className="mt-3">
-            <p className="text-[10px] text-[#52525B] uppercase tracking-widest mb-1.5">Add a photo to a day</p>
-            <div className="flex flex-wrap gap-1.5">
-              {days.map((d) => (
-                <Link
-                  key={d.date}
-                  href={`/day/${d.date}`}
-                  className="inline-flex items-center gap-1 bg-[#0D0D0F] border border-[#27272A] rounded-full px-2.5 py-1 text-xs text-[#A1A1AA] hover:border-[#F59E0B]/40 hover:text-[#F59E0B] transition-colors"
-                >
-                  {d.photo_path ? null : <ImagePlus size={11} />}
-                  {new Date(d.date + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                </Link>
-              ))}
-            </div>
-          </div>
+          <SectionLabel>Every stop</SectionLabel>
+          <TripJourney dates={tripDates} geojson={tracks} />
         </section>
       </div>
     </main>

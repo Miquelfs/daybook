@@ -48,6 +48,7 @@ from infrastructure.api.routers import system as system_module
 from infrastructure.api.routers import plans as plans_module
 from infrastructure.api.routers import coll as coll_module
 from infrastructure.api.routers import ask as ask_module
+from infrastructure.api.routers import travel as travel_module
 
 VERSION = "0.1.0"
 ROOT = Path(__file__).parents[2]
@@ -157,6 +158,7 @@ app.include_router(wellness_module.router)
 app.include_router(plans_module.router)
 app.include_router(coll_module.router)
 app.include_router(ask_module.router)
+app.include_router(travel_module.router)
 
 _photos_dir = ROOT / "data" / "photos"
 _photos_dir.mkdir(parents=True, exist_ok=True)
@@ -233,6 +235,10 @@ def _run_migrations() -> None:
     _conn12 = _get_conn()
     _migrate_plans(_conn12)
     _conn12.close()
+    from infrastructure.db.migrate_travel import migrate as _migrate_travel
+    _conn_t = _get_conn()
+    _migrate_travel(_conn_t)
+    _conn_t.close()
     from infrastructure.db.migrate_zero_moving_time import migrate as _migrate_zero_moving
     _conn13 = _get_conn()
     _migrate_zero_moving(_conn13)

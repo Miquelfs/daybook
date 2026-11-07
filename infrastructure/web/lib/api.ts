@@ -922,6 +922,8 @@ export type Trip = {
   n_days: number;
   n_nights: number;                     // nights away from home
   passenger_flight_count: number;
+  /** Moments in the travel journal (domains/travel); cover_photo_path prefers the journal's cover. */
+  moment_count?: number;
 };
 
 export type PlaceSummary = {

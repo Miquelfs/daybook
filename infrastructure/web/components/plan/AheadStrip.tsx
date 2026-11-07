@@ -66,7 +66,7 @@ function Ahead({ date }: { date: string }) {
     ...a.trips.filter((t) => t.ongoing || t.days_until <= 7).map((t) => ({
       key: `p${t.id}`, on: t.start_date, icon: <Plane size={14} />,
       label: t.checklist_total ? `${t.name} · ✓ ${t.checklist_done}/${t.checklist_total}` : t.name,
-      when: t.ongoing ? "now" : `in ${t.days_until}d`, warn: t.days_until <= 7, href: `/plan/trip/${t.id}`,
+      when: t.ongoing ? "now" : `in ${t.days_until}d`, warn: t.days_until <= 7, href: t.ongoing ? `/plan/trip/${t.id}?tab=journal` : `/plan/trip/${t.id}`,
     })),
     ...a.upcoming.map((t) => {
       const Icon = area(t.area).icon;

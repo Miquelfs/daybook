@@ -4,15 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Check, X, Trash2 } from "lucide-react";
 import type { Trip } from "@/lib/api";
+import { photoUrl } from "@/lib/travel-api";
 
 function fmtRange(start: string, end: string): string {
   const s = new Date(start + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   const e = new Date(end + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   return `${s} – ${e}`;
-}
-
-function photoProxy(path: string): string {
-  return `/api/photos/${path.split("/").pop()}`;
 }
 
 export function TripCard({ trip, flag }: { trip: Trip; flag?: React.ReactNode }) {
@@ -128,14 +125,15 @@ export function TripCard({ trip, flag }: { trip: Trip; flag?: React.ReactNode })
           {fmtRange(trip.start_date, trip.return_date ?? trip.end_date)} · {trip.n_nights} night{trip.n_nights === 1 ? "" : "s"}
           {far != null && far >= 1 ? ` · ${far >= 1000 ? `${(far / 1000).toFixed(1)}k` : Math.round(far)} km away` : ""}
           {trip.passenger_flight_count > 0 ? ` · ✈ ${trip.passenger_flight_count}` : ""}
+          {trip.moment_count ? ` · ${trip.moment_count} moment${trip.moment_count === 1 ? "" : "s"}` : ""}
         </p>
 
 </div>
 
       {trip.cover_photo_path && (
-        <div className="shrink-0 w-12 h-12 rounded-lg overflow-hidden border border-[#27272A] self-center">
+        <div className="shrink-0 w-16 h-16 rounded-xl overflow-hidden border border-[#27272A] self-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={photoProxy(trip.cover_photo_path)} alt="" className="w-full h-full object-cover" />
+          <img src={photoUrl(trip.cover_photo_path)} alt="" className="w-full h-full object-cover" />
         </div>
       )}
     </div>
