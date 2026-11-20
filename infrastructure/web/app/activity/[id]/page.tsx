@@ -1,4 +1,5 @@
 import { api, fmtDuration, fmtDistance, fmtPace, activityIcon } from "@/lib/api";
+import { RemoveActivity } from "@/components/activity/RemoveActivity";
 import type { ActivityDetail, ActivityComputedMetrics, ActivityAnalysis, ActivityImpact, ActivityEffort, ActivityStory, RideProfile } from "@/lib/api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -505,6 +506,8 @@ export default async function ActivityPage({ params }: Props) {
           initialRating={activity.user_rating ?? null}
         />
       </section>
+
+      <RemoveActivity activityId={decodedId} name={activity.name ?? "this activity"} date={activity.date} />
     </main>
   );
 }

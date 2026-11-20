@@ -105,5 +105,32 @@ class TwinPreferenceTest(unittest.TestCase):
         self.assertIsNotNone(c.execute("SELECT 1 FROM activities WHERE id='swim'").fetchone())
 
 
+class RemoveTest(unittest.TestCase):
+    def test_friends_ride_goes_with_its_strava_copy_and_stays_gone(self):
+        from domains.health.activity_remove import remove
+        c = _db()
+        _act(c, "garmin_9", "2026-10-03 07:00:00", "2026-10-03 09:00:00", 7200)
+        _act(c, "mine", "2026-10-03 16:00:00", "2026-10-03 18:00:00", 3600)
+        c.execute("""INSERT INTO activities (id, date, source, activity_type, name, start_time, duration_seconds, raw_payload)
+                     VALUES ('strava_5', '2026-10-03', 'strava', 'cycling', 'Castellterçol', '2026-10-03T07:00:40Z', 7200, '{}')""")
+        _session(c, 1, "2026-10-03", "completed", "garmin_9", auto=1)
+        if any(r[1] == "activity_id" for r in c.execute("PRAGMA table_info(activity_streams)")):
+            c.execute("INSERT INTO activity_streams (activity_id, stream_type, data_json) VALUES ('garmin_9', 'hr', '[]')")
+        c.commit()
+
+        out = remove(c, "garmin_9", "not mine")
+        self.assertEqual(sorted(out["removed"]), ["garmin_9", "strava_5"])
+        left = [r[0] for r in c.execute("SELECT id FROM activities ORDER BY id")]
+        self.assertEqual(left, ["mine"])
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM activity_streams WHERE activity_id='garmin_9'").fetchone()[0], 0)
+        # the session it had ticked off goes to your own ride that day
+        s = c.execute("SELECT status, completed_activity_id FROM plan_sessions WHERE id=1").fetchone()
+        self.assertEqual(tuple(s), ("completed", "mine"))
+        # a resync skips both
+        self.assertTrue(ad.is_duplicate(c, "garmin_9"))
+        from domains.health.activity_remove import is_removed
+        self.assertTrue(is_removed(c, "strava_5"))
+
+
 if __name__ == "__main__":
     unittest.main()

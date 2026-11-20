@@ -12,15 +12,17 @@ from typing import Optional
 SHORT_SLEEP_SECONDS = 5 * 3600 + 30 * 60   # 5h30m
 
 
-def hrv_direction(conn, date: str, row) -> Optional[str]:
-    """'low' / 'high' / 'normal' — where last night's HRV sits against your normal range.
+def hrv_direction(conn, date: str, row, which: str = "night") -> Optional[str]:
+    """'low' / 'high' / 'normal' — where last night's HRV (`which="week"`: the 7-day average) sits
+    against your normal range.
 
     Garmin calls HRV "unbalanced" when it leaves your baseline in EITHER direction; above it
     (after a rest week, a deload, a trip's easy days) is the opposite of a warning. The range is
     Garmin's own baseline (hrvSummary.baseline.balancedLow/Upper), else your 30-night mean ± 1 SD."""
     if row is None:
         return None
-    hrv = row["last_night_avg"] if row["last_night_avg"] is not None else row["weekly_avg"]
+    first, second = ("last_night_avg", "weekly_avg") if which == "night" else ("weekly_avg", "last_night_avg")
+    hrv = row[first] if row[first] is not None else row[second]
     if hrv is None:
         return None
     lo = hi = None
@@ -66,10 +68,13 @@ def recovery_flag(conn, date: str) -> dict:
         hrv = None
     hrv_status = hrv["status"] if hrv else None
     direction = hrv_direction(conn, date, hrv)
+    week = hrv_direction(conn, date, hrv, "week")
     st = (hrv_status or "").lower()
-    # a warning only when HRV is down: Garmin's "unbalanced" also means *above* your range
-    if st in ("low", "poor") or (st == "unbalanced" and direction != "high") or (not st and direction == "low"):
-        reasons.append(f"HRV {'below your normal range' if direction == 'low' else st}")
+    # Garmin's status judges the 7-DAY average: "unbalanced" is also *above* your range, and after a hard
+    # week it stays "unbalanced" for days while last night is already back. Warn only when last night is down.
+    night_ok = direction in ("normal", "high")
+    if direction == "low" or (st in ("low", "poor", "unbalanced") and not night_ok and week != "high"):
+        reasons.append("HRV below your normal range" if direction == "low" else f"HRV {st}")
         score += 1
 
     w = conn.execute("SELECT bb_min, bb_max, skin_temp_dev FROM wellness_daily WHERE date=?", (date,)).fetchone()
@@ -101,7 +106,8 @@ def recovery_flag(conn, date: str) -> dict:
         "reasons": reasons,
         "rhr_delta": rhr_delta,
         "hrv_status": hrv_status,
-        "hrv_direction": direction,     # low | high | normal | None
+        "hrv_direction": direction,     # last night: low | high | normal | None
+        "hrv_week_direction": week,     # the 7-day average Garmin's status is about
         "body_battery_low": bb_low,
         "body_battery_high": bb_high,
         "skin_temp_dev": skin_dev,

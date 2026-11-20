@@ -285,6 +285,8 @@ def _run_migrations() -> None:
     try:
         _ensure_gear(_conn19)
         _activity_dates.ensure_tables(_conn19)
+        from domains.health.activity_remove import ensure_table as _ensure_removed
+        _ensure_removed(_conn19)
         _activity_dates.repair(_conn19, log=lambda m: print(f"[startup] {m}"))
     except Exception as e:                       # noqa: BLE001 — never block the API on a repair
         print(f"[startup] activity repair failed: {e}")

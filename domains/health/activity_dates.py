@@ -56,10 +56,14 @@ def ensure_tables(conn: sqlite3.Connection) -> None:
 
 
 def is_duplicate(conn: sqlite3.Connection, activity_id: str) -> bool:
+    """Merged into another device's copy, or removed by hand (activity_remove) — either way a sync skips it."""
     try:
-        return conn.execute("SELECT 1 FROM activity_duplicates WHERE dropped_id=?", (activity_id,)).fetchone() is not None
+        if conn.execute("SELECT 1 FROM activity_duplicates WHERE dropped_id=?", (activity_id,)).fetchone():
+            return True
     except sqlite3.OperationalError:
-        return False
+        pass
+    from domains.health.activity_remove import is_removed
+    return is_removed(conn, activity_id)
 
 
 def _tables_with_date(conn) -> list[str]:

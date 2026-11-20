@@ -462,6 +462,20 @@ def swap_plan_match(activity_id: str, body: PlanSwap, conn: Annotated[sqlite3.Co
         raise HTTPException(status_code=422, detail=str(e))
 
 
+class RemoveActivity(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/{activity_id}/remove")
+def remove_activity(activity_id: str, body: RemoveActivity, conn: Annotated[sqlite3.Connection, Depends(get_db)]):
+    """Not yours (a friend wore the watch): gone from everywhere, its Strava copy too, and a resync won't bring it back."""
+    from domains.health.activity_remove import remove
+    try:
+        return remove(conn, activity_id, body.reason)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="activity not found")
+
+
 class BikeWeight(BaseModel):
     bike_kg: Optional[float] = None        # None → back to the default (est_power.BIKE_KG)
     scope: str = "ride"                    # 'ride' | 'trip' — every outdoor ride of the trip this one is on

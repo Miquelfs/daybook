@@ -18,9 +18,9 @@ def _db():
     return c
 
 
-def _hrv(c, d, night, status="BALANCED", lo=None, hi=None):
+def _hrv(c, d, night, status="BALANCED", lo=None, hi=None, week=None):
     raw = {"hrvSummary": {"baseline": {"balancedLow": lo, "balancedUpper": hi}}} if lo else {}
-    c.execute("INSERT INTO hrv VALUES (?,?,?,?,?)", (d, night, night, status, json.dumps(raw)))
+    c.execute("INSERT INTO hrv VALUES (?,?,?,?,?)", (d, night, week if week is not None else night, status, json.dumps(raw)))
 
 
 class HrvDirectionTest(unittest.TestCase):
@@ -45,9 +45,16 @@ class HrvDirectionTest(unittest.TestCase):
         self.assertEqual(hrv_direction(c, "2026-11-20", c.execute("SELECT * FROM hrv WHERE date='2026-11-20'").fetchone()), "high")
         self.assertEqual(recovery_flag(c, "2026-11-20")["status"], "ok")
 
-    def test_low_status_always_counts(self):
+    def test_hard_week_still_in_the_average_but_last_night_is_back(self):
+        # 20 Nov after Taiwan: last night 97, 7-day average 72 below the range → Garmin "UNBALANCED"
         c = _db()
-        _hrv(c, "2026-11-20", 80, "LOW", lo=68, hi=86)
+        _hrv(c, "2026-11-20", 97, "UNBALANCED", lo=74, hi=100, week=72)
+        f = recovery_flag(c, "2026-11-20")
+        self.assertEqual((f["status"], f["hrv_direction"], f["hrv_week_direction"]), ("ok", "normal", "low"))
+
+    def test_low_status_with_a_low_night_counts(self):
+        c = _db()
+        _hrv(c, "2026-11-20", 60, "LOW", lo=68, hi=86)
         self.assertEqual(recovery_flag(c, "2026-11-20")["status"], "watch")
 
 

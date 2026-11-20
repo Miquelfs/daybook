@@ -218,6 +218,9 @@ def _import_strava_only(conn, strava_act: dict, fetch_detail: bool, client: Stra
     ).fetchone()
     if already:
         return False
+    from domains.health.activity_remove import is_removed
+    if is_removed(conn, activity_id):              # removed by hand (not yours) — stays gone
+        return False
 
     start_date = strava_act.get("start_date", "")
     # the local day (start_date_local), not the UTC one — see domains/health/activity_dates.py
