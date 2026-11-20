@@ -904,6 +904,40 @@ export type CurveBucket = {
   last_90d_best: number | null;
 };
 
+/** One night (date = the day you woke). Stage % are of time in bed — they add up to 100. */
+export type SleepNight = {
+  date: string; source: "garmin" | "manual";
+  in_bed_s: number | null; asleep_s: number | null;
+  deep_s: number | null; light_s: number | null; rem_s: number | null; awake_s: number | null;
+  deep_pct: number | null; light_pct: number | null; rem_pct: number | null; awake_pct: number | null;
+  score: number | null; bed: string | null; wake: string | null;
+  resting_hr: number | null; hrv: number | null; respiration: number | null; stress: number | null;
+  awakenings: number | null; restless: number | null; body_battery: number | null; spo2: number | null;
+  naps: { start: string | null; end: string | null; seconds: number }[];
+};
+
+export type SleepSummary = {
+  nights: number; asleep_s?: number; in_bed_s?: number; efficiency_pct?: number; score?: number | null;
+  deep_pct?: number | null; light_pct?: number | null; rem_pct?: number | null; awake_pct?: number | null;
+  bed?: string | null; bed_sd_min?: number | null; wake?: string | null; wake_sd_min?: number | null;
+  short_nights?: number; debt_s?: number; debt_nights?: number;
+  resting_hr?: number | null; hrv?: number | null; respiration?: number | null; stress?: number | null;
+  awakenings?: number | null; restless?: number | null; body_battery?: number | null; spo2?: number | null;
+  naps?: { count: number; seconds: number; avg_s: number | null; days: number };
+  best?: { date: string; score: number | null; asleep_s: number };
+  worst?: { date: string; score: number | null; asleep_s: number };
+};
+
+export type SleepPeriod = {
+  days: number; start: string; end: string; need_h: number;
+  summary: SleepSummary;
+  previous: { nights: number; asleep_s?: number; score?: number | null; bed?: string | null; resting_hr?: number | null; hrv?: number | null };
+  nights: SleepNight[];
+  naps: { date: string; start: string | null; end: string | null; seconds: number }[];
+  by_weekday: { label: string; nights: number; asleep_s: number | null; score: number | null; bed: string | null }[];
+  by_duty: { key: string; label: string; nights: number; asleep_s: number; score: number | null; bed: string | null; wake: string | null }[];
+};
+
 export type Trip = {
   id: number;
   start_date: string;
@@ -1375,6 +1409,7 @@ export const api = {
     }>(`/insights/on-this-day/${date}`),
 
   // ─── Sleep ──────────────────────────────────────────────────────────────────
+  sleepPeriod: (days = 30) => get<SleepPeriod>(`/health/sleep/period?days=${days}`),
   sleepSummary: (days = 30) =>
     get<Record<string, number | null>>(`/health/sleep/summary?days=${days}`),
   sleepStages: (days = 60) =>

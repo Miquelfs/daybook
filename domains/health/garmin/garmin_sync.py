@@ -53,7 +53,7 @@ def _parse_sleep(raw: dict, d: str) -> dict | None:
         "light_seconds": dto.get("lightSleepSeconds"),
         "rem_seconds": dto.get("remSleepSeconds"),
         "awake_seconds": dto.get("awakeSleepSeconds"),
-        "avg_hrv": dto.get("avgSleepStress"),
+        "avg_hrv": raw.get("avgOvernightHrv"),        # was avgSleepStress by mistake (migrate_sleep_hrv)
         "avg_spo2": dto.get("averageSpO2Value"),
         "score": dto.get("sleepScores", {}).get("overall", {}).get("value")
                  if isinstance(dto.get("sleepScores"), dict) else None,

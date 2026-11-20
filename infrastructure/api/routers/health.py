@@ -734,6 +734,14 @@ def sleep_summary(conn: DB, days: int = Query(30)):
     }
 
 
+@router.get("/sleep/period")
+def sleep_period(conn: DB, days: int = Query(30, ge=7, le=730)):
+    """The sleep page for the last `days`: every night (stages add up to the time in bed), bed and
+    wake times, overnight vitals, naps, the same summary for the period before, by weekday and by duty."""
+    from domains.health.sleep_view import period
+    return period(conn, days)
+
+
 @router.get("/sleep/stages")
 def sleep_stages(conn: DB, days: int = Query(60)):
     """Daily sleep stage breakdown for stacked bar chart."""

@@ -274,6 +274,10 @@ def _run_migrations() -> None:
     _conn18 = _get_conn()
     _vo2_boost(_conn18)
     _conn18.close()
+    from infrastructure.db.migrate_sleep_hrv import migrate as _migrate_sleep_hrv
+    _conn_s = _get_conn()
+    _migrate_sleep_hrv(_conn_s)
+    _conn_s.close()
     # activities on the local day (not GMT), one copy per workout, plan sessions re-matched — idempotent
     from domains.health import activity_dates as _activity_dates
     from domains.training.est_power import ensure_gear as _ensure_gear
