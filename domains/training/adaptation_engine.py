@@ -395,7 +395,7 @@ def map_daybook_data(conn, goal_id: int) -> WeekData:
         """SELECT COUNT(*) as total,
                   SUM(CASE WHEN status IN ('completed','skipped') THEN 1 ELSE 0 END) as done
            FROM plan_sessions
-           WHERE goal_id=? AND original_date BETWEEN ? AND ?""",
+           WHERE goal_id=? AND session_date BETWEEN ? AND ? AND status != 'displaced'""",
         (goal_id, counts_from, today),
     ).fetchone()
     total = row["total"] or 1

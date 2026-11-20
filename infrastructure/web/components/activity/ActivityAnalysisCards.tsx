@@ -5,6 +5,7 @@ import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   ReferenceArea, ReferenceLine, CartesianGrid,
 } from "recharts";
+import { BikeWeight } from "./BikeWeight";
 import type { ActivityAnalysis, AnalysisIntervals, ZoneShare, Climb } from "@/lib/api";
 
 // ── tokens (defined in globals.css, themed for dark + paper) ──────────────────
@@ -325,21 +326,24 @@ function RepsTable({ iv, run }: { iv: AnalysisIntervals; run: boolean }) {
 }
 
 /** How the watts were estimated, and how far to trust them. */
-function EstimateNote({ e }: { e: NonNullable<NonNullable<ActivityAnalysis["power"]>["estimated"]> }) {
+function EstimateNote({ e, activityId }: { e: NonNullable<NonNullable<ActivityAnalysis["power"]>["estimated"]>; activityId?: string }) {
   const m = e.hr_model;
   return (
-    <p className="text-xs text-[#71717A] -mt-2 mb-4 leading-relaxed">
-      No power meter — physics from speed, gradient{e.wind ? ", wind" : ""} and {e.mass_kg} kg (rider + bike)
+    <div className="text-xs text-[#71717A] -mt-2 mb-4 leading-relaxed">
+      No power meter — physics from speed, gradient{e.wind ? ", wind" : ""} and {e.mass_kg} kg
+      {activityId && e.bike_kg != null && e.rider_kg != null
+        ? <BikeWeight activityId={activityId} rider={e.rider_kg} bike={e.bike_kg} isDefault={!!e.bike_default} />
+        : " (rider + bike)"}
       {m ? <>, blended on the flats with your heart rate → power line from {m.rides} trainer ride{m.rides > 1 ? "s" : ""} (±{m.rmse_w} W)</> : null}.
       {e.climb_agreement_pct != null
         ? <> On {e.climb_min} min of climbing the HR line read {Math.abs(e.climb_agreement_pct)}% {e.climb_agreement_pct < 0 ? "low" : "high"} — rescaled to match physics there.</>
         : m && e.hr_scale !== 1 ? <> HR line scaled ×{e.hr_scale} (your usual outdoor offset).</> : null}
       {" "}Climbs ±5%, flats ±10–15%.
-    </p>
+    </div>
   );
 }
 
-function PowerCard({ a }: { a: ActivityAnalysis }) {
+function PowerCard({ a, activityId }: { a: ActivityAnalysis; activityId?: string }) {
   const p = a.power!;
   const pts = a.series.points;
   const maxBest = Math.max(...p.bests.map((b) => b.watts), 1);
@@ -347,7 +351,7 @@ function PowerCard({ a }: { a: ActivityAnalysis }) {
     <Card title={a.sport === "run" ? "Running power" : p.indoor ? "Power · trainer" : p.estimated ? "Power · estimated" : "Power"}
           headline={p.estimated ? <>~{p.np ?? p.avg}</> : p.np ?? p.avg} unit={p.np ? "W normalized" : "W avg"}
           aside={<>avg {p.avg} W · max {p.max} W{p.ftp && <><br />FTP {p.ftp} W</>}</>} verdict={p.verdict}>
-      {p.estimated && <EstimateNote e={p.estimated} />}
+      {p.estimated && <EstimateNote e={p.estimated} activityId={activityId} />}
       {pts.some((x) => x.pw) && (
         <div className="mb-4">
           <SeriesChart data={pts} k="pw" color={C.pw} unit={a.series.x_unit} name="Power" area
@@ -519,13 +523,13 @@ function CadenceCard({ a }: { a: ActivityAnalysis }) {
 }
 
 // ── page section ─────────────────────────────────────────────────────────────
-export function ActivityAnalysisCards({ analysis }: { analysis: ActivityAnalysis }) {
+export function ActivityAnalysisCards({ analysis, activityId }: { analysis: ActivityAnalysis; activityId?: string }) {
   const a = analysis;
   return (
     <>
       {a.hr && <HeartRateCard a={a} />}
       {a.pace && <PaceCard a={a} />}
-      {a.power && <PowerCard a={a} />}
+      {a.power && <PowerCard a={a} activityId={activityId} />}
       {a.elevation && <ElevationCard a={a} />}
       {a.cadence && <CadenceCard a={a} />}
     </>

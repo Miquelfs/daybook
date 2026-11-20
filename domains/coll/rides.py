@@ -49,7 +49,7 @@ MOVING_MPS = 1.0            # as on the device
 MAX_STEP_S = 10             # longer gaps are pauses: not moving time
 GENERIC_NAMES = {"", "ride", "simulated ride"}
 # tables whose rows are yours to keep when the watch's copy takes over (else deleted with the ride)
-KEEP_TABLES = ("fueling_logs", "activity_companions", "injuries")
+KEEP_TABLES = ("fueling_logs", "activity_companions", "injuries", "activity_gear")
 
 
 # ── parsing ─────────────────────────────────────────────────────────────────

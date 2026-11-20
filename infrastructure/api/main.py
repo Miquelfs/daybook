@@ -274,6 +274,17 @@ def _run_migrations() -> None:
     _conn18 = _get_conn()
     _vo2_boost(_conn18)
     _conn18.close()
+    # activities on the local day (not GMT), one copy per workout, plan sessions re-matched — idempotent
+    from domains.health import activity_dates as _activity_dates
+    from domains.training.est_power import ensure_gear as _ensure_gear
+    _conn19 = _get_conn()
+    try:
+        _ensure_gear(_conn19)
+        _activity_dates.ensure_tables(_conn19)
+        _activity_dates.repair(_conn19, log=lambda m: print(f"[startup] {m}"))
+    except Exception as e:                       # noqa: BLE001 — never block the API on a repair
+        print(f"[startup] activity repair failed: {e}")
+    _conn19.close()
     # money.db: all CREATE ... IF NOT EXISTS (receipts tables etc.) — idempotent
     from domains.money.money_db import init_money_db as _init_money_db
     _init_money_db()

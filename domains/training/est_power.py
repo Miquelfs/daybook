@@ -28,7 +28,7 @@ import sqlite3
 from datetime import date, timedelta
 
 G = 9.81
-BIKE_KG = 10.0              # bike + bottles + kit
+BIKE_KG = 10.0              # bike + bottles + kit — the default; a ride can say otherwise (activity_gear)
 CRR = 0.005                 # road tyres on Mallorcan tarmac
 CDA = 0.32                  # on the hoods
 ETA = 0.975                 # drivetrain
@@ -38,6 +38,36 @@ HR_LAG_S = 30
 MODEL_DAYS = 180           # trainer rides up to ~6 months before the ride…
 MODEL_AHEAD_DAYS = 60       # …or 2 months after it (fitness moves slowly; older rides still benefit)
 MIN_BLOCKS = 20
+
+
+# ── what the bike weighed ────────────────────────────────────────────────────
+
+def ensure_gear(conn) -> None:
+    """Per-ride bike + luggage weight (a loaded touring bike is 30–40 kg, not 10)."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS activity_gear (
+        activity_id TEXT PRIMARY KEY, bike_kg REAL NOT NULL,
+        updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')))""")
+
+
+def bike_kg(conn, activity_id: str) -> float:
+    try:
+        r = conn.execute("SELECT bike_kg FROM activity_gear WHERE activity_id=?", (activity_id,)).fetchone()
+    except sqlite3.OperationalError:
+        return BIKE_KG
+    return float(r[0]) if r and r[0] else BIKE_KG
+
+
+def set_bike_kg(conn, activity_ids: list[str], kg: float | None) -> None:
+    """`kg` None → back to the default."""
+    ensure_gear(conn)
+    for aid in activity_ids:
+        if kg is None:
+            conn.execute("DELETE FROM activity_gear WHERE activity_id=?", (aid,))
+        else:
+            conn.execute("INSERT INTO activity_gear (activity_id, bike_kg) VALUES (?, ?) ON CONFLICT(activity_id) "
+                         "DO UPDATE SET bike_kg=excluded.bike_kg, updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')",
+                         (aid, kg))
+    conn.commit()
 
 
 # ── HR → power, learned indoors ──────────────────────────────────────────────
@@ -194,7 +224,8 @@ def estimate(conn, act, s1: dict, moving: list[bool], grade_1hz: list, weight_kg
     if not spd or not any(spd):
         return None
     n = len(spd)
-    mass = (weight_kg or 80.0) + BIKE_KG
+    bike = bike_kg(conn, act["id"])
+    mass = (weight_kg or 80.0) + bike
     spd_s = _smooth([v if m else None for v, m in zip(spd, moving)], 5)
 
     # headwind per second from the ride's wind profile (per km), when the wind card has run
@@ -251,7 +282,8 @@ def estimate(conn, act, s1: dict, moving: list[bool], grade_1hz: list, weight_kg
         "watts": [round(x) if x is not None else None for x in est],
         "meta": {
             "method": "physics + heart rate" if model else "physics",
-            "mass_kg": round(mass, 1), "cda": CDA, "crr": CRR, "wind": bool(prof),
+            "mass_kg": round(mass, 1), "rider_kg": round(weight_kg or 80.0, 1), "bike_kg": round(bike, 1),
+            "bike_default": bike == BIKE_KG, "cda": CDA, "crr": CRR, "wind": bool(prof),
             "hr_model": model, "hr_scale": round(scale, 2), "climb_agreement_pct": agree,
             "climb_min": round(len(climb) / 60) if climb else 0,
         },

@@ -138,6 +138,15 @@ before Overland uploads is placed on the next read. Dropped photos group into mo
 renders it; `book.py` renders the same story as a standalone HTML book (inline SVG map, no tiles/scripts) and
 the export zip (index.html + photos/ + route.gpx + trip.json) — keep the export dependency-free.
 
+## Activity days
+
+An activity belongs to the **local** day where it started (Garmin `startTimeLocal`, Strava `start_date_local`),
+never the GMT day — `domains/health/activity_dates.py`. `repair()` (API startup + after each Garmin sync) re-dates
+stored rows, merges a workout recorded on two Garmin devices into the one from the device you usually use for that
+sport (`activity_duplicates` keeps the dropped copy so a resync skips it), re-matches plan sessions on the changed
+days (`domains/training/autolink.py`) and recomputes training load from there. Estimated ride power uses a per-ride
+bike + luggage weight (`activity_gear`, default 10 kg; set per ride or per trip from the power card).
+
 ## Key Directories
 
 - `infrastructure/web/` — Next.js frontend

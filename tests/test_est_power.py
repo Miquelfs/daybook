@@ -57,5 +57,22 @@ class PlanStreakTest(unittest.TestCase):
         self.assertEqual((s["done_4w"], s["planned_4w"]), (3, 4))
 
 
+
+
+class BikeWeightTest(unittest.TestCase):
+    def test_per_ride_bike_weight(self):
+        c = sqlite3.connect(":memory:")
+        self.assertEqual(ep.bike_kg(c, "a"), ep.BIKE_KG)          # no table yet → default
+        ep.set_bike_kg(c, ["a", "b"], 25.0)
+        self.assertEqual(ep.bike_kg(c, "a"), 25.0)
+        ep.set_bike_kg(c, ["b"], None)
+        self.assertEqual(ep.bike_kg(c, "b"), ep.BIKE_KG)
+        # a 75 kg rider on a 35 kg loaded bike climbs at ~29 % more watts than on the 10 kg road bike
+        v = 12 / 3.6
+        road = ep.climb_watts(300, 5.0, 5000 / v, 75 + ep.BIKE_KG)
+        tour = ep.climb_watts(300, 5.0, 5000 / v, 75 + 35)
+        self.assertGreater(tour / road, 1.25)
+
+
 if __name__ == "__main__":
     unittest.main()

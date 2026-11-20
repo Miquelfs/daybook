@@ -1187,9 +1187,11 @@ _INDOOR_TYPES = (
     "fitness_equipment", "yoga", "pilates",
 )
 
-_RIDE_TYPES = ("cycling", "road_biking", "mountain_biking", "gravel_cycling", "indoor_cycling", "virtual_ride")
-_RUN_TYPES = ("running", "trail_running", "treadmill_running", "indoor_running", "virtual_run")
-_SWIM_TYPES = ("lap_swimming", "open_water_swimming", "swimming")
+from domains.training.autolink import (  # noqa: E402 — one list per sport, shared with plan auto-matching
+    _RIDE_ACT_TYPES as _RIDE_TYPES,
+    _RUN_ACT_TYPES as _RUN_TYPES,
+    _SWIM_ACT_TYPES as _SWIM_TYPES,
+)
 
 
 # ─── Route Polylines (multi-sport overlay map) ────────────────────────────────

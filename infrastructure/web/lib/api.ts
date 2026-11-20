@@ -1624,7 +1624,7 @@ export interface ActivityAnalysis {
     indoor: boolean; verdict: string;
     /** Set when there was no power meter: watts estimated from physics + the HR line learned on the trainer. */
     estimated?: {
-      method: string; mass_kg: number; cda: number; crr: number; wind: boolean; hr_scale: number;
+      method: string; mass_kg: number; rider_kg?: number; bike_kg?: number; bike_default?: boolean; cda: number; crr: number; wind: boolean; hr_scale: number;
       climb_agreement_pct: number | null; climb_min: number;
       hr_model: { a: number; b: number; blocks: number; r2: number; rmse_w: number; rides: number; latest: string } | null;
     };

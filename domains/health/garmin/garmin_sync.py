@@ -91,7 +91,10 @@ def _parse_hrv(raw: dict | list, d: str) -> dict | None:
 
 def _parse_activity(raw: dict) -> dict:
     start = raw.get("startTimeGMT") or raw.get("startTimeLocal", "")
-    d = start[:10] if start else ""
+    # the day where you were (startTimeLocal), not the GMT day — see domains/health/activity_dates.py
+    from domains.health.activity_dates import local_date
+    d = local_date(raw.get("startTimeGMT"), raw.get("startTimeLocal"),
+                   raw.get("startLatitude"), raw.get("startLongitude"))
     native_id = str(raw.get("activityId", ""))
     act_type = raw.get("activityType", {})
     if isinstance(act_type, dict):
@@ -331,6 +334,7 @@ def sync_activities(client, conn, start: str, end: str, force: bool, fetch_strea
             return 0
 
         _write_raw("activities", f"activities_{start}_to_{end}", raw_list)
+        from domains.health.activity_dates import is_duplicate, repair
         count = 0
         for raw in raw_list:
             parsed = _parse_activity(raw)
@@ -339,6 +343,8 @@ def sync_activities(client, conn, start: str, end: str, force: bool, fetch_strea
 
             activity_id = parsed["id"]
             native_id = str(raw.get("activityId", ""))
+            if is_duplicate(conn, activity_id):        # a second device's copy, already merged
+                continue
 
             if not force:
                 row = conn.execute("SELECT id FROM activities WHERE id=?", (activity_id,)).fetchone()
@@ -385,6 +391,14 @@ def sync_activities(client, conn, start: str, end: str, force: bool, fetch_strea
             reapply_if_attached(conn, activity_id)
 
             count += 1
+
+        # one workout recorded on two devices counts once; sessions on those days re-matched
+        if count:
+            try:
+                repair(conn, since=(date.fromisoformat(start) - timedelta(days=2)).isoformat(),
+                       log=lambda m: print(f"  {m}", file=sys.stderr))
+            except Exception as e:                       # noqa: BLE001
+                print(f"  WARN activity repair: {e}", file=sys.stderr)
 
         # A ride Coll also recorded gives way to the watch's activity (domains/coll/rides.py)
         if count:

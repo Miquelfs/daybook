@@ -220,7 +220,8 @@ def _import_strava_only(conn, strava_act: dict, fetch_detail: bool, client: Stra
         return False
 
     start_date = strava_act.get("start_date", "")
-    date_str = start_date[:10] if start_date else ""
+    # the local day (start_date_local), not the UTC one — see domains/health/activity_dates.py
+    date_str = (strava_act.get("start_date_local") or start_date or "")[:10]
     if not date_str:
         return False
 

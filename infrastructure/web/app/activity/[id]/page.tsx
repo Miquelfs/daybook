@@ -393,7 +393,7 @@ export default async function ActivityPage({ params }: Props) {
 
       {/* Metrics: heart rate → speed → power → elevation → cadence (falls back to plain charts without streams) */}
       {analysis ? (
-        <ActivityAnalysisCards analysis={analysis} />
+        <ActivityAnalysisCards analysis={analysis} activityId={decodedId} />
       ) : !isGym && (
         <ActivityCharts activityId={decodedId} activityType={activity.activity_type} />
       )}

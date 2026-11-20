@@ -301,7 +301,7 @@ def for_activity(conn, activity_id: str) -> list[dict]:
     except sqlite3.OperationalError:
         return []
     # watts / W/kg per climb (the road bike has no power meter: physics from gain, length and time)
-    from domains.training.est_power import BIKE_KG, climb_watts
+    from domains.training.est_power import bike_kg, climb_watts
     kg = None
     if rows:
         try:
@@ -312,7 +312,7 @@ def for_activity(conn, activity_id: str) -> list[dict]:
             kg = None
 
     def watts(r):
-        return climb_watts(r["gain_m"], r["length_km"], r["secs"], kg + BIKE_KG) if kg else None
+        return climb_watts(r["gain_m"], r["length_km"], r["secs"], kg + bike_kg(conn, activity_id)) if kg else None
 
     return [{"key": r["key"], "name": r["name"], "kind": r["kind"], "side": r["side"], "length_km": r["length_km"],
              "est_w": round(watts(r)) if watts(r) else None,

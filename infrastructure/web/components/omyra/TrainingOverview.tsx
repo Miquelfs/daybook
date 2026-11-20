@@ -242,7 +242,8 @@ function GoalFitness({ fitness }: { fitness: number }) {
         <span className="text-[10px] text-[#52525B] uppercase tracking-widest">{g.name} · race-day fitness</span>
         <span className="tabular-nums text-[#FAFAFA]">{Math.round(fitness)} <span className="text-[#71717A]">/ ~{g.target_fitness} · {g.pct}%</span></span>
       </div>
-      <div className="relative h-2 bg-[#18181B] rounded-full overflow-hidden" title={`At your current build rate: ~${g.projected_fitness} on race day`}>
+      <div className="relative h-2 bg-[#18181B] rounded-full overflow-hidden"
+           title={g.projected_fitness >= g.target_fitness ? `At your current build rate you'd pass ~${g.target_fitness} before race day` : `At your current build rate: ~${g.projected_fitness} on race day`}>
         <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.max(0, proj)}%`, background: "var(--viz-i2)", opacity: 0.5 }} />
         <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${g.pct}%`, background: "var(--viz-i4)" }} />
       </div>
@@ -259,9 +260,13 @@ function GoalFitness({ fitness }: { fitness: number }) {
             <>{" "}Last 4 weeks: {L.ramp_per_week >= 0 ? "+" : ""}{L.ramp_per_week}/week
               {g.projected_fitness < g.target_fitness
                 ? <> — if that pace simply continued you&apos;d arrive at ~{g.projected_fitness}, so the build needs to come from the plan&apos;s upcoming weeks.</>
-                : <> — keep that up and you arrive at ~{g.projected_fitness}.</>}</>
+                : L.ramp_per_week > 2 * g.needed_ramp_per_week
+                  ? <> — well ahead of what you need, so there&apos;s no need to keep building that fast.</>
+                  : <> — enough to get there.</>}</>
           )}
-          {" "}<span className="text-[#71717A]">Stay under +{g.safe_ramp}/week to avoid overload.</span>
+          {L.ramp_7d != null && L.ramp_7d > g.safe_ramp
+            ? <>{" "}<span className="text-rose-400">This week&apos;s +{L.ramp_7d} is over the safe +{g.safe_ramp}/week — absorb it with easy days before building again.</span></>
+            : <>{" "}<span className="text-[#71717A]">Stay under +{g.safe_ramp}/week to avoid overload.</span></>}
         </p>
       ) : (
         <p className="text-xs text-[#A1A1AA] mt-1">Hold it there and arrive fresh — the taper does the rest.</p>

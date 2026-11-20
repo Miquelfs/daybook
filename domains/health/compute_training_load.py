@@ -213,6 +213,33 @@ def write_series(conn, series: list[dict]) -> int:
     return count
 
 
+def recompute(conn, start: date, end: date | None = None, sport: str | None = None, log=None) -> int:
+    """Rewrite training_load_daily from `start` to `end` (today). Returns rows written; doesn't commit."""
+    end = end or date.today()
+    daily_tss = _build_daily_tss(conn, start, end)
+    if log:
+        log(f"  Loaded TSS for {len(daily_tss)} days with activity data")
+
+    target_sports = [sport] if sport and sport != "combined" else SPORTS
+    total = 0
+    for sp in target_sports:
+        series = compute_sport_series(conn, sp, start, end, daily_tss)
+        total += write_series(conn, series)
+        if series and log:
+            last = series[-1]
+            log(f"  {sp}: CTL={last['ctl']} ATL={last['atl']} TSB={last['tsb']} ramp={last['ramp_rate']}")
+
+    # Combined = sum of all sports per day
+    if not sport or sport == "combined":
+        combined_tss = {ds: {"combined": sum(day.values())} for ds, day in daily_tss.items()}
+        combined_series = compute_sport_series(conn, "combined", start, end, combined_tss)
+        total += write_series(conn, combined_series)
+        if combined_series and log:
+            last = combined_series[-1]
+            log(f"  combined: CTL={last['ctl']} ATL={last['atl']} TSB={last['tsb']} ramp={last['ramp_rate']}")
+    return total
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--backfill-days", type=int, default=None)
@@ -223,53 +250,8 @@ def main() -> None:
 
     conn = get_connection()
     start, end = _get_date_range(conn, args)
-
     print(f"CTL/ATL/TSB engine: {start} → {end}", file=sys.stderr)
-
-    # Build daily TSS map once
-    daily_tss = _build_daily_tss(conn, start, end)
-    print(f"  Loaded TSS for {len(daily_tss)} days with activity data", file=sys.stderr)
-
-    target_sports = [args.sport] if args.sport and args.sport != "combined" else SPORTS
-
-    total = 0
-    for sport in target_sports:
-        series = compute_sport_series(conn, sport, start, end, daily_tss)
-        n = write_series(conn, series)
-        total += n
-        if series:
-            last = series[-1]
-            print(f"  {sport}: CTL={last['ctl']} ATL={last['atl']} TSB={last['tsb']} ramp={last['ramp_rate']}",
-                  file=sys.stderr)
-
-    # Combined = sum of all sports per day
-    if not args.sport or args.sport == "combined":
-        print("  Computing combined series...", file=sys.stderr)
-
-        # Build combined daily_tss
-        combined_tss: dict[str, dict] = {}
-        for ds, day_data in daily_tss.items():
-            combined_tss[ds] = {"combined": sum(day_data.values())}
-
-        # Also sum any "other" sport
-        for ds, day_data in daily_tss.items():
-            if ds not in combined_tss:
-                combined_tss[ds] = {"combined": 0}
-            combined_tss[ds]["combined"] = sum(day_data.values())
-
-        combined_series = compute_sport_series(conn, "combined", start, end, combined_tss)
-        # Adjust: combined_series uses sport key "combined" but daily_tss has it under "combined"
-        for row in combined_series:
-            day_data = combined_tss.get(row["date"], {})
-            row["daily_tss"] = day_data.get("combined", 0.0)
-
-        n = write_series(conn, combined_series)
-        total += n
-        if combined_series:
-            last = combined_series[-1]
-            print(f"  combined: CTL={last['ctl']} ATL={last['atl']} TSB={last['tsb']} ramp={last['ramp_rate']}",
-                  file=sys.stderr)
-
+    total = recompute(conn, start, end, args.sport, log=lambda m: print(m, file=sys.stderr))
     conn.commit()
     conn.close()
     print(f"\nDone: {total} rows written", file=sys.stderr)

@@ -363,118 +363,10 @@ def _goal_out(row: sqlite3.Row, conn: sqlite3.Connection) -> dict:
 # RPE blank for the user to fill. The activity detail page then surfaces the
 # linked session via activities._linked_plan_session → PlannedVsActual panel.
 
-# Discipline (get_discipline output) → activity_type family. Reused from the
-# training router so both stay in sync.
-from infrastructure.api.routers.training import (
-    _RUN_TYPES as _RUN_ACT_TYPES,
-    _RIDE_TYPES as _RIDE_ACT_TYPES,
-    _SWIM_TYPES as _SWIM_ACT_TYPES,
+from domains.training.autolink import (  # noqa: E402,F401 — re-exported: other modules import them from here
+    _ACT_DEDUP, _DISCIPLINE_ACT_FAMILY, _RIDE_ACT_TYPES, _RUN_ACT_TYPES, _STRENGTH_ACT_TYPES, _SWIM_ACT_TYPES,
+    autolink_sessions,
 )
-
-# Gym sessions get recorded on the watch as strength, a stopwatch "timed activity", cardio…
-_STRENGTH_ACT_TYPES: tuple[str, ...] = (
-    "strength_training", "stop_watch", "fitness_equipment", "indoor_cardio", "hiit", "training",
-    "other", "cardio", "functional_strength", "pilates", "yoga",
-)
-
-_DISCIPLINE_ACT_FAMILY: dict[str, tuple[str, ...]] = {
-    "running": _RUN_ACT_TYPES,
-    "cycling": _RIDE_ACT_TYPES,
-    "swimming": _SWIM_ACT_TYPES,
-    "brick": tuple(_RUN_ACT_TYPES) + tuple(_RIDE_ACT_TYPES),
-}
-
-# Exclude Strava rows that duplicate a Garmin activity (same rule as the training
-# router's _DEDUP), so a single workout can't be double-counted.
-_ACT_DEDUP = """
-    AND NOT (source='strava' AND EXISTS (
-      SELECT 1 FROM activities g
-      WHERE g.date = activities.date
-        AND g.source = 'garmin'
-        AND g.strava_id = CAST(SUBSTR(activities.id, 8) AS TEXT)
-    ))
-"""
-
-
-def autolink_sessions(
-    conn: sqlite3.Connection,
-    goal_id: Optional[int] = None,
-    on_date: Optional[str] = None,
-) -> int:
-    """
-    Link pending plan sessions to a same-day real activity of the matching
-    discipline. Marks matched sessions completed (auto_matched=1), leaving
-    rpe_actual untouched. Idempotent — only touches pending, unlinked sessions
-    of active goals, and never reuses an activity already linked elsewhere.
-    Returns the number of sessions newly linked.
-    """
-    if not _table_exists(conn, "plan_sessions") or not _table_exists(conn, "activities"):
-        return 0
-
-    has_auto = "auto_matched" in {r["name"] for r in conn.execute("PRAGMA table_info(plan_sessions)")}
-
-    clauses = ["ps.status='pending'", "ps.completed_activity_id IS NULL", "rg.status='active'"]
-    params: list = []
-    if goal_id is not None:
-        clauses.append("ps.goal_id=?")
-        params.append(goal_id)
-    if on_date is not None:
-        clauses.append("ps.session_date=?")
-        params.append(on_date)
-
-    sessions = conn.execute(
-        f"""SELECT ps.id, ps.session_date, ps.discipline, ps.session_type
-            FROM plan_sessions ps JOIN race_goals rg ON rg.id = ps.goal_id
-            WHERE {' AND '.join(clauses)}
-            ORDER BY ps.session_date, ps.discipline""",
-        params,
-    ).fetchall()
-    if not sessions:
-        return 0
-
-    # Activities already linked to any session must not be reused.
-    consumed: set[str] = {
-        r["completed_activity_id"]
-        for r in conn.execute(
-            "SELECT completed_activity_id FROM plan_sessions WHERE completed_activity_id IS NOT NULL"
-        ).fetchall()
-    }
-
-    linked = 0
-    for s in sessions:
-        family = _DISCIPLINE_ACT_FAMILY.get(s["discipline"])
-        min_dur = 0
-        if not family and (s["session_type"] or "").lower().startswith(("strength", "gym")):
-            family, min_dur = _STRENGTH_ACT_TYPES, 15 * 60     # a real gym session, not a 2-min timer
-        if not family:
-            continue  # other 'other' sessions (mobility, rest…) — skip auto-match
-        placeholders = ",".join("?" for _ in family)
-        candidates = conn.execute(
-            f"""SELECT id FROM activities
-                WHERE date = ?
-                  AND lower(activity_type) IN ({placeholders})
-                  AND COALESCE(moving_time_seconds, duration_seconds, 0) >= {min_dur}
-                  {_ACT_DEDUP}
-                ORDER BY COALESCE(moving_time_seconds, duration_seconds, 0) DESC""",
-            [s["session_date"], *family],
-        ).fetchall()
-        match_id = next((c["id"] for c in candidates if c["id"] not in consumed), None)
-        if not match_id:
-            continue
-        consumed.add(match_id)
-        auto_set = ", auto_matched=1" if has_auto else ""
-        conn.execute(
-            f"""UPDATE plan_sessions
-                SET completed_activity_id=?, status='completed'{auto_set},
-                    updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
-                WHERE id=?""",
-            (match_id, s["id"]),
-        )
-        linked += 1
-
-    if linked:
-        conn.commit()
-    return linked
 
 
 def _session_actual(conn: sqlite3.Connection, activity_id: Optional[str]) -> Optional[dict]:
@@ -2390,18 +2282,21 @@ def goal_compliance(goal_id: int, conn: DB):
         if created_date > counts_missed_from:
             counts_missed_from = created_date
 
+    # 'displaced' sessions were set aside (a tour, a trip, a B-race) — not part of the plan any more.
+    # A session is missed once the day it's on NOW has passed, not the day it was first planned for
+    # (one moved to Saturday isn't missed on Wednesday).
     rows = conn.execute(
         """SELECT week_number,
                   COUNT(*) as planned,
                   SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
                   SUM(CASE WHEN status='skipped'   THEN 1 ELSE 0 END) as skipped,
-                  SUM(CASE WHEN status='pending' AND original_date < date('now')
-                            AND original_date >= ? THEN 1 ELSE 0 END) as missed
+                  SUM(CASE WHEN status='pending' AND session_date < ?
+                            AND session_date >= ? THEN 1 ELSE 0 END) as missed
            FROM plan_sessions
-           WHERE goal_id=? AND week_number <= ?
+           WHERE goal_id=? AND week_number <= ? AND status != 'displaced'
            GROUP BY week_number
            ORDER BY week_number""",
-        (counts_missed_from, goal_id, current_week_num),
+        (_today(), counts_missed_from, goal_id, current_week_num),
     ).fetchall()
 
     weeks = []

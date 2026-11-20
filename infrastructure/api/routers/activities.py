@@ -462,6 +462,40 @@ def swap_plan_match(activity_id: str, body: PlanSwap, conn: Annotated[sqlite3.Co
         raise HTTPException(status_code=422, detail=str(e))
 
 
+class BikeWeight(BaseModel):
+    bike_kg: Optional[float] = None        # None → back to the default (est_power.BIKE_KG)
+    scope: str = "ride"                    # 'ride' | 'trip' — every outdoor ride of the trip this one is on
+
+
+@router.put("/{activity_id}/bike")
+def set_bike_weight(activity_id: str, body: BikeWeight, conn: Annotated[sqlite3.Connection, Depends(get_db)]):
+    """What the bike weighed with everything on it — the estimated power's physics uses it."""
+    from domains.health.activity_analysis import is_indoor, sport_of
+    from domains.training.est_power import BIKE_KG, set_bike_kg
+    if body.bike_kg is not None and not 3 <= body.bike_kg <= 80:
+        raise HTTPException(status_code=422, detail="bike + luggage should be between 3 and 80 kg")
+    act = conn.execute("SELECT id, date FROM activities WHERE id=?", (activity_id,)).fetchone()
+    if act is None:
+        raise HTTPException(status_code=404, detail="activity not found")
+    ids, trip = [activity_id], None
+    if body.scope == "trip":
+        try:
+            trip = conn.execute(
+                """SELECT start_date, COALESCE(return_date, end_date) AS last, COALESCE(user_name, auto_name) AS name
+                   FROM trips WHERE start_date <= ? AND COALESCE(return_date, end_date) >= ?
+                   ORDER BY start_date DESC LIMIT 1""", (act["date"], act["date"])).fetchone()
+        except sqlite3.OperationalError:
+            trip = None
+        if trip is None:
+            raise HTTPException(status_code=422, detail="this ride isn't on a detected trip")
+        ids = [r["id"] for r in conn.execute("SELECT id, activity_type FROM activities WHERE date BETWEEN ? AND ?",
+                                             (trip["start_date"], trip["last"]))
+               if sport_of(r["activity_type"]) == "ride" and not is_indoor(r["activity_type"])]
+    kg = None if body.bike_kg is None or abs(body.bike_kg - BIKE_KG) < 0.05 else round(body.bike_kg, 1)
+    set_bike_kg(conn, ids, kg)
+    return {"bike_kg": kg or BIKE_KG, "activity_ids": ids, "trip": trip["name"] if trip else None}
+
+
 @router.get("/{activity_id}/impact")
 def get_activity_impact(
     activity_id: str,

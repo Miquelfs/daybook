@@ -25,7 +25,7 @@ import math
 import sqlite3
 from bisect import bisect_right
 
-VERSION = 7   # 4: HR zones from threshold HR (hr_zones) · 5: interval reps · 6: estimated ride power · 7: no est. TSS
+VERSION = 8   # 4: HR zones from threshold HR (hr_zones) · 5: interval reps · 6: estimated ride power · 7: no est. TSS · 8: bike weight per ride
 MAX_GAP_S = 30
 MAX_SERIES = 600
 
@@ -681,10 +681,13 @@ def _signature(conn, act, sport) -> str:
     extra = ""
     if sport == "ride" and not is_indoor(act["activity_type"]):
         try:
-            from domains.training.est_power import model_signature
+            from domains.training.est_power import BIKE_KG, bike_kg, model_signature
             wind = conn.execute("SELECT 1 FROM activity_wind WHERE activity_id=? AND result_json IS NOT NULL",
                                 (act["id"],)).fetchone()
             extra = f"|w{1 if wind else 0}|{model_signature(conn, act['date'])}"
+            kg = bike_kg(conn, act["id"])
+            if kg != BIKE_KG:                        # bike + luggage set on this ride
+                extra += f"|b{kg:g}"
         except sqlite3.OperationalError:
             pass
     return f"v{VERSION}|{zsig}|{_plan_zone(conn, act['id'])}|{nstreams}{extra}"
