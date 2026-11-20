@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formLabel } from "@/lib/form";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -175,8 +176,7 @@ function FormCard() {
   const last = rows[rows.length - 1];
   const weekAgo = rows[Math.max(0, rows.length - 8)];
   const form = (last.ctl ?? 0) - (last.atl ?? 0);
-  const label = form > 5 ? "Fresh — ready for a big day" : form > -10 ? "Neutral — training normally"
-    : form > -30 ? "Productive fatigue — the work is landing" : "Deep fatigue — plan easy days";
+  const label = formLabel(form).long;
   const dFit = (last.ctl ?? 0) - (weekAgo.ctl ?? 0);
   return (
     <Section title="Form now">

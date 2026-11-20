@@ -5,10 +5,41 @@ elevated resting HR vs baseline + unbalanced HRV + a poor overnight Body Battery
 recharge + a short night's sleep (+ skin-temperature spike when available).
 """
 
+import json
 from typing import Optional
 
 # Nights shorter than this leave you under-recovered regardless of the rest.
 SHORT_SLEEP_SECONDS = 5 * 3600 + 30 * 60   # 5h30m
+
+
+def hrv_direction(conn, date: str, row) -> Optional[str]:
+    """'low' / 'high' / 'normal' — where last night's HRV sits against your normal range.
+
+    Garmin calls HRV "unbalanced" when it leaves your baseline in EITHER direction; above it
+    (after a rest week, a deload, a trip's easy days) is the opposite of a warning. The range is
+    Garmin's own baseline (hrvSummary.baseline.balancedLow/Upper), else your 30-night mean ± 1 SD."""
+    if row is None:
+        return None
+    hrv = row["last_night_avg"] if row["last_night_avg"] is not None else row["weekly_avg"]
+    if hrv is None:
+        return None
+    lo = hi = None
+    try:
+        raw = json.loads(row["raw_payload"] or "{}") or {}
+        base = (raw.get("hrvSummary") or raw).get("baseline") or {}
+        lo, hi = base.get("balancedLow"), base.get("balancedUpper")
+    except (ValueError, TypeError, AttributeError, IndexError, KeyError):
+        pass
+    if lo is None or hi is None:
+        vals = [r[0] for r in conn.execute(
+            "SELECT last_night_avg FROM hrv WHERE date < ? AND last_night_avg IS NOT NULL ORDER BY date DESC LIMIT 30",
+            (date,))]
+        if len(vals) < 7:
+            return None
+        m = sum(vals) / len(vals)
+        sd = (sum((v - m) ** 2 for v in vals) / len(vals)) ** 0.5
+        lo, hi = m - sd, m + sd
+    return "low" if hrv < lo else "high" if hrv > hi else "normal"
 
 
 def recovery_flag(conn, date: str) -> dict:
@@ -28,10 +59,17 @@ def recovery_flag(conn, date: str) -> dict:
             reasons.append(f"resting HR +{rhr_delta} vs 14-day avg")
             score += 1
 
-    hrv = conn.execute("SELECT status FROM hrv WHERE date=?", (date,)).fetchone()
+    try:
+        hrv = conn.execute("SELECT status, last_night_avg, weekly_avg, raw_payload FROM hrv WHERE date=?",
+                           (date,)).fetchone()
+    except Exception:                                   # noqa: BLE001 — older hrv table without raw_payload
+        hrv = None
     hrv_status = hrv["status"] if hrv else None
-    if hrv_status and hrv_status.lower() in ("unbalanced", "low", "poor"):
-        reasons.append(f"HRV {hrv_status.lower()}")
+    direction = hrv_direction(conn, date, hrv)
+    st = (hrv_status or "").lower()
+    # a warning only when HRV is down: Garmin's "unbalanced" also means *above* your range
+    if st in ("low", "poor") or (st == "unbalanced" and direction != "high") or (not st and direction == "low"):
+        reasons.append(f"HRV {'below your normal range' if direction == 'low' else st}")
         score += 1
 
     w = conn.execute("SELECT bb_min, bb_max, skin_temp_dev FROM wellness_daily WHERE date=?", (date,)).fetchone()
@@ -63,6 +101,7 @@ def recovery_flag(conn, date: str) -> dict:
         "reasons": reasons,
         "rhr_delta": rhr_delta,
         "hrv_status": hrv_status,
+        "hrv_direction": direction,     # low | high | normal | None
         "body_battery_low": bb_low,
         "body_battery_high": bb_high,
         "skin_temp_dev": skin_dev,

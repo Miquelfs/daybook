@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { formLabel, formOf } from "@/lib/form";
 import { CourseCard } from "@/components/training/CourseCard";
 import type { PlanCourse } from "@/lib/api";
 import { sessionIcon } from "@/lib/sport";
@@ -126,7 +127,8 @@ interface DayPrescription {
 function ReadinessHeader({ ctx }: { ctx: ReadinessContext }) {
   const readiness = ctx.garmin_readiness;
   const status = ctx.recovery_status;
-  const tsb = ctx.tsb;
+  // fitness − fatigue today, as Omyra and Health show it (ctx.tsb is yesterday's state)
+  const tsb = formOf(ctx.ctl, ctx.atl) ?? ctx.tsb;
 
   const statusMeta: Record<string, { dot: string; label: string; hint: string }> = {
     recovering:   { dot: "#4ADE80", label: "Recovering",  hint: "absorbing load" },
@@ -139,11 +141,9 @@ function ReadinessHeader({ ctx }: { ctx: ReadinessContext }) {
     : readiness >= 40 ? "#FB923C"
     : "#F87171";
 
+  const FORM_COLOR = { good: "#4ADE80", neutral: "#A1A1AA", warn: "#FB923C", bad: "#F87171" } as const;
   const formMeta = tsb == null ? null
-    : tsb >= 15 ? { color: "#4ADE80", label: "fresh" }
-    : tsb >= -10 ? { color: "#A1A1AA", label: "optimal" }
-    : tsb >= -25 ? { color: "#FB923C", label: "productive" }
-    : { color: "#F87171", label: "overreaching" };
+    : (() => { const l = formLabel(tsb); return { color: FORM_COLOR[l.tone], label: l.short }; })();
 
   // The roster isn't repeated here — the Duty lane right above shows it.
   const hasAny = readiness != null || status != null || tsb != null;
@@ -182,7 +182,7 @@ function ReadinessHeader({ ctx }: { ctx: ReadinessContext }) {
         </div>
       )}
       {tsb != null && formMeta && (
-        <div className="flex flex-col leading-tight ml-auto text-right" title="Training stress balance (CTL − ATL)">
+        <div className="flex flex-col leading-tight ml-auto text-right" title="Form: fitness − fatigue (CTL − ATL)">
           <span className="text-sm font-semibold tabular-nums" style={{ color: formMeta.color }}>
             {tsb > 0 ? "+" : ""}{tsb.toFixed(0)} <span className="text-[10px] font-normal">form</span>
           </span>

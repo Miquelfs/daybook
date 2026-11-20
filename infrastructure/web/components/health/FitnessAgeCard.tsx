@@ -18,7 +18,11 @@ type FitnessAge = {
   garmin: { date: string; fitness_age: number } | null;
 };
 
-const fmtVal = (c: Component) => `${c.key === "steps" ? c.value.toLocaleString("en-GB") : c.value}${c.unit ? ` ${c.unit}` : ""}`;
+/** Resting HR, HRV, steps and sleep are 28-day averages — say so, so 77 ms here doesn't read as a
+ *  contradiction of last night's 97 ms on the hero above. */
+const AVERAGED = new Set(["rhr", "hrv", "steps", "sleep"]);
+const fmtVal = (c: Component) =>
+  `${c.key === "steps" ? c.value.toLocaleString("en-GB") : c.value}${c.unit ? ` ${c.unit}` : ""}${AVERAGED.has(c.key) ? " avg" : ""}`;
 const yrs = (y: number) => `${y > 0 ? "+" : y < 0 ? "−" : ""}${Math.abs(y).toFixed(1)} y`;
 
 /** Daybook's fitness age: VO₂max sets the base, everyday health signals move it — every step shown. */

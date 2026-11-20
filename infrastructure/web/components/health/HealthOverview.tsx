@@ -9,6 +9,8 @@ import {
 import { format, parseISO, subDays } from "date-fns";
 import { HRContext } from "@/components/HRContext";
 import { FitnessAgeCard } from "@/components/health/FitnessAgeCard";
+import { useFitnessSummary } from "@/components/activity/TrainingImpactCard";
+import { formLabel } from "@/lib/form";
 import { injuriesApi, type ActiveSummaryItem, ZONE_LABELS } from "@/lib/injuries-api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -88,6 +90,7 @@ function Delta({ v, unit = "", goodUp = true, digits = 0 }: { v: number | null; 
 
 // ── recovery hero ────────────────────────────────────────────────────────────
 function RecoveryHero({ days }: { days: Day[] }) {
+  const { data: fitness } = useFitnessSummary();
   const last = [...days].reverse().find((d) => d.hrv != null || d.sleep_seconds != null);
   if (!last) return null;
   const base = vals(days.slice(-30).map((d) => d.hrv));
@@ -103,6 +106,15 @@ function RecoveryHero({ days }: { days: Day[] }) {
   const state = score >= 4 ? { label: "Recovered", tone: "text-emerald-400", note: "Green light — a good day for quality work." }
     : score >= 2 ? { label: "Steady", tone: "", note: "Normal day — train as planned, keep the easy days easy." }
     : { label: "Under-recovered", tone: "text-amber-400", note: "Signals are low — favour easy aerobic work or rest, sleep early." };
+  // Last night can look great while the training load hasn't cleared (Today's readiness reads the load):
+  // say both, so the two pages never contradict each other.
+  const form = fitness?.load?.form ?? null;
+  const load = form != null ? formLabel(form) : null;
+  const note = load && load.tone === "bad" && score >= 2
+    ? `Last night's signals have bounced back, but training load hasn't — form ${Math.round(form!)} (${load.short}). Keep today easy.`
+    : load && load.tone === "warn" && score >= 4
+      ? `${state.note} Form ${Math.round(form!)} — the load is still landing, so one quality session, not two.`
+      : state.note;
 
   const chip = (label: string, value: string, sub: React.ReactNode) => (
     <div className="bg-[#18181B] rounded-xl px-3 py-2.5">
@@ -115,7 +127,7 @@ function RecoveryHero({ days }: { days: Day[] }) {
     <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl p-5 mb-8">
       <p className="text-[10px] uppercase tracking-[0.2em] text-[#71717A]">Last night · {format(parseISO(last.date), "EEE d MMM")}</p>
       <p className={`text-3xl font-semibold tracking-tight mt-1 ${state.tone}`}>{state.label}</p>
-      <p className="text-sm text-[#A1A1AA] mt-1">{state.note}</p>
+      <p className="text-sm text-[#A1A1AA] mt-1">{note}</p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
         {chip("HRV", last.hrv != null ? `${Math.round(last.hrv)} ms` : "—",
           hrvBase != null && last.hrv != null ? <Delta v={last.hrv - hrvBase} unit=" vs normal" /> : "")}

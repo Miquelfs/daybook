@@ -27,7 +27,8 @@ export function MovementBlock({ date, activities, stats, screenTimeSlot }: Props
     staleTime: 30_000,
   });
 
-  const net = food?.net_vs_burn_kcal ?? null;
+  // Net only means something once you've eaten something logged — before that it's just −(calories burned).
+  const net = food && food.entries_count > 0 ? food.net_vs_burn_kcal ?? null : null;
 
   return (
     <section id="movement" className="scroll-mt-20">
@@ -58,7 +59,6 @@ export function MovementBlock({ date, activities, stats, screenTimeSlot }: Props
             <Metric
               label="Net cal"
               value={`${net > 0 ? "+" : ""}${Math.round(net).toLocaleString()}`}
-              color={net <= 0 ? "text-[#34D399]" : "text-[#F87171]"}
             />
           )}
         </div>
