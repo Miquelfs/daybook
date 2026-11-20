@@ -933,7 +933,8 @@ export type SleepPeriod = {
   summary: SleepSummary;
   previous: { nights: number; asleep_s?: number; score?: number | null; bed?: string | null; resting_hr?: number | null; hrv?: number | null };
   nights: SleepNight[];
-  naps: { date: string; start: string | null; end: string | null; seconds: number }[];
+  /** From your nap tags (duration + time you woke), plus Garmin-detected naps on untagged days. */
+  naps: { date: string; start: string | null; end: string | null; seconds: number | null; source: "tag" | "garmin" }[];
   by_weekday: { label: string; nights: number; asleep_s: number | null; score: number | null; bed: string | null }[];
   by_duty: { key: string; label: string; nights: number; asleep_s: number; score: number | null; bed: string | null; wake: string | null }[];
 };

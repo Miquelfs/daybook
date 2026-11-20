@@ -22,7 +22,10 @@ def _db():
             rem_seconds INT, awake_seconds INT, avg_hrv REAL, avg_spo2 REAL, score INT, raw_payload TEXT,
             source TEXT DEFAULT 'garmin', start_time TEXT, end_time TEXT);
         CREATE TABLE hrv (date TEXT PRIMARY KEY, last_night_avg REAL);
-        CREATE TABLE roster (date TEXT PRIMARY KEY, duty_type TEXT, report_time TEXT);""")
+        CREATE TABLE roster (date TEXT PRIMARY KEY, duty_type TEXT, report_time TEXT);
+        CREATE TABLE tags (id INTEGER PRIMARY KEY, slug TEXT);
+        CREATE TABLE day_tags (date TEXT, tag_id INT, note TEXT);
+        INSERT INTO tags VALUES (7, 'nap');""")
     return c
 
 
@@ -55,15 +58,30 @@ class NightTest(unittest.TestCase):
         n = sv.nights(c, "2026-11-01", "2026-11-30")[0]
         self.assertEqual((n["source"], n["bed"], n["wake"], n["deep_pct"]), ("manual", "23:00", "06:00", None))
 
-    def test_naps(self):
+    def test_naps_come_from_the_nap_tag(self):
         c = _db()
+        # the watch also caught the 10th's nap — the tag is the same nap, counted once
         _night(c, "2026-11-10", "2026-11-09", "23:00", "07:00", 5000, 16000, 6000, 600, naps=[
             {"napStartTimestampLocal": _local_ms("2026-11-10", "14:10"),
              "napEndTimestampLocal": _local_ms("2026-11-10", "14:35"), "napTimeSec": 1500}])
         _night(c, "2026-11-11", "2026-11-10", "23:00", "07:00", 5000, 16000, 6000, 600)
+        c.executemany("INSERT INTO day_tags VALUES (?, 7, ?)", [
+            ("2026-11-10", "30min @14:40"),      # 30 min, woke 14:40
+            ("2026-11-11", "1h15"),              # no time
+            ("2026-11-12", None),                # just tagged
+        ])
         p = sv.period(c, 14, today=date(2026, 11, 12))
-        self.assertEqual(p["naps"], [{"date": "2026-11-10", "start": "14:10", "end": "14:35", "seconds": 1500}])
-        self.assertEqual(p["summary"]["naps"], {"count": 1, "seconds": 1500, "avg_s": 1500, "days": 1})
+        self.assertEqual([(n["date"], n["start"], n["end"], n["seconds"], n["source"]) for n in p["naps"]], [
+            ("2026-11-12", None, None, None, "tag"),
+            ("2026-11-11", None, None, 4500, "tag"),
+            ("2026-11-10", "14:10", "14:40", 1800, "tag"),
+        ])
+        self.assertEqual(p["summary"]["naps"], {"count": 3, "seconds": 6300, "avg_s": 3150, "days": 3})
+
+    def test_garmin_nap_on_an_untagged_day_still_counts(self):
+        from domains.health.naps import merged
+        out = merged([], [{"date": "2026-11-10", "start": "14:10", "end": "14:35", "seconds": 1500}])
+        self.assertEqual(out[0]["source"], "garmin")
 
 
 class SummaryTest(unittest.TestCase):

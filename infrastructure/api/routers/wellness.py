@@ -53,35 +53,7 @@ _MEAL_LABEL = {
 }
 
 
-def _duration_to_min(s: str) -> Optional[int]:
-    """Tolerant free-text duration → minutes. Handles '45min', '45m', '45',
-    '1h', '1h30', '1h30m', '1.5h', '90'. Bare numbers are read as minutes."""
-    if not s:
-        return None
-    s = s.lower().strip()
-    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*h(?:\s*(\d+)\s*m?)?\s*$", s)
-    if m:
-        return int(round(float(m.group(1)) * 60 + (float(m.group(2)) if m.group(2) else 0)))
-    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*(?:min|mins|m)?\s*$", s)
-    if m:
-        return int(round(float(m.group(1))))
-    num = re.search(r"(\d+(?:\.\d+)?)", s)
-    return int(round(float(num.group(1)))) if num else None
-
-
-def _parse_nap_note(note: str) -> tuple[Optional[str], Optional[int]]:
-    """Nap tag note is '<duration> @<HH:MM end>' (end optional, back-compatible
-    with plain '<duration>'). Returns (end_hhmm | None, duration_min | None)."""
-    if not note:
-        return None, None
-    end = None
-    m = re.search(r"@\s*(\d{1,2}):(\d{2})", note)
-    if m:
-        h, mm = int(m.group(1)), int(m.group(2))
-        if 0 <= h < 24 and 0 <= mm < 60:
-            end = f"{h:02d}:{mm:02d}"
-    dur_text = re.sub(r"@\s*\d{1,2}:\d{2}", "", note).strip()
-    return end, _duration_to_min(dur_text)
+from domains.health.naps import duration_to_min as _duration_to_min, parse_nap_note as _parse_nap_note  # noqa: E402
 
 
 @router.get("/recovery")

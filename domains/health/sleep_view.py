@@ -13,6 +13,8 @@ payloads lack some keys, manual nights have none (they keep start/end as HH:MM).
   summarise   averages over the nights; bedtime/wake averaged on the clock (23:30 and 00:30
               average to midnight, not noon); rhythm = how much bedtime wanders.
   by_weekday  · by_duty — the night before a day off / a duty / an early report.
+  naps        from your `nap` tags (domains/health/naps.py), plus any Garmin detected on a day
+              you didn't tag.
 """
 
 from __future__ import annotations
@@ -152,7 +154,7 @@ def clock_mean(times: list[str | None], pivot: int = 12 * 60) -> tuple[str | Non
     return f"{t // 60:02d}:{t % 60:02d}", (round(sd) if sd is not None else None)
 
 
-def summarise(ns: list[dict], today: str | None = None) -> dict:
+def summarise(ns: list[dict], today: str | None = None, naps: list[dict] | None = None) -> dict:
     sl = [n for n in ns if n["asleep_s"]]
     if not sl:
         return {"nights": 0}
@@ -168,7 +170,9 @@ def summarise(ns: list[dict], today: str | None = None) -> dict:
     since = (date.fromisoformat(today) - timedelta(days=DEBT_WINDOW)).isoformat()
     recent = [n for n in sl if n["date"] > since]
     debt = sum(max(0.0, NEED_H * 3600 - n["asleep_s"]) for n in recent)
-    naps = [p for n in ns for p in n["naps"]]
+    if naps is None:
+        naps = [{"date": n["date"], **p} for n in ns for p in n["naps"]]
+    timed = [p["seconds"] for p in naps if p.get("seconds")]
     best = max(sl, key=lambda n: (n["score"] or 0, n["asleep_s"]))
     worst = min(sl, key=lambda n: (n["score"] if n["score"] is not None else 101, n["asleep_s"]))
     return {
@@ -187,9 +191,9 @@ def summarise(ns: list[dict], today: str | None = None) -> dict:
         "resting_hr": avg("resting_hr"), "hrv": avg("hrv"), "respiration": avg("respiration"),
         "stress": avg("stress"), "awakenings": avg("awakenings"), "restless": avg("restless"),
         "body_battery": avg("body_battery", 0), "spo2": avg("spo2"),
-        "naps": {"count": len(naps), "seconds": sum(p["seconds"] for p in naps),
-                 "avg_s": round(sum(p["seconds"] for p in naps) / len(naps)) if naps else None,
-                 "days": sum(1 for n in ns if n["naps"])},
+        "naps": {"count": len(naps), "seconds": sum(timed),
+                 "avg_s": round(sum(timed) / len(timed)) if timed else None,
+                 "days": len({p["date"] for p in naps})},
         "best": {"date": best["date"], "score": best["score"], "asleep_s": best["asleep_s"]},
         "worst": {"date": worst["date"], "score": worst["score"], "asleep_s": worst["asleep_s"]},
     }
@@ -248,9 +252,11 @@ def period(conn: sqlite3.Connection, days: int, today: date | None = None) -> di
     ns = nights(conn, start, today.isoformat())
     prev_start = (today - timedelta(days=2 * days - 1)).isoformat()
     prev = nights(conn, prev_start, (today - timedelta(days=days)).isoformat())
-    s = summarise(ns, today.isoformat())
+    from domains.health import naps as nap_log
+    naps = nap_log.merged(nap_log.tagged(conn, start, today.isoformat()),
+                          [{"date": n["date"], **x} for n in ns for x in n["naps"]])
+    s = summarise(ns, today.isoformat(), naps)
     p = summarise(prev, (today - timedelta(days=days)).isoformat())
-    naps = [{"date": n["date"], **x} for n in ns for x in n["naps"]]
     return {
         "days": days, "start": start, "end": today.isoformat(), "need_h": NEED_H,
         "summary": s,

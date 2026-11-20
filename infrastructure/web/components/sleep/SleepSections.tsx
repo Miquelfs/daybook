@@ -112,7 +112,7 @@ export function NapsBlock({ p }: { p: SleepPeriod }) {
   return (
     <Block title="Naps">
       {!n || !n.count ? (
-        <Empty>No naps in this period. Garmin logs one when the watch detects it, or when you add it in Garmin Connect.</Empty>
+        <Empty>No naps in this period — add the Nap tag on a day (how long, and when you woke).</Empty>
       ) : (
         <div className="space-y-2">
           <Stats cols={3}>
@@ -126,7 +126,9 @@ export function NapsBlock({ p }: { p: SleepPeriod }) {
                     className="flex items-center justify-between px-4 py-2.5 text-sm hover:bg-[#18181B] transition-colors">
                 <span className="text-[#A1A1AA]">{day(x.date)}</span>
                 <span className="text-xs text-[#71717A] tabular-nums">
-                  {x.start && x.end ? `${x.start}–${x.end} · ` : ""}<span className="text-[#FAFAFA]">{hm(x.seconds)}</span>
+                  {x.start && x.end ? `${x.start}–${x.end} · ` : x.end ? `woke ${x.end} · ` : ""}
+                  <span className="text-[#FAFAFA]">{x.seconds ? hm(x.seconds) : "no duration"}</span>
+                  {x.source === "garmin" && <span className="text-[#52525B]"> · watch</span>}
                 </span>
               </Link>
             ))}
