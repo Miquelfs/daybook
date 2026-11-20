@@ -38,7 +38,7 @@ export function SleepHero({ p }: { p: SleepPeriod }) {
 export function NightsBlock({ p }: { p: SleepPeriod }) {
   return (
     <>
-      <Block title="Every night" note="Time in bed, split into stages. The dashed line is an 8-hour night.">
+      <Block title="Every night" note="Time in bed, split into stages. The dashed line is an 8-hour night. Tap a night to open it.">
         <Panel className="p-4">
           <StagesChart nights={p.nights} start={p.start} end={p.end} needH={p.need_h} />
         </Panel>
@@ -182,8 +182,8 @@ export function PatternsBlock({ p }: { p: SleepPeriod }) {
 
         {s.best && s.worst && s.best.date !== s.worst.date && (
           <Stats cols={2}>
-            <Stat label="Best night" value={hm(s.best.asleep_s)} sub={`${day(s.best.date)}${s.best.score != null ? ` · score ${s.best.score}` : ""}`} href={`/day/${s.best.date}`} />
-            <Stat label="Worst night" value={hm(s.worst.asleep_s)} sub={`${day(s.worst.date)}${s.worst.score != null ? ` · score ${s.worst.score}` : ""}`} href={`/day/${s.worst.date}`} />
+            <Stat label="Best night" value={hm(s.best.asleep_s)} sub={`${day(s.best.date)}${s.best.score != null ? ` · score ${s.best.score}` : ""}`} href={`/health/sleep/${s.best.date}`} />
+            <Stat label="Worst night" value={hm(s.worst.asleep_s)} sub={`${day(s.worst.date)}${s.worst.score != null ? ` · score ${s.worst.score}` : ""}`} href={`/health/sleep/${s.worst.date}`} />
           </Stats>
         )}
       </div>

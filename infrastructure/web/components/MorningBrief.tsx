@@ -7,6 +7,8 @@ import { fmtDuration } from "@/lib/api";
 import type { SleepData, DailyStats, HRVData, LoadIndexData } from "@/lib/api";
 
 interface Props {
+  /** The day this brief is for — its night is the one that ended that morning. */
+  date: string;
   sleep: SleepData | null;
   stats: DailyStats | null;
   hrv: HRVData | null;
@@ -82,7 +84,7 @@ const RECOVERY_COLOR: Record<string, string> = {
   accumulating:"text-rose-400 border-rose-900",
 };
 
-export function MorningBrief({ sleep, stats, hrv, loadIndex, brief, aiAvailable }: Props) {
+export function MorningBrief({ date, sleep, stats, hrv, loadIndex, brief, aiAvailable }: Props) {
   const sleepDuration = fmtDuration(sleep?.duration_seconds ?? null);
   const deepPct = sleep?.duration_seconds && sleep.deep_seconds
     ? Math.round((sleep.deep_seconds / sleep.duration_seconds) * 100)
@@ -111,12 +113,12 @@ export function MorningBrief({ sleep, stats, hrv, loadIndex, brief, aiAvailable 
       <p className="text-xs text-[#F59E0B] uppercase tracking-[0.2em] mb-4">Morning brief</p>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
-        <Stat label="Sleep" value={sleepDuration} accent to="/health/sleep" />
+        <Stat label="Sleep" value={sleepDuration} accent to={`/health/sleep/${date}`} />
         <Stat
           label="HRV"
           value={hrv?.last_night_avg ? Math.round(hrv.last_night_avg) : null}
           unit="ms"
-          to="/health/sleep"
+          to={`/health/sleep/${date}#hrv`}
         />
         <Stat
           label="Body battery"

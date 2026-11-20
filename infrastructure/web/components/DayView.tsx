@@ -93,6 +93,7 @@ export async function DayView({ date }: { date: string }) {
 
       <div className="flex flex-col gap-12 mt-10">
         <MorningBrief
+          date={date}
           sleep={day.sleep}
           stats={day.daily_stats}
           hrv={day.hrv}

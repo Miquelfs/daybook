@@ -939,6 +939,34 @@ export type SleepPeriod = {
   by_duty: { key: string; label: string; nights: number; asleep_s: number; score: number | null; bed: string | null; wake: string | null }[];
 };
 
+export type NightPoint = { m: number; v: number };
+export type HrvLever = { key: string; label: string; with: number; without: number; delta: number;
+  n_with: number; n_without: number; tonight: boolean | null };
+export type NightHrv = {
+  night: number; week: number | null; status: string | null; high_5min: number | null;
+  /** Garmin's balanced range (your baseline). */
+  range: [number, number] | null; low_below: number | null;
+  direction: "low" | "normal" | "high" | null; week_direction: "low" | "normal" | "high" | null;
+  reading: { tone: "low" | "ok" | "good" | null; headline: string; detail: string };
+  history: { date: string; night: number | null; week: number | null; lo: number | null; hi: number | null }[];
+  levers: HrvLever[];
+};
+/** One night in full (GET /health/sleep/night/{date}); x axis = minutes since falling asleep at `bed_min`. */
+export type SleepNightDetail = {
+  date: string; need_h: number;
+  night: SleepNight & {
+    bed_min: number | null; end_m?: number | null;
+    timeline: { from: number; to: number; stage: "deep" | "light" | "rem" | "awake" }[];
+    series: { hr?: NightPoint[]; hrv?: NightPoint[]; stress?: NightPoint[]; body_battery?: NightPoint[]; respiration?: NightPoint[] };
+    score_parts: { key: string; label: string; value: number | null; qualifier: string | null; optimal: [number, number] | null }[];
+    feedback: string | null; insight: string | null; need_s: number | null;
+    lowest_spo2: number | null; respiration_range: [number, number] | null;
+  };
+  usual: Partial<SleepSummary>;
+  hrv: NightHrv | null;
+  prev: string | null; next: string | null;
+};
+
 export type Trip = {
   id: number;
   start_date: string;
@@ -1411,6 +1439,7 @@ export const api = {
 
   // ─── Sleep ──────────────────────────────────────────────────────────────────
   sleepPeriod: (days = 30) => get<SleepPeriod>(`/health/sleep/period?days=${days}`),
+  sleepNight: (date: string) => get<SleepNightDetail>(`/health/sleep/night/${date}`),
   sleepSummary: (days = 30) =>
     get<Record<string, number | null>>(`/health/sleep/summary?days=${days}`),
   sleepStages: (days = 60) =>

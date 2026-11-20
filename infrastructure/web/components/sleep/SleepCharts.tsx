@@ -4,6 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
 } from "recharts";
 import { format, parseISO, startOfISOWeek, addDays } from "date-fns";
+import { useRouter } from "next/navigation";
 import type { SleepNight } from "@/lib/api";
 
 export const STAGE = {
@@ -96,13 +97,20 @@ function StageTip({ active, payload }: { active?: boolean; payload?: { payload: 
 /** Hours per night, stacked deep → REM → light → awake: the bar is the time in bed, so nothing pokes
  *  over 100 % and a short night is a short bar. */
 export function StagesChart({ nights, start, end, needH }: { nights: SleepNight[]; start: string; end: string; needH: number }) {
+  const router = useRouter();
   const data = rows(nights, start, end);
   const weekly = data[0]?.weekly;
+  // a night's bar opens that night; a week's bar has no single night to open
+  const open = (st: { activeLabel?: string | number } | null) => {
+    const k = st?.activeLabel != null ? String(st.activeLabel) : null;
+    if (!weekly && k && data.find((r) => r.key === k)?.nights) router.push(`/health/sleep/${k}`);
+  };
   const top = Math.max(needH + 1, ...data.map((r) => (r.deep ?? 0) + (r.rem ?? 0) + (r.light ?? 0) + (r.awake ?? 0)));
   return (
     <div>
       <ResponsiveContainer width="100%" height={200}>
-        <BarChart data={data} margin={{ top: 6, right: 4, bottom: 0, left: -28 }} barCategoryGap={weekly ? "20%" : "18%"}>
+        <BarChart data={data} margin={{ top: 6, right: 4, bottom: 0, left: -28 }} barCategoryGap={weekly ? "20%" : "18%"}
+                  onClick={open} style={weekly ? undefined : { cursor: "pointer" }}>
           <CartesianGrid stroke="var(--viz-grid)" vertical={false} />
           <XAxis dataKey="key" tick={AXIS} ticks={ticks(data)} tickLine={false} axisLine={false}
                  tickFormatter={(d) => format(parseISO(d), "d MMM")} />

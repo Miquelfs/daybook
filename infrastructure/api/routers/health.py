@@ -742,6 +742,21 @@ def sleep_period(conn: DB, days: int = Query(30, ge=7, le=730)):
     return period(conn, days)
 
 
+@router.get("/sleep/night/{d}")
+def sleep_night(d: str, conn: DB):
+    """One night in full: the stage timeline, overnight HR / HRV / stress / Body Battery / breathing on one
+    axis, the score's parts, vs your last 30 nights, and the HRV against your baseline with what moves it."""
+    from domains.health.sleep_night import night_detail
+    try:
+        date.fromisoformat(d)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD")
+    out = night_detail(conn, d)
+    if out is None:
+        raise HTTPException(status_code=404, detail="No sleep recorded that night")
+    return out
+
+
 @router.get("/sleep/stages")
 def sleep_stages(conn: DB, days: int = Query(60)):
     """Daily sleep stage breakdown for stacked bar chart."""
