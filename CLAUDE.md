@@ -128,7 +128,8 @@ offered in `/coll/sync`), ride screens (`settings.screens`, same grammar as `fir
 
 ## Trips & the travel journal
 
-Trips are detected nightly (`trips`, keyed by dates and rebuilt) or planned ahead (`planned_trips`: board, day
+Trips are detected nightly (`trips`, keyed by dates and rebuilt; a run you split by hand on the trip page stays split —
+`trip_splits` holds the first night of each new trip, applied on every rebuild; split/join rebuild only that window) or planned ahead (`planned_trips`: board, day
 lines, checklist). The journal (`domains/travel/`, `/travel/*`, proxy `app/api/travel/[...path]`) adds **moments**:
 title, a few lines, photos (`data/photos/moments/`, 2048 px + thumbnail). Moments are keyed by **day**, never by
 trip id, so the planned trip's Journal tab and the detected trip's page show the same story. Where/when fill

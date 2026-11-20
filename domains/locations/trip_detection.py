@@ -19,6 +19,12 @@ outstation. Two signals rescue those nights (see detect/_home_landings):
   - Logbook: if the day's last logged flight lands at an airport inside the
     home radius and no GPS fix is later than that on-block, it's a home night.
 
+Manual splits: one detected run can be two trips (Tenerife → Barcelona → somewhere
+else, never sleeping at home in between). trip_splits holds the days a new trip
+starts; the detector cuts runs there on every rebuild, so a split survives the
+nightly recompute. split_trip()/join_trip() add/remove one and rebuild just that
+trip's window (bounded detect), keeping the names you gave.
+
 Usage:
   python -m domains.locations.trip_detection            # last 120 days
   python -m domains.locations.trip_detection --full     # all history
@@ -166,7 +172,36 @@ def _day_context(lcon: sqlite3.Connection, start: str, end: str) -> dict[str, di
     return days
 
 
-def detect(start: str, end: str, verbose: bool = True) -> int:
+SPLITS_DDL = """CREATE TABLE IF NOT EXISTS trip_splits (
+    split_date TEXT PRIMARY KEY,               -- a new trip starts on this (away) night
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')))"""
+
+
+def _splits(dcon: sqlite3.Connection) -> list[str]:
+    dcon.execute(SPLITS_DDL)
+    return [r[0] for r in dcon.execute("SELECT split_date FROM trip_splits ORDER BY split_date")]
+
+
+def apply_splits(runs: list[list[str]], splits: list[str]) -> list[list[str]]:
+    """Cut each run of away nights at the split days that fall inside it (after its first night)."""
+    out: list[list[str]] = []
+    for run in runs:
+        piece: list[str] = []
+        cuts = [s for s in splits if run[0] < s <= run[-1]]
+        for d in run:
+            if cuts and d >= cuts[0] and piece:
+                out.append(piece)
+                piece = []
+                while cuts and d >= cuts[0]:
+                    cuts.pop(0)
+            piece.append(d)
+        out.append(piece)
+    return out
+
+
+def detect(start: str, end: str, verbose: bool = True, bounded: bool = False) -> int:
+    """Rebuild the trips from `start`. Unbounded (nightly): every trip from there on is rewritten.
+    Bounded: only trips overlapping [start, end] — for a split/join of one trip in the past."""
     lcon = _conn(_LOCATIONS_DB)
     dcon = _conn(_DAYBOOK_DB)
     try:
@@ -177,8 +212,10 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
         # trip behind AND creating an overlapping fragment for the same days.)
         scan_start = (date.fromisoformat(start) - timedelta(days=TRIP_LOOKBACK_DAYS)).isoformat()
 
-        obs = _observations(lcon, scan_start, end)
-        landings = _home_landings(dcon, scan_start, end)
+        # bounded: look a couple of days past `end` for the late-return check and the home-coming day
+        scan_end = (date.fromisoformat(end) + timedelta(days=2)).isoformat() if bounded else end
+        obs = _observations(lcon, scan_start, scan_end)
+        landings = _home_landings(dcon, scan_start, scan_end)
 
         # Classify each observed date: away night / home night
         away: dict[str, float] = {}   # date → distance from home that night
@@ -229,13 +266,16 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
                     runs[-1].append(d)
                     continue
             runs.append([d])
+        runs = apply_splits(runs, _splits(dcon))
 
         # Only trips reaching into the requested window are this run's
         # responsibility. A run that started in the look-back buffer but
         # continues past `start` is rewritten whole from its true start; runs
         # living entirely in the buffer (end < start) are left untouched.
-        relevant = [run for run in runs if run[-1] >= start]
+        relevant = [run for run in runs if run[-1] >= start and (not bounded or run[0] <= end)]
         effective_start = relevant[0][0] if relevant else start
+        # bounded: wipe only what overlaps the rebuilt trips; unbounded: everything from there on
+        effective_end = max([end] + [r[-1] for r in relevant]) if bounded else "9999-12-31"
 
         # Preserve user overrides (custom names + dismissed trips) across the
         # wipe. They're keyed by (start_date, end_date) and MUST survive nightly
@@ -248,14 +288,15 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
         overrides = {
             (r["start_date"], r["end_date"]): r
             for r in dcon.execute(
-                f"SELECT {ov_cols} FROM trips WHERE end_date >= ?", (effective_start,)
+                f"SELECT {ov_cols} FROM trips WHERE end_date >= ? AND start_date <= ?",
+                (effective_start, effective_end),
             ).fetchall()
         }
 
         # Wipe every existing trip that OVERLAPS [effective_start, end] before
         # re-inserting, so rule/data changes, merged trips, and straddling trips
         # never leave stale or overlapping rows behind.
-        dcon.execute("DELETE FROM trips WHERE end_date >= ?", (effective_start,))
+        dcon.execute("DELETE FROM trips WHERE end_date >= ? AND start_date <= ?", (effective_start, effective_end))
 
         context = _day_context(lcon, scan_start, end)
         has_location_days = bool(lcon.execute(
@@ -358,6 +399,75 @@ def detect(start: str, end: str, verbose: bool = True) -> int:
     finally:
         lcon.close()
         dcon.close()
+
+
+def _trip(dcon: sqlite3.Connection, start: str, end: str):
+    return dcon.execute("SELECT * FROM trips WHERE start_date=? AND end_date=?", (start, end)).fetchone()
+
+
+def _pieces(start: str, end: str) -> list[dict]:
+    dcon = _conn(_DAYBOOK_DB)
+    try:
+        return [dict(r) for r in dcon.execute(
+            "SELECT start_date, end_date, return_date, COALESCE(user_name, auto_name) AS name FROM trips "
+            "WHERE start_date <= ? AND end_date >= ? ORDER BY start_date", (end, start))]
+    finally:
+        dcon.close()
+
+
+def _name(start: str, end: str, name: str | None) -> None:
+    if not name or not name.strip():
+        return
+    dcon = _conn(_DAYBOOK_DB)
+    try:
+        dcon.execute("UPDATE trips SET user_name=? WHERE start_date=? AND end_date=?", (name.strip(), start, end))
+        dcon.commit()
+    finally:
+        dcon.close()
+
+
+def split_trip(start: str, end: str, on: str, names: tuple[str | None, str | None] = (None, None)) -> list[dict]:
+    """Make `on` (an away night after the first) the first night of a new trip. Returns both trips."""
+    dcon = _conn(_DAYBOOK_DB)
+    try:
+        t = _trip(dcon, start, end)
+        if t is None:
+            raise LookupError("trip not found")
+        if not start < on <= end:
+            raise ValueError("the new trip has to start after the first night and by the last one")
+        keep = t["user_name"]
+        dcon.execute(SPLITS_DDL)
+        dcon.execute("INSERT OR IGNORE INTO trip_splits (split_date) VALUES (?)", (on,))
+        dcon.commit()
+    finally:
+        dcon.close()
+    detect(start, end, verbose=False, bounded=True)
+    pieces = _pieces(start, end)
+    for i, p in enumerate(pieces[:2]):
+        # the first part keeps the trip's own name unless you gave it another
+        _name(p["start_date"], p["end_date"], names[i] or (keep if i == 0 else None))
+    return _pieces(start, end)
+
+
+def join_trip(start: str, end: str) -> list[dict]:
+    """Undo the split that started this trip: it joins the trip before it again."""
+    dcon = _conn(_DAYBOOK_DB)
+    try:
+        dcon.execute(SPLITS_DDL)
+        if not dcon.execute("SELECT 1 FROM trip_splits WHERE split_date=?", (start,)).fetchone():
+            raise ValueError("this trip wasn't split from the one before")
+        prev = dcon.execute("SELECT start_date, user_name FROM trips WHERE end_date < ? ORDER BY end_date DESC LIMIT 1",
+                            (start,)).fetchone()
+        dcon.execute("DELETE FROM trip_splits WHERE split_date=?", (start,))
+        dcon.commit()
+    finally:
+        dcon.close()
+    first = prev["start_date"] if prev else start
+    detect(first, end, verbose=False, bounded=True)
+    pieces = _pieces(first, end)
+    if prev is not None and pieces:
+        _name(pieces[0]["start_date"], pieces[0]["end_date"], prev["user_name"])
+    return _pieces(first, end)
 
 
 def main() -> None:

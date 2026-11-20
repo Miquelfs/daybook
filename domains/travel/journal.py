@@ -214,6 +214,11 @@ def _trip_meta(conn: sqlite3.Connection, start: str, end: str) -> dict:
 def story_row(conn: sqlite3.Connection, start: str, end: str) -> dict | None:
     """The trip_stories row for these dates — keyed by first day, found by overlap (±1 day)."""
     lo = (date.fromisoformat(start) - timedelta(days=1)).isoformat()
+    try:   # a trip split off by hand starts exactly there — the day before is the other trip's
+        if conn.execute("SELECT 1 FROM trip_splits WHERE split_date=?", (start,)).fetchone():
+            lo = start
+    except sqlite3.OperationalError:
+        pass
     r = conn.execute("SELECT * FROM trip_stories WHERE start_date BETWEEN ? AND ? ORDER BY start_date LIMIT 1",
                      (lo, end)).fetchone()
     return dict(r) if r else None

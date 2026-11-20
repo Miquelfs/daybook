@@ -1602,6 +1602,12 @@ def _trip_row_to_dict(r: sqlite3.Row, con: sqlite3.Connection) -> dict:
     n_nights = 1 + (
         datetime.fromisoformat(t["end_date"]) - datetime.fromisoformat(t["start_date"])
     ).days
+    # split from the trip before it (trip_splits) → it can be joined back
+    try:
+        t["split_from_previous"] = con.execute("SELECT 1 FROM trip_splits WHERE split_date=?",
+                                               (t["start_date"],)).fetchone() is not None
+    except sqlite3.OperationalError:
+        t["split_from_previous"] = False
     t["n_days"] = n_nights          # kept for backward compatibility
     t["n_nights"] = n_nights        # nights away from home
     # Passenger flights (not the pilot roster) within the trip window, including
@@ -1675,6 +1681,57 @@ def rename_trip(start_date: str, end_date: str, body: TripRename):
     if not updated:
         raise HTTPException(404, "Trip not found")
     return {"status": "ok", "name": name}
+
+
+class TripSplit(BaseModel):
+    on: str                                # the first night of the new (second) trip
+    first_name: str | None = None
+    second_name: str | None = None
+
+
+@router.post("/trips/{start_date}/{end_date}/split")
+def split_trip(start_date: str, end_date: str, body: TripSplit):
+    """One detected trip → two (Tenerife → Barcelona → somewhere else without a night at home).
+    Kept as a rule (trip_splits), so the nightly rebuild splits it the same way."""
+    from domains.locations.trip_detection import split_trip as _split
+    try:
+        return {"trips": _split(start_date, end_date, body.on, (body.first_name, body.second_name))}
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@router.post("/trips/{start_date}/{end_date}/join")
+def join_trip(start_date: str, end_date: str):
+    """Undo a split: this trip joins the one before it again."""
+    from domains.locations.trip_detection import join_trip as _join
+    try:
+        return {"trips": _join(start_date, end_date)}
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@router.get("/trips/{start_date}/{end_date}/nights")
+def trip_nights(start_date: str, end_date: str):
+    """Each night of the trip with where you were — to pick where to split it."""
+    from datetime import date as _date, timedelta as _td
+    from domains.locations.trip_detection import _day_context
+    lcon = _conn()
+    try:
+        ctx = _day_context(lcon, start_date, end_date)
+    except sqlite3.OperationalError:
+        ctx = {}
+    finally:
+        lcon.close()
+    out, d = [], _date.fromisoformat(start_date)
+    while d <= _date.fromisoformat(end_date):
+        c = ctx.get(d.isoformat()) or {}
+        city = c["cities"].most_common(1)[0][0] if c.get("cities") else None
+        country = c["countries"].most_common(1)[0][0] if c.get("countries") else None
+        out.append({"date": d.isoformat(), "city": city, "country": _en(country) if country else None})
+        d += _td(days=1)
+    return {"nights": out}
 
 
 @router.delete("/trips/{start_date}/{end_date}")

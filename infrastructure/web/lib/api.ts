@@ -924,6 +924,8 @@ export type Trip = {
   passenger_flight_count: number;
   /** Moments in the travel journal (domains/travel); cover_photo_path prefers the journal's cover. */
   moment_count?: number;
+  /** Split by hand from the trip before it (trip_splits) — can be joined back. */
+  split_from_previous?: boolean;
 };
 
 export type PlaceSummary = {

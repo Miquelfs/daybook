@@ -74,5 +74,57 @@ class TripDetectionTest(unittest.TestCase):
         self.assertEqual([tuple(r) for r in self.trips()], [("2026-10-20", "2026-10-20")])
 
 
+    def _bcn_then_london(self):
+        """Barcelona 3 nights, then straight on to London 2 nights, home on the 6th — one detected run."""
+        for d in ("2026-10-01", "2026-10-02", "2026-10-03"):
+            self.ping(d, BCN, f"{d}T21:00:00Z")
+        for d in ("2026-10-04", "2026-10-05"):
+            self.ping(d, LHR, f"{d}T21:00:00Z")
+        self.ping("2026-10-06", PMI, "2026-10-06T21:00:00Z")
+        self.l.commit()
+
+    def test_split_survives_the_nightly_rebuild_and_joins_back(self):
+        self._bcn_then_london()
+        self.assertEqual([tuple(r) for r in self.trips()], [("2026-10-01", "2026-10-05")])
+        self.c.execute("UPDATE trips SET user_name='Work + London'"); self.c.commit()
+
+        out = td.split_trip("2026-10-01", "2026-10-05", "2026-10-04", (None, "London"))
+        self.assertEqual([(p["start_date"], p["end_date"], p["name"]) for p in out],
+                         [("2026-10-01", "2026-10-03", "Work + London"), ("2026-10-04", "2026-10-05", "London")])
+        self.assertIsNone(out[0]["return_date"])                 # no night at home between them
+        self.assertEqual(out[1]["return_date"], "2026-10-06")
+
+        # the nightly rebuild cuts it the same way and keeps both names
+        self.assertEqual([tuple(r) for r in self.trips()], [("2026-10-01", "2026-10-03"), ("2026-10-04", "2026-10-05")])
+        names = [r[0] for r in sqlite3.connect(self.D).execute("SELECT user_name FROM trips ORDER BY start_date")]
+        self.assertEqual(names, ["Work + London", "London"])
+
+        joined = td.join_trip("2026-10-04", "2026-10-05")
+        self.assertEqual([(p["start_date"], p["end_date"], p["name"]) for p in joined],
+                         [("2026-10-01", "2026-10-05", "Work + London")])
+
+    def test_split_rebuild_leaves_other_trips_alone(self):
+        self._bcn_then_london()
+        self.ping("2026-10-20", LHR, "2026-10-20T20:00:00Z")
+        self.ping("2026-10-21", PMI, "2026-10-21T12:00:00Z")
+        self.l.commit()
+        self.trips()
+        self.c.execute("UPDATE trips SET user_name='Later' WHERE start_date='2026-10-20'"); self.c.commit()
+        td.split_trip("2026-10-01", "2026-10-05", "2026-10-04")
+        rows = sqlite3.connect(self.D).execute("SELECT start_date, user_name FROM trips ORDER BY start_date").fetchall()
+        self.assertEqual(rows, [("2026-10-01", None), ("2026-10-04", None), ("2026-10-20", "Later")])
+
+    def test_split_day_must_be_inside(self):
+        self._bcn_then_london()
+        self.trips()
+        with self.assertRaises(ValueError):
+            td.split_trip("2026-10-01", "2026-10-05", "2026-10-01")
+
+    def test_apply_splits_over_a_bridged_gap(self):
+        run = ["2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06"]      # 3–4 no data, bridged
+        self.assertEqual(td.apply_splits([run], ["2026-10-04"]),
+                         [["2026-10-01", "2026-10-02"], ["2026-10-05", "2026-10-06"]])
+        self.assertEqual(td.apply_splits([run], ["2026-09-01", "2026-10-01"]), [run])
+
 if __name__ == "__main__":
     unittest.main()

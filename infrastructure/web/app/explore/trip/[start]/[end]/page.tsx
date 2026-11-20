@@ -12,6 +12,7 @@ import { TripPlan } from "@/components/plan/TripPlan";
 import { Flag } from "@/components/Flag";
 import { localISODate } from "@/lib/dates";
 import { TripStory } from "@/components/trip/TripStory";
+import { TripSplit } from "@/components/trip/TripSplit";
 
 interface Props {
   params: Promise<{ start: string; end: string }>;
@@ -94,6 +95,9 @@ export default async function TripDetailPage({ params }: Props) {
           <SectionLabel>Every stop</SectionLabel>
           <TripJourney dates={tripDates} geojson={tracks} />
         </section>
+
+        <TripSplit start={trip.start_date} end={trip.end_date} name={trip.name}
+                   splitFromPrevious={!!trip.split_from_previous} />
       </div>
     </main>
   );
