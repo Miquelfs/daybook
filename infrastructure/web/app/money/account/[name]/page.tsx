@@ -57,6 +57,10 @@ export default function AccountTransactionsPage() {
           <p className="text-xs text-[#52525B] mt-1">
             Compare with your bank app — add anything missing so the two match.
           </p>
+          <Link href={`/money/reconcile?account=${encodeURIComponent(name)}`}
+                className="text-xs text-[#F59E0B] hover:text-[#FCD34D] mt-2 inline-block">
+            Check against a bank statement →
+          </Link>
         </div>
       )}
 

@@ -113,6 +113,7 @@ export type Transaction = {
   notes: string | null;
   created_at: string;
   has_receipt?: boolean;   // a supermarket ticket is attached
+  vehicle_id?: number | null;  // a car / scooter cost (Vehicles)
 };
 
 // ── Supermarket tickets (Groceries) ──────────────────────────────────────────
@@ -229,6 +230,7 @@ export type TransactionCreate = {
   subcategory?: string;
   account?: string;
   notes?: string;
+  vehicle_id?: number;   // a car / scooter cost; 0 on a patch clears it
 };
 
 export type TransactionPatch = Partial<Omit<TransactionCreate, "date"> & { date: string }>;

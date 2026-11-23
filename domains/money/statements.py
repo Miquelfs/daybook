@@ -93,7 +93,8 @@ def name_similarity(a: str, b: str) -> float:
         return 1.0
     ta, tb = set(ka.split()), set(kb.split())
     overlap = len(ta & tb) / max(1, min(len(ta), len(tb)))
-    return max(overlap, SequenceMatcher(None, ka, kb).ratio())
+    ratio = SequenceMatcher(None, ka, kb).ratio()
+    return max(overlap, ratio if ratio >= 0.6 else ratio / 2)   # loose letter overlap alone isn't a match
 
 
 # ── numbers and dates ─────────────────────────────────────────────────────────

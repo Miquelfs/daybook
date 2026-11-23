@@ -139,6 +139,19 @@ before Overland uploads is placed on the next read. Dropped photos group into mo
 renders it; `book.py` renders the same story as a standalone HTML book (inline SVG map, no tiles/scripts) and
 the export zip (index.html + photos/ + route.gpx + trip.json) — keep the export dependency-free.
 
+## Bank statements & vehicles (money.db)
+
+Expenses are still typed by hand — that habit is the point. A bank export (CSV / XLSX / XLS; PDF via Claude) is only a
+**check**: `domains/money/statements.py` finds the header by column names (ES/EN, signed amount or debit/credit,
+Revolut fee/state), stores lines per account in `statement_lines` (fingerprint-deduped, so overlapping exports are
+fine) and `reconcile()` matches them to `transactions` **on every read** (same amount ±4 days, then a near amount on a
+similar name) → only in bank / amount differs / only in Daybook + the balance gap at both ends. Only hand links
+(`txn_id`) and ignores are stored. Page `/money/reconcile` (proxy `app/api/money/statements/[[...path]]`).
+Vehicles (`domains/vehicles/`, `/vehicles/*`, `/money/vehicles`): costs are ordinary Transportation expenses —
+`transactions.vehicle_id`, or for history the vehicle's `subcategories`; km from `vehicle_odometer` (spread evenly
+between readings); routes from the GPS on days with the vehicle's day tag (`motorcycle` = Scooter ride,
+`car_drive` = Car drive) → `vehicle_days`, nightly step `vehicle_routes`.
+
 ## Activity days
 
 An activity belongs to the **local** day where it started (Garmin `startTimeLocal`, Strava `start_date_local`),

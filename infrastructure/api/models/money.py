@@ -13,6 +13,7 @@ class TransactionCreate(BaseModel):
     account: Optional[str] = None
     notes: Optional[str] = None
     source_id: Optional[str] = None  # external dedup key (e.g. FinanceKit tx UUID)
+    vehicle_id: Optional[int] = None  # a car / scooter cost (Vehicles)
 
 
 class TransactionOut(BaseModel):
@@ -28,6 +29,7 @@ class TransactionOut(BaseModel):
     notes: Optional[str]
     created_at: str
     has_receipt: bool = False   # a supermarket ticket is attached
+    vehicle_id: Optional[int] = None
 
 
 class TransactionPatch(BaseModel):
@@ -39,6 +41,7 @@ class TransactionPatch(BaseModel):
     subcategory: Optional[str] = None
     account: Optional[str] = None
     notes: Optional[str] = None
+    vehicle_id: Optional[int] = None  # 0 clears the link
 
 
 class CategoryBudget(BaseModel):

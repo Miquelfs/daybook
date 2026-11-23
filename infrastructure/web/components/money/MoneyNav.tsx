@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { CalendarDays, Lightbulb, TrendingUp, PieChart } from "lucide-react";
+import { CalendarDays, Lightbulb, TrendingUp, PieChart, Car } from "lucide-react";
 import { PageHeader, SectionTabs } from "@/components/ui/kit";
 
 const TABS = [
@@ -9,14 +9,17 @@ const TABS = [
   { href: "/money/insights", label: "Insights", icon: Lightbulb },
   { href: "/money/trends", label: "Trends", icon: TrendingUp },
   { href: "/money/portfolio", label: "Portfolio", icon: PieChart },
+  { href: "/money/vehicles", label: "Vehicles", icon: Car },
 ];
 
 // Drill-downs light up the tab they belong to: a holding → Portfolio; a
-// category, an account, the grocery basket or the budget planner → This month.
+// category, an account, a statement check, the grocery basket or the budget planner → This month;
+// a vehicle → Vehicles.
 function activeTab(pathname: string): string {
   if (pathname.startsWith("/money/portfolio")) return "/money/portfolio";
   if (pathname.startsWith("/money/insights")) return "/money/insights";
   if (pathname.startsWith("/money/trends")) return "/money/trends";
+  if (pathname.startsWith("/money/vehicles")) return "/money/vehicles";
   return "/money";
 }
 

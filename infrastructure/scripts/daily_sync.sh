@@ -89,6 +89,7 @@ step overland_process python -m domains.locations.overland_process
 # Trips: re-detect trips over the last 120 days (Plan B.2, nights-based).
 log "Detecting trips..."
 step trip_detection python -m domains.locations.trip_detection
+step vehicle_routes python -m domains.vehicles.routes
 # Planned trips that have now happened hand their name + companions to the detected trip.
 step planned_trips python -m domains.plans.planned_trips
 

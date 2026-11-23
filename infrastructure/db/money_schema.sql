@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     notes            TEXT,
     deleted_at       TEXT,                   -- soft delete (ISO timestamp)
     source_id        TEXT UNIQUE,            -- external dedup key (FinanceKit UUID, etc.)
+    vehicle_id       INTEGER,                -- a car / scooter cost (vehicles.id)
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );

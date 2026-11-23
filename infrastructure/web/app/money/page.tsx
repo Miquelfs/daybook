@@ -186,6 +186,12 @@ export default async function MoneyPage({ searchParams }: Props) {
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xs text-[#71717A] uppercase tracking-widest">Transactions</h2>
           <div className="flex items-center gap-2">
+            <Link
+              href="/money/reconcile"
+              className="text-xs font-medium px-3 py-1.5 rounded-full bg-[#27272A] text-[#A1A1AA] hover:bg-[#3F3F46] hover:text-[#FAFAFA] transition-colors"
+            >
+              Check vs bank
+            </Link>
             <a
               href={`/api/money/export?start=${month}-01&end=${format(endOfMonth(monthDate), "yyyy-MM-dd")}`}
               download

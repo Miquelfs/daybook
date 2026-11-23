@@ -6,6 +6,7 @@ import { X, Check, Loader, Paperclip } from "lucide-react";
 import { moneyApi, type MoneyMeta, type MerchantSuggestion } from "@/lib/money-api";
 import { CATEGORY_EMOJI, accountBadgeClass } from "./CategoryPills";
 import { useVisualViewport, sheetViewportStyle } from "@/lib/useVisualViewport";
+import { vehiclesApi } from "@/lib/statements-api";
 
 const INCOME_CATS = new Set(["Income", "OMYRA", "Finance"]);
 
@@ -30,6 +31,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta, account: presetAc
   const [account, setAccount] = useState(presetAccount ?? (meta.defaults.account || ""));
   const [txDate, setTxDate] = useState(date);
   const [notes, setNotes] = useState("");
+  const [vehicleId, setVehicleId] = useState<number | null>(null);
   // Supermarket ticket (Groceries only) — optional, can also be attached later from the list
   const [ticket, setTicket] = useState<File[]>([]);
   const [ticketError, setTicketError] = useState<string | null>(null);
@@ -96,9 +98,29 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta, account: presetAc
     enabled: !!activeCategory,
   });
 
+  // Your car / scooter, offered on a Transportation expense so its cost lands on that vehicle.
+  const isTransport = activeCategory === "Transportation";
+  const { data: vehicles = [] } = useQuery({
+    queryKey: ["vehicles"],
+    queryFn: () => vehiclesApi.list(),
+    enabled: isOpen && isTransport,
+    staleTime: 5 * 60_000,
+  });
+  const activeVehicles = vehicles.filter((v) => !v.vehicle.sold_on);
+  // A past subcategory that belongs to one vehicle preselects it ("Gasolina moto" → Scooter).
+  useEffect(() => {
+    if (!isTransport || vehicleId !== null) return;
+    const sub = subcategory.trim().toLowerCase();
+    if (!sub) return;
+    const owner = activeVehicles.filter((v) => v.vehicle.subcategories.some((x) => x.trim().toLowerCase() === sub));
+    if (owner.length === 1) setVehicleId(owner[0].vehicle.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subcategory, isTransport, vehicles]);
+
   // Reset on open
   useEffect(() => {
     if (isOpen) {
+      setVehicleId(null);
       setSign(INCOME_CATS.has(meta.defaults.category || "Restaurant") ? "+" : "-");
       setAmount("");
       setCategory(meta.defaults.category || "Restaurant");
@@ -143,6 +165,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta, account: presetAc
         subcategory: subcategory.trim() || undefined,
         account: account || undefined,
         notes: notes.trim() || undefined,
+        vehicle_id: isTransport && vehicleId ? vehicleId : undefined,
       });
       // The expense is saved either way; a ticket that can't be read is reported, not fatal.
       if (ticket.length && isGroceries) {
@@ -157,6 +180,7 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta, account: presetAc
     onSuccess: ({ ticketError }) => {
       qc.invalidateQueries({ queryKey: ["money"] });
       qc.invalidateQueries({ queryKey: ["groceries"] });
+      if (isTransport && vehicleId) qc.invalidateQueries({ queryKey: ["vehicles"] });
       if (ticketError) setTicketError(ticketError);
       else onClose();
     },
@@ -321,6 +345,24 @@ export function AddExpenseSheet({ date, isOpen, onClose, meta, account: presetAc
               </div>
             )}
           </div>
+
+          {/* Vehicle (Transportation only) */}
+          {isTransport && activeVehicles.length > 0 && (
+            <div>
+              <label className="text-xs text-[#52525B] uppercase tracking-widest mb-2 block">
+                Vehicle <span className="normal-case text-[#3F3F46]">(optional)</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {activeVehicles.map(({ vehicle: v }) => (
+                  <button key={v.id} type="button" onClick={() => setVehicleId(vehicleId === v.id ? null : v.id)}
+                    className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+                      vehicleId === v.id ? "border-[#F59E0B] text-[#F59E0B] bg-[#F59E0B]/10" : "border-[#27272A] text-[#A1A1AA] hover:text-[#FAFAFA]"}`}>
+                    {v.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Account */}
           <div>

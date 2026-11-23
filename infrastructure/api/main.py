@@ -49,6 +49,8 @@ from infrastructure.api.routers import plans as plans_module
 from infrastructure.api.routers import coll as coll_module
 from infrastructure.api.routers import ask as ask_module
 from infrastructure.api.routers import travel as travel_module
+from infrastructure.api.routers import statements as statements_module
+from infrastructure.api.routers import vehicles as vehicles_module
 
 VERSION = "0.1.0"
 ROOT = Path(__file__).parents[2]
@@ -159,6 +161,8 @@ app.include_router(plans_module.router)
 app.include_router(coll_module.router)
 app.include_router(ask_module.router)
 app.include_router(travel_module.router)
+app.include_router(statements_module.router)
+app.include_router(vehicles_module.router)
 
 _photos_dir = ROOT / "data" / "photos"
 _photos_dir.mkdir(parents=True, exist_ok=True)

@@ -92,6 +92,7 @@ def _row_to_txn(row: sqlite3.Row) -> TransactionOut:
         notes=row["notes"],
         created_at=row["created_at"],
         has_receipt=bool(row["has_receipt"]) if "has_receipt" in row.keys() else False,
+        vehicle_id=row["vehicle_id"] if "vehicle_id" in row.keys() else None,
     )
 
 
@@ -129,11 +130,11 @@ def create_transaction(body: TransactionCreate, conn: DB):
     conn.execute(
         """INSERT OR IGNORE INTO transactions
              (id, source, notion_id, date, name, amount, account, category,
-              subcategory, transaction_type, notes, source_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+              subcategory, transaction_type, notes, source_id, vehicle_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (txn_id, "local", None, body.date, body.name, stored_amount,
          body.account, body.category, body.subcategory, txn_type, body.notes,
-         body.source_id),
+         body.source_id, body.vehicle_id),
     )
     conn.commit()
     # If source_id already exists, IGNORE silently — return the existing row
@@ -195,6 +196,8 @@ def patch_transaction(txn_id: str, body: TransactionPatch, conn: DB):
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         return _row_to_txn(row)
+    if updates.get("vehicle_id") == 0:
+        updates["vehicle_id"] = None  # explicit "not a vehicle cost"
 
     # Recalculate transaction_type if category changed
     if "category" in updates:
@@ -220,7 +223,7 @@ def patch_transaction(txn_id: str, body: TransactionPatch, conn: DB):
 
     _WRITABLE_COLS = {
         "date", "name", "amount", "category", "subcategory", "account",
-        "notes", "transaction_type", "source", "updated_at",
+        "notes", "transaction_type", "source", "updated_at", "vehicle_id",
     }
     updates = {k: v for k, v in updates.items() if k in _WRITABLE_COLS}
 
