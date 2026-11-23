@@ -24,9 +24,11 @@ Closing the gap (all on the reconcile page):
   elsewhere                   a bank line you logged on another account (same amount, same days, and
                               that account's own statement doesn't have it) → move it here.
   add_line / add_all          create the Daybook entry from a bank line. Add all files each line by its
-                              kind — an investment as a Transfer (mirrored on the matching investment
-                              account), interest / dividends / cashback as Income, fees / tax as Finance —
-                              and everything you'd have typed yourself as 🚨 Alert, to look at later.
+                              kind — an investment as Finance like a plan execution ("DCA: <ticker>"),
+                              interest / dividends / cashback as Income, fees / tax as Finance — and
+                              everything you'd have typed yourself as 🚨 Alert, to look at later.
+  savings_plans               the statement's savings plans (by ISIN) next to Daybook's DCA plans:
+                              missing, paid from another account, another amount or cadence.
   settle                      closes the period: what's still off is booked as an 🚨 Alert expense or
                               income (the gap before the statement starts, and the rest at its end),
                               and its unexplained lines stop showing. Settling the same period again
@@ -107,6 +109,42 @@ def kind_of(*texts: object) -> str | None:
         if any(w in blob for w in words):
             return kind
     return None
+
+
+_ISIN = re.compile(r"\b([A-Z]{2}[A-Z0-9]{9}[0-9])\b")
+ISIN_WINDOW = 7                     # a savings plan runs a day or two off its date (weekends, holidays)
+
+
+def isin_of(*texts: object) -> str | None:
+    for t in texts:
+        m = _ISIN.search(str(t or ""))
+        if m:
+            return m.group(1)
+    return None
+
+
+def txn_isins(conn: sqlite3.Connection, ids: list[str]) -> dict[str, str]:
+    """Transaction id → ISIN, for plan executions (their holding's ISIN) and entries that name one."""
+    out: dict[str, str] = {}
+    if not ids:
+        return out
+    q = ",".join("?" * len(ids))
+    try:
+        for r in conn.execute(
+                f"""SELECT e.transaction_id id, h.isin, h.ticker FROM investment_plan_executions e
+                    JOIN investment_plans p ON p.id = e.plan_id JOIN holdings h ON h.id = p.holding_id
+                    WHERE e.transaction_id IN ({q})""", ids):
+            i = r["isin"] or isin_of(r["ticker"])
+            if i:
+                out[r["id"]] = i
+    except sqlite3.OperationalError:
+        pass
+    for r in conn.execute(f"SELECT id, name, notes FROM transactions WHERE id IN ({q})", ids):
+        if r["id"] not in out:
+            i = isin_of(r["name"], r["notes"])
+            if i:
+                out[r["id"]] = i
+    return out
 
 
 # ── text helpers ──────────────────────────────────────────────────────────────
@@ -674,6 +712,10 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
                               f"WHERE id IN ({q}) AND deleted_at IS NULL", manual_ids):
             txns[r["id"]] = r
 
+    l_isin = {l["id"]: isin_of(l["description"]) for l in lines}
+    t_isin = txn_isins(conn, list(txns))
+    other_fund = lambda l, t: bool(l_isin.get(l["id"]) and t_isin.get(t["id"]) and l_isin[l["id"]] != t_isin[t["id"]])
+
     taken: set[str] = set()
     match: dict[int, tuple[str, str]] = {}               # line id → (txn id, how)
     for l in lines:
@@ -692,7 +734,7 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
                 if t["id"] in taken:
                     continue
                 gap = abs((_d(t["date"]) - _d(l["date"])).days)
-                if gap > window or not fits(l, t):
+                if gap > window or other_fund(l, t) or not fits(l, t):
                     continue
                 sim = name_similarity(l["description"], t["name"])
                 cands.append((gap - sim * 1.5 + abs(l["amount"] - t["amount"]) / 10, l["id"], t["id"]))
@@ -703,6 +745,10 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
             taken.add(tid)
 
     pass_(DATE_WINDOW, lambda l, t: abs(l["amount"] - t["amount"]) < 0.005, "exact")
+    # the same fund bought by a savings plan: a few days off, a few cents off (crypto fees)
+    pass_(ISIN_WINDOW, lambda l, t: l_isin.get(l["id"]) is not None and l_isin[l["id"]] == t_isin.get(t["id"])
+          and (l["amount"] < 0) == (t["amount"] < 0) and abs(l["amount"] - t["amount"]) <= max(1.0, 0.05 * abs(l["amount"])),
+          "isin")
     pass_(NEAR_WINDOW, lambda l, t: _near(l["amount"], t["amount"])
           and name_similarity(l["description"], t["name"]) >= NEAR_NAME, "near")
 
@@ -720,8 +766,10 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
         else:
             row["suggest"] = suggest(conn, l["description"], l["amount"], l["kind"])
             row["elsewhere"] = elsewhere(conn, account, l)
+            row["isin"] = l_isin.get(l["id"])
             row["candidates"] = [_txn(t) for t in sorted(
                 (t for t in txns.values() if t["id"] not in taken and (t["amount"] < 0) == (l["amount"] < 0)
+                 and not other_fund(l, t)
                  and abs((_d(t["date"]) - _d(l["date"])).days) <= 7),
                 key=lambda t: (abs(t["amount"] - l["amount"]), abs((_d(t["date"]) - _d(l["date"])).days)))[:4]]
             missing.append(row)
@@ -750,7 +798,16 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
             "closing_date": last["date"], "bank_closing": round(last["balance"], 2), "daybook_closing": db_close,
             "closing_gap": round(db_close - last["balance"], 2),
             "chain_breaks": _chain_errors([Line(l["date"], "", l["amount"], l["balance"]) for l in with_bal]),
+            # where the bank's running balance skips: a line the export / reader missed, and its amount
+            "breaks": [{"after": a["date"], "before": b["date"], "after_text": a["description"][:60],
+                        "missing": round(b["balance"] - (a["balance"] + b["amount"]), 2)}
+                       for a, b in zip(with_bal, with_bal[1:])
+                       if abs(a["balance"] + b["amount"] - b["balance"]) > 0.011][:20],
         }
+        bal["unexplained"] = round(bal["closing_gap"] - bal["opening_gap"]
+                                   - (-sum(r["amount"] for r in missing + settled["missing"] + ignored)
+                                      + sum(t["amount"] for t in only_daybook + settled["only_daybook"])
+                                      - sum(r["amount"] - r["txn"]["amount"] for r in differs)), 2)
 
     s = lambda rows, k="amount": round(sum(r[k] for r in rows), 2)
     return {
@@ -772,7 +829,7 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
 
 
 KIND_FILING = {                     # kind → (category, subcategory) when Daybook has nothing like it yet
-    "investment": ("Transfer", None),
+    "investment": ("Finance", None),   # like a plan execution: the holding tracks the other side
     "interest": ("Income", "Interest"),
     "dividend": ("Income", "Dividends"),
     "cashback": ("Income", "Cashback"),
@@ -838,10 +895,14 @@ def elsewhere(conn: sqlite3.Connection, account: str, line: dict) -> list[dict]:
              AND NOT EXISTS (SELECT 1 FROM statement_lines s WHERE s.account = t.account
                              AND ABS(s.amount - t.amount) < 0.005
                              AND s.date BETWEEN date(t.date, ?) AND date(t.date, ?))
-           ORDER BY ABS(julianday(t.date) - julianday(?)) LIMIT 2""",
+           ORDER BY ABS(julianday(t.date) - julianday(?)) LIMIT 6""",
         (account, line["amount"], _shift(line["date"], -DATE_WINDOW), _shift(line["date"], DATE_WINDOW),
          f"-{DATE_WINDOW} day", f"+{DATE_WINDOW} day", line["date"])).fetchall()
-    return [_txn(r) | {"account": r["account"]} for r in rows]
+    mine = isin_of(line["description"])
+    if mine:
+        theirs = txn_isins(conn, [r["id"] for r in rows])
+        rows = [r for r in rows if theirs.get(r["id"], mine) == mine]       # another fund is never "this one"
+    return [_txn(r) | {"account": r["account"]} for r in rows[:2]]
 
 
 def move_here(conn: sqlite3.Connection, line_id: int, txn_id: str) -> None:
@@ -899,7 +960,6 @@ def add_all(conn: sqlite3.Connection, account: str, start: str | None = None, en
     on another account are left for you to move."""
     rep = reconcile(conn, account, start, end)
     added = {"alert": 0, "filed": 0, "left": 0}
-    mirror = rep.get("mirror_account")
     for l in rep.get("missing") or []:
         if l.get("elsewhere"):
             added["left"] += 1
@@ -907,11 +967,13 @@ def add_all(conn: sqlite3.Connection, account: str, start: str | None = None, en
         sug = l["suggest"]
         if l.get("kind") in KIND_FILING:
             cat, sub = KIND_FILING[l["kind"]]
-            if sug.get("category") and sug["category"] != ALERT and _fold(sug["category"]) != "transfer" \
-                    and l["kind"] != "investment":
+            if sug.get("category") and sug["category"] not in (ALERT, "Transfer") and l["kind"] != "investment":
                 cat, sub = sug["category"], sug.get("subcategory")
-            add_line(conn, l["id"], sug["name"], cat, sub, f"From the bank statement: {l['description']}",
-                     mirror_account=mirror if l["kind"] == "investment" else None)
+            name = sug["name"]
+            if l["kind"] == "investment":
+                h = holding_for(conn, l.get("isin"))
+                name = f"DCA: {h['ticker']} (bank)" if h else name
+            add_line(conn, l["id"], name, cat, sub, f"From the bank statement: {l['description']}")
             added["filed"] += 1
         else:
             guess = f" (looks like {sug['category']})" if sug.get("category") else ""
@@ -975,3 +1037,113 @@ def unsettle(conn: sqlite3.Connection, account: str) -> None:
                  (f"bankcheck:{account}:%", _shift(r["start"], -1), r["through"]))
     conn.execute("DELETE FROM statement_settlements WHERE id=?", (r["id"],))
     conn.commit()
+
+
+# ── savings plans: the statement vs Daybook's DCA plans ──────────────────────
+
+def holding_for(conn: sqlite3.Connection, isin: str | None):
+    if not isin:
+        return None
+    try:
+        return conn.execute("SELECT * FROM holdings WHERE (isin=? OR ticker=?) ORDER BY is_active DESC LIMIT 1",
+                            (isin, isin)).fetchone()
+    except sqlite3.OperationalError:
+        return None
+
+
+def _cadence(dates: list[str]) -> str | None:
+    if len(dates) < 2:
+        return None
+    ds = sorted(_d(d) for d in dates)
+    gaps = sorted((b - a).days for a, b in zip(ds, ds[1:]))
+    g = gaps[len(gaps) // 2]
+    return "weekly" if g <= 10 else "biweekly" if g <= 20 else "monthly" if g <= 45 else "quarterly" if g <= 120 else "yearly"
+
+
+_PER_MONTH = {"weekly": 52 / 12, "biweekly": 26 / 12, "monthly": 1, "quarterly": 1 / 3, "yearly": 1 / 12}
+
+
+def savings_plans(conn: sqlite3.Connection, account: str, start: str | None = None, end: str | None = None) -> list[dict]:
+    """Each fund the statement buys on a schedule (by ISIN), next to the Daybook plan for it, with what's off."""
+    cov = coverage(conn, account)
+    if not cov:
+        return []
+    start, end = start or cov[0], end or cov[1]
+    groups: dict[str, list] = {}
+    for l in conn.execute("SELECT date, description, amount FROM statement_lines WHERE account=? AND date BETWEEN ? AND ? "
+                          "AND kind='investment' AND amount < 0 AND ignored=0 ORDER BY date", (account, start, end)):
+        i = isin_of(l["description"])
+        if i:
+            groups.setdefault(i, []).append(l)
+    try:
+        plans = conn.execute("""SELECT p.*, h.isin, h.ticker, h.name holding_name, h.account holding_account
+                                FROM investment_plans p JOIN holdings h ON h.id = p.holding_id
+                                WHERE p.is_active = 1""").fetchall()
+    except sqlite3.OperationalError:
+        plans = []
+    by_isin: dict[str, list] = {}
+    for p in plans:
+        i = p["isin"] or isin_of(p["ticker"])
+        if i:
+            by_isin.setdefault(i, []).append(p)
+
+    out = []
+    for isin, ls in groups.items():
+        amounts = sorted(-l["amount"] for l in ls)
+        typical = amounts[len(amounts) // 2]
+        cad = _cadence([l["date"] for l in ls])
+        days = sorted(int(l["date"][8:]) for l in ls)
+        desc = ls[-1]["description"]
+        name = re.sub(r"^.*?" + isin + r"\s*", "", desc).split(", quantity")[0].strip() or desc
+        h = holding_for(conn, isin)
+        ps = by_isin.get(isin, [])
+        p = next((x for x in ps if x["source_account"] == account), ps[0] if ps else None)
+        issues = []
+        if not h:
+            issues.append("no_holding")
+        elif not p:
+            issues.append("no_plan")
+        else:
+            if p["source_account"] != account:
+                issues.append("account")
+            if abs(p["amount_eur"] - typical) > max(1.0, 0.05 * typical):
+                issues.append("amount")
+            if cad and p["cadence"] != cad:
+                issues.append("cadence")
+        out.append({
+            "isin": isin, "name": name[:80], "count": len(ls), "total": round(-sum(l["amount"] for l in ls), 2),
+            "typical": round(typical, 2), "cadence": cad, "day_of_month": max(set(days), key=days.count),
+            "last": ls[-1]["date"],
+            "holding": {"id": h["id"], "ticker": h["ticker"], "name": h["name"], "account": h["account"]} if h else None,
+            "plan": {"id": p["id"], "source_account": p["source_account"], "amount_eur": p["amount_eur"],
+                     "cadence": p["cadence"], "day_of_month": p["day_of_month"],
+                     "next_execution_date": p["next_execution_date"]} if p else None,
+            "issues": issues,
+        })
+    # Daybook plans paid from this account that the statement never shows (stopped? another fund?)
+    for i, ps in by_isin.items():
+        for p in ps:
+            if p["source_account"] == account and i not in groups and p["start_date"] <= end:
+                out.append({"isin": i, "name": p["holding_name"], "count": 0, "total": 0, "typical": None, "cadence": None,
+                            "day_of_month": None, "last": None,
+                            "holding": {"id": p["holding_id"], "ticker": p["ticker"], "name": p["holding_name"],
+                                        "account": p["holding_account"]},
+                            "plan": {"id": p["id"], "source_account": p["source_account"], "amount_eur": p["amount_eur"],
+                                     "cadence": p["cadence"], "day_of_month": p["day_of_month"],
+                                     "next_execution_date": p["next_execution_date"]},
+                            "issues": ["not_on_statement"]})
+    out.sort(key=lambda x: (not x["issues"], -x["total"]))
+    return out
+
+
+def move_plan_executions(conn: sqlite3.Connection, plan_id: int, account: str, start: str, end: str) -> int:
+    """A plan that was booked on the wrong account: its executions in the period move to `account`."""
+    rows = conn.execute("SELECT transaction_id FROM investment_plan_executions WHERE plan_id=? AND transaction_id IS NOT NULL "
+                        "AND execution_date BETWEEN ? AND ?", (plan_id, start, end)).fetchall()
+    ids = [r[0] for r in rows]
+    if ids:
+        q = ",".join("?" * len(ids))
+        conn.execute(f"UPDATE transactions SET account=?, updated_at=? WHERE id IN ({q}) AND deleted_at IS NULL",
+                     (account, _now(), *ids))
+    conn.commit()
+    return len(ids)

@@ -104,6 +104,8 @@ class Reconcile(unittest.TestCase):
         # the gap is exactly what the lists explain: −missing + only-in-Daybook − amount differences
         self.assertAlmostEqual(b["closing_gap"] - b["opening_gap"],
                                -r["totals"]["missing"] + r["totals"]["only_daybook"] - r["totals"]["differs"])
+        self.assertEqual(b["unexplained"], 0)
+        self.assertEqual(b["breaks"], [])
 
     def test_reimport_dedups(self):
         again = st.store(self.c, "BBVA", st.parse(BBVA_CSV), "again.csv")
@@ -207,6 +209,65 @@ class Kinds(unittest.TestCase):
         c = get_money_connection(path)
         self.assertEqual(st.investment_account_for(c, "Trade Republic Cash"), "Trade Republic Wealth")
         self.assertEqual(st.suggest(c, "Pago de intereses", 3.2, "interest")["category"], "Income")
+
+
+TR_CSV = """Fecha;Tipo;Descripción;Importe;Balance
+02/10/2026;Operar;Savings plan execution IE00B4L5Y983 iShares Core MSCI World, quantity: 0.1;-10,00;990,00
+02/10/2026;Operar;Savings plan execution XF000BTC0017 Bitcoin, quantity: 0.0001;-9,94;980,06
+03/10/2026;Operar;Savings plan execution IE00BK5BQT80 Vanguard FTSE All-World, quantity: 0.1;-10,00;970,06
+02/11/2026;Operar;Savings plan execution IE00B4L5Y983 iShares Core MSCI World, quantity: 0.1;-10,00;960,06
+""".encode()
+
+
+class SavingsPlans(unittest.TestCase):
+    def setUp(self):
+        path = tmpdir() / "money.db"
+        init_money_db(path)
+        self.c = c = get_money_connection(path)
+        c.executescript("""
+            INSERT INTO holdings (id, account, ticker, isin, name, asset_class, quantity) VALUES
+              ('tr-world','Trade Republic Wealth','EUNL.DE','IE00B4L5Y983','iShares World','equity_etf',1),
+              ('tr-btc','Trade Republic Wealth','BTC-EUR','XF000BTC0017','Bitcoin','crypto',1),
+              ('mi-sp','My Investor','IE00B03HD191','IE00B03HD191','Vanguard SP','equity_etf',1);
+            INSERT INTO investment_plans (id, holding_id, source_account, amount_eur, cadence, day_of_month, start_date, next_execution_date)
+              VALUES (1,'tr-world','My Investor',10,'monthly',1,'2026-01-01','2026-12-01'),
+                     (2,'tr-btc','Trade Republic Cash',10,'monthly',1,'2026-01-01','2026-12-01'),
+                     (3,'mi-sp','My Investor',10,'weekly',NULL,'2026-01-01','2026-12-01');
+            INSERT INTO transactions (id, source, date, name, amount, account, category, transaction_type) VALUES
+              ('btc-oct','local','2026-10-01','DCA: BTC-EUR (monthly)',-10,'Trade Republic Cash','Finance','Finance'),
+              ('sp-oct','local','2026-10-03','DCA: IE00B03HD191 (weekly)',-10,'My Investor','Finance','Finance'),
+              ('w-oct','local','2026-10-01','DCA: EUNL.DE (monthly)',-10,'My Investor','Finance','Finance');
+            INSERT INTO investment_plan_executions (plan_id, execution_date, amount_eur, price_eur, quantity_added, transaction_id, status)
+              VALUES (2,'2026-10-01',10,1,10,'btc-oct','success'),(3,'2026-10-03',10,1,10,'sp-oct','success'),
+                     (1,'2026-10-01',10,1,10,'w-oct','success');
+        """)
+        c.commit()
+        st.store(c, "Trade Republic Cash", st.parse(TR_CSV, "tr.csv"), "tr.csv")
+
+    def test_isin_matching_and_other_funds(self):
+        r = st.reconcile(self.c, "Trade Republic Cash")
+        btc = next(l for l in r["differs"] if "Bitcoin" in l["description"])      # a day and 6 cents off → same fund
+        self.assertEqual((btc["txn"]["id"], btc["how"]), ("btc-oct", "isin"))
+        vang = next(l for l in r["missing"] if "Vanguard" in l["description"])
+        self.assertEqual(vang["elsewhere"], [])                 # My Investor's S&P plan is another fund
+        world = next(l for l in r["missing"] if "World" in l["description"] and l["date"] == "2026-10-02")
+        self.assertEqual([t["id"] for t in world["elsewhere"]], ["w-oct"])        # same fund, booked on My Investor
+
+    def test_plan_check(self):
+        plans = {p["isin"]: p for p in st.savings_plans(self.c, "Trade Republic Cash")}
+        self.assertEqual(plans["IE00B4L5Y983"]["issues"], ["account"])
+        self.assertEqual(plans["IE00B4L5Y983"]["cadence"], "monthly")
+        self.assertEqual(plans["XF000BTC0017"]["issues"], [])
+        self.assertEqual(plans["IE00BK5BQT80"]["issues"], ["no_holding"])
+        self.assertEqual(st.move_plan_executions(self.c, 1, "Trade Republic Cash", "2026-10-01", "2026-11-30"), 1)
+        self.assertEqual(self.c.execute("SELECT account FROM transactions WHERE id='w-oct'").fetchone()[0], "Trade Republic Cash")
+
+    def test_add_all_files_investments_like_plans(self):
+        st.add_all(self.c, "Trade Republic Cash")
+        rows = self.c.execute("SELECT name, category, transaction_type FROM transactions WHERE notes LIKE 'From the bank%'").fetchall()
+        self.assertTrue(rows)
+        self.assertTrue(all(r["category"] == "Finance" and r["transaction_type"] == "Finance" for r in rows))
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM transactions WHERE account='Trade Republic Wealth'").fetchone()[0], 0)
 
 
 if __name__ == "__main__":

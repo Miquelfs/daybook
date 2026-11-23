@@ -9,6 +9,7 @@ import { Upload, Check, Link2, EyeOff, Plus, RotateCcw, Trash2, ArrowRightLeft, 
 import { moneyApi, fmtAmount } from "@/lib/money-api";
 import { statementsApi, STMT_KIND_LABEL, type StmtLine, type StmtTxn } from "@/lib/statements-api";
 import { ActionButton, Block, Empty, Hero, Panel, Pill, Skeleton, Stat, Stats } from "@/components/ui/kit";
+import { SavingsPlansCheck } from "@/components/money/SavingsPlansCheck";
 
 const signed = (n: number) => `${n < 0 ? "−" : n > 0 ? "+" : ""}${fmtAmount(n)}`;
 const day = (d: string) => format(parseISO(d), "d MMM");
@@ -27,14 +28,11 @@ const input = "bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-1.5 text-
 
 // A bank line Daybook doesn't have: add it (prefilled from a past entry that looks like it),
 // pair it with an entry that's there under another name / amount, or ignore it.
-function MissingRow({ line, categories, mirror, onDone }: {
-  line: StmtLine; categories: string[]; mirror?: string | null; onDone: () => void;
-}) {
+function MissingRow({ line, categories, onDone }: { line: StmtLine; categories: string[]; onDone: () => void }) {
   const [mode, setMode] = useState<null | "add" | "pair">(null);
   const [name, setName] = useState(line.suggest?.name ?? "");
   const [category, setCategory] = useState(line.suggest?.category ?? (line.amount > 0 ? "Income" : categories[0] ?? "Other"));
   const [sub, setSub] = useState(line.suggest?.subcategory ?? "");
-  const [mirrorOn, setMirrorOn] = useState(line.kind === "investment");
   const act = useMutation({
     mutationFn: (fn: () => Promise<unknown>) => fn(),
     onSuccess: onDone,
@@ -72,7 +70,6 @@ function MissingRow({ line, categories, mirror, onDone }: {
                 e.preventDefault();
                 act.mutate(() => statementsApi.add(line.id, {
                   name, category, subcategory: sub || undefined,
-                  mirror_account: category === "Transfer" && mirror && mirrorOn ? mirror : undefined,
                 }));
               }}>
           <input className={`${input} flex-1 basis-40`} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
@@ -84,12 +81,6 @@ function MissingRow({ line, categories, mirror, onDone }: {
                   className="inline-flex items-center gap-1 text-xs bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#F59E0B] hover:bg-[#F59E0B]/20 rounded-lg px-3 py-1.5 disabled:opacity-50">
             <Check size={12} />Save
           </button>
-          {category === "Transfer" && mirror && (
-            <label className="w-full flex items-center gap-2 text-xs text-[#71717A]">
-              <input type="checkbox" checked={mirrorOn} onChange={(e) => setMirrorOn(e.target.checked)} />
-              Also {signed(-line.amount)} on {mirror}
-            </label>
-          )}
         </form>
       )}
       {mode === "pair" && (
@@ -277,10 +268,19 @@ function ReconcileInner() {
                 {settle.error && <span className="text-xs text-rose-400">{(settle.error as Error).message}</span>}
               </div>
             )}
-            {b && b.chain_breaks > 0 && (
-              <p className="text-xs text-[#71717A] mt-2">
-                The bank&apos;s running balance skips in {b.chain_breaks} place{b.chain_breaks === 1 ? "" : "s"} — lines may be missing from the export.
-              </p>
+            {b && b.breaks.length > 0 && (
+              <div className="mt-3 text-xs text-[#71717A] space-y-1">
+                <p>
+                  The bank&apos;s running balance skips in {b.chain_breaks} place{b.chain_breaks === 1 ? "" : "s"} — a line the
+                  export (or the reader) missed, so these aren&apos;t in the lists below{Math.abs(b.unexplained) >= 0.01
+                    ? ` and ${signed(b.unexplained)} of the gap is unexplained. Settle after finding them` : ""}:
+                </p>
+                {b.breaks.map((k, i) => (
+                  <p key={i} className="text-[#A1A1AA]">
+                    {signed(k.missing)} between {day(k.after)} ({k.after_text}) and {day(k.before)}
+                  </p>
+                ))}
+              </div>
             )}
           </Hero>
 
@@ -299,6 +299,8 @@ function ReconcileInner() {
             <input type="date" className={input} value={range.end ?? rep.end} min={rep.coverage![0]} max={rep.coverage![1]}
                    onChange={(e) => setRange((r) => ({ ...r, end: e.target.value || undefined }))} />
           </div>
+
+          <SavingsPlansCheck account={account} start={range.start} end={range.end} onChanged={refresh} />
 
           {rep.settled?.through && (
             <Panel className="p-4">
@@ -346,7 +348,7 @@ function ReconcileInner() {
 
           {rep.missing!.length > 0 && (
             <Block title="Only in the bank"
-                   note="On the statement, not in Daybook. Add it, pair it with what you logged, move it from the account you logged it on, or ignore it. Add all files investments, interest, cashback and fees by their kind and the rest as 🚨 Alert."
+                   note="On the statement, not in Daybook. Add it, pair it with what you logged, move it from the account you logged it on, or ignore it. Add all files investments as Finance (like a plan execution), interest and cashback as Income, fees as Finance, and the rest as 🚨 Alert."
                    action={<ActionButton icon={Plus} onClick={() => {
                      if (!addAll.isPending && confirm(`Add the ${rep.missing!.length} lines to Daybook? Spending goes in as 🚨 Alert to look at later; lines logged on another account are left for you to move.`)) addAll.mutate();
                    }}>{addAll.isPending ? "Adding…" : "Add all"}</ActionButton>}>
@@ -357,7 +359,7 @@ function ReconcileInner() {
                 </p>
               )}
               <Panel className="divide-y divide-[#18181B]">
-                {rep.missing!.map((l) => <MissingRow key={l.id} line={l} categories={categories} mirror={rep.mirror_account} onDone={refresh} />)}
+                {rep.missing!.map((l) => <MissingRow key={l.id} line={l} categories={categories} onDone={refresh} />)}
               </Panel>
             </Block>
           )}

@@ -22,7 +22,7 @@ export type StmtTxn = { id: string; date: string; name: string; amount: number; 
 
 export type StmtLine = {
   id: number; date: string; description: string; amount: number; balance: number | null; currency: string | null;
-  txn?: StmtTxn; how?: "exact" | "near" | "manual"; days_off?: number;
+  txn?: StmtTxn; how?: "exact" | "near" | "isin" | "manual"; isin?: string | null; days_off?: number;
   suggest?: { name: string; category: string | null; subcategory: string | null };
   candidates?: StmtTxn[];
   kind?: StmtKind | null;
@@ -44,6 +44,8 @@ export type Reconcile = {
   balance?: {
     opening_date: string; bank_opening: number; daybook_opening: number; opening_gap: number;
     closing_date: string; bank_closing: number; daybook_closing: number; closing_gap: number; chain_breaks: number;
+    breaks: { after: string; before: string; after_text: string; missing: number }[];
+    unexplained: number;      // the part of the gap the lists below don't account for (lines the export missed)
   } | null;
   mirror_account?: string | null;                     // where a buy / sell lands (Trade Republic Cash → … Wealth)
   adjustments?: { id: string; date: string; name: string; amount: number }[];
@@ -67,7 +69,25 @@ export type StmtStatus = {
   closing_gap: number | null; last_import: string;
 };
 
+export type StmtPlanIssue = "no_holding" | "no_plan" | "account" | "amount" | "cadence" | "not_on_statement";
+export type StmtPlan = {
+  isin: string; name: string; count: number; total: number; typical: number | null;
+  cadence: "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | null; day_of_month: number | null; last: string | null;
+  holding: { id: string; ticker: string; name: string; account: string } | null;
+  plan: { id: number; source_account: string; amount_eur: number; cadence: string; day_of_month: number | null;
+          next_execution_date: string } | null;
+  issues: StmtPlanIssue[];
+};
+
 export const statementsApi = {
+  plans: (account: string, start?: string, end?: string) => {
+    const q = new URLSearchParams({ account });
+    if (start) q.set("start", start);
+    if (end) q.set("end", end);
+    return call<StmtPlan[]>(`/money/statements/plans?${q}`);
+  },
+  movePlanExecutions: (planId: number, account: string, start?: string, end?: string) =>
+    call<{ moved: number }>(`/money/statements/plans/${planId}/move-executions`, { method: "POST", json: { account, start, end } }),
   upload: (account: string, file: File) => {
     const fd = new FormData();
     fd.append("account", account);

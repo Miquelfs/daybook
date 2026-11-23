@@ -149,7 +149,12 @@ similar name) → only in bank / amount differs / only in Daybook + the balance 
 (`txn_id`) and ignores are stored. Page `/money/reconcile` (proxy `app/api/money/statements/[[...path]]`).
 Lines carry a `kind` (card, transfer, investment, interest, dividend, cashback, fee, tax — the bank's type column, or Claude for
 PDFs, which are read in page chunks in parallel). A Trade Republic PDF has its own reader, `statement_tr.py` (word positions,
-no AI, checked against the statement's summary box); Claude is only the fallback for other PDFs. Closing the gap: a line logged on another account → *move it here*; *Add all*
+no AI, checked against the statement's summary box); Claude is only the fallback for other PDFs.
+Investments match by ISIN (`isin_of`; a plan execution's ISIN comes from its holding) within 7 days / ±€1 or 5 %, and a
+different fund never matches. Investment lines are filed as Finance like `plan_executor` ("DCA: <ticker>"), never mirrored —
+the holding tracks the other side. `savings_plans()` (block on the reconcile page) compares the statement's plans with Daybook's
+DCA plans (missing, paid from another account, amount, cadence). Balance skips are listed with the missing amount
+(`balance.breaks`), and `balance.unexplained` is the part of the gap the lists don't cover. Closing the gap: a line logged on another account → *move it here*; *Add all*
 files by kind (investment = Transfer mirrored on the matching investment account, e.g. Trade Republic Cash → Wealth) and the
 rest as category `Alert`; *Settle* closes the period (`statement_settlements`): what's still off is booked as an `Alert`
 expense or income (`source_id` `bankcheck:<account>:…`, recomputed when the same period is settled again; other months'
