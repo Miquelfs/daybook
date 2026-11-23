@@ -19,6 +19,8 @@ Bank statements → reconciliation (domains/money/statements.py).
   POST   /money/statements/unsettle            {account} — reopen the last settled period
   GET    /money/statements/plans               ?account=&start=&end= — the statement's savings plans vs Daybook's
   POST   /money/statements/plans/{id}/move-executions  {account, start, end} — a plan booked on the wrong account
+  POST   /money/statements/plans/book          {account, isin, start?, end?, add_units} — the statement's runs Daybook
+                                               never booked → booked like plan executions
 """
 
 from __future__ import annotations
@@ -146,6 +148,22 @@ def move_plan_executions(plan_id: int, body: RangeBody, conn: DB):
     if not cov:
         raise HTTPException(404, "No statement for this account")
     return {"moved": statements.move_plan_executions(conn, plan_id, body.account, body.start or cov[0], body.end or cov[1])}
+
+
+class BookRunsBody(BaseModel):
+    account: str
+    isin: str
+    start: Optional[str] = None
+    end: Optional[str] = None
+    add_units: bool = False
+
+
+@router.post("/plans/book")
+def book_plan_runs(body: BookRunsBody, conn: DB):
+    try:
+        return statements.book_plan_runs(conn, body.account, body.isin, body.start, body.end, body.add_units)
+    except statements.StatementError as e:
+        raise HTTPException(422, str(e))
 
 
 @router.post("/unsettle")

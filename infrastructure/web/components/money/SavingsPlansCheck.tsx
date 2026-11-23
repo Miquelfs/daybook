@@ -68,6 +68,10 @@ export function SavingsPlansCheck({ account, start, end, onChanged }: {
     }),
     onSuccess: done,
   });
+  const book = useMutation({
+    mutationFn: ({ p, units }: { p: StmtPlan; units: boolean }) => statementsApi.bookPlanRuns(account, p.isin, units, start, end),
+    onSuccess: done,
+  });
   if (plans.length === 0) return null;
   const off = plans.filter((p) => p.issues.length).length;
 
@@ -89,6 +93,16 @@ export function SavingsPlansCheck({ account, start, end, onChanged }: {
                 <p className="text-[10px] text-[#52525B] tabular-nums">{p.isin}</p>
               </div>
             </div>
+            {p.unbooked > 0 && p.holding && (
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <span className="text-xs text-[#71717A]">{p.unbooked} run{p.unbooked === 1 ? "" : "s"} on the statement Daybook never booked ({fmtAmount(p.unbooked_total)})</span>
+                <button className={btn} disabled={book.isPending} onClick={() => {
+                  if (!confirm(`Book ${p.unbooked} run${p.unbooked === 1 ? "" : "s"} (${fmtAmount(p.unbooked_total)}) like plan executions on ${account}?`)) return;
+                  const units = confirm(`Also add the units the bank bought to ${p.holding!.name}?\n\nOK = yes. Cancel = no — pick this if you already keep the holding's quantity in step with the app by hand.`);
+                  book.mutate({ p, units });
+                }}>Book them</button>
+              </div>
+            )}
             {p.issues.length > 0 && !p.issues.includes("not_on_statement") && (
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {p.plan && (
@@ -112,7 +126,9 @@ export function SavingsPlansCheck({ account, start, end, onChanged }: {
           </div>
         ))}
       </Panel>
-      {(fix.error || create.error) && <p className="text-xs text-rose-400 mt-2">{((fix.error || create.error) as Error).message}</p>}
+      {(fix.error || create.error || book.error) && (
+        <p className="text-xs text-rose-400 mt-2">{((fix.error || create.error || book.error) as Error).message}</p>
+      )}
     </Block>
   );
 }

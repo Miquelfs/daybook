@@ -45,7 +45,10 @@ export type Reconcile = {
     opening_date: string; bank_opening: number; daybook_opening: number; opening_gap: number;
     closing_date: string; bank_closing: number; daybook_closing: number; closing_gap: number; chain_breaks: number;
     breaks: { after: string; before: string; after_text: string; missing: number }[];
-    unexplained: number;      // the part of the gap the lists below don't account for (lines the export missed)
+    unexplained: number;
+    period_gap: number;                                 // the part that arose inside the statement
+    daybook_now: number;                                // Daybook's balance today
+    after: { count: number; amount: number };           // Daybook entries after the statement's last day      // the part of the gap the lists below don't account for (lines the export missed)
   } | null;
   mirror_account?: string | null;                     // where a buy / sell lands (Trade Republic Cash → … Wealth)
   adjustments?: { id: string; date: string; name: string; amount: number }[];
@@ -77,6 +80,7 @@ export type StmtPlan = {
   plan: { id: number; source_account: string; amount_eur: number; cadence: string; day_of_month: number | null;
           next_execution_date: string } | null;
   issues: StmtPlanIssue[];
+  unbooked: number; unbooked_total: number;          // the statement's runs Daybook never booked
 };
 
 export const statementsApi = {
@@ -86,6 +90,9 @@ export const statementsApi = {
     if (end) q.set("end", end);
     return call<StmtPlan[]>(`/money/statements/plans?${q}`);
   },
+  bookPlanRuns: (account: string, isin: string, add_units: boolean, start?: string, end?: string) =>
+    call<{ booked: number; amount: number; units: number; units_added: boolean }>("/money/statements/plans/book",
+      { method: "POST", json: { account, isin, start, end, add_units } }),
   movePlanExecutions: (planId: number, account: string, start?: string, end?: string) =>
     call<{ moved: number }>(`/money/statements/plans/${planId}/move-executions`, { method: "POST", json: { account, start, end } }),
   upload: (account: string, file: File) => {

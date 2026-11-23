@@ -262,6 +262,27 @@ class SavingsPlans(unittest.TestCase):
         self.assertEqual(st.move_plan_executions(self.c, 1, "Trade Republic Cash", "2026-10-01", "2026-11-30"), 1)
         self.assertEqual(self.c.execute("SELECT account FROM transactions WHERE id='w-oct'").fetchone()[0], "Trade Republic Cash")
 
+    def test_book_past_runs_from_the_statement(self):
+        # the World plan existed on the wrong account; after fixing it, the Nov run is still unbooked
+        plans = {p["isin"]: p for p in st.savings_plans(self.c, "Trade Republic Cash")}
+        self.assertEqual(plans["IE00B4L5Y983"]["unbooked"], 2)
+        out = st.book_plan_runs(self.c, "Trade Republic Cash", "IE00B4L5Y983", add_units=True)
+        self.assertEqual((out["booked"], out["amount"]), (2, 20.0))
+        self.assertAlmostEqual(out["units"], 0.2)
+        r = st.reconcile(self.c, "Trade Republic Cash")
+        self.assertFalse([l for l in r["missing"] if l.get("isin") == "IE00B4L5Y983"])
+        q = self.c.execute("SELECT quantity FROM holdings WHERE id='tr-world'").fetchone()[0]
+        self.assertAlmostEqual(q, 1.2)
+        n = self.c.execute("SELECT COUNT(*) FROM investment_plan_executions WHERE plan_id=1").fetchone()[0]
+        self.assertEqual(n, 3)
+
+    def test_booking_inside_a_settled_period_resettles(self):
+        st.settle(self.c, "Trade Republic Cash")
+        gap = lambda: st.reconcile(self.c, "Trade Republic Cash")["balance"]["closing_gap"]
+        self.assertAlmostEqual(gap(), 0, places=2)
+        st.book_plan_runs(self.c, "Trade Republic Cash", "IE00B4L5Y983")
+        self.assertAlmostEqual(gap(), 0, places=2)             # the adjustment shrank instead of counting twice
+
     def test_add_all_files_investments_like_plans(self):
         st.add_all(self.c, "Trade Republic Cash")
         rows = self.c.execute("SELECT name, category, transaction_type FROM transactions WHERE notes LIKE 'From the bank%'").fetchall()

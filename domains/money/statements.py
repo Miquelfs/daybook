@@ -770,7 +770,8 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
             row["candidates"] = [_txn(t) for t in sorted(
                 (t for t in txns.values() if t["id"] not in taken and (t["amount"] < 0) == (l["amount"] < 0)
                  and not other_fund(l, t)
-                 and abs((_d(t["date"]) - _d(l["date"])).days) <= 7),
+                 and (abs((_d(t["date"]) - _d(l["date"])).days) <= 7
+                      or (abs(t["amount"] - l["amount"]) < 0.005 and abs((_d(t["date"]) - _d(l["date"])).days) <= 31))),
                 key=lambda t: (abs(t["amount"] - l["amount"]), abs((_d(t["date"]) - _d(l["date"])).days)))[:4]]
             missing.append(row)
     only_daybook = [_txn(t) for t in sorted(txns.values(), key=lambda t: t["date"])
@@ -804,6 +805,12 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
                        for a, b in zip(with_bal, with_bal[1:])
                        if abs(a["balance"] + b["amount"] - b["balance"]) > 0.011][:20],
         }
+        today = date.today().isoformat()
+        after = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM transactions WHERE account=? AND deleted_at IS NULL "
+                             "AND date > ? AND date <= ?", (account, last["date"], today)).fetchone()
+        bal["period_gap"] = round(bal["closing_gap"] - bal["opening_gap"], 2)
+        bal["daybook_now"] = balance_on(conn, account, today)
+        bal["after"] = {"count": after[0], "amount": round(after[1], 2)}      # Daybook entries the statement doesn't reach
         bal["unexplained"] = round(bal["closing_gap"] - bal["opening_gap"]
                                    - (-sum(r["amount"] for r in missing + settled["missing"] + ignored)
                                       + sum(t["amount"] for t in only_daybook + settled["only_daybook"])
@@ -1069,6 +1076,8 @@ def savings_plans(conn: sqlite3.Connection, account: str, start: str | None = No
     if not cov:
         return []
     start, end = start or cov[0], end or cov[1]
+    rep = reconcile(conn, account, start, end)
+    open_lines = rep.get("missing", []) + rep.get("settled", {}).get("missing", [])     # runs Daybook never booked
     groups: dict[str, list] = {}
     for l in conn.execute("SELECT date, description, amount FROM statement_lines WHERE account=? AND date BETWEEN ? AND ? "
                           "AND kind='investment' AND amount < 0 AND ignored=0 ORDER BY date", (account, start, end)):
@@ -1110,7 +1119,9 @@ def savings_plans(conn: sqlite3.Connection, account: str, start: str | None = No
                 issues.append("amount")
             if cad and p["cadence"] != cad:
                 issues.append("cadence")
+        unbooked = [l for l in open_lines if l.get("isin") == isin]
         out.append({
+            "unbooked": len(unbooked), "unbooked_total": round(-sum(l["amount"] for l in unbooked), 2),
             "isin": isin, "name": name[:80], "count": len(ls), "total": round(-sum(l["amount"] for l in ls), 2),
             "typical": round(typical, 2), "cadence": cad, "day_of_month": max(set(days), key=days.count),
             "last": ls[-1]["date"],
@@ -1124,7 +1135,7 @@ def savings_plans(conn: sqlite3.Connection, account: str, start: str | None = No
     for i, ps in by_isin.items():
         for p in ps:
             if p["source_account"] == account and i not in groups and p["start_date"] <= end:
-                out.append({"isin": i, "name": p["holding_name"], "count": 0, "total": 0, "typical": None, "cadence": None,
+                out.append({"unbooked": 0, "unbooked_total": 0, "isin": i, "name": p["holding_name"], "count": 0, "total": 0, "typical": None, "cadence": None,
                             "day_of_month": None, "last": None,
                             "holding": {"id": p["holding_id"], "ticker": p["ticker"], "name": p["holding_name"],
                                         "account": p["holding_account"]},
@@ -1146,4 +1157,58 @@ def move_plan_executions(conn: sqlite3.Connection, plan_id: int, account: str, s
         conn.execute(f"UPDATE transactions SET account=?, updated_at=? WHERE id IN ({q}) AND deleted_at IS NULL",
                      (account, _now(), *ids))
     conn.commit()
+    if ids:
+        _resettle(conn, account, [start, end])
     return len(ids)
+
+
+_QTY = re.compile(r"quantity:\s*([0-9]+(?:[.,][0-9]+)?)", re.I)
+
+
+def _resettle(conn: sqlite3.Connection, account: str, days: list[str]) -> None:
+    """Entries added inside a settled period: recompute its adjustment so nothing counts twice."""
+    for r in conn.execute("SELECT DISTINCT start, through FROM statement_settlements WHERE account=?", (account,)).fetchall():
+        if any(r["start"] <= d <= r["through"] for d in days):
+            settle(conn, account, r["start"], r["through"])
+
+
+def book_plan_runs(conn: sqlite3.Connection, account: str, isin: str, start: str | None = None, end: str | None = None,
+                   add_units: bool = False) -> dict:
+    """The statement's runs of a fund that Daybook never booked → booked like plan executions: a Finance
+    entry "DCA: <ticker>" on this account, paired with the bank line, logged on the plan (with the units
+    and price the bank printed). add_units also adds those units to the holding — leave it off when the
+    holding's quantity is already kept in step by hand."""
+    h = holding_for(conn, isin)
+    if not h:
+        raise StatementError("Add this fund as a holding first")
+    plan = conn.execute("SELECT * FROM investment_plans WHERE holding_id=? ORDER BY is_active DESC, source_account=? DESC LIMIT 1",
+                        (h["id"], account)).fetchone()
+    rep = reconcile(conn, account, start, end)
+    lines = [l for l in rep.get("missing", []) + rep.get("settled", {}).get("missing", []) if l.get("isin") == isin]
+    units = 0.0
+    for l in lines:
+        tid = "local-" + str(uuid.uuid4())
+        cadence = plan["cadence"] if plan else "bank"
+        conn.execute(
+            """INSERT INTO transactions (id, source, date, name, amount, account, category, transaction_type, notes)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (tid, "local", l["date"], f"DCA: {h['ticker']} ({cadence})", l["amount"], account, "Finance", "Finance",
+             f"From the bank statement: {l['description']}"))
+        conn.execute("UPDATE statement_lines SET txn_id=?, ignored=0 WHERE id=?", (tid, l["id"]))
+        m = _QTY.search(l["description"])
+        qty = float(m.group(1).replace(",", ".")) if m else 0.0
+        units += qty
+        if plan:
+            conn.execute(
+                """INSERT OR IGNORE INTO investment_plan_executions
+                     (plan_id, execution_date, amount_eur, price_eur, quantity_added, transaction_id, status, notes)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (plan["id"], l["date"], -l["amount"], (-l["amount"] / qty) if qty else 0.0, qty, tid, "success",
+                 "Booked from the bank statement"))
+    if add_units and units:
+        conn.execute("UPDATE holdings SET quantity = quantity + ?, cost_basis_eur = COALESCE(cost_basis_eur,0) + ?, "
+                     "updated_at=? WHERE id=?", (units, -sum(l["amount"] for l in lines), _now(), h["id"]))
+    conn.commit()
+    _resettle(conn, account, [l["date"] for l in lines])
+    return {"booked": len(lines), "amount": round(-sum(l["amount"] for l in lines), 2), "units": units,
+            "units_added": add_units and bool(units)}

@@ -154,7 +154,9 @@ Investments match by ISIN (`isin_of`; a plan execution's ISIN comes from its hol
 different fund never matches. Investment lines are filed as Finance like `plan_executor` ("DCA: <ticker>"), never mirrored —
 the holding tracks the other side. `savings_plans()` (block on the reconcile page) compares the statement's plans with Daybook's
 DCA plans (missing, paid from another account, amount, cadence). Balance skips are listed with the missing amount
-(`balance.breaks`), and `balance.unexplained` is the part of the gap the lists don't cover. Closing the gap: a line logged on another account → *move it here*; *Add all*
+(`balance.breaks`), and `balance.unexplained` is the part of the gap the lists don't cover. `book_plan_runs` books the statement's runs
+Daybook never booked like plan executions (Finance entry + execution log, units optional); adding entries or moving
+executions inside a settled period re-settles it (`_resettle`) so nothing counts twice. Closing the gap: a line logged on another account → *move it here*; *Add all*
 files by kind (investment = Transfer mirrored on the matching investment account, e.g. Trade Republic Cash → Wealth) and the
 rest as category `Alert`; *Settle* closes the period (`statement_settlements`): what's still off is booked as an `Alert`
 expense or income (`source_id` `bankcheck:<account>:…`, recomputed when the same period is settled again; other months'

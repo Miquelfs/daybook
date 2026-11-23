@@ -246,14 +246,30 @@ function ReconcileInner() {
             value={gap == null ? `${rep.counts!.missing + rep.counts!.only_daybook + rep.counts!.differs}`
               : Math.abs(gap) < 0.01 ? "Matches" : signed(gap)}
             unit={gap == null ? "to look at" : Math.abs(gap) < 0.01 ? undefined : gap > 0 ? "more in Daybook" : "less in Daybook"}
-            sub={b ? `Bank ${signed(b.bank_closing)} · Daybook ${signed(b.daybook_closing)}`
+            sub={b ? `On ${dayYear(b.closing_date)}, the statement's last day: bank ${signed(b.bank_closing)} · Daybook ${signed(b.daybook_closing)}`
               : "This statement has no running balance — only the lines are compared"}
           >
-            {priorGap !== 0 && b && (
-              <p className="text-xs text-[#71717A] mt-3">
-                {signed(priorGap)} of it was already off on {dayYear(b.opening_date)}, before this statement starts —
-                import an older one, or fix the account&apos;s opening balance.
-              </p>
+            {b && (
+              <div className="mt-3 text-xs text-[#71717A] space-y-1 tabular-nums">
+                {priorGap !== 0 && (
+                  <p>
+                    <span className="text-[#A1A1AA]">{signed(priorGap)}</span> was already off on {dayYear(b.opening_date)}, before
+                    the statement starts — from older entries; import an older statement to find it, or let Settle book it.
+                  </p>
+                )}
+                {Math.abs(b.period_gap) >= 0.01 && (
+                  <p>
+                    <span className="text-[#A1A1AA]">{signed(b.period_gap)}</span> arose during the statement — the lists below
+                    {Math.abs(b.unexplained) >= 0.01 ? `, except ${signed(b.unexplained)} from lines the export missed` : ""}.
+                  </p>
+                )}
+                {b.after.count > 0 && (
+                  <p>
+                    After {day(b.closing_date)} Daybook has {b.after.count} more entr{b.after.count === 1 ? "y" : "ies"} ({signed(b.after.amount)}),
+                    so it shows {signed(b.daybook_now)} today — the next statement checks those.
+                  </p>
+                )}
+              </div>
             )}
             {(rep.counts!.missing + rep.counts!.only_daybook > 0 || (b && Math.abs(b.closing_gap) >= 0.01)) && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
