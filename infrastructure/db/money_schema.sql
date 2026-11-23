@@ -226,6 +226,16 @@ CREATE TABLE IF NOT EXISTS statement_lines (
 );
 CREATE INDEX IF NOT EXISTS idx_stmt_lines_acct_date ON statement_lines(account, date);
 
+-- "Settle the gap": the period is closed — what's left of it is booked as 🚨 Alert and its lines
+-- stop showing as only-in-bank / only-in-Daybook.
+CREATE TABLE IF NOT EXISTS statement_settlements (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    account        TEXT NOT NULL,
+    start          TEXT NOT NULL,
+    through        TEXT NOT NULL,
+    settled_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
 -- ─── Vehicles (car, scooter) ─────────────────────────────────────────────────
 -- Costs are ordinary Transportation expenses: linked by transactions.vehicle_id,
 -- or (for history) by subcategory. Kilometres come from odometer readings; routes

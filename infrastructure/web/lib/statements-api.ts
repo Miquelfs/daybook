@@ -47,6 +47,8 @@ export type Reconcile = {
   } | null;
   mirror_account?: string | null;                     // where a buy / sell lands (Trade Republic Cash → … Wealth)
   adjustments?: { id: string; date: string; name: string; amount: number }[];
+  // settled periods are closed: their leftovers are in the 🚨 adjustment and set aside here
+  settled?: { through: string | null; missing: StmtLine[]; only_daybook: StmtTxn[] };
   missing?: StmtLine[]; differs?: StmtLine[]; only_daybook?: StmtTxn[]; matched?: StmtLine[]; ignored?: StmtLine[];
 };
 
@@ -96,6 +98,7 @@ export const statementsApi = {
   settle: (account: string, start?: string, end?: string) =>
     call<{ added: { id: string; date: string; name: string; amount: number }[] }>("/money/statements/settle",
       { method: "POST", json: { account, start, end } }),
+  unsettle: (account: string) => call<unknown>("/money/statements/unsettle", { method: "POST", json: { account } }),
   useBankAmount: (lineId: number, txnId: string) =>
     call<unknown>(`/money/statements/lines/${lineId}/use-bank-amount`, { method: "POST", json: { txn_id: txnId } }),
 };

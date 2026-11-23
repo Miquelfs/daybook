@@ -143,14 +143,22 @@ class Reconcile(unittest.TestCase):
         self.assertNotEqual(r["balance"]["closing_gap"], 0)          # the ghost cinema and the tip still differ
         added = st.settle(self.c, "BBVA")
         self.assertEqual(len(added), 1)                              # no gap before the statement → one adjustment
-        self.assertAlmostEqual(st.reconcile(self.c, "BBVA")["balance"]["closing_gap"], 0, places=2)
-        again = st.settle(self.c, "BBVA")                            # idempotent: replaces, never piles up
+        r = st.reconcile(self.c, "BBVA")
+        self.assertAlmostEqual(r["balance"]["closing_gap"], 0, places=2)
+        # Daybook had too little (a −9 cinema the bank never saw, less a 2.50 tip it missed) → a +6.50 🚨 Alert income
+        adj = self.c.execute("SELECT category, transaction_type, amount FROM transactions WHERE source_id LIKE 'bankcheck:%'").fetchone()
+        self.assertEqual(tuple(adj), ("Alert", "Income", 6.5))
+        # the period is closed: the ghost is set aside, not listed, and the adjustment isn't "only in Daybook"
+        self.assertEqual(r["only_daybook"], [])
+        self.assertEqual(r["counts"]["only_daybook"], 0)
+        self.assertEqual([t["id"] for t in r["settled"]["only_daybook"]], ["ghost"])
+        again = st.settle(self.c, "BBVA")                            # same period again: replaces, never piles up
         self.assertEqual(len(again), 1)
         self.assertEqual(self.c.execute("SELECT COUNT(*) FROM transactions WHERE source_id LIKE 'bankcheck:%'").fetchone()[0], 1)
-        # an adjustment is never spending, and never "only in Daybook"
-        self.assertEqual(self.c.execute("SELECT transaction_type FROM transactions WHERE source_id LIKE 'bankcheck:%'").fetchone()[0],
-                         "Account Setup")
-        self.assertEqual([t["id"] for t in st.reconcile(self.c, "BBVA")["only_daybook"]], ["ghost"])
+        st.unsettle(self.c, "BBVA")                                  # reopen
+        r = st.reconcile(self.c, "BBVA")
+        self.assertEqual([t["id"] for t in r["only_daybook"]], ["ghost"])
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM transactions WHERE source_id LIKE 'bankcheck:%'").fetchone()[0], 0)
 
 
 class Kinds(unittest.TestCase):

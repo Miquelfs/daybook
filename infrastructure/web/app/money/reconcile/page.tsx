@@ -189,6 +189,8 @@ function ReconcileInner() {
   const restore = useMutation({ mutationFn: (id: number) => statementsApi.ignore(id, false), onSuccess: refresh });
   const addAll = useMutation({ mutationFn: () => statementsApi.addAll(account, range.start, range.end), onSuccess: refresh });
   const settle = useMutation({ mutationFn: () => statementsApi.settle(account, range.start, range.end), onSuccess: refresh });
+  const unsettle = useMutation({ mutationFn: () => statementsApi.unsettle(account), onSuccess: refresh });
+  const [showSettled, setShowSettled] = useState(false);
 
   const categories = (meta?.categories ?? []).map((c) => c.key);
   const accounts = [...new Set([...(meta?.accounts ?? []), ...status.map((s) => s.account)])];
@@ -262,17 +264,16 @@ function ReconcileInner() {
                 import an older one, or fix the account&apos;s opening balance.
               </p>
             )}
-            {b && (Math.abs(b.closing_gap) >= 0.01 || (rep.adjustments?.length ?? 0) > 0) && (
+            {(rep.counts!.missing + rep.counts!.only_daybook > 0 || (b && Math.abs(b.closing_gap) >= 0.01)) && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button className={btn} disabled={settle.isPending}
                         onClick={() => {
-                          if (confirm("Book what's still off as 🚨 adjustments (never counted as spending)? Do it after adding / moving what you can; pressing it again recomputes them.")) settle.mutate();
+                          const g = b ? -b.closing_gap : 0;
+                          const what = Math.abs(g) >= 0.01 ? `${signed(g)} goes in as a 🚨 Alert ${g < 0 ? "expense" : "income"}, and ` : "";
+                          if (confirm(`Close this period? ${what}what's still only in the bank or only in Daybook is set aside. Do it after adding / moving what you can — settling again recomputes it.`)) settle.mutate();
                         }}>
-                  <Scale size={12} />{(rep.adjustments?.length ?? 0) > 0 ? "Settle again" : "Settle the gap"}
+                  <Scale size={12} />Settle the gap
                 </button>
-                {rep.adjustments?.map((a) => (
-                  <span key={a.id} className="text-xs text-[#71717A]">{day(a.date)} {signed(a.amount)}</span>
-                ))}
                 {settle.error && <span className="text-xs text-rose-400">{(settle.error as Error).message}</span>}
               </div>
             )}
@@ -298,6 +299,50 @@ function ReconcileInner() {
             <input type="date" className={input} value={range.end ?? rep.end} min={rep.coverage![0]} max={rep.coverage![1]}
                    onChange={(e) => setRange((r) => ({ ...r, end: e.target.value || undefined }))} />
           </div>
+
+          {rep.settled?.through && (
+            <Panel className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm">Settled through {dayYear(rep.settled.through)}</p>
+                  <p className="text-xs text-[#71717A] mt-0.5">
+                    {rep.settled.missing.length + rep.settled.only_daybook.length === 0 ? "Nothing was left over."
+                      : `${rep.settled.missing.length} bank line${rep.settled.missing.length === 1 ? "" : "s"} and ${rep.settled.only_daybook.length} Daybook entr${rep.settled.only_daybook.length === 1 ? "y" : "ies"} set aside`}
+                    {rep.adjustments?.filter((a) => a.date <= rep.settled!.through!).map((a) => ` · 🚨 ${day(a.date)} ${signed(a.amount)}`)}
+                  </p>
+                </div>
+                {rep.settled.missing.length + rep.settled.only_daybook.length > 0 && (
+                  <button className="text-xs text-[#71717A] hover:text-[#FAFAFA]" onClick={() => setShowSettled(!showSettled)}>
+                    {showSettled ? "Hide" : "Show"}
+                  </button>
+                )}
+                <button className={btn} disabled={unsettle.isPending}
+                        onClick={() => { if (confirm("Reopen the last settled period? Its 🚨 adjustment is removed and its lines show again.")) unsettle.mutate(); }}>
+                  <RotateCcw size={12} />Reopen
+                </button>
+              </div>
+              {showSettled && (
+                <div className="mt-3 divide-y divide-[#18181B]">
+                  {rep.settled.missing.map((l) => (
+                    <div key={l.id} className="py-2 flex items-center gap-3">
+                      <DayLink d={l.date} />
+                      <p className="text-sm text-[#A1A1AA] flex-1 min-w-0 truncate">{l.description}</p>
+                      <span className="text-[10px] uppercase tracking-widest text-[#52525B]">bank</span>
+                      <Amount n={l.amount} />
+                    </div>
+                  ))}
+                  {rep.settled.only_daybook.map((t) => (
+                    <div key={t.id} className="py-2 flex items-center gap-3">
+                      <DayLink d={t.date} />
+                      <p className="text-sm text-[#A1A1AA] flex-1 min-w-0 truncate">{t.name}</p>
+                      <span className="text-[10px] uppercase tracking-widest text-[#52525B]">daybook</span>
+                      <Amount n={t.amount} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+          )}
 
           {rep.missing!.length > 0 && (
             <Block title="Only in the bank"
@@ -334,7 +379,7 @@ function ReconcileInner() {
           )}
 
           {rep.counts!.missing + rep.counts!.differs + rep.counts!.only_daybook === 0 && (
-            <Empty>Every line on the statement is in Daybook, and nothing extra. </Empty>
+            <Empty>{rep.settled?.through ? "Nothing new since the last settled period." : "Every line on the statement is in Daybook, and nothing extra."}</Empty>
           )}
 
           {rep.ignored!.length > 0 && (

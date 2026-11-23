@@ -14,8 +14,9 @@ Bank statements → reconciliation (domains/money/statements.py).
   POST   /money/statements/lines/{id}/move     {txn_id} — logged on another account: move it here and pair
   POST   /money/statements/add-all             {account, start?, end?} — every line only in the bank → Daybook
                                                (by kind; the rest as 🚨 Alert)
-  POST   /money/statements/settle              {account, start?, end?} — what's still off → 🚨 adjustments
-                                               (Account Setup, never spending); replaces earlier ones
+  POST   /money/statements/settle              {account, start?, end?} — close the period: what's still off →
+                                               🚨 Alert expense / income; its unexplained lines are set aside
+  POST   /money/statements/unsettle            {account} — reopen the last settled period
 """
 
 from __future__ import annotations
@@ -130,6 +131,12 @@ class RangeBody(BaseModel):
 @router.post("/add-all")
 def add_all(body: RangeBody, conn: DB):
     return statements.add_all(conn, body.account, body.start, body.end)
+
+
+@router.post("/unsettle")
+def unsettle(body: RangeBody, conn: DB):
+    statements.unsettle(conn, body.account)
+    return {"status": "reopened"}
 
 
 @router.post("/settle")

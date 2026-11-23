@@ -150,8 +150,9 @@ similar name) → only in bank / amount differs / only in Daybook + the balance 
 Lines carry a `kind` (card, transfer, investment, interest, dividend, cashback, fee, tax — the bank's type column, or Claude for
 PDFs, which are read in page chunks in parallel). Closing the gap: a line logged on another account → *move it here*; *Add all*
 files by kind (investment = Transfer mirrored on the matching investment account, e.g. Trade Republic Cash → Wealth) and the
-rest as category `Alert`; *Settle* books what's still off as `Alert` adjustments with transaction_type `Account Setup`
-(never spending), `source_id` `bankcheck:<account>:…`, recomputed on every press.
+rest as category `Alert`; *Settle* closes the period (`statement_settlements`): what's still off is booked as an `Alert`
+expense or income (`source_id` `bankcheck:<account>:…`, recomputed when the same period is settled again; other months'
+stay) and lines/entries up to that date are set aside, not listed. *Reopen* (`unsettle`) undoes the last one.
 Vehicle GPS legs are built from consecutive points (Overland stores a drive as one-point segments); bump `routes.READER`
 when the leg builder changes so every day is re-read (also on API startup).
 Vehicles (`domains/vehicles/`, `/vehicles/*`, `/explore/vehicles` — an Explore sub-tab next to Movement): costs are ordinary Transportation expenses —

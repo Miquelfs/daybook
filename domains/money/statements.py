@@ -26,9 +26,10 @@ Closing the gap (all on the reconcile page):
                               kind — an investment as a Transfer (mirrored on the matching investment
                               account), interest / dividends / cashback as Income, fees / tax as Finance —
                               and everything you'd have typed yourself as 🚨 Alert, to look at later.
-  settle                      what's still off becomes a 🚨 adjustment (Account Setup, so it's never
-                              counted as spending): the gap before the statement starts, and the rest at
-                              its end. Running it again replaces the previous adjustments.
+  settle                      closes the period: what's still off is booked as an 🚨 Alert expense or
+                              income (the gap before the statement starts, and the rest at its end),
+                              and its unexplained lines stop showing. Settling the same period again
+                              recomputes it; a new month adds its own. unsettle() reopens the last one.
 """
 
 from __future__ import annotations
@@ -652,7 +653,8 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
     txns = {r["id"]: r for r in conn.execute(
         """SELECT id, date, name, amount, category, subcategory FROM transactions
            WHERE account=? AND deleted_at IS NULL AND date BETWEEN ? AND ?
-             AND COALESCE(transaction_type,'') != 'Account Setup'""",
+             AND COALESCE(transaction_type,'') != 'Account Setup'
+             AND COALESCE(source_id,'') NOT LIKE 'bankcheck:%'""",
         (account, _shift(start, -DATE_WINDOW), _shift(end, DATE_WINDOW)))}
     # Links you made by hand may point anywhere (another month, another account) — honour them.
     manual_ids = [l["txn_id"] for l in lines if l["txn_id"]]
@@ -715,6 +717,14 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
             missing.append(row)
     only_daybook = [_txn(t) for t in sorted(txns.values(), key=lambda t: t["date"])
                     if t["id"] not in taken and start <= t["date"] <= end]
+    # A settled period is closed: its leftovers are in the 🚨 adjustment, so they're set aside.
+    through = settled_through(conn, account)
+    settled = {"through": through, "missing": [], "only_daybook": []}
+    if through:
+        settled["missing"] = [r for r in missing if r["date"] <= through]
+        settled["only_daybook"] = [t for t in only_daybook if t["date"] <= through]
+        missing = [r for r in missing if r["date"] > through]
+        only_daybook = [t for t in only_daybook if t["date"] > through]
 
     # Balances: what the bank printed vs what Daybook adds up to, at both ends of the period.
     with_bal = [l for l in lines if l["balance"] is not None]
@@ -743,6 +753,7 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
                    "bank_in": round(sum(l["amount"] for l in lines if l["amount"] > 0), 2)},
         "balance": bal,
         "mirror_account": investment_account_for(conn, account),
+        "settled": settled,
         "adjustments": [dict(r) for r in conn.execute(
             "SELECT id, date, name, amount FROM transactions WHERE source_id LIKE ? AND deleted_at IS NULL ORDER BY date",
             (f"bankcheck:{account}:%",))],
@@ -900,15 +911,25 @@ def add_all(conn: sqlite3.Connection, account: str, start: str | None = None, en
     return added
 
 
+def settled_through(conn: sqlite3.Connection, account: str) -> str | None:
+    r = conn.execute("SELECT MAX(through) FROM statement_settlements WHERE account=?", (account,)).fetchone()
+    return r[0] if r else None
+
+
 def settle(conn: sqlite3.Connection, account: str, start: str | None = None, end: str | None = None) -> list[dict]:
-    """Book what's still off as 🚨 adjustments that never count as spending (Account Setup): the gap
-    already there before the statement starts, then the rest at its end. Replaces earlier ones."""
-    conn.execute("DELETE FROM transactions WHERE source_id LIKE ?", (f"bankcheck:{account}:%",))   # ours, recomputed
+    """Close the period: book what's still off as 🚨 Alert — an expense when Daybook had too much, an
+    income when too little — the gap already there before the statement starts, then the rest at its
+    end. Settling the same period again recomputes its adjustments (other months' stay)."""
+    cov = coverage(conn, account)
+    if not cov:
+        raise StatementError("No statement for this account yet")
+    start, end = start or cov[0], end or cov[1]
+    conn.execute("DELETE FROM transactions WHERE source_id LIKE ? AND date BETWEEN ? AND ?",
+                 (f"bankcheck:{account}:%", _shift(start, -1), end))            # ours, recomputed
+    conn.execute("DELETE FROM statement_settlements WHERE account=? AND through BETWEEN ? AND ?", (account, start, end))
     conn.commit()
     rep = reconcile(conn, account, start, end)
     b = rep.get("balance")
-    if not b:
-        raise StatementError("This statement has no running balance, so there's no gap to settle")
     out = []
 
     def book(day: str, amount: float, name: str, note: str, tag: str):
@@ -918,14 +939,29 @@ def settle(conn: sqlite3.Connection, account: str, start: str | None = None, end
         conn.execute(
             """INSERT INTO transactions (id, source, date, name, amount, account, category, transaction_type, notes, source_id)
                VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (tid, "local", day, name, round(amount, 2), account, ALERT, "Account Setup", note,
+            (tid, "local", day, name, round(amount, 2), account, ALERT, "Expense" if amount < 0 else "Income", note,
              f"bankcheck:{account}:{tag}:{day}"))
         out.append({"id": tid, "date": day, "name": name, "amount": round(amount, 2)})
 
-    book(b["opening_date"], -b["opening_gap"], "🚨 Bank check · off before this statement",
-         f"Daybook was {b['opening_gap']:+.2f} off the bank on {b['opening_date']}. Not spending — an adjustment.", "open")
-    book(b["closing_date"], -(b["closing_gap"] - b["opening_gap"]), "🚨 Bank check · unexplained difference",
-         "What the statement period still disagreed on after the lines were sorted. Not spending — an adjustment; "
-         "fix the real entries and press Settle again to recompute it.", "close")
+    if b:
+        book(b["opening_date"], -b["opening_gap"], "🚨 Bank check · off before this statement",
+             f"Daybook was {b['opening_gap']:+.2f} off the bank on {b['opening_date']}, before the statement starts.", "open")
+        book(b["closing_date"], -(b["closing_gap"] - b["opening_gap"]), "🚨 Bank check · unexplained difference",
+             f"What {start} → {b['closing_date']} still disagreed on after the lines were sorted. Fix the real entries "
+             "and press Settle again to recompute it.", "close")
+    conn.execute("INSERT INTO statement_settlements (account, start, through) VALUES (?,?,?)",
+                 (account, start, b["closing_date"] if b else end))
     conn.commit()
     return out
+
+
+def unsettle(conn: sqlite3.Connection, account: str) -> None:
+    """Reopen the last settled period: its adjustments go, its lines show again."""
+    r = conn.execute("SELECT id, start, through FROM statement_settlements WHERE account=? ORDER BY through DESC, id DESC LIMIT 1",
+                     (account,)).fetchone()
+    if not r:
+        return
+    conn.execute("DELETE FROM transactions WHERE source_id LIKE ? AND date BETWEEN ? AND ?",
+                 (f"bankcheck:{account}:%", _shift(r["start"], -1), r["through"]))
+    conn.execute("DELETE FROM statement_settlements WHERE id=?", (r["id"],))
+    conn.commit()
