@@ -11,8 +11,9 @@ interface Props {
 }
 
 // One compact line: kicker + date on the left, day navigation inline on the
-// right — no separate nav row eating vertical space on the phone. The year sits in
-// the kicker so the title ("September 30") never gets cut next to the buttons.
+// right — no separate nav row eating vertical space on the phone. The year stays in
+// the title, in grey; when "September 30 2026" doesn't fit next to the buttons it
+// wraps under the date instead of being cut.
 export function DayHeader({ date }: Props) {
   const d = parseISO(date);
   const prev = format(subDays(d, 1), "yyyy-MM-dd");
@@ -24,13 +25,14 @@ export function DayHeader({ date }: Props) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs text-[#F59E0B] uppercase tracking-[0.2em] mb-1.5">
-            {isToday(d) ? "Today" : format(d, "EEEE")} · {format(d, "yyyy")}
+            {isToday(d) ? "Today" : format(d, "EEEE")}
           </p>
           <h1
-            className="font-semibold leading-[1.15] tracking-tight text-[#FAFAFA] truncate"
+            className="font-semibold leading-[1.15] tracking-tight text-[#FAFAFA] flex flex-wrap items-baseline gap-x-[0.3em]"
             style={{ fontSize: "clamp(1.5rem, 5.5vw, 3.25rem)" }}
           >
-            {format(d, "MMMM d")}
+            <span className="whitespace-nowrap">{format(d, "MMMM d")}</span>
+            <span className="text-[#71717A] font-normal">{format(d, "yyyy")}</span>
           </h1>
         </div>
 
