@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Flag, Plus, Trash2 } from "lucide-react";
+import { Toggle } from "@/components/ui/kit";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -93,6 +94,42 @@ export function BRacesCard({ goalId }: { goalId: number }) {
           </div>
         </div>
       )}
+      <GymRuns goalId={goalId} onChange={refresh} />
     </section>
+  );
+}
+
+type GymRunsState = { enabled: boolean; runs: number; gyms_swapped: number; gyms_tapered: number };
+
+/** One gym a week and the other an easy run — and no gym in the last days before a race. */
+function GymRuns({ goalId, onChange }: { goalId: number; onChange: () => void }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const { data } = useQuery<GymRunsState | null>({
+    queryKey: ["gym-runs", goalId],
+    queryFn: () => fetch(`${BASE}/race-plans/goals/${goalId}/gym-runs`).then((r) => (r.ok ? r.json() : null)),
+  });
+  async function set(on: boolean) {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/race-plans/goals/${goalId}/gym-runs`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: on }),
+      });
+      if (r.ok) qc.setQueryData(["gym-runs", goalId], await r.json());
+      for (const k of ["omyra-upcoming", "omyra-all-sessions", "omyra-week"]) qc.invalidateQueries({ queryKey: [k] });
+      onChange();
+    } finally { setBusy(false); }
+  }
+  if (!data) return null;
+  return (
+    <div className="mt-4 pt-4 border-t border-[#18181B] space-y-1">
+      <Toggle on={data.enabled} onChange={set} disabled={busy} label="One gym a week, the other an easy run" />
+      <p className="text-xs text-[#52525B]">
+        {data.enabled
+          ? `${data.runs} gym session${data.runs === 1 ? "" : "s"} became easy runs; the heavy one stays each week` +
+            (data.gyms_tapered ? ` · no gym in the last days before a race (${data.gyms_tapered} set aside)` : "")
+          : "Keeps the one heavy session that protects the 312's last hours and your tendons; the other becomes a 35-min easy run."}
+      </p>
+    </div>
   );
 }

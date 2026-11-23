@@ -189,3 +189,83 @@ CREATE TABLE IF NOT EXISTS money_settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
 );
+
+-- ─── Bank statements (reconciliation) ────────────────────────────────────────
+-- Expenses are still typed by hand in Daybook; a statement exported from the bank
+-- (CSV / XLSX / XLS / PDF) is only a check against them. Its lines are kept per
+-- account, deduplicated by fingerprint so overlapping exports never double up,
+-- and matched against `transactions` on every read (domains/money/statements.py).
+CREATE TABLE IF NOT EXISTS statement_imports (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    account        TEXT NOT NULL,
+    filename       TEXT,
+    bank           TEXT,                      -- parser's guess ('BBVA', 'Revolut', …)
+    period_start   TEXT,
+    period_end     TEXT,
+    lines_total    INTEGER NOT NULL DEFAULT 0,
+    lines_new      INTEGER NOT NULL DEFAULT 0,
+    imported_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS statement_lines (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_id      INTEGER NOT NULL REFERENCES statement_imports(id) ON DELETE CASCADE,
+    account        TEXT NOT NULL,
+    date           TEXT NOT NULL,             -- YYYY-MM-DD (operation date when the bank gives one)
+    seq            INTEGER NOT NULL DEFAULT 0,-- chronological order within the import
+    description    TEXT NOT NULL,
+    amount         REAL NOT NULL,             -- bank sign: negative = money out
+    balance        REAL,                      -- running balance after this line, when the bank prints it
+    currency       TEXT,
+    fingerprint    TEXT NOT NULL,
+    txn_id         TEXT,                      -- a link you made by hand (or by "Add to Daybook")
+    ignored        INTEGER NOT NULL DEFAULT 0,-- "not an expense to track" (internal move, hold…)
+    UNIQUE (account, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_stmt_lines_acct_date ON statement_lines(account, date);
+
+-- ─── Vehicles (car, scooter) ─────────────────────────────────────────────────
+-- Costs are ordinary Transportation expenses: linked by transactions.vehicle_id,
+-- or (for history) by subcategory. Kilometres come from odometer readings; routes
+-- from the GPS on days carrying the vehicle's day tag (domains/vehicles/).
+CREATE TABLE IF NOT EXISTS vehicles (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT NOT NULL,
+    kind           TEXT NOT NULL DEFAULT 'car',   -- 'car' | 'scooter' | 'motorbike' | 'other'
+    make_model     TEXT,
+    plate          TEXT,
+    year           INTEGER,
+    fuel           TEXT,                          -- 'petrol' | 'diesel' | 'electric' | 'hybrid'
+    bought_on      TEXT,
+    bought_km      REAL,
+    bought_price   REAL,
+    sold_on        TEXT,
+    day_tag        TEXT,                          -- tag slug marking the days you used it
+    subcategories  TEXT NOT NULL DEFAULT '[]',    -- JSON: Transportation subcategories that are this vehicle's
+    notes          TEXT,
+    created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS vehicle_odometer (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id     INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+    date           TEXT NOT NULL,
+    km             REAL NOT NULL,
+    note           TEXT,
+    created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_odo_vehicle ON vehicle_odometer(vehicle_id, date);
+
+-- One row per vehicle per day it was used, from that day's GPS (rebuilt nightly).
+CREATE TABLE IF NOT EXISTS vehicle_days (
+    vehicle_id     INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+    date           TEXT NOT NULL,
+    km             REAL NOT NULL DEFAULT 0,
+    minutes        REAL NOT NULL DEFAULT 0,
+    legs           INTEGER NOT NULL DEFAULT 0,
+    start_place    TEXT,
+    end_place      TEXT,
+    route          TEXT,                          -- JSON: [[ [lat,lng], … ], …] one list per leg, simplified
+    computed_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    PRIMARY KEY (vehicle_id, date)
+);

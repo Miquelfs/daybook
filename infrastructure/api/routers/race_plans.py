@@ -1044,7 +1044,10 @@ def create_b_race(goal_id: int, body: BRaceCreate, conn: DB):
     from domains.training import b_race
     _row(conn, "race_goals", goal_id)
     try:
-        return b_race.create(conn, goal_id, body.name.strip() or "Half marathon", body.race_date, body.race_type)
+        out = b_race.create(conn, goal_id, body.name.strip() or "Half marathon", body.race_date, body.race_type)
+        from domains.training import gym_runs
+        gym_runs.apply(conn, goal_id)                 # the no-gym taper before it
+        return out
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -1052,11 +1055,15 @@ def create_b_race(goal_id: int, body: BRaceCreate, conn: DB):
 @router.delete("/b-races/{b_id}", status_code=200)
 def delete_b_race(b_id: int, conn: DB):
     """Remove a B race — its runs go, the swapped bike sessions come back."""
-    from domains.training import b_race
+    from domains.training import b_race, gym_runs
+    b_race.ensure_table(conn)
+    g = conn.execute("SELECT goal_id FROM b_races WHERE id=?", (b_id,)).fetchone()
     try:
         b_race.delete(conn, b_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    if g:
+        gym_runs.apply(conn, g["goal_id"])           # its no-gym taper goes with it
     return {"deleted": b_id}
 
 
@@ -1278,19 +1285,62 @@ def rematerialize_goal(
                 raise HTTPException(status_code=422, detail="from must be 'current_week' or ISO YYYY-MM-DD")
             cutoff = from_date
 
+    # tour days belong to their block, not the template — they stay
+    keep = "AND session_type != 'Cycling - Tour day'"
     if cutoff:
         deleted = conn.execute(
-            "DELETE FROM plan_sessions WHERE goal_id=? AND status='pending' AND session_date >= ?",
+            f"DELETE FROM plan_sessions WHERE goal_id=? AND status='pending' AND session_date >= ? {keep}",
             (goal_id, cutoff),
         ).rowcount
     else:
         deleted = conn.execute(
-            "DELETE FROM plan_sessions WHERE goal_id=? AND status='pending'",
+            f"DELETE FROM plan_sessions WHERE goal_id=? AND status='pending' {keep}",
             (goal_id,),
         ).rowcount
     conn.commit()
     count = _materialize_sessions(conn, goal_id, row, from_date=cutoff)
-    return {"sessions_deleted": deleted, "sessions_created": count, "from": cutoff}
+    reapplied = _reapply_on_top(conn, goal_id)
+    return {"sessions_deleted": deleted, "sessions_created": count, "from": cutoff, **reapplied}
+
+
+def _reapply_on_top(conn, goal_id: int) -> dict:
+    """A fresh template has none of what you added on top of it: put the B races' runs (and their
+    taper) back, then the gym → run swap, then re-plan around the roster."""
+    from domains.training import b_race, gym_runs
+    b_race.ensure_table(conn)
+    again = []
+    for b in conn.execute("SELECT * FROM b_races WHERE goal_id=? ORDER BY race_date", (goal_id,)).fetchall():
+        if b["race_date"] <= date.today().isoformat():
+            continue
+        b_race.delete(conn, b["id"])
+        try:
+            b_race.create(conn, goal_id, b["name"], b["race_date"], b["race_type"])
+            again.append(b["name"])
+        except ValueError:
+            pass
+    gym = gym_runs.apply(conn, goal_id)
+    return {"b_races_reapplied": again, "gym_runs": gym}
+
+
+class GymRunsIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/goals/{goal_id}/gym-runs")
+def get_gym_runs(goal_id: int, conn: DB):
+    from domains.training import gym_runs
+    _row(conn, "race_goals", goal_id)
+    return gym_runs.summary(conn, goal_id)
+
+
+@router.put("/goals/{goal_id}/gym-runs")
+def put_gym_runs(goal_id: int, body: GymRunsIn, conn: DB, background: BackgroundTasks):
+    """One gym a week and the other an easy run (on), or the plan's gym sessions as written (off)."""
+    from domains.training import gym_runs
+    _row(conn, "race_goals", goal_id)
+    out = gym_runs.set_enabled(conn, goal_id, body.enabled)
+    background.add_task(_push_now)
+    return out
 
 
 @router.get("/goals/{goal_id}/pace-zones")
