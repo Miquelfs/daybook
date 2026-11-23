@@ -148,7 +148,8 @@ fine) and `reconcile()` matches them to `transactions` **on every read** (same a
 similar name) → only in bank / amount differs / only in Daybook + the balance gap at both ends. Only hand links
 (`txn_id`) and ignores are stored. Page `/money/reconcile` (proxy `app/api/money/statements/[[...path]]`).
 Lines carry a `kind` (card, transfer, investment, interest, dividend, cashback, fee, tax — the bank's type column, or Claude for
-PDFs, which are read in page chunks in parallel). Closing the gap: a line logged on another account → *move it here*; *Add all*
+PDFs, which are read in page chunks in parallel). A Trade Republic PDF has its own reader, `statement_tr.py` (word positions,
+no AI, checked against the statement's summary box); Claude is only the fallback for other PDFs. Closing the gap: a line logged on another account → *move it here*; *Add all*
 files by kind (investment = Transfer mirrored on the matching investment account, e.g. Trade Republic Cash → Wealth) and the
 rest as category `Alert`; *Settle* closes the period (`statement_settlements`): what's still off is booked as an `Alert`
 expense or income (`source_id` `bankcheck:<account>:…`, recomputed when the same period is settled again; other months'

@@ -7,7 +7,8 @@ exported from the bank is only read to find where the two disagree:
   parse(raw, filename)        CSV / XLSX / XLS from any bank (BBVA, Sabadell, Revolut, Trade
                               Republic…): the header row is found by its column names (Spanish or
                               English), amounts in either "1.234,56" or "1,234.56", one signed amount
-                              column or separate debit / credit ones. A PDF is read by Claude.
+                              column or separate debit / credit ones. A Trade Republic PDF has its own
+                              reader (statement_tr.py, on the Pi); any other PDF is read by Claude.
   store(conn, account, …)     keeps the lines per account; a line already stored (same day, amount,
                               text and position among identical ones) is skipped, so overlapping
                               exports never double up.
@@ -470,7 +471,10 @@ If this part has no movements, return an empty list.
 
 
 def _pdf_pages(raw: bytes) -> list[str]:
-    import fitz  # pymupdf
+    try:
+        import pymupdf as fitz
+    except ImportError:                          # older pymupdf
+        import fitz
     try:
         doc = fitz.open(stream=raw, filetype="pdf")
     except Exception as e:
@@ -524,6 +528,12 @@ def _parse_pdf(raw: bytes) -> Parsed:
     pages = _pdf_pages(raw)
     if len("".join(pages).strip()) < 40:
         raise StatementError("That PDF has no text in it (a scan?) — export a CSV or Excel instead")
+    from domains.money import statement_tr
+    if statement_tr.looks_like("\n".join(pages[:3])):  # its own reader: stays on the Pi, checks itself
+        try:
+            return statement_tr.parse_pdf(raw)
+        except StatementError:
+            log.warning("Trade Republic reader found nothing — asking Claude instead")
     import anthropic
     from concurrent.futures import ThreadPoolExecutor
     client = anthropic.Anthropic()
