@@ -147,7 +147,7 @@ Revolut fee/state), stores lines per account in `statement_lines` (fingerprint-d
 fine) and `reconcile()` matches them to `transactions` **on every read** (same amount ±4 days, then a near amount on a
 similar name) → only in bank / amount differs / only in Daybook + the balance gap at both ends. Only hand links
 (`txn_id`) and ignores are stored. Page `/money/reconcile` (proxy `app/api/money/statements/[[...path]]`).
-Vehicles (`domains/vehicles/`, `/vehicles/*`, `/money/vehicles`): costs are ordinary Transportation expenses —
+Vehicles (`domains/vehicles/`, `/vehicles/*`, `/explore/vehicles` — an Explore sub-tab next to Movement): costs are ordinary Transportation expenses —
 `transactions.vehicle_id`, or for history the vehicle's `subcategories`. Routes: GPS legs at vehicle speed
 (`vehicle_legs`, read for every tagged day + every day of the last 45) are assigned by your pick
 (`vehicle_leg_picks`, 0 = not mine) else the one vehicle whose day tag (`motorcycle` = Scooter ride, `car_drive` =

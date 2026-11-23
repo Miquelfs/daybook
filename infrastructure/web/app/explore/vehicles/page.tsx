@@ -7,7 +7,8 @@ import { format, parseISO } from "date-fns";
 import { Car, Bike, Plus } from "lucide-react";
 import { fmtAmount } from "@/lib/money-api";
 import { vehiclesApi, KIND_LABEL, type InboxLeg, type VehicleOverview } from "@/lib/statements-api";
-import { ActionButton, Block, Empty, Panel, Skeleton, Stat, Stats } from "@/components/ui/kit";
+import { ActionButton, Block, Empty, PageHeader, Panel, Skeleton, Stat, Stats } from "@/components/ui/kit";
+import { ExploreTabs } from "@/components/explore/ExploreTabs";
 import { VehicleForm } from "@/components/vehicles/VehicleForm";
 import { AreaPlan } from "@/components/plan/AreaPlan";
 
@@ -69,8 +70,10 @@ export default function VehiclesPage() {
   const refresh = () => { qc.invalidateQueries({ queryKey: ["vehicles"] }); qc.invalidateQueries({ queryKey: ["area-plan", "vehicles"] }); };
 
   return (
-    <main className="max-w-2xl mx-auto px-4 pb-24 space-y-8">
-      <Block title="Your vehicles" note="Kilometres from the odometer, costs from your Transportation expenses, routes from the GPS."
+    <main className="max-w-3xl mx-auto px-4 pb-24 pt-8 space-y-8">
+      <PageHeader title="Vehicles" subtitle="The car and the scooter — kilometres, routes, what they cost and what's due"
+                  tabs={<ExploreTabs active="/explore/vehicles" />} />
+      <Block title="Your vehicles" note="Kilometres from the odometer, routes from the GPS, costs from your Transportation expenses in Money."
              action={!adding && <ActionButton icon={Plus} onClick={() => setAdding(true)}>Add</ActionButton>}>
         {adding && (
           <Panel className="p-4 mb-3">
@@ -86,7 +89,7 @@ export default function VehiclesPage() {
               const v = o.vehicle;
               const Icon = v.kind === "car" ? Car : Bike;
               return (
-                <Link key={v.id} href={`/money/vehicles/${v.id}`} className="block hover:opacity-90 transition-opacity">
+                <Link key={v.id} href={`/explore/vehicles/${v.id}`} className="block hover:opacity-90 transition-opacity">
                   <Panel className="p-4">
                     <div className="flex items-center gap-2 mb-3">
                       <Icon size={15} className="text-[#71717A]" />

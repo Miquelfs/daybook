@@ -32,7 +32,7 @@ export const AREAS: Record<AreaKey, Area> = {
   culture:  { key: "culture",  label: "Reading & culture", icon: BookOpen, href: "/explore" },
   projects: { key: "projects", label: "Projects",  icon: Wrench,       href: null },
   home:     { key: "home",     label: "Home",      icon: House,        href: null },
-  vehicles: { key: "vehicles", label: "Vehicles",  icon: Car,          href: "/money/vehicles" },
+  vehicles: { key: "vehicles", label: "Vehicles",  icon: Car,          href: "/explore/vehicles" },
   admin:    { key: "admin",    label: "Admin",     icon: FileText,     href: null },
   personal: { key: "personal", label: "Personal",  icon: Sparkles,     href: null },
 };

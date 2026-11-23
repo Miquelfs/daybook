@@ -120,7 +120,7 @@ def _notes(r, due: dict) -> str:
         bits.append(f"due at {due['km']:,} km" + (f" ({due['km_left']:,} to go)" if due["km_left"] is not None and due["km_left"] > 0 else ""))
     if due["by"] == "km" and due["date"]:
         bits.append("date projected from your pace")
-    return " · ".join(bits) + ". Tick it off here or on the vehicle's page (Money → Vehicles)."
+    return " · ".join(bits) + ". Tick it off here or on the vehicle's page (Explore → Vehicles)."
 
 
 def _readings(conn, v) -> list[tuple[str, float]]:

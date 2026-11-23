@@ -72,19 +72,19 @@ export default function VehiclePage() {
   });
   const remove = useMutation({
     mutationFn: () => vehiclesApi.remove(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["vehicles"] }); router.push("/money/vehicles"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["vehicles"] }); router.push("/explore/vehicles"); },
   });
   const recompute = useMutation({ mutationFn: () => vehiclesApi.refresh(), onSuccess: refreshAll });
 
-  if (isLoading || !s) return <main className="max-w-2xl mx-auto px-4"><Skeleton h={200} /></main>;
+  if (isLoading || !s) return <main className="max-w-2xl mx-auto px-4 pt-8"><Skeleton h={200} /></main>;
   const v = s.vehicle;
   const kmPeriod = s.km_period || s.gps.km_period;
   const subsOffered = [...new Set([...v.subcategories, ...s.by_subcategory.map((b) => b.subcategory)])].filter((x) => x !== "Other");
 
   return (
-    <main className="max-w-2xl mx-auto px-4 pb-24 space-y-8">
+    <main className="max-w-2xl mx-auto px-4 pb-24 pt-8 space-y-8">
       <div>
-        <Link href="/money/vehicles" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Vehicles</Link>
+        <Link href="/explore/vehicles" className="text-xs text-[#71717A] hover:text-[#A1A1AA] uppercase tracking-widest inline-block mb-2">← Vehicles</Link>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold tracking-tight">{v.name}</h1>
