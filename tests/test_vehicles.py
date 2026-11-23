@@ -87,6 +87,33 @@ class Legs(unittest.TestCase):
         self.assertEqual(len(routes.legs_from_segments(segs)), 1)
 
 
+    def test_forced_window_keeps_a_slow_or_walking_segment(self):
+        line = [[2.60 + i * 0.001, 39.57] for i in range(11)]       # ~0.9 km in 20 min: "walking" pace
+        seg = self.seg("2026-11-01T10:00:00Z", "2026-11-01T10:20:00Z", line, motion="walking")
+        self.assertEqual(routes.legs_from_segments([seg]), [])
+        legs = routes.legs_from_segments([seg], [("2026-11-01T10:20:00Z", "2026-11-01T10:20:00Z")])
+        self.assertEqual(len(legs), 1)
+
+
+class ActivityTimes(unittest.TestCase):
+    def test_activity_with_offset_compares_with_gps(self):
+        from domains.locations import locations_query as lq
+        db = tmpdir() / "daybook.db"
+        con = sqlite3.connect(db)
+        con.executescript("""
+            CREATE TABLE wellness_daily (date TEXT, utc_offset_min INTEGER);
+            CREATE TABLE activities (date TEXT, activity_type TEXT, start_time TEXT, duration_seconds INTEGER);
+            INSERT INTO wellness_daily VALUES ('2026-06-04', 120);
+            INSERT INTO activities VALUES ('2026-06-04','cycling','2026-06-04T08:00:00Z',3600),
+                                          ('2026-06-04','running','2026-06-04 18:00:00',1800);
+        """)
+        con.commit(); con.close()
+        with mock.patch.object(lq, "_DAYBOOK_DB", db):
+            acts = lq._activities_for_date("2026-06-04")
+        self.assertTrue(all(a.tzinfo is None and b.tzinfo is None for a, b, _ in acts))
+        self.assertEqual([a.hour for a, _, _ in acts], [8, 16])     # Z kept as UTC; naive local − 2 h
+
+
 class Assign(unittest.TestCase):
     def setUp(self):
         d = tmpdir()
@@ -128,6 +155,19 @@ class Assign(unittest.TestCase):
         self.assertIsNotNone(tagged)
         v = self.c.execute("SELECT * FROM vehicles WHERE id=1").fetchone()
         self.assertEqual(set(garage.usage_days(self.c, v)), {"2026-11-01", "2026-11-02", "2026-11-03"})
+
+
+    def test_map_pick_by_stretch(self):
+        routes.assign(self.c)
+        # tapped a stretch inside the 18:00 drive on the day map → that drive is the car's, replacing an older pick
+        routes.pick(self.c, "2026-11-02", "2026-11-02T18:00:00Z", 1)
+        with mock.patch.object(routes, "scan_day", return_value=0):
+            routes.pick(self.c, "2026-11-02", "2026-11-02T18:10:00Z", 2, end="2026-11-02T18:20:00Z")
+        self.assertIn(("2026-11-02", "18", 2, "pick"), self.legs())
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM vehicle_leg_picks").fetchone()[0], 1)
+        with mock.patch.object(routes, "scan_day", return_value=0):
+            view = routes.on_day(self.c, "2026-11-02")
+        self.assertEqual([v["name"] for v in view["vehicles"]], ["Scooter", "Car"])
 
 
 class Reminders(unittest.TestCase):

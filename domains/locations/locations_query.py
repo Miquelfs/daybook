@@ -7,7 +7,7 @@ All functions return plain dicts suitable for JSON serialisation.
 """
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -184,8 +184,11 @@ def _activities_for_date(date: str) -> list[tuple[datetime, datetime, str | None
     out = []
     for r in rows:
         try:
-            local_start = datetime.fromisoformat(r["start_time"])
-            start = local_start - timedelta(minutes=off_min)
+            local_start = datetime.fromisoformat(str(r["start_time"]).replace("Z", "+00:00"))
+            if local_start.tzinfo:          # some sources store an offset: that's already exact → naive UTC
+                start = local_start.astimezone(timezone.utc).replace(tzinfo=None)
+            else:
+                start = local_start - timedelta(minutes=off_min)
         except (ValueError, TypeError):
             continue
         end = start + timedelta(seconds=r["duration_seconds"] or 0)

@@ -4,6 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { api } from "@/lib/api";
 import type { TracksGeoJSON } from "@/lib/api";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
+import { vehiclesApi, type VehiclesOnDay } from "@/lib/statements-api";
 
 interface Props {
   geojson: TracksGeoJSON;
@@ -103,31 +104,70 @@ function classifyLeg(
   return "vehicle";
 }
 
+// A vehicle's kind → the route colour its drives get.
+const KIND_MODE: Record<string, string> = { car: "car", scooter: "scooter", motorbike: "scooter", other: "vehicle" };
+
+const ms = (iso: string) => Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso.replace(" ", "T") + "Z");
+
+/** The drive (from Explore → Vehicles) a map leg falls in, if any. */
+function driveFor(day: VehiclesOnDay | null, start: string, end: string) {
+  if (!day) return null;
+  const a = ms(start), b = ms(end);
+  return day.legs.find((l) => ms(l.start) <= b && a <= ms(l.end)) ?? null;
+}
+
+type VehicleChoice = { vehicles: VehiclesOnDay["vehicles"]; current: number | null; onPick: (vid: number) => void };
+
 /** Small DOM popup for correcting a leg's mode by hand — built imperatively
- * since Leaflet popup content is a raw DOM node, not JSX. */
-function buildModePopup(currentMode: string, isManual: boolean, onPick: (mode: string | null) => void): HTMLElement {
+ * since Leaflet popup content is a raw DOM node, not JSX. With vehicles in
+ * Explore → Vehicles, it first asks which of them it was. */
+function buildModePopup(currentMode: string, isManual: boolean, onPick: (mode: string | null) => void,
+                        driver?: string | null, choice?: VehicleChoice): HTMLElement {
   const wrap = document.createElement("div");
   wrap.style.cssText = "font-family:system-ui;min-width:190px";
 
   const title = document.createElement("div");
   title.style.cssText = "font-weight:600;font-size:12px;color:#111;margin-bottom:6px";
-  title.textContent = isManual
+  title.textContent = driver
+    ? `Drove: ${driver}`
+    : isManual
     ? `Set: ${MODE_STYLE[currentMode]?.label ?? currentMode}`
     : `Detected: ${MODE_STYLE[currentMode]?.label ?? "Unknown"}`;
   wrap.appendChild(title);
 
+  const button = (text: string, active: boolean, color: string, onClick: () => void) => {
+    const btn = document.createElement("button");
+    btn.textContent = text;
+    btn.style.cssText =
+      `font-size:11px;padding:4px 6px;border-radius:6px;text-align:left;cursor:pointer;` +
+      `border:1px solid ${active ? color : "#ddd"};` +
+      `background:${active ? color + "22" : "#fff"};color:#111`;
+    btn.onclick = onClick;
+    return btn;
+  };
+
+  if (choice && choice.vehicles.length) {
+    const label = document.createElement("div");
+    label.style.cssText = "font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#888;margin:2px 0 4px";
+    label.textContent = "Which vehicle";
+    wrap.appendChild(label);
+    const vgrid = document.createElement("div");
+    vgrid.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:8px";
+    for (const v of choice.vehicles) {
+      const color = MODE_STYLE[KIND_MODE[v.kind] ?? "vehicle"].color;
+      vgrid.appendChild(button(v.name, choice.current === v.id, color, () => choice.onPick(v.id)));
+    }
+    if (choice.current) vgrid.appendChild(button("Not mine", false, "#888", () => choice.onPick(0)));
+    wrap.appendChild(vgrid);
+    const label2 = label.cloneNode() as HTMLElement;
+    label2.textContent = "Or the mode";
+    wrap.appendChild(label2);
+  }
+
   const grid = document.createElement("div");
   grid.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:4px";
   for (const m of EDITABLE_MODES) {
-    const btn = document.createElement("button");
-    btn.textContent = MODE_STYLE[m].label;
-    const active = m === currentMode;
-    btn.style.cssText =
-      `font-size:11px;padding:4px 6px;border-radius:6px;text-align:left;cursor:pointer;` +
-      `border:1px solid ${active ? MODE_STYLE[m].color : "#ddd"};` +
-      `background:${active ? MODE_STYLE[m].color + "22" : "#fff"};color:#111`;
-    btn.onclick = () => onPick(m);
-    grid.appendChild(btn);
+    grid.appendChild(button(MODE_STYLE[m].label, !driver && m === currentMode, MODE_STYLE[m].color, () => onPick(m)));
   }
   wrap.appendChild(grid);
 
@@ -175,6 +215,32 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [date]);
+
+  // Your vehicles + who drove each of the day's drives (Explore → Vehicles). A drive assigned to
+  // one colours its legs by that vehicle's kind, unless a leg has its own manual mode.
+  const vehiclesRef = useRef<VehiclesOnDay | null>(null);
+  useEffect(() => {
+    vehiclesRef.current = null;
+    if (!date) return;
+    let cancelled = false;
+    vehiclesApi.onDay(date).then((d) => {
+      if (cancelled) return;
+      vehiclesRef.current = d;
+      setOverridesVersion((v) => v + 1);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [date]);
+
+  const pickVehicle = async (legKey: string, vid: number) => {
+    if (!date) return;
+    const [legStart, legEnd] = legKey.split("|");
+    try {
+      vehiclesRef.current = await vehiclesApi.pickStretch(date, legStart, legEnd, vid);
+      // the vehicle now says what this was; a hand-set mode on the leg would hide it
+      if (vid && overridesRef.current.has(legKey)) await saveOverride(legKey, null);
+      setOverridesVersion((v) => v + 1);
+    } catch { /* leave the map as it was */ }
+  };
 
   const saveOverride = async (legKey: string, mode: string | null) => {
     if (!date) return;
@@ -340,7 +406,10 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
         for (let i = 0; i < legPoints.length - 1; i++) {
           const legKey     = `${legPoints[i].time}|${legPoints[i + 1].time}`;
           const manualMode = overridesRef.current.get(legKey) ?? null;
-          const mode       = manualMode ?? classifyLeg(legPoints[i], legPoints[i + 1]);
+          const vday       = vehiclesRef.current;
+          const drive      = driveFor(vday, legPoints[i].time, legPoints[i + 1].time);
+          const driver     = drive?.vehicle_id ? vday?.vehicles.find((v) => v.id === drive.vehicle_id) ?? null : null;
+          const mode       = manualMode ?? (driver ? KIND_MODE[driver.kind] ?? "vehicle" : classifyLeg(legPoints[i], legPoints[i + 1]));
           const style      = MODE_STYLE[mode] ?? MODE_STYLE.vehicle;
           usedModes.add(mode);
           const line = L.polyline([legPoints[i].latlng, legPoints[i + 1].latlng], {
@@ -358,7 +427,10 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
               const popupEl = buildModePopup(mode, !!manualMode, (picked) => {
                 saveOverride(legKey, picked);
                 hitArea.closePopup();
-              });
+              }, manualMode ? null : driver?.name, vday?.vehicles.length ? {
+                vehicles: vday.vehicles, current: driver?.id ?? null,
+                onPick: (vid) => { pickVehicle(legKey, vid); hitArea.closePopup(); },
+              } : undefined);
               hitArea.bindPopup(popupEl, { maxWidth: 230 }).openPopup(e.latlng);
             });
           }

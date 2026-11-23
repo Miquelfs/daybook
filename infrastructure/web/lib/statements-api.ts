@@ -134,6 +134,10 @@ export type Reminder = {
 export type ReminderInput = Partial<Pick<Reminder, "title" | "every_months" | "every_km" | "last_date" | "last_km" | "due_date" | "remind_days" | "notes">>;
 export type ReminderPreset = { title: string; every_months: number | null; every_km: number | null };
 export type VehicleRoute = { date: string; legs: [number, number][][] };
+export type VehiclesOnDay = {
+  vehicles: { id: number; name: string; kind: VehicleKind }[];
+  legs: { start: string; end: string; km: number; vehicle_id: number | null; how: string }[];
+};
 export type TransportSub = { subcategory: string; count: number; total: number; last: string };
 
 export type VehicleInput = Partial<Omit<Vehicle, "id">>;
@@ -158,6 +162,10 @@ export const vehiclesApi = {
   inbox: () => call<InboxLeg[]>("/vehicles/inbox"),
   pickLeg: (date: string, start: string, vehicle_id: number) =>
     call<unknown>("/vehicles/legs/pick", { method: "POST", json: { date, start, vehicle_id } }),
+  onDay: (date: string) => call<VehiclesOnDay>(`/vehicles/on/${date}`),
+  // a stretch tapped on the day map: whichever drive touches it is this vehicle's (0 = not mine)
+  pickStretch: (date: string, start: string, end: string, vehicle_id: number) =>
+    call<VehiclesOnDay>("/vehicles/legs/pick", { method: "POST", json: { date, start, end, vehicle_id } }),
   reminders: (id: number) => call<Reminder[]>(`/vehicles/${id}/reminders`),
   presets: () => call<Record<string, ReminderPreset[]>>("/vehicles/reminders/presets"),
   addReminder: (id: number, body: ReminderInput) => call<unknown>(`/vehicles/${id}/reminders`, { method: "POST", json: body }),

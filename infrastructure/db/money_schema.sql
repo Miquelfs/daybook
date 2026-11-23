@@ -281,6 +281,7 @@ CREATE TABLE IF NOT EXISTS vehicle_leg_picks (
     date           TEXT NOT NULL,
     start          TEXT NOT NULL,
     vehicle_id     INTEGER NOT NULL,
+    end            TEXT,                -- set when picked on the day map: the stretch you tapped
     PRIMARY KEY (date, start)
 );
 

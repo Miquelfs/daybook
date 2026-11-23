@@ -15,7 +15,9 @@ Vehicles (car, scooter…): odometer, costs from expenses, routes from GPS (doma
   GET    /vehicles/{id}/days             days used: tagged, or with GPS legs assigned to it (?limit=)
   GET    /vehicles/{id}/routes           its legs of the last N months, for the map
   GET    /vehicles/inbox                 drives waiting for "who drove this?" (untagged / both tags)
-  POST   /vehicles/legs/pick             {date, start, vehicle_id} — 0 = not mine
+  POST   /vehicles/legs/pick             {date, start, vehicle_id, end?} — 0 = not mine; with end = a stretch
+                                         picked on the day map (becomes a drive even if the GPS thought walking)
+  GET    /vehicles/on/{date}             the day map's view: your vehicles + who drove each drive that day
   POST   /vehicles/refresh               read the GPS again now (?all=true)
   GET    /vehicles/{id}/reminders        ITV, insurance, oil change… with when they're due
   POST   /vehicles/{id}/reminders
@@ -121,16 +123,23 @@ class PickBody(BaseModel):
     date: str
     start: str
     vehicle_id: int                        # 0 = not mine
+    end: Optional[str] = None              # picked on the day map: the stretch tapped
 
 
 @router.post("/legs/pick")
 def pick_leg(body: PickBody, conn: DB):
     if body.vehicle_id:
         _vehicle(conn, body.vehicle_id)
-    if not conn.execute("SELECT 1 FROM vehicle_legs WHERE date=? AND start=?", (body.date, body.start)).fetchone():
+    if not body.end and not conn.execute("SELECT 1 FROM vehicle_legs WHERE date=? AND start=?",
+                                         (body.date, body.start)).fetchone():
         raise HTTPException(404, "No such drive")
-    routes.pick(conn, body.date, body.start, body.vehicle_id)
-    return {"status": "ok"}
+    routes.pick(conn, body.date, body.start, body.vehicle_id, body.end)
+    return routes.on_day(conn, body.date) if body.end else {"status": "ok"}
+
+
+@router.get("/on/{day}")
+def vehicles_on_day(day: str, conn: DB):
+    return routes.on_day(conn, day)
 
 
 @router.post("/refresh")

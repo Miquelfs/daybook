@@ -152,7 +152,8 @@ Vehicles (`domains/vehicles/`, `/vehicles/*`, `/explore/vehicles` — an Explore
 (`vehicle_legs`, read for every tagged day + every day of the last 45) are assigned by your pick
 (`vehicle_leg_picks`, 0 = not mine) else the one vehicle whose day tag (`motorcycle` = Scooter ride, `car_drive` =
 Car drive) is on the day; untagged / both-tag drives wait in "Who drove this?" (picking on an untagged day tags the
-day). Odometer km between two readings go to the days used (tag or assigned legs), weighted by GPS km.
+day). The day map's leg popup also lists your vehicles (`GET /vehicles/on/{date}`; a pick with `end` is a stretch —
+whatever GPS touches it becomes that vehicle's drive, even if it read as walking). Odometer km between two readings go to the days used (tag or assigned legs), weighted by GPS km.
 Reminders (`vehicle_reminders`, `reminders.py`): every N months / N km / a date → one open Plan task each
 (daybook.db `tasks`, area `vehicles`); ticking it off in Plan starts the next cycle on sync. Nightly steps
 `vehicle_routes`, `vehicle_reminders`.

@@ -57,34 +57,47 @@ def path_km(pts: list[tuple[float, float]]) -> float:
     return sum(_km(a, b) for a, b in zip(pts, pts[1:]) if _km(a, b) < 5)   # a 5 km hop between pings is a jump
 
 
-def legs_from_segments(segments: list[dict]) -> list[dict]:
-    """tracks_for_date() output → vehicle legs: [{start, end, km, minutes, start_place, end_place, points}]."""
+def _overlaps(a0: str, a1: str, b0: str, b1: str) -> bool:
+    """Closed time windows [a0, a1] and [b0, b1] share a moment."""
+    try:
+        return _ts(a0) <= _ts(b1) and _ts(b0) <= _ts(a1)
+    except (ValueError, TypeError):
+        return False
+
+
+def legs_from_segments(segments: list[dict], forced: list[tuple[str, str]] = ()) -> list[dict]:
+    """tracks_for_date() output → vehicle legs: [{start, end, km, minutes, start_place, end_place, points}].
+
+    `forced`: windows you picked a vehicle for on the day map — a segment touching one is a drive
+    whatever the speed / motion guess said (a slow scooter ride the phone took for walking)."""
     keep = []
     for s in segments:
-        if s.get("activity_type") or (s.get("motion") in NOT_VEHICLE):
-            continue
         pts = [(c[1], c[0]) for c in s.get("coordinates") or []]
         if len(pts) < 2:
             continue
-        km = path_km(pts)
         try:
             hours = max((_ts(s["segment_end"]) - _ts(s["segment_start"])).total_seconds(), 30) / 3600
         except (KeyError, ValueError, TypeError):
             continue
-        if km < 0.2 or not (MIN_KMH <= km / hours <= MAX_KMH):
-            continue
+        km = path_km(pts)
+        force = any(_overlaps(s["segment_start"], s["segment_end"], a, b) for a, b in forced)
+        if not force:
+            if s.get("activity_type") or (s.get("motion") in NOT_VEHICLE):
+                continue
+            if km < 0.2 or not (MIN_KMH <= km / hours <= MAX_KMH):
+                continue
         keep.append({"start": s["segment_start"], "end": s["segment_end"], "km": km, "hours": hours,
-                     "place": s.get("place_name") or s.get("city"), "points": pts})
+                     "place": s.get("place_name") or s.get("city"), "points": pts, "forced": force})
     legs: list[dict] = []
-    for s in sorted(keep, key=lambda x: x["start"]):
+    for s in sorted(keep, key=lambda x: _ts(x["start"])):
         if legs and (_ts(s["start"]) - _ts(legs[-1]["end"])).total_seconds() <= JOIN_GAP_MIN * 60:
             l = legs[-1]
-            l.update(end=s["end"], km=l["km"] + s["km"], hours=l["hours"] + s["hours"],
+            l.update(end=s["end"], km=l["km"] + s["km"], hours=l["hours"] + s["hours"], forced=l["forced"] or s["forced"],
                      end_place=s["place"] or l["end_place"], points=l["points"] + s["points"])
         else:
-            legs.append({"start": s["start"], "end": s["end"], "km": s["km"], "hours": s["hours"],
+            legs.append({"start": s["start"], "end": s["end"], "km": s["km"], "hours": s["hours"], "forced": s["forced"],
                          "start_place": s["place"], "end_place": s["place"], "points": s["points"]})
-    return [l for l in legs if l["km"] >= MIN_LEG_KM]
+    return [l for l in legs if l["km"] >= MIN_LEG_KM or l["forced"]]
 
 
 def _thin(points: list[tuple[float, float]]) -> list[list[float]]:
@@ -145,8 +158,10 @@ def _vehicle_tags(conn: sqlite3.Connection) -> dict[str, list[int]]:
 def scan_day(conn: sqlite3.Connection, day: str) -> int:
     """Read one day's GPS into vehicle_legs (keeps the assignment columns for assign())."""
     from domains.locations.locations_query import tracks_for_date
+    forced = [(p["start"], p["end"]) for p in conn.execute(
+        "SELECT start, end FROM vehicle_leg_picks WHERE date=? AND vehicle_id != 0 AND end IS NOT NULL", (day,))]
     try:
-        legs = legs_from_segments(tracks_for_date(day))
+        legs = legs_from_segments(tracks_for_date(day), forced)
     except sqlite3.OperationalError:
         legs = []
     except Exception:                                   # one odd day never stops the others
@@ -164,10 +179,17 @@ def scan_day(conn: sqlite3.Connection, day: str) -> int:
     return len(legs)
 
 
-def _pick_for(picks: list[sqlite3.Row], start: str) -> int | None:
+def _pick_for(picks: list[sqlite3.Row], start: str, end: str | None = None) -> int | None:
+    """Your pick for a leg: one made on the day map whose stretch touches it (the latest wins),
+    else one from the inbox that started within PICK_MATCH_MIN of it."""
+    for p in reversed(picks):
+        if p["end"] and end and _overlaps(p["start"], p["end"], start, end):
+            return p["vehicle_id"]
     t = _ts(start)
     best = None
     for p in picks:
+        if p["end"]:
+            continue
         try:
             gap = abs((_ts(p["start"]) - t).total_seconds())
         except (ValueError, TypeError):
@@ -182,12 +204,12 @@ def assign(conn: sqlite3.Connection) -> None:
     by_tag = _vehicle_tags(conn)
     tags = day_tags(set(by_tag))
     picks: dict[str, list] = {}
-    for p in conn.execute("SELECT date, start, vehicle_id FROM vehicle_leg_picks"):
+    for p in conn.execute("SELECT date, start, end, vehicle_id FROM vehicle_leg_picks ORDER BY rowid"):
         picks.setdefault(p["date"], []).append(p)
     live = {r[0] for r in conn.execute("SELECT id FROM vehicles")}
-    for leg in conn.execute("SELECT date, start FROM vehicle_legs").fetchall():
+    for leg in conn.execute("SELECT date, start, end FROM vehicle_legs").fetchall():
         d = leg["date"]
-        pick = _pick_for(picks.get(d, []), leg["start"])
+        pick = _pick_for(picks.get(d, []), leg["start"], leg["end"])
         if pick == 0:
             vid, how = None, "not_mine"
         elif pick in live:
@@ -198,9 +220,26 @@ def assign(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE vehicle_legs SET vehicle_id=?, how=? WHERE date=? AND start=?", (vid, how, d, leg["start"]))
 
 
-def pick(conn: sqlite3.Connection, day: str, start: str, vehicle_id: int) -> None:
-    """You say who drove a leg (0 = not mine). On an untagged day the vehicle's tag goes on the day."""
-    conn.execute("INSERT OR REPLACE INTO vehicle_leg_picks (date, start, vehicle_id) VALUES (?,?,?)", (day, start, vehicle_id))
+def pick(conn: sqlite3.Connection, day: str, start: str, vehicle_id: int, end: str | None = None) -> None:
+    """You say who drove a leg (0 = not mine). On an untagged day the vehicle's tag goes on the day.
+
+    With `end` (picked on the day map) it's a stretch of time: whichever drive touches it is this
+    vehicle's — and if the GPS read none there (too slow, taken for walking), it becomes one."""
+    if end:
+        # an earlier pick on the same stretch is replaced, not outvoted
+        touching = [l for l in conn.execute("SELECT start, end FROM vehicle_legs WHERE date=?", (day,))
+                    if _overlaps(l["start"], l["end"], start, end)]
+        for p in conn.execute("SELECT start, end FROM vehicle_leg_picks WHERE date=?", (day,)).fetchall():
+            p_end = p["end"] or p["start"]
+            if _overlaps(p["start"], p_end, start, end) or any(
+                    _overlaps(l["start"], l["end"], p["start"], p_end) for l in touching):
+                conn.execute("DELETE FROM vehicle_leg_picks WHERE date=? AND start=?", (day, p["start"]))
+        conn.execute("INSERT OR REPLACE INTO vehicle_leg_picks (date, start, end, vehicle_id) VALUES (?,?,?,?)",
+                     (day, start, end, vehicle_id))
+        if vehicle_id:
+            scan_day(conn, day)                  # the stretch may not have been a drive by speed alone
+    else:
+        conn.execute("INSERT OR REPLACE INTO vehicle_leg_picks (date, start, vehicle_id) VALUES (?,?,?)", (day, start, vehicle_id))
     if vehicle_id:
         v = conn.execute("SELECT day_tag FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
         by_tag = _vehicle_tags(conn)
@@ -242,6 +281,20 @@ def refresh(conn: sqlite3.Connection, everything: bool = False) -> int:
     assign(conn)
     conn.commit()
     return n
+
+
+def on_day(conn: sqlite3.Connection, day: str) -> dict:
+    """The day map's view: your vehicles, and who drove each of that day's drives."""
+    if not conn.execute("SELECT 1 FROM vehicle_scan WHERE date=?", (day,)).fetchone() and \
+            conn.execute("SELECT 1 FROM vehicles LIMIT 1").fetchone():
+        scan_day(conn, day)
+        assign(conn)
+        conn.commit()
+    vehicles = [dict(r) for r in conn.execute(
+        "SELECT id, name, kind FROM vehicles WHERE sold_on IS NULL OR sold_on >= ? ORDER BY id", (day,))]
+    legs = [dict(r) for r in conn.execute(
+        "SELECT start, end, km, vehicle_id, how FROM vehicle_legs WHERE date=? ORDER BY start", (day,))]
+    return {"vehicles": vehicles, "legs": legs}
 
 
 def inbox(conn: sqlite3.Connection, limit: int = 60) -> list[dict]:
