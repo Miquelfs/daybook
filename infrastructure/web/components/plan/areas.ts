@@ -3,7 +3,7 @@
 // on that page (Money, Health, Logbook, …). Line icons, like the app's tabs.
 
 import {
-  Activity, Apple, Bike, BookOpen, Clock, Coins, Dumbbell, Earth, FileText, Flame, Footprints, Gauge,
+  Activity, Apple, Bike, BookOpen, Car, Clock, Coins, Dumbbell, Earth, FileText, Flame, Footprints, Gauge,
   HeartPulse, House, Landmark, Luggage, Moon, Mountain, PiggyBank, Plane, PlaneLanding, PlaneTakeoff,
   Smartphone, Smile, Sparkles, Sprout, Timer, Users, Utensils, Wallet, Waves, Weight, Wrench, BatteryCharging,
   type LucideIcon,
@@ -11,7 +11,7 @@ import {
 
 export type AreaKey =
   | "training" | "health" | "food" | "habits" | "people" | "money" | "aviation"
-  | "travel" | "culture" | "projects" | "home" | "admin" | "personal";
+  | "travel" | "culture" | "projects" | "home" | "admin" | "personal" | "vehicles";
 
 export interface Area {
   key: AreaKey;
@@ -32,14 +32,15 @@ export const AREAS: Record<AreaKey, Area> = {
   culture:  { key: "culture",  label: "Reading & culture", icon: BookOpen, href: "/explore" },
   projects: { key: "projects", label: "Projects",  icon: Wrench,       href: null },
   home:     { key: "home",     label: "Home",      icon: House,        href: null },
+  vehicles: { key: "vehicles", label: "Vehicles",  icon: Car,          href: "/money/vehicles" },
   admin:    { key: "admin",    label: "Admin",     icon: FileText,     href: null },
   personal: { key: "personal", label: "Personal",  icon: Sparkles,     href: null },
 };
 
 export const AREA_LIST = Object.values(AREAS);
 
-/** Areas whose page shows a plan panel (AreaPlan) — Money, Health, Logbook, Omyra, Food. */
-export const AREAS_WITH_PANEL = new Set<AreaKey>(["training", "health", "food", "money", "aviation"]);
+/** Areas whose page shows a plan panel (AreaPlan) — Money, Health, Logbook, Omyra, Food, Vehicles. */
+export const AREAS_WITH_PANEL = new Set<AreaKey>(["training", "health", "food", "money", "aviation", "vehicles"]);
 
 export function area(key: string | null | undefined): Area {
   return AREAS[(key ?? "") as AreaKey] ?? AREAS.personal;

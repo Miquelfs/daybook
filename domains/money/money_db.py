@@ -24,6 +24,7 @@ def init_money_db(db_path: Path = MONEY_DB_PATH) -> None:
         "ALTER TABLE grocery_products ADD COLUMN generic TEXT",
         "ALTER TABLE grocery_products ADD COLUMN pack_g REAL",
         "ALTER TABLE transactions ADD COLUMN vehicle_id INTEGER",
+        "DROP TABLE IF EXISTS vehicle_days",  # replaced by vehicle_legs (a cache — rebuilt by routes.refresh)
     ]:
         try:
             conn.execute(stmt)

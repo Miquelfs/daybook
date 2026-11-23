@@ -90,6 +90,7 @@ step overland_process python -m domains.locations.overland_process
 log "Detecting trips..."
 step trip_detection python -m domains.locations.trip_detection
 step vehicle_routes python -m domains.vehicles.routes
+step vehicle_reminders python -m domains.vehicles.reminders
 # Planned trips that have now happened hand their name + companions to the detected trip.
 step planned_trips python -m domains.plans.planned_trips
 

@@ -1,11 +1,18 @@
 """
 Where each vehicle went, from the GPS.
 
-A day tagged with the vehicle's day tag (Scooter ride → `motorcycle`, Car drive → `car_drive`)
-is read from Overland: the track segments that move at vehicle speed and aren't a Garmin
-activity are that vehicle's legs (segments a few minutes apart are joined into one leg).
-The result is cached per vehicle per day in money.db → vehicle_days; the nightly step fills
-new tagged days and recomputes the last few (Overland uploads late).
+1. Legs. A day's Overland track segments that move at vehicle speed and aren't a Garmin activity
+   are joined into legs (a few minutes apart = one leg) and cached in money.db → vehicle_legs.
+   Read: every day carrying a vehicle's day tag (all history), and every day of the last
+   SCAN_DAYS whatever its tags — so a ride you forgot to tag still shows up. The last few days are
+   read again (Overland uploads late).
+2. Who drove it (cheap, redone on every refresh):
+     your pick (vehicle_leg_picks; 0 = not mine)          → 'pick' / 'not_mine'
+     else exactly one vehicle's tag on the day             → 'tag'
+     else two vehicles' tags (Scooter ride + Car drive)    → 'both'      — waits for your pick
+     else no tag                                           → 'untagged'  — waits for your pick
+   Picking a vehicle for a leg on an untagged day also puts its tag on the day (tags stay the
+   source of truth for "what I did that day").
 
     python -m domains.vehicles.routes [--all]
 """
@@ -24,8 +31,11 @@ MIN_KMH, MAX_KMH = 12.0, 150.0        # slower is walking/traffic noise, faster 
 MIN_LEG_KM = 0.4
 JOIN_GAP_MIN = 12                     # segments this close are one leg (a red light, a GPS pause)
 NOT_VEHICLE = {"walking", "running", "stationary"}
-MAX_POINTS = 400                      # per day, after thinning
+MAX_POINTS = 250                      # per leg, after thinning
 RECENT_DAYS = 3
+SCAN_DAYS = 45                        # untagged days read for drives you didn't tag
+INBOX_DAYS = 30                       # untagged drives older than this aren't asked about
+PICK_MATCH_MIN = 15
 
 
 def _km(a, b) -> float:
@@ -73,74 +83,152 @@ def legs_from_segments(segments: list[dict]) -> list[dict]:
     return [l for l in legs if l["km"] >= MIN_LEG_KM]
 
 
-def _thin(legs: list[dict]) -> list[list[list[float]]]:
-    total = sum(len(l["points"]) for l in legs)
-    step = max(1, math.ceil(total / MAX_POINTS))
-    out = []
-    for l in legs:
-        p = l["points"]
-        kept = p[::step] + ([p[-1]] if (len(p) - 1) % step else [])
-        out.append([[round(a, 5), round(b, 5)] for a, b in kept])
+def _thin(points: list[tuple[float, float]]) -> list[list[float]]:
+    step = max(1, math.ceil(len(points) / MAX_POINTS))
+    kept = points[::step] + ([points[-1]] if (len(points) - 1) % step else [])
+    return [[round(a, 5), round(b, 5)] for a, b in kept]
+
+
+def _daybook():
+    con = sqlite3.connect(DAYBOOK_DB)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def day_tags(slugs: set[str], since: str | None = None) -> dict[str, set[str]]:
+    """date → the vehicle tag slugs on it."""
+    if not slugs or not DAYBOOK_DB.exists():
+        return {}
+    con = _daybook()
+    try:
+        q = ",".join("?" * len(slugs))
+        rows = con.execute(
+            f"SELECT dt.date, t.slug FROM day_tags dt JOIN tags t ON t.id = dt.tag_id WHERE t.slug IN ({q})"
+            + (" AND dt.date >= ?" if since else ""), [*slugs, *([since] if since else [])]).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    finally:
+        con.close()
+    out: dict[str, set[str]] = {}
+    for r in rows:
+        out.setdefault(r["date"], set()).add(r["slug"])
     return out
 
 
-def tagged_days(tag: str) -> list[str]:
-    if not tag or not DAYBOOK_DB.exists():
-        return []
-    con = sqlite3.connect(DAYBOOK_DB)
+def add_day_tag(day: str, slug: str) -> None:
+    if not DAYBOOK_DB.exists():
+        return
+    con = _daybook()
     try:
-        return [r[0] for r in con.execute(
-            "SELECT dt.date FROM day_tags dt JOIN tags t ON t.id = dt.tag_id WHERE t.slug = ? ORDER BY dt.date", (tag,))]
+        t = con.execute("SELECT id FROM tags WHERE slug=?", (slug,)).fetchone()
+        if t:
+            con.execute("INSERT OR IGNORE INTO day_tags (date, tag_id) VALUES (?,?)", (day, t["id"]))
+            con.commit()
     except sqlite3.OperationalError:
-        return []
+        pass
     finally:
         con.close()
 
 
-def compute_day(conn: sqlite3.Connection, vehicle_id: int, day: str) -> dict:
+def _vehicle_tags(conn: sqlite3.Connection) -> dict[str, list[int]]:
+    """tag slug → vehicles using it (only ones not sold)."""
+    out: dict[str, list[int]] = {}
+    for vid, tag in conn.execute("SELECT id, day_tag FROM vehicles WHERE day_tag IS NOT NULL AND day_tag != ''"):
+        out.setdefault(tag, []).append(vid)
+    return out
+
+
+def scan_day(conn: sqlite3.Connection, day: str) -> int:
+    """Read one day's GPS into vehicle_legs (keeps the assignment columns for assign())."""
     from domains.locations.locations_query import tracks_for_date
     try:
         legs = legs_from_segments(tracks_for_date(day))
     except sqlite3.OperationalError:
         legs = []
-    row = {
-        "km": round(sum(l["km"] for l in legs), 1),
-        "minutes": round(sum(l["hours"] for l in legs) * 60),
-        "legs": len(legs),
-        "start_place": legs[0]["start_place"] if legs else None,
-        "end_place": legs[-1]["end_place"] if legs else None,
-        "route": json.dumps(_thin(legs)) if legs else None,
-    }
-    conn.execute(
-        """INSERT INTO vehicle_days (vehicle_id, date, km, minutes, legs, start_place, end_place, route, computed_at)
-           VALUES (?,?,?,?,?,?,?,?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-           ON CONFLICT(vehicle_id, date) DO UPDATE SET km=excluded.km, minutes=excluded.minutes, legs=excluded.legs,
-             start_place=excluded.start_place, end_place=excluded.end_place, route=excluded.route,
-             computed_at=excluded.computed_at""",
-        (vehicle_id, day, row["km"], row["minutes"], row["legs"], row["start_place"], row["end_place"], row["route"]),
-    )
-    return row
+    conn.execute("DELETE FROM vehicle_legs WHERE date=?", (day,))
+    for l in legs:
+        conn.execute(
+            """INSERT OR REPLACE INTO vehicle_legs (date, start, end, km, minutes, start_place, end_place, route)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (day, l["start"], l["end"], round(l["km"], 2), round(l["hours"] * 60, 1), l["start_place"], l["end_place"],
+             json.dumps(_thin(l["points"]))))
+    conn.execute("INSERT OR REPLACE INTO vehicle_scan (date, legs, scanned_at) VALUES (?,?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                 (day, len(legs)))
+    return len(legs)
 
 
-def refresh(conn: sqlite3.Connection, vehicle_id: int | None = None, everything: bool = False) -> int:
-    """Fill vehicle_days for tagged days not done yet (and the last few days again). Returns days computed."""
-    q = "SELECT id, day_tag FROM vehicles WHERE day_tag IS NOT NULL AND day_tag != ''"
-    vehicles = conn.execute(q + (" AND id = ?" if vehicle_id else ""), ((vehicle_id,) if vehicle_id else ())).fetchall()
-    recent = (date.today() - timedelta(days=RECENT_DAYS)).isoformat()
+def _pick_for(picks: list[sqlite3.Row], start: str) -> int | None:
+    t = _ts(start)
+    best = None
+    for p in picks:
+        gap = abs((_ts(p["start"]) - t).total_seconds())
+        if gap <= PICK_MATCH_MIN * 60 and (best is None or gap < best[0]):
+            best = (gap, p["vehicle_id"])
+    return best[1] if best else None
+
+
+def assign(conn: sqlite3.Connection) -> None:
+    """Decide who drove every cached leg (picks, then tags)."""
+    by_tag = _vehicle_tags(conn)
+    tags = day_tags(set(by_tag))
+    picks: dict[str, list] = {}
+    for p in conn.execute("SELECT date, start, vehicle_id FROM vehicle_leg_picks"):
+        picks.setdefault(p["date"], []).append(p)
+    live = {r[0] for r in conn.execute("SELECT id FROM vehicles")}
+    for leg in conn.execute("SELECT date, start FROM vehicle_legs").fetchall():
+        d = leg["date"]
+        pick = _pick_for(picks.get(d, []), leg["start"])
+        if pick == 0:
+            vid, how = None, "not_mine"
+        elif pick in live:
+            vid, how = pick, "pick"
+        else:
+            owners = sorted({v for slug in tags.get(d, ()) for v in by_tag.get(slug, [])})
+            vid, how = (owners[0], "tag") if len(owners) == 1 else (None, "both" if owners else "untagged")
+        conn.execute("UPDATE vehicle_legs SET vehicle_id=?, how=? WHERE date=? AND start=?", (vid, how, d, leg["start"]))
+
+
+def pick(conn: sqlite3.Connection, day: str, start: str, vehicle_id: int) -> None:
+    """You say who drove a leg (0 = not mine). On an untagged day the vehicle's tag goes on the day."""
+    conn.execute("INSERT OR REPLACE INTO vehicle_leg_picks (date, start, vehicle_id) VALUES (?,?,?)", (day, start, vehicle_id))
+    if vehicle_id:
+        v = conn.execute("SELECT day_tag FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+        by_tag = _vehicle_tags(conn)
+        on_day = day_tags(set(by_tag), since=day).get(day, set())
+        if v and v["day_tag"] and not on_day:
+            add_day_tag(day, v["day_tag"])
+    assign(conn)
+    conn.commit()
+
+
+def refresh(conn: sqlite3.Connection, everything: bool = False) -> int:
+    """Read tagged days not read yet, every recent day, the last few again; then assign. Returns days read."""
+    if not conn.execute("SELECT 1 FROM vehicles LIMIT 1").fetchone():
+        return 0
+    by_tag = _vehicle_tags(conn)
+    today = date.today()
+    recent = (today - timedelta(days=RECENT_DAYS)).isoformat()
+    window = [(today - timedelta(days=i)).isoformat() for i in range(SCAN_DAYS + 1)]
+    wanted = set(day_tags(set(by_tag))) | set(window)
+    done = {r[0] for r in conn.execute("SELECT date FROM vehicle_scan")}
     n = 0
-    for vid, tag in vehicles:
-        days = tagged_days(tag)
-        done = {r[0] for r in conn.execute("SELECT date FROM vehicle_days WHERE vehicle_id=?", (vid,))}
-        # a tag you removed takes its day with it
-        gone = done - set(days)
-        for d in gone:
-            conn.execute("DELETE FROM vehicle_days WHERE vehicle_id=? AND date=?", (vid, d))
-        for d in days:
-            if everything or d not in done or d >= recent:
-                compute_day(conn, vid, d)
-                n += 1
+    for d in sorted(wanted):
+        if everything or d not in done or d >= recent:
+            scan_day(conn, d)
+            n += 1
+    assign(conn)
     conn.commit()
     return n
+
+
+def inbox(conn: sqlite3.Connection, limit: int = 60) -> list[dict]:
+    """Legs waiting for your pick: both tags on the day (any date), or no tag (last INBOX_DAYS)."""
+    since = (date.today() - timedelta(days=INBOX_DAYS)).isoformat()
+    rows = conn.execute(
+        """SELECT date, start, end, km, minutes, start_place, end_place, how FROM vehicle_legs
+           WHERE vehicle_id IS NULL AND (how='both' OR (how='untagged' AND date >= ?))
+           ORDER BY date DESC, start DESC LIMIT ?""", (since, limit)).fetchall()
+    return [dict(r) for r in rows]
 
 
 def main() -> None:
@@ -150,7 +238,7 @@ def main() -> None:
         n = refresh(conn, everything="--all" in sys.argv)
     finally:
         conn.close()
-    print(f"vehicle_routes: {n} day(s) computed")
+    print(f"vehicle_routes: {n} day(s) read")
 
 
 if __name__ == "__main__":

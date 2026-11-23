@@ -257,16 +257,53 @@ CREATE TABLE IF NOT EXISTS vehicle_odometer (
 );
 CREATE INDEX IF NOT EXISTS idx_odo_vehicle ON vehicle_odometer(vehicle_id, date);
 
--- One row per vehicle per day it was used, from that day's GPS (rebuilt nightly).
-CREATE TABLE IF NOT EXISTS vehicle_days (
-    vehicle_id     INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+-- Every leg the GPS saw at vehicle speed (not a Garmin activity), cached per day — tagged days
+-- for all history, every day for the last few weeks — and who drove it: the one vehicle whose day
+-- tag is on that day, or your pick (untagged days, days with both tags). domains/vehicles/routes.py
+CREATE TABLE IF NOT EXISTS vehicle_legs (
     date           TEXT NOT NULL,
-    km             REAL NOT NULL DEFAULT 0,
-    minutes        REAL NOT NULL DEFAULT 0,
-    legs           INTEGER NOT NULL DEFAULT 0,
+    start          TEXT NOT NULL,                 -- ISO time the leg started
+    end            TEXT NOT NULL,
+    km             REAL NOT NULL,
+    minutes        REAL NOT NULL,
     start_place    TEXT,
     end_place      TEXT,
-    route          TEXT,                          -- JSON: [[ [lat,lng], … ], …] one list per leg, simplified
-    computed_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    PRIMARY KEY (vehicle_id, date)
+    route          TEXT,                          -- JSON [[lat,lng], …], thinned
+    vehicle_id     INTEGER,                       -- NULL = nobody's yet
+    how            TEXT,                          -- 'tag' | 'pick' | 'untagged' | 'both' | 'not_mine'
+    PRIMARY KEY (date, start)
+);
+CREATE INDEX IF NOT EXISTS idx_legs_vehicle ON vehicle_legs(vehicle_id, date);
+
+-- Your pick for a leg (vehicle_id 0 = not mine: a bus, a taxi, a friend's car). Kept apart so a
+-- re-read of the GPS keeps it (matched to the leg starting within 15 min).
+CREATE TABLE IF NOT EXISTS vehicle_leg_picks (
+    date           TEXT NOT NULL,
+    start          TEXT NOT NULL,
+    vehicle_id     INTEGER NOT NULL,
+    PRIMARY KEY (date, start)
+);
+
+CREATE TABLE IF NOT EXISTS vehicle_scan (
+    date           TEXT PRIMARY KEY,
+    legs           INTEGER NOT NULL DEFAULT 0,
+    scanned_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+-- ITV, insurance, oil change…: due every N months and/or every N km from the last time, or on a
+-- fixed date. Each keeps one open task in Plan (daybook.db → tasks, area 'vehicles'); completing it
+-- there or here starts the next cycle. domains/vehicles/reminders.py
+CREATE TABLE IF NOT EXISTS vehicle_reminders (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id     INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+    title          TEXT NOT NULL,
+    every_months   INTEGER,
+    every_km       REAL,
+    last_date      TEXT,
+    last_km        REAL,
+    due_date       TEXT,                          -- a fixed date (renewal), overrides every_months once
+    remind_days    INTEGER NOT NULL DEFAULT 30,
+    task_id        INTEGER,                       -- the open Plan task
+    notes          TEXT,
+    created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );

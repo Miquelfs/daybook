@@ -12,6 +12,7 @@ import { moneyApi, fmtAmount } from "@/lib/money-api";
 import { vehiclesApi } from "@/lib/statements-api";
 import { Block, Empty, Hero, Panel, Pill, Skeleton, Stat, Stats, TabBar } from "@/components/ui/kit";
 import { VehicleForm } from "@/components/vehicles/VehicleForm";
+import { RemindersBlock } from "@/components/vehicles/RemindersBlock";
 
 const VehicleRoutesMap = dynamic(() => import("@/components/vehicles/VehicleRoutesMap").then((m) => m.VehicleRoutesMap), {
   ssr: false, loading: () => <Skeleton h={256} />,
@@ -73,7 +74,7 @@ export default function VehiclePage() {
     mutationFn: () => vehiclesApi.remove(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["vehicles"] }); router.push("/money/vehicles"); },
   });
-  const recompute = useMutation({ mutationFn: () => vehiclesApi.refresh(id), onSuccess: refreshAll });
+  const recompute = useMutation({ mutationFn: () => vehiclesApi.refresh(), onSuccess: refreshAll });
 
   if (isLoading || !s) return <main className="max-w-2xl mx-auto px-4"><Skeleton h={200} /></main>;
   const v = s.vehicle;
@@ -165,7 +166,10 @@ export default function VehiclePage() {
         </Panel>
       </Block>
 
-      <Block title="Kilometres a month" note="Odometer km are spread evenly between two readings; the line is what the GPS saw.">
+      <RemindersBlock vehicle={v} accounts={meta?.accounts ?? []} defaultAccount={meta?.defaults.account} />
+
+      <Block title="Kilometres a month"
+             note={`Odometer km between two readings go to the days you used it (${s.days_used} so far), weighted by what the GPS saw that day; the line is the GPS alone.`}>
         <Panel className="p-3">
           <ResponsiveContainer width="100%" height={160}>
             <ComposedChart data={s.series} margin={{ top: 6, right: 4, left: -24, bottom: 0 }}>
@@ -212,9 +216,9 @@ export default function VehiclePage() {
       )}
 
       <Block title={`Routes · ${s.gps.days} day${s.gps.days === 1 ? "" : "s"}`}
-             note={v.day_tag ? `Days tagged ${v.day_tag === "motorcycle" ? "Scooter ride" : v.day_tag === "car_drive" ? "Car drive" : v.day_tag}, read from the GPS.`
-               : "Pick a day tag (edit) so the GPS can find this vehicle's routes."}
-             action={v.day_tag && (
+             note={v.day_tag ? `Days tagged ${v.day_tag === "motorcycle" ? "Scooter ride" : v.day_tag === "car_drive" ? "Car drive" : v.day_tag}, and drives you gave it under Vehicles → Who drove this?`
+               : "Pick a day tag (edit), or give it drives under Vehicles → Who drove this?"}
+             action={(
                <button onClick={() => recompute.mutate()} disabled={recompute.isPending} title="Read the GPS again"
                        className="text-[#71717A] hover:text-[#FAFAFA] disabled:opacity-50">
                  <RefreshCw size={13} className={recompute.isPending ? "animate-spin" : ""} />
@@ -231,6 +235,7 @@ export default function VehiclePage() {
                   {format(parseISO(d.date), "d MMM yy")}
                 </Link>
                 <p className="text-sm flex-1 min-w-0 truncate">
+                  {d.picked && <span className="text-[#52525B]">picked · </span>}
                   {d.legs === 0 ? <span className="text-[#52525B]">no GPS that day</span>
                     : d.start_place && d.end_place && d.start_place !== d.end_place ? `${d.start_place} → ${d.end_place}` : d.start_place ?? "—"}
                 </p>

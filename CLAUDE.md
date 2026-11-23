@@ -148,9 +148,14 @@ fine) and `reconcile()` matches them to `transactions` **on every read** (same a
 similar name) → only in bank / amount differs / only in Daybook + the balance gap at both ends. Only hand links
 (`txn_id`) and ignores are stored. Page `/money/reconcile` (proxy `app/api/money/statements/[[...path]]`).
 Vehicles (`domains/vehicles/`, `/vehicles/*`, `/money/vehicles`): costs are ordinary Transportation expenses —
-`transactions.vehicle_id`, or for history the vehicle's `subcategories`; km from `vehicle_odometer` (spread evenly
-between readings); routes from the GPS on days with the vehicle's day tag (`motorcycle` = Scooter ride,
-`car_drive` = Car drive) → `vehicle_days`, nightly step `vehicle_routes`.
+`transactions.vehicle_id`, or for history the vehicle's `subcategories`. Routes: GPS legs at vehicle speed
+(`vehicle_legs`, read for every tagged day + every day of the last 45) are assigned by your pick
+(`vehicle_leg_picks`, 0 = not mine) else the one vehicle whose day tag (`motorcycle` = Scooter ride, `car_drive` =
+Car drive) is on the day; untagged / both-tag drives wait in "Who drove this?" (picking on an untagged day tags the
+day). Odometer km between two readings go to the days used (tag or assigned legs), weighted by GPS km.
+Reminders (`vehicle_reminders`, `reminders.py`): every N months / N km / a date → one open Plan task each
+(daybook.db `tasks`, area `vehicles`); ticking it off in Plan starts the next cycle on sync. Nightly steps
+`vehicle_routes`, `vehicle_reminders`.
 
 ## Activity days
 

@@ -97,9 +97,12 @@ export type VehicleOverview = {
   vehicle: Vehicle; odometer: number | null; reading_age_days: number | null; km_period: number;
   cost_period: number; per_km_period: number | null; per_month: number;
   gps: { days: number; km: number; km_period: number };
+  days_used_period: number;
+  next_reminder?: ({ title: string } & ReminderDue) | null;
 };
 
 export type VehicleSummary = VehicleOverview & {
+  days_used: number;
   last_reading: { date: string; km: number } | null;
   km_total: number; cost_total: number; per_km: number | null;
   by_subcategory: { subcategory: string; amount: number; count: number }[];
@@ -112,7 +115,24 @@ export type VehicleCost = {
   id: string; date: string; name: string; amount: number; account: string | null; subcategory: string | null;
   notes: string | null; vehicle_id: number | null; linked: boolean;
 };
-export type VehicleDay = { date: string; km: number; minutes: number; legs: number; start_place: string | null; end_place: string | null };
+export type VehicleDay = {
+  date: string; km: number; minutes: number; legs: number; start_place: string | null; end_place: string | null; picked: boolean;
+};
+export type InboxLeg = {
+  date: string; start: string; end: string; km: number; minutes: number; start_place: string | null; end_place: string | null;
+  how: "untagged" | "both";
+};
+export type ReminderDue = {
+  date: string | null; by: "date" | "km" | null; km: number | null; km_left: number | null; days_left: number | null;
+  odometer: number | null; pace_km_day: number | null;
+};
+export type Reminder = {
+  id: number; vehicle_id: number; title: string; every_months: number | null; every_km: number | null;
+  last_date: string | null; last_km: number | null; due_date: string | null; remind_days: number; task_id: number | null;
+  notes: string | null; due: ReminderDue;
+};
+export type ReminderInput = Partial<Pick<Reminder, "title" | "every_months" | "every_km" | "last_date" | "last_km" | "due_date" | "remind_days" | "notes">>;
+export type ReminderPreset = { title: string; every_months: number | null; every_km: number | null };
 export type VehicleRoute = { date: string; legs: [number, number][][] };
 export type TransportSub = { subcategory: string; count: number; total: number; last: string };
 
@@ -134,7 +154,17 @@ export const vehiclesApi = {
     call<{ txn_id: string; odometer_error?: string }>(`/vehicles/${id}/costs`, { method: "POST", json: body }),
   days: (id: number, limit = 60) => call<VehicleDay[]>(`/vehicles/${id}/days?limit=${limit}`),
   routes: (id: number, months = 12) => call<VehicleRoute[]>(`/vehicles/${id}/routes?months=${months}`),
-  refresh: (id: number) => call<{ days: number }>(`/vehicles/${id}/refresh?all=true`, { method: "POST", json: {} }),
+  refresh: () => call<{ days: number }>("/vehicles/refresh?all=true", { method: "POST", json: {} }),
+  inbox: () => call<InboxLeg[]>("/vehicles/inbox"),
+  pickLeg: (date: string, start: string, vehicle_id: number) =>
+    call<unknown>("/vehicles/legs/pick", { method: "POST", json: { date, start, vehicle_id } }),
+  reminders: (id: number) => call<Reminder[]>(`/vehicles/${id}/reminders`),
+  presets: () => call<Record<string, ReminderPreset[]>>("/vehicles/reminders/presets"),
+  addReminder: (id: number, body: ReminderInput) => call<unknown>(`/vehicles/${id}/reminders`, { method: "POST", json: body }),
+  patchReminder: (rid: number, body: ReminderInput) => call<unknown>(`/vehicles/reminders/${rid}`, { method: "PATCH", json: body }),
+  deleteReminder: (rid: number) => call<unknown>(`/vehicles/reminders/${rid}`, { method: "DELETE" }),
+  reminderDone: (rid: number, body: { date: string; km?: number; cost?: { amount: number; account?: string; name?: string } }) =>
+    call<{ odometer_error?: string }>(`/vehicles/reminders/${rid}/done`, { method: "POST", json: body }),
 };
 
 export const KIND_LABEL: Record<VehicleKind, string> = { car: "Car", scooter: "Scooter", motorbike: "Motorbike", other: "Other" };

@@ -1,9 +1,11 @@
 """
 A vehicle's kilometres and what it costs.
 
-  Kilometres  odometer readings you log (the truth), spread evenly over the days between two
-              readings so each month gets its share; the GPS (routes.py) adds where you went and
-              fills the months between readings.
+  Kilometres  odometer readings you log (the truth). The km between two readings are shared out
+              over the days you actually used the vehicle in between (its day tag, or GPS legs
+              assigned to it) — weighted by what the GPS saw each day; a used day the GPS missed
+              counts as an average day of that stretch. With no used day in a stretch, evenly.
+              The GPS (routes.py) adds where you went.
   Costs       ordinary expenses — there is no second ledger. An expense is this vehicle's when it
               carries its vehicle_id (picked in Add transaction, or logged from the vehicle's page),
               or, for everything typed before vehicles existed, when it's a Transportation expense
@@ -45,26 +47,57 @@ def _month(d: str) -> str:
     return d[:7]
 
 
-def spread_km(readings: list[tuple[str, float]]) -> dict[str, float]:
-    """Odometer readings → km per month, assuming an even pace between two readings."""
+def _month_split(a: date, b: date, km: float, out: dict[str, float]) -> None:
+    """km spread evenly over the days from a to b."""
+    days = (b - a).days
+    if days <= 0:
+        out[b.isoformat()[:7]] += km
+        return
+    per_day, cur = km / days, a
+    while cur < b:                                      # month by month, not day by day
+        nxt = date(cur.year + (cur.month == 12), cur.month % 12 + 1, 1)
+        stop = min(nxt, b)
+        out[cur.isoformat()[:7]] += per_day * (stop - cur).days
+        cur = stop
+
+
+def spread_km(readings: list[tuple[str, float]], used: dict[str, float] | None = None) -> dict[str, float]:
+    """Odometer readings → km per month.
+
+    `used`: day → GPS km on the days you used the vehicle (0 when the GPS saw nothing). Each stretch
+    between two readings gives its km to its used days (after the first reading, up to the second),
+    in proportion to their GPS km; a used day without GPS weighs as the stretch's average GPS day
+    (all equal when none has GPS). A stretch with no used day is spread evenly."""
     out: dict[str, float] = defaultdict(float)
+    used = used or {}
     pts = sorted(readings)
     for (d0, k0), (d1, k1) in zip(pts, pts[1:]):
-        a, b = date.fromisoformat(d0), date.fromisoformat(d1)
-        days, km = (b - a).days, k1 - k0
+        km = k1 - k0
         if km <= 0:
             continue
-        if days <= 0:
-            out[_month(d1)] += km
+        days = sorted(d for d in used if d0 < d <= d1)
+        if not days:
+            _month_split(date.fromisoformat(d0), date.fromisoformat(d1), km, out)
             continue
-        per_day = km / days
-        cur = a
-        while cur < b:                                  # month by month, not day by day
-            nxt = date(cur.year + (cur.month == 12), cur.month % 12 + 1, 1)
-            stop = min(nxt, b)
-            out[cur.isoformat()[:7]] += per_day * (stop - cur).days
-            cur = stop
-    return dict(out)
+        seen = [used[d] for d in days if used[d] > 0]
+        fill = sum(seen) / len(seen) if seen else 1.0
+        w = {d: (used[d] if used[d] > 0 else fill) for d in days}
+        total = sum(w.values())
+        for d in days:
+            out[d[:7]] += km * w[d] / total
+    return {k: v for k, v in out.items() if v}
+
+
+def usage_days(conn: sqlite3.Connection, v) -> dict[str, float]:
+    """day → GPS km for every day you used this vehicle (its tag on the day, or legs assigned to it)."""
+    from domains.vehicles.routes import day_tags
+    used: dict[str, float] = {}
+    if v["day_tag"]:
+        for d in day_tags({v["day_tag"]}):
+            used[d] = 0.0
+    for r in conn.execute("SELECT date, SUM(km) km FROM vehicle_legs WHERE vehicle_id=? GROUP BY date", (v["id"],)):
+        used[r["date"]] = float(r["km"] or 0)
+    return used
 
 
 def readings(conn: sqlite3.Connection, v) -> list[tuple[str, float]]:
@@ -82,7 +115,8 @@ def summary(conn: sqlite3.Connection, v, months: int = 12) -> dict:
         y, mo = y - 1, mo + 12
     since = date(y, mo, 1).isoformat()
     rs = readings(conn, v)
-    by_month_km = spread_km(rs)
+    used = usage_days(conn, v)
+    by_month_km = spread_km(rs, used)
     odo_now = rs[-1][1] if rs else None
     odo_from = rs[0][1] if rs else None
     km_total = round(odo_now - odo_from, 1) if rs and len(rs) > 1 else 0.0
@@ -105,8 +139,8 @@ def summary(conn: sqlite3.Connection, v, months: int = 12) -> dict:
     if rs and len(rs) > 1 and km_total > 0:
         span_cost = -sum(t["amount"] for t in txns if rs[0][0] <= t["date"] <= rs[-1][0])
 
-    gps = conn.execute("SELECT date, km, minutes, legs, start_place, end_place FROM vehicle_days "
-                       "WHERE vehicle_id=? AND km > 0 ORDER BY date DESC", (v["id"],)).fetchall()
+    gps = conn.execute("SELECT date, SUM(km) km FROM vehicle_legs WHERE vehicle_id=? GROUP BY date ORDER BY date DESC",
+                       (v["id"],)).fetchall()
     by_month_gps: dict[str, float] = defaultdict(float)
     for g in gps:
         by_month_gps[_month(g["date"])] += g["km"]
@@ -135,6 +169,8 @@ def summary(conn: sqlite3.Connection, v, months: int = 12) -> dict:
         "by_subcategory": sorted(({"subcategory": k, "amount": round(a, 2), "count": n} for k, (a, n) in by_sub.items()),
                                  key=lambda x: -x["amount"]),
         "series": series,
+        "days_used": len(used),
+        "days_used_period": sum(1 for d in used if d >= since),
         "gps": {"days": len(gps), "km": round(sum(g["km"] for g in gps), 1),
                 "km_period": round(sum(g["km"] for g in gps if g["date"] >= since), 1)},
         "months": months,
@@ -152,5 +188,5 @@ def overview(conn: sqlite3.Connection) -> list[dict]:
     for v in conn.execute("SELECT * FROM vehicles ORDER BY sold_on IS NOT NULL, id").fetchall():
         s = summary(conn, v)
         out.append({k: s[k] for k in ("vehicle", "odometer", "reading_age_days", "km_period", "cost_period",
-                                      "per_km_period", "per_month", "gps")})
+                                      "per_km_period", "per_month", "gps", "days_used_period")})
     return out
