@@ -83,7 +83,10 @@ def main() -> None:
         con.commit()
         print("--force: cleared all geocodes")
 
-    query = "SELECT id, points_json FROM tracks WHERE geocode_city IS NULL ORDER BY date DESC"
+    # a ping you were only passing through never gets a place (domains/locations/passing.py)
+    from domains.locations.passing import ensure_column
+    ensure_column(con)
+    query = "SELECT id, points_json FROM tracks WHERE geocode_city IS NULL AND COALESCE(passing, 0) = 0 ORDER BY date DESC"
     if args.limit:
         query += f" LIMIT {args.limit}"
 

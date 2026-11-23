@@ -194,6 +194,7 @@ def get_tracks(date_str: str):
             "country": seg["country"],
             "activity_type": seg["activity_type"],
             "motion": seg["motion"],
+            "passing": seg.get("passing", False),
         }
         if len(coords) >= 2:
             geometry = {"type": "LineString", "coordinates": coords}
@@ -233,6 +234,7 @@ def get_tracks_range(start: str, end: str):
                 "country": seg["country"],
                 "activity_type": seg["activity_type"],
                 "motion": seg["motion"],
+                "passing": seg.get("passing", False),
             }
             geometry = (
                 {"type": "LineString", "coordinates": coords}
@@ -590,7 +592,7 @@ def get_top_places(limit: int = 30, year: int | None = None):
                 END
             ) AS total_seconds
         FROM tracks t
-        WHERE t.geocode_name IS NOT NULL AND t.geocode_name != ''
+        WHERE t.geocode_name IS NOT NULL AND t.geocode_name != '' AND COALESCE(t.passing,0) = 0
               {year_clause}
         GROUP BY t.geocode_name
         ORDER BY days DESC, visits DESC
@@ -754,7 +756,7 @@ def get_place_summary(place: str, country: str | None = None):
                       MAX(geocode_city) AS city,
                       MAX(geocode_country) AS country
                FROM tracks
-               WHERE (geocode_name = :place OR geocode_city = :place) {country_clause}""",
+               WHERE ((geocode_name = :place AND COALESCE(passing,0)=0) OR geocode_city = :place) {country_clause}""",
             params,
         ).fetchone()
         coords = con.execute(
@@ -767,7 +769,7 @@ def get_place_summary(place: str, country: str | None = None):
                 f"""SELECT json_extract(points_json, '$[0].lat') AS lat,
                           json_extract(points_json, '$[0].lng') AS lng
                    FROM tracks
-                   WHERE (geocode_name = :place OR geocode_city = :place) {country_clause}
+                   WHERE ((geocode_name = :place AND COALESCE(passing,0)=0) OR geocode_city = :place) {country_clause}
                      AND points_json IS NOT NULL LIMIT 1""",
                 params,
             ).fetchone()
@@ -818,7 +820,7 @@ def get_place_dates(
                        t.geocode_city AS city,
                        t.geocode_country AS country
                 FROM   tracks t
-                WHERE  (t.geocode_name = ? OR t.geocode_city = ?)
+                WHERE  ((t.geocode_name = ? AND COALESCE(t.passing,0)=0) OR t.geocode_city = ?)
                        {year_clause} {country_clause}
                 ORDER BY date DESC
                 LIMIT ? OFFSET ?

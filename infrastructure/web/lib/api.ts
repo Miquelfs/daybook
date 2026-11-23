@@ -806,6 +806,7 @@ export type GeoFeature = {
     country: string | null;
     activity_type: string | null;  // run/ride/hike/walk/swim/... when this leg overlaps a logged Garmin/Strava activity
     motion: string | null;         // Overland on-device classification (walking/running/cycling/driving→car|scooter/stationary) when no activity applies
+    passing?: boolean;             // a ping you were only moving through (car, scooter, train) — route, not a place
   };
 };
 

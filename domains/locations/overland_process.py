@@ -217,7 +217,7 @@ def _upsert_location_day(con: sqlite3.Connection, date: str) -> None:
     rows = con.execute(
         """
         SELECT segment_start, segment_end, points_json,
-               geocode_name, geocode_city
+               CASE WHEN COALESCE(passing, 0) = 1 THEN NULL ELSE geocode_name END AS geocode_name, geocode_city
         FROM tracks
         WHERE date = ?
         ORDER BY segment_start
@@ -278,6 +278,43 @@ def _upsert_location_day(con: sqlite3.Connection, date: str) -> None:
     con.commit()
 
 
+def _geocode_day(con: sqlite3.Connection, date: str) -> None:
+    from domains.locations.passing import CITY_EVERY_KM
+    rows = con.execute("SELECT id, points_json, passing, geocode_name, geocode_city FROM tracks WHERE date=? "
+                       "ORDER BY segment_start", (date,)).fetchall()
+    last_city_pt = None
+    for r in rows:
+        try:
+            pts = [p for p in json.loads(r["points_json"] or "[]") if "lat" in p]
+        except ValueError:
+            pts = []
+        if not pts:
+            continue
+        lat, lng = _centroid(pts)
+        if r["passing"]:
+            if r["geocode_city"]:
+                last_city_pt = (lat, lng)
+                continue
+            if last_city_pt and _haversine_m(last_city_pt[0], last_city_pt[1], lat, lng) < CITY_EVERY_KM * 1000:
+                continue
+            zoom, keep_name = 10, False                  # city level: where you drove through, not a place
+        else:
+            if r["geocode_name"]:
+                continue
+            zoom, keep_name = 18, True                   # venue level: cafés, restaurants, airports
+        try:
+            name, city, country = _extract_place(_reverse_geocode(lat, lng, zoom=zoom))
+            con.execute("UPDATE tracks SET geocode_name=?, geocode_city=?, geocode_country=? WHERE id=?",
+                        (name if keep_name else None, city, country, r["id"]))
+            con.commit()
+            if r["passing"]:
+                last_city_pt = (lat, lng)
+            print(f"    geocoded{' (passing)' if r['passing'] else ''}: {name if keep_name else ''} {city}")
+            time.sleep(1.1)
+        except Exception as e:
+            print(f"    geocode error: {e}")
+
+
 # ── Main processing ───────────────────────────────────────────────────────────
 
 def process(date_filter: str | None = None, geocode: bool = True) -> int:
@@ -312,10 +349,13 @@ def process(date_filter: str | None = None, geocode: bool = True) -> int:
     for r in rows:
         by_date.setdefault(r["date"], []).append(dict(r))
 
+    from domains.locations import passing
+    passing.ensure_column(con)
     created = 0
     for date, pts in sorted(by_date.items()):
-        segments = _detect_segments(pts)
-        print(f"  {date}: {len(pts)} points → {len(segments)} segments")
+        kept = passing.thin_fast(pts)            # a drive needs a point a km, not one every few seconds
+        segments = _detect_segments(kept)
+        print(f"  {date}: {len(pts)} points ({len(pts) - len(kept)} thinned at speed) → {len(segments)} segments")
 
         for seg in segments:
             # Build points_json in the same format as import_tracks
@@ -341,24 +381,12 @@ def process(date_filter: str | None = None, geocode: bool = True) -> int:
                 print(f"    Skip segment {seg_start}: {e}")
                 continue
 
-            if geocode and len(seg["points"]) >= 1:
-                row = con.execute(
-                    "SELECT id FROM tracks WHERE segment_start=? AND geocode_city IS NULL",
-                    (seg_start,),
-                ).fetchone()
-                if row:
-                    try:
-                        # zoom 18 = venue level (gets café/restaurant/airport names)
-                        geo = _reverse_geocode(seg["lat"], seg["lng"], zoom=18)
-                        name, city, country = _extract_place(geo)
-                        con.execute(
-                            "UPDATE tracks SET geocode_name=?, geocode_city=?, geocode_country=? WHERE id=?",
-                            (name, city, country, row["id"]),
-                        )
-                        print(f"    geocoded: {name}, {city}")
-                        time.sleep(1.1)
-                    except Exception as e:
-                        print(f"    geocode error: {e}")
+
+        # Passing through (a moving ping) or somewhere? Worked out on the whole day, then only real
+        # stops are geocoded to a place; passing pings get a city now and then, never a place name.
+        passing.mark_day(con, date)
+        if geocode:
+            _geocode_day(con, date)
 
         # Mark all processed points as done
         ids = [p["id"] for p in pts]

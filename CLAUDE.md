@@ -85,6 +85,9 @@ The Pi's SD card is 15 GB. When it hits 100%, SQLite can't open its WAL files an
 - **Frontend**: Next.js App Router + TanStack Query, served from Pi on port 3000
 - **DB**: SQLite — `daybook.db` (main), `money.db`, `locations.db`
 - **GPS**: Overland iOS → `/overland` endpoint → `overland_process.py`
+  - Moving pings are *passing* (`tracks.passing`, `domains/locations/passing.py`: < 3 min, faster than walking in and out, not home):
+    route only — never a place, first visit, top place or marker, and not venue-geocoded (city level every 5 km). Fast stretches
+    are thinned before segmenting (a point a km / a minute / a turn). Old days are backfilled on API startup.
 - **Photos**: Stored in `data/photos/` on Pi, served as static files via FastAPI
 
 ## CORS & Mutations

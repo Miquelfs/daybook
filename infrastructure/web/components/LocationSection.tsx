@@ -110,7 +110,7 @@ export function LocationSection({ date, initialTracks, editable = false }: Props
   const distanceM = computeDistanceM(tracks);
 
   // Build deduplicated named stop list for the collapsible
-  const stops = tracks.features.filter((f) => f.properties.place_name ?? f.properties.city);
+  const stops = tracks.features.filter((f) => !f.properties.passing && (f.properties.place_name ?? f.properties.city));
   const seen = new Set<string>();
   const legendItems = stops.filter((f) => {
     const key = f.properties.place_name ?? f.properties.city ?? "";

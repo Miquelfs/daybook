@@ -448,6 +448,7 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
       const seen = new Set<string>();
       geojson.features.forEach((feature) => {
         const props = feature.properties;
+        if (props.passing) return;                 // driven past: part of the route, not a stop
         const name  = props.place_name ?? props.city ?? null;
 
         let latlng: [number, number];

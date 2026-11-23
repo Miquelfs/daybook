@@ -4,7 +4,9 @@ countries you were in and which of them were new (never seen before that date).
 
 Two sources, merged: Google timeline visits (place_names: name, city, country — until 2026-05)
 and Overland tracks (geocoded segment: name, city, country — since). A "place" is the geocoded
-name in its city (often a street or venue); countries are normalised to English.
+name in its city (often a street or venue) of somewhere you stopped — a ping you were only passing
+through (passing.py) still counts for its city and country, never as a place; countries are
+normalised to English.
 """
 
 from __future__ import annotations
@@ -18,12 +20,17 @@ from domains.locations.country_names import to_english
 
 def _rows(con: sqlite3.Connection):
     """(date, place, city, country) for every visit and named track segment, oldest first."""
-    q = """
+    try:
+        has_passing = "passing" in {r[1] for r in con.execute("PRAGMA table_info(tracks)")}
+    except sqlite3.OperationalError:
+        has_passing = False
+    named = "CASE WHEN COALESCE(t.passing, 0) = 1 THEN NULL ELSE t.geocode_name END" if has_passing else "t.geocode_name"
+    q = f"""
         SELECT substr(v.date, 1, 10) AS d, p.name AS place, p.city AS city, p.country AS country
         FROM visits v JOIN place_names p ON p.place_id = v.place_id
         WHERE v.date IS NOT NULL
         UNION ALL
-        SELECT substr(t.date, 1, 10), t.geocode_name, t.geocode_city, t.geocode_country
+        SELECT substr(t.date, 1, 10), {named}, t.geocode_city, t.geocode_country
         FROM tracks t WHERE t.date IS NOT NULL AND (t.geocode_name IS NOT NULL OR t.geocode_city IS NOT NULL)
         ORDER BY 1"""
     try:
@@ -41,7 +48,7 @@ def _first_seen(con):
     location data changes (a full scan takes seconds on the Pi)."""
     try:
         sig = tuple(con.execute("SELECT (SELECT COUNT(*) FROM visits), (SELECT COUNT(*) FROM tracks), "
-                                "(SELECT MAX(date) FROM tracks)").fetchone())
+                                "(SELECT MAX(date) FROM tracks), (SELECT SUM(COALESCE(passing, 0)) FROM tracks)").fetchone())
     except sqlite3.OperationalError:
         sig = None
     if sig is not None and _CACHE.get("sig") == sig:

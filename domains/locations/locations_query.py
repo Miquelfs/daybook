@@ -329,8 +329,7 @@ def tracks_for_date(date: str) -> list[dict]:
     con = _conn()
     rows = con.execute(
         """
-        SELECT segment_start, segment_end, points_json,
-               geocode_name, geocode_city, geocode_country
+        SELECT *
         FROM   tracks
         WHERE  date = ?
         ORDER BY segment_start
@@ -402,6 +401,9 @@ def tracks_for_date(date: str) -> list[dict]:
         hl = home_label(pts[0]["lat"], pts[0]["lng"]) if pts else None
         if hl:
             place_name, semantic_type = hl, "Home"
+        passing = bool(r["passing"]) if "passing" in r.keys() else False
+        if passing:                                   # driven past, not a place (passing.py)
+            place_name, semantic_type = None, None
         result.append({
             "segment_start": r["segment_start"],
             "segment_end": r["segment_end"],
@@ -411,6 +413,7 @@ def tracks_for_date(date: str) -> list[dict]:
             "country": enrich.get("country") or r["geocode_country"],
             "activity_type": best_activity(r["segment_start"], r["segment_end"]),
             "motion": best_motion(r["segment_start"], r["segment_end"]),
+            "passing": passing,
             "coordinates": [[p["lng"], p["lat"]] for p in pts],
         })
     return result

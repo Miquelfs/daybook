@@ -48,8 +48,6 @@ export function OnThisDay({ entries, todayDate }: { entries: OnThisDayYear[]; to
   const y = entries[Math.min(selected, entries.length - 1)];
   const yearsAgo = parseInt(todayDate.slice(0, 4)) - parseInt(y.date.slice(0, 4));
   const accent = moodAccent(y.mood);
-  const isEmpty = y.events.length === 0 && y.restaurants.length === 0 && y.books.length === 0
-    && !y.mood_note && !y.notes && !y.mood && !y.trip_city;
 
   return (
     <div className="flex flex-col gap-3">
@@ -88,7 +86,9 @@ export function OnThisDay({ entries, todayDate }: { entries: OnThisDayYear[]; to
         <Link href={`/day/${y.date}`} className="flex items-center justify-between gap-3 mb-2 group">
           <span className="text-xs text-[#52525B] uppercase tracking-widest group-hover:text-[#F59E0B] transition-colors">
             {format(parseISO(y.date), "d MMM yyyy")}
-            <span className="text-[#3F3F46]"> · {yearsAgo} year{yearsAgo !== 1 ? "s" : ""} ago</span>
+            <span className="text-[#3F3F46]">
+              {" · "}{Math.abs(yearsAgo)} year{Math.abs(yearsAgo) !== 1 ? "s" : ""} {yearsAgo >= 0 ? "ago" : "later"}
+            </span>
           </span>
           {y.mood != null && (
             <span className="text-sm font-semibold text-[#F59E0B] shrink-0">
@@ -105,10 +105,6 @@ export function OnThisDay({ entries, todayDate }: { entries: OnThisDayYear[]; to
 
         {(y.mood_note || y.notes) && (
           <p className="text-sm text-[#A1A1AA] italic mb-2">&ldquo;{y.mood_note || y.notes}&rdquo;</p>
-        )}
-
-        {isEmpty && (
-          <p className="text-xs text-[#3F3F46]">Nothing specific logged — just marking the date.</p>
         )}
 
         {y.events.length > 0 && (

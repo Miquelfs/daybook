@@ -302,6 +302,16 @@ def _run_migrations() -> None:
     import threading as _threading
     from domains.vehicles.routes import refresh_in_background as _vehicle_refresh
     _threading.Thread(target=_vehicle_refresh, daemon=True, name="vehicle-routes").start()
+    # locations: which old pings were only passing through (not places) — once, then only new days
+    from domains.locations.passing import backfill_in_background as _passing_backfill, ensure_column as _passing_col
+    try:
+        from domains.locations.overland_process import _conn as _loc_conn
+        _lc = _loc_conn()
+        _passing_col(_lc)                        # the column first, so queries never miss it
+        _lc.close()
+    except Exception as e:                       # noqa: BLE001
+        print(f"[startup] tracks.passing: {e}")
+    _threading.Thread(target=_passing_backfill, daemon=True, name="passing").start()
 
 
 class ThemeIn(BaseModel):
