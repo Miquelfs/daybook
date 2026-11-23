@@ -1,10 +1,45 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { format, parseISO, addDays, subDays, isToday } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { GarminSyncButton } from "@/components/GarminSyncButton";
 import { DayCalendar } from "@/components/DayCalendar";
+
+const MAX_PX = 52;
+const MIN_PX = 20;
+
+// One line, as big as it fits: starts at MAX_PX and shrinks to the width it has
+// (re-measured when the window or the buttons beside it change size).
+function FitTitle({ children }: { children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const text = useRef<HTMLHeadingElement>(null);
+  const [px, setPx] = useState(MAX_PX);
+  useLayoutEffect(() => {
+    const fit = () => {
+      const b = box.current, t = text.current;
+      if (!b || !t) return;
+      t.style.fontSize = `${MAX_PX}px`;
+      const need = t.scrollWidth, room = b.clientWidth;
+      const next = need > room ? Math.max(MIN_PX, Math.floor((MAX_PX * room) / need)) : MAX_PX;
+      t.style.fontSize = `${next}px`;
+      setPx(next);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    if (box.current) ro.observe(box.current);
+    return () => ro.disconnect();
+  }, [children]);
+  return (
+    <div ref={box} className="min-w-0 w-full overflow-hidden">
+      <h1 ref={text} className="font-semibold leading-[1.15] tracking-tight text-[#FAFAFA] whitespace-nowrap w-max max-w-none"
+          style={{ fontSize: px }}>
+        {children}
+      </h1>
+    </div>
+  );
+}
 
 interface Props {
   date: string; // YYYY-MM-DD
@@ -12,8 +47,8 @@ interface Props {
 
 // One compact line: kicker + date on the left, day navigation inline on the
 // right — no separate nav row eating vertical space on the phone. The year stays in
-// the title, in grey; when "September 30 2026" doesn't fit next to the buttons it
-// wraps under the date instead of being cut.
+// the title, in grey; when "September 30 2026" doesn't fit next to the buttons the
+// title shrinks to fit (FitTitle) instead of being cut or wrapped.
 export function DayHeader({ date }: Props) {
   const d = parseISO(date);
   const prev = format(subDays(d, 1), "yyyy-MM-dd");
@@ -23,17 +58,13 @@ export function DayHeader({ date }: Props) {
   return (
     <header className="pt-6 pb-6 border-b border-[#27272A]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-xs text-[#F59E0B] uppercase tracking-[0.2em] mb-1.5">
             {isToday(d) ? "Today" : format(d, "EEEE")}
           </p>
-          <h1
-            className="font-semibold leading-[1.15] tracking-tight text-[#FAFAFA] flex flex-wrap items-baseline gap-x-[0.3em]"
-            style={{ fontSize: "clamp(1.5rem, 5.5vw, 3.25rem)" }}
-          >
-            <span className="whitespace-nowrap">{format(d, "MMMM d")}</span>
-            <span className="text-[#71717A] font-normal">{format(d, "yyyy")}</span>
-          </h1>
+          <FitTitle>
+            {format(d, "MMMM d")} <span className="text-[#71717A] font-normal">{format(d, "yyyy")}</span>
+          </FitTitle>
         </div>
 
         <div className="flex items-center gap-1 shrink-0 sm:pb-0.5">
