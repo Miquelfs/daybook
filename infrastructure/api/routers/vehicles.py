@@ -33,7 +33,7 @@ import uuid
 from datetime import date as _date
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from domains.vehicles import garage, reminders, routes
@@ -85,7 +85,7 @@ def list_vehicles(conn: DB, day_conn: DayDB):
 
 
 @router.post("", status_code=201)
-def create_vehicle(body: VehicleBody, conn: DB):
+def create_vehicle(body: VehicleBody, conn: DB, background: BackgroundTasks):
     if not (body.name or "").strip():
         raise HTTPException(422, "Give it a name")
     kind = body.kind if body.kind in garage.KINDS else "car"
@@ -98,7 +98,7 @@ def create_vehicle(body: VehicleBody, conn: DB):
     )
     conn.commit()
     vid = cur.lastrowid
-    routes.refresh(conn)
+    background.add_task(routes.refresh_in_background)   # 45 days of GPS: not inside the request
     return garage.vehicle_out(_vehicle(conn, vid))
 
 
@@ -226,7 +226,7 @@ def get_vehicle(vid: int, conn: DB, months: int = Query(12, ge=1, le=120)):
 
 
 @router.patch("/{vid}")
-def patch_vehicle(vid: int, body: VehicleBody, conn: DB):
+def patch_vehicle(vid: int, body: VehicleBody, conn: DB, background: BackgroundTasks):
     before = _vehicle(conn, vid)
     sent = body.model_dump(exclude_unset=True)
     updates = {k: (json.dumps(v or []) if k == "subcategories" else v) for k, v in sent.items() if k in _COLS}
@@ -238,7 +238,7 @@ def patch_vehicle(vid: int, body: VehicleBody, conn: DB):
         conn.execute(f"UPDATE vehicles SET {', '.join(f'{k}=?' for k in updates)} WHERE id=?", (*updates.values(), vid))
         conn.commit()
     if "day_tag" in updates and updates["day_tag"] != before["day_tag"]:
-        routes.refresh(conn)
+        background.add_task(routes.refresh_in_background)
     return garage.vehicle_out(_vehicle(conn, vid))
 
 

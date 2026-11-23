@@ -80,6 +80,13 @@ class Legs(unittest.TestCase):
         self.assertAlmostEqual(legs[0]["km"], 17.2, delta=0.5)
 
 
+    def test_mixed_timestamp_formats_join(self):
+        line = [[2.60 + i * 0.01, 39.57] for i in range(11)]
+        segs = [self.seg("2026-11-01T10:00:00Z", "2026-11-01T10:10:00Z", line),
+                self.seg("2026-11-01 10:15:00", "2026-11-01T10:25:00+00:00", line[::-1])]   # no offset / +00:00
+        self.assertEqual(len(routes.legs_from_segments(segs)), 1)
+
+
 class Assign(unittest.TestCase):
     def setUp(self):
         d = tmpdir()

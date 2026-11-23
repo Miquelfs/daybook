@@ -20,12 +20,14 @@ Where each vehicle went, from the GPS.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import sqlite3
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+log = logging.getLogger(__name__)
 DAYBOOK_DB = Path(__file__).parents[2] / "infrastructure" / "db" / "daybook.db"
 MIN_KMH, MAX_KMH = 12.0, 150.0        # slower is walking/traffic noise, faster is a train or a plane
 MIN_LEG_KM = 0.4
@@ -46,7 +48,9 @@ def _km(a, b) -> float:
 
 
 def _ts(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    """Always timezone-aware (a time without an offset is UTC), so any two can be subtracted."""
+    t = datetime.fromisoformat(str(s).strip().replace(" ", "T").replace("Z", "+00:00"))
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
 def path_km(pts: list[tuple[float, float]]) -> float:
@@ -145,6 +149,9 @@ def scan_day(conn: sqlite3.Connection, day: str) -> int:
         legs = legs_from_segments(tracks_for_date(day))
     except sqlite3.OperationalError:
         legs = []
+    except Exception:                                   # one odd day never stops the others
+        log.exception("vehicle legs: couldn't read %s", day)
+        return 0
     conn.execute("DELETE FROM vehicle_legs WHERE date=?", (day,))
     for l in legs:
         conn.execute(
@@ -161,7 +168,10 @@ def _pick_for(picks: list[sqlite3.Row], start: str) -> int | None:
     t = _ts(start)
     best = None
     for p in picks:
-        gap = abs((_ts(p["start"]) - t).total_seconds())
+        try:
+            gap = abs((_ts(p["start"]) - t).total_seconds())
+        except (ValueError, TypeError):
+            continue
         if gap <= PICK_MATCH_MIN * 60 and (best is None or gap < best[0]):
             best = (gap, p["vehicle_id"])
     return best[1] if best else None
@@ -199,6 +209,19 @@ def pick(conn: sqlite3.Connection, day: str, start: str, vehicle_id: int) -> Non
             add_day_tag(day, v["day_tag"])
     assign(conn)
     conn.commit()
+
+
+def refresh_in_background() -> None:
+    """For API calls that change what's assigned (a new vehicle, a new day tag): own connection,
+    never raises — the request already answered."""
+    from infrastructure.db.money_connection import get_money_connection
+    conn = get_money_connection()
+    try:
+        refresh(conn)
+    except Exception:
+        log.exception("vehicle routes refresh failed")
+    finally:
+        conn.close()
 
 
 def refresh(conn: sqlite3.Connection, everything: bool = False) -> int:
