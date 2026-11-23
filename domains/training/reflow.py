@@ -405,6 +405,9 @@ def _write(conn, movable, placed, unplaced, ctx, covered: dict[int, str] | None 
            zones: dict[int, str] | None = None) -> list[dict]:
     changes = []
     unplaced_ids = {u["id"] for u in unplaced}
+    # sessions cut for a tour's recovery week: once placed outside that week they're ridden as written
+    from domains.training.restore import forget_recovery, recovery_windows
+    cut = {sid: (w, e) for w in recovery_windows(conn) for sid, e in w["entries"].items()}
     for s in movable:
         if covered and s["id"] in covered:
             note = covered[s["id"]]
@@ -420,6 +423,13 @@ def _write(conn, movable, placed, unplaced, ctx, covered: dict[int, str] | None 
             d, eff, note = placed[s["id"]]
             new_date = d.isoformat()
             zone = (zones or {}).get(s["id"], s["intensity_zone"])
+            if s["id"] in cut and not (cut[s["id"]][0]["start"] <= d <= cut[s["id"]][0]["end"]):
+                orig = cut[s["id"]][1]
+                eff = min(int(orig.get("eff") or eff), ctx[d]["window_min"] or eff)
+                if s["id"] not in (zones or {}):
+                    zone = orig.get("zone") or zone
+                conn.execute("UPDATE plan_sessions SET eff_override=NULL WHERE id=?", (s["id"],))
+                forget_recovery(conn, s["id"])
             if (new_date != s["session_date"] or eff != s["effective_duration_min"]
                     or note != s["schedule_note"] or s["status"] != "pending" or zone != s["intensity_zone"]):
                 conn.execute(

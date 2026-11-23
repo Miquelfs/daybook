@@ -9,7 +9,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
 from infrastructure.api.db import get_db
@@ -687,12 +687,49 @@ def start_plan_early(goal_id: int, conn: DB):
 
 
 @router.post("/goals/{goal_id}/reflow", status_code=200)
-def reflow_goal_endpoint(goal_id: int, conn: DB, reset_week: Optional[str] = Query(None)):
+def reflow_goal_endpoint(goal_id: int, conn: DB, background: BackgroundTasks, reset_week: Optional[str] = Query(None)):
     """Re-place this and future weeks' pending sessions around roster / travel.
-    reset_week=<Monday> also releases that week's hand-moved sessions first."""
+    reset_week=<Monday> also releases that week's hand-moved sessions first. What moved goes to
+    Garmin / MyWhoosh straight away (the nightly push would leave today's session off the watch)."""
     _row(conn, "race_goals", goal_id)
     changes = reflow_goal(conn, goal_id, reset_week=reset_week)
+    if changes:
+        background.add_task(_push_now)
     return {"changed": len(changes), "changes": changes}
+
+
+def _push_now(days: int = 9) -> None:
+    """Best-effort push of the next days to Garmin and Intervals.icu (→ MyWhoosh), on its own connection."""
+    from infrastructure.db.connection import get_connection
+    conn = get_connection()
+    try:
+        try:
+            _push_mywhoosh(conn, days)
+        except Exception:                                          # noqa: BLE001
+            pass
+        try:
+            from domains.health.garmin import workout_push as wp
+            if wp.enabled():
+                wp.push_upcoming(conn, days=days, verbose=False)
+        except (Exception, SystemExit):                            # noqa: BLE001 — no Garmin login: the nightly push retries
+            pass
+    finally:
+        conn.close()
+
+
+@router.post("/sessions/{session_id}/restore", status_code=200)
+def restore_session(session_id: int, conn: DB, background: BackgroundTasks):
+    """Ride the session as the plan wrote it: full length, its own intensity (undo a recovery-week
+    cut, a "only ~1h free" trim), then re-plan so it lands on a day that holds it."""
+    from domains.training.restore import restore_full
+    try:
+        out = restore_full(conn, session_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    background.add_task(_push_now)
+    return {**out, "session": _session_out(_row(conn, "plan_sessions", session_id), conn)}
 
 
 # ── Race cockpit overview ───────────────────────────────────────────────────

@@ -109,5 +109,61 @@ class BlockTest(unittest.TestCase):
             blocks.create(self.c, 1, "Other", "2026-11-20", "2026-11-25", [])
 
 
+
+class RecoveryWeekKeyWorkTest(BlockTest):
+    """The Puig Major climb after Taiwan: cut to 60 % Z2 for the recovery week, then left cut after it moved."""
+
+    def puig(self):
+        return self.c.execute("SELECT * FROM plan_sessions WHERE session_type LIKE '%Puig Major%' "
+                              "AND week_number=6").fetchone()
+
+    def test_no_key_work_in_the_recovery_week(self):
+        self.make()
+        ctx = DayContextReader(self.c).context("2026-11-24")
+        self.assertFalse(ctx["intense_ok"])
+        self.assertIn("easy week after Taiwan", ctx["label"])
+        self.assertTrue(DayContextReader(self.c).context("2026-11-29")["intense_ok"])
+
+    def test_cut_key_session_moved_past_the_recovery_week_is_ridden_in_full(self):
+        self.make()
+        p = self.puig()
+        self.assertLess(p["effective_duration_min"], p["duration_min"])          # cut for the recovery week
+        self.assertEqual(p["intensity_zone"], "Z2")
+        rf.date = fake_date(2026, 11, 23)
+        rf.reflow_goal(self.c, 1)
+        p = self.puig()
+        self.assertEqual(p["session_date"], "2026-11-29")                        # first day after the easy week
+        self.assertEqual((p["effective_duration_min"], p["intensity_zone"], p["eff_override"]),
+                         (p["duration_min"], "Z3", None))
+
+    def test_restore_a_cut_left_behind(self):
+        """What happened on the Pi: set aside while the recovery was resized, so it kept the provisional cut."""
+        from domains.training.restore import recovery_windows, restore_full
+        self.make()
+        p = self.puig()
+        self.c.execute("UPDATE training_blocks SET changes_json=json_set(changes_json, '$.recovery', json('[]'))")
+        self.c.execute("UPDATE plan_sessions SET session_date='2026-11-23', status='pending', structure_json=? WHERE id=?",
+                       ('[{"kind":"steady","zone":"Z1","duration_min":15},{"kind":"intervals","work_zone":"Z3",'
+                        '"rest_zone":"Z1","reps":2,"work_min":12}]', p["id"]))
+        rf.date = fake_date(2026, 11, 23)
+        out = restore_full(self.c, p["id"])
+        self.assertEqual((out["effective_duration_min"], out["intensity_zone"]), (p["duration_min"], "Z3"))
+        p = self.puig()
+        self.assertEqual(p["session_date"], "2026-11-29")
+        self.assertNotIn(p["id"], recovery_windows(self.c)[0]["entries"])
+
+    def test_resizing_the_recovery_also_restores_set_aside_sessions(self):
+        self.make()
+        p = self.puig()
+        self.c.execute("UPDATE plan_sessions SET status='displaced', schedule_note='No free slot this week' WHERE id=?",
+                       (p["id"],))
+        import json as _j
+        ch = _j.loads(self.c.execute("SELECT changes_json FROM training_blocks").fetchone()[0])
+        blocks._restore_recovery(self.c, ch["recovery"])
+        p = self.puig()
+        self.assertEqual((p["effective_duration_min"], p["intensity_zone"], p["status"], p["schedule_note"]),
+                         (p["duration_min"], "Z3", "displaced", "No free slot this week"))
+
+
 if __name__ == "__main__":
     unittest.main()

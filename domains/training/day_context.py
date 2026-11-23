@@ -151,6 +151,15 @@ class DayContextReader:
         return round(r[0] / 3600, 1) if r and r[0] else None
 
     # ── the context ──────────────────────────────────────────────────────────
+    def recovery_after(self, d: str) -> str | None:
+        """The tour/camp whose recovery week (the 7 days after it) this day is in."""
+        if "training_blocks" not in self.tables:
+            return None
+        r = self.conn.execute(
+            "SELECT name FROM training_blocks WHERE date(end_date, '+1 day') <= ? AND date(end_date, '+7 day') >= ? "
+            "LIMIT 1", (d, d)).fetchone()
+        return r[0] if r else None
+
     def context(self, d: str) -> dict:
         day = date.fromisoformat(d)
         prev = (day - timedelta(days=1)).isoformat()
@@ -238,6 +247,12 @@ class DayContextReader:
 
         ctx["window_min"] = int(min(window, FULL_DAY_MIN))
         ctx["intense_ok"] = ctx["window_min"] >= HARD_MIN_WINDOW
+        rec = self.recovery_after(d)
+        if rec:
+            # the week after a tour is for absorbing it: easy riding and gym, the key work goes after
+            ctx["recovery_after"] = rec
+            ctx["intense_ok"] = False
+            ctx["label"] += f" · easy week after {rec}"
         if prev_late:
             ctx["label"] += f" · late finish last night ({ctx['prev_end_time']})"
         return ctx

@@ -173,6 +173,21 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
     finally { setSkipping(false); }
   }
 
+  // Shortened by the plan (recovery week, "only ~1h free") — put it back as written; the re-plan finds it a day.
+  const [restoring, setRestoring] = useState(false);
+  const cut = (session.status === "pending" || session.status === "displaced")
+    && session.effective_duration_min < session.duration_min;
+  async function restore() {
+    setRestoring(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/race-plans/sessions/${session.id}/restore`, { method: "POST" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Could not restore");
+      onUpdate(); onClose();
+    } catch (e) { setErr((e as Error).message); }
+    finally { setRestoring(false); }
+  }
+
   // Log RPE on an already-completed session (e.g. one auto-matched from Garmin).
   async function saveRpe() {
     if (!rpe) { setErr("Pick an RPE first"); return; }
@@ -204,6 +219,7 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-[#FAFAFA]">{session.session_type}</p>
             <p className="text-xs text-[#52525B]">{session.session_date} · Week {session.week_number}</p>
+            {session.schedule_note && <p className="text-[11px] text-[#71717A] mt-0.5">{session.schedule_note}</p>}
           </div>
           <button onClick={onClose} className="text-[#52525B] hover:text-[#A1A1AA] p-1"><X size={16} /></button>
         </div>
@@ -283,6 +299,12 @@ function SessionDetailSheet({ session, onClose, onUpdate, disciplineZones }: {
             <p className="text-xl font-semibold text-[#FAFAFA] tabular-nums">{session.effective_duration_min}<span className="text-sm font-normal text-[#52525B]"> min</span></p>
             {session.effective_duration_min !== session.duration_min && (
               <p className="text-[10px] text-[#52525B] mt-0.5">Planned {session.duration_min}m · adjusted by plan</p>
+            )}
+            {cut && (
+              <button onClick={restore} disabled={restoring}
+                      className="mt-2 text-[11px] text-[#F59E0B] hover:underline disabled:opacity-50">
+                {restoring ? "Restoring…" : `Ride it in full (${session.duration_min} min) →`}
+              </button>
             )}
           </div>
           <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-3 flex-1">

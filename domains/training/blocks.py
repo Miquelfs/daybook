@@ -82,7 +82,8 @@ def _restore_recovery(conn, entries: list[dict]) -> None:
     _ensure_columns(conn)
     for r in entries:
         conn.execute("UPDATE plan_sessions SET effective_duration_min=?, eff_override=NULL, intensity_zone=?, "
-                     "schedule_note=NULL WHERE id=? AND status='pending'", (r["eff"], r["zone"], r["id"]))
+                     "schedule_note=CASE WHEN status='pending' THEN NULL ELSE schedule_note END "
+                     "WHERE id=? AND status IN ('pending', 'displaced')", (r["eff"], r["zone"], r["id"]))
 
 
 def ensure_table(conn) -> None:
