@@ -32,12 +32,13 @@ DAYBOOK_DB = Path(__file__).parents[2] / "infrastructure" / "db" / "daybook.db"
 MIN_KMH, MAX_KMH = 12.0, 150.0        # slower is walking/traffic noise, faster is a train or a plane
 MIN_LEG_KM = 0.4
 JOIN_GAP_MIN = 12                     # segments this close are one leg (a red light, a GPS pause)
-NOT_VEHICLE = {"walking", "running", "stationary"}
+ON_FOOT = {"walking", "running"}            # both ends of a step say so → not a drive (speed rules out the rest)
 MAX_POINTS = 250                      # per leg, after thinning
 RECENT_DAYS = 3
 SCAN_DAYS = 45                        # untagged days read for drives you didn't tag
 INBOX_DAYS = 30                       # untagged drives older than this aren't asked about
 PICK_MATCH_MIN = 15
+READER = 2                            # bump when legs_from_segments changes: every day is read again
 
 
 def _km(a, b) -> float:
@@ -65,38 +66,64 @@ def _overlaps(a0: str, a1: str, b0: str, b1: str) -> bool:
         return False
 
 
-def legs_from_segments(segments: list[dict], forced: list[tuple[str, str]] = ()) -> list[dict]:
-    """tracks_for_date() output → vehicle legs: [{start, end, km, minutes, start_place, end_place, points}].
+def _points(segments: list[dict]) -> list[dict]:
+    """Every GPS point of the day in order, with a time and what its segment says.
 
-    `forced`: windows you picked a vehicle for on the day map — a segment touching one is a drive
-    whatever the speed / motion guess said (a slow scooter ride the phone took for walking)."""
-    keep = []
+    Overland stores a drive as a run of one-point segments (each moving ping is its own), and a
+    stop as one segment of many jittery points — so a drive only shows up between consecutive
+    points, the way the day map draws it. Points inside one segment get times spread evenly
+    from its start to its end."""
+    out = []
     for s in segments:
-        pts = [(c[1], c[0]) for c in s.get("coordinates") or []]
-        if len(pts) < 2:
-            continue
+        coords = s.get("coordinates") or []
         try:
-            hours = max((_ts(s["segment_end"]) - _ts(s["segment_start"])).total_seconds(), 30) / 3600
+            t0, t1 = _ts(s["segment_start"]), _ts(s["segment_end"])
         except (KeyError, ValueError, TypeError):
             continue
-        km = path_km(pts)
-        force = any(_overlaps(s["segment_start"], s["segment_end"], a, b) for a, b in forced)
-        if not force:
-            if s.get("activity_type") or (s.get("motion") in NOT_VEHICLE):
-                continue
-            if km < 0.2 or not (MIN_KMH <= km / hours <= MAX_KMH):
-                continue
-        keep.append({"start": s["segment_start"], "end": s["segment_end"], "km": km, "hours": hours,
-                     "place": s.get("place_name") or s.get("city"), "points": pts, "forced": force})
+        n = len(coords)
+        for i, c in enumerate(coords):
+            out.append({"t": t0 + (t1 - t0) * (i / (n - 1) if n > 1 else 0), "pt": (c[1], c[0]),
+                        "iso": s["segment_start"] if i == 0 else s["segment_end"],
+                        "exercise": bool(s.get("activity_type")), "motion": s.get("motion"),
+                        "place": s.get("place_name") or s.get("city")})
+    out.sort(key=lambda p: p["t"])
+    return out
+
+
+def legs_from_segments(segments: list[dict], forced: list[tuple[str, str]] = ()) -> list[dict]:
+    """tracks_for_date() output → vehicle legs: [{start, end, km, hours, start_place, end_place, points}].
+
+    A step between two consecutive points is a drive at vehicle speed, unless a logged workout
+    covers it or both ends say walking/running. `forced`: windows you picked a vehicle for on
+    the day map — a step touching one is a drive whatever the speed / motion said (a slow scooter
+    ride the phone took for walking). Drive steps less than JOIN_GAP_MIN apart are one leg."""
+    win = [(_ts(a), _ts(b)) for a, b in forced]
+    pts = _points(segments)
     legs: list[dict] = []
-    for s in sorted(keep, key=lambda x: _ts(x["start"])):
-        if legs and (_ts(s["start"]) - _ts(legs[-1]["end"])).total_seconds() <= JOIN_GAP_MIN * 60:
+    for p, q in zip(pts, pts[1:]):
+        secs = (q["t"] - p["t"]).total_seconds()
+        km = _km(p["pt"], q["pt"])
+        force = any(p["t"] <= b and a <= q["t"] for a, b in win) and km > 0
+        if not force:
+            if secs <= 0 or p["exercise"] or q["exercise"]:
+                continue
+            if p["motion"] in ON_FOOT and q["motion"] in ON_FOOT:
+                continue
+            if not (MIN_KMH <= km / (secs / 3600) <= MAX_KMH):
+                continue
+        hours = max(secs, 0) / 3600
+        if legs and (p["t"] - legs[-1]["_end"]).total_seconds() <= JOIN_GAP_MIN * 60:
             l = legs[-1]
-            l.update(end=s["end"], km=l["km"] + s["km"], hours=l["hours"] + s["hours"], forced=l["forced"] or s["forced"],
-                     end_place=s["place"] or l["end_place"], points=l["points"] + s["points"])
+            if l["points"][-1] != p["pt"]:
+                l["points"].append(p["pt"])
+            l["points"].append(q["pt"])
+            l.update(end=q["iso"], _end=q["t"], km=l["km"] + km, hours=l["hours"] + hours,
+                     end_place=q["place"] or l["end_place"], forced=l["forced"] or force)
         else:
-            legs.append({"start": s["start"], "end": s["end"], "km": s["km"], "hours": s["hours"], "forced": s["forced"],
-                         "start_place": s["place"], "end_place": s["place"], "points": s["points"]})
+            legs.append({"start": p["iso"], "end": q["iso"], "_end": q["t"], "km": km, "hours": hours, "forced": force,
+                         "start_place": p["place"], "end_place": q["place"], "points": [p["pt"], q["pt"]]})
+    for l in legs:
+        l.pop("_end")
     return [l for l in legs if l["km"] >= MIN_LEG_KM or l["forced"]]
 
 
@@ -174,8 +201,8 @@ def scan_day(conn: sqlite3.Connection, day: str) -> int:
                VALUES (?,?,?,?,?,?,?,?)""",
             (day, l["start"], l["end"], round(l["km"], 2), round(l["hours"] * 60, 1), l["start_place"], l["end_place"],
              json.dumps(_thin(l["points"]))))
-    conn.execute("INSERT OR REPLACE INTO vehicle_scan (date, legs, scanned_at) VALUES (?,?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
-                 (day, len(legs)))
+    conn.execute("INSERT OR REPLACE INTO vehicle_scan (date, legs, reader, scanned_at) "
+                 "VALUES (?,?,?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))", (day, len(legs), READER))
     return len(legs)
 
 
@@ -221,7 +248,7 @@ def assign(conn: sqlite3.Connection) -> None:
 
 
 def pick(conn: sqlite3.Connection, day: str, start: str, vehicle_id: int, end: str | None = None) -> None:
-    """You say who drove a leg (0 = not mine). On an untagged day the vehicle's tag goes on the day.
+    """You say who drove a leg (0 = not mine). The vehicle's day tag goes on the day (Scooter ride / Car drive).
 
     With `end` (picked on the day map) it's a stretch of time: whichever drive touches it is this
     vehicle's — and if the GPS read none there (too slow, taken for walking), it becomes one."""
@@ -240,11 +267,9 @@ def pick(conn: sqlite3.Connection, day: str, start: str, vehicle_id: int, end: s
             scan_day(conn, day)                  # the stretch may not have been a drive by speed alone
     else:
         conn.execute("INSERT OR REPLACE INTO vehicle_leg_picks (date, start, vehicle_id) VALUES (?,?,?)", (day, start, vehicle_id))
-    if vehicle_id:
+    if vehicle_id:                               # you rode it that day → its tag goes on the day
         v = conn.execute("SELECT day_tag FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
-        by_tag = _vehicle_tags(conn)
-        on_day = day_tags(set(by_tag), since=day).get(day, set())
-        if v and v["day_tag"] and not on_day:
+        if v and v["day_tag"]:
             add_day_tag(day, v["day_tag"])
     assign(conn)
     conn.commit()
@@ -272,7 +297,7 @@ def refresh(conn: sqlite3.Connection, everything: bool = False) -> int:
     recent = (today - timedelta(days=RECENT_DAYS)).isoformat()
     window = [(today - timedelta(days=i)).isoformat() for i in range(SCAN_DAYS + 1)]
     wanted = set(day_tags(set(by_tag))) | set(window)
-    done = {r[0] for r in conn.execute("SELECT date FROM vehicle_scan")}
+    done = {r[0] for r in conn.execute("SELECT date FROM vehicle_scan WHERE reader >= ?", (READER,))}
     n = 0
     for d in sorted(wanted):
         if everything or d not in done or d >= recent:
@@ -285,7 +310,7 @@ def refresh(conn: sqlite3.Connection, everything: bool = False) -> int:
 
 def on_day(conn: sqlite3.Connection, day: str) -> dict:
     """The day map's view: your vehicles, and who drove each of that day's drives."""
-    if not conn.execute("SELECT 1 FROM vehicle_scan WHERE date=?", (day,)).fetchone() and \
+    if not conn.execute("SELECT 1 FROM vehicle_scan WHERE date=? AND reader >= ?", (day, READER)).fetchone() and \
             conn.execute("SELECT 1 FROM vehicles LIMIT 1").fetchone():
         scan_day(conn, day)
         assign(conn)

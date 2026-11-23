@@ -18,6 +18,17 @@ exported from the bank is only read to find where the two disagree:
 
 Matching is recomputed on every read, so fixing an entry by hand is reflected at once. Only the
 links you make yourself (or "Add to Daybook") and the lines you ignore are stored.
+
+Closing the gap (all on the reconcile page):
+  elsewhere                   a bank line you logged on another account (same amount, same days, and
+                              that account's own statement doesn't have it) → move it here.
+  add_line / add_all          create the Daybook entry from a bank line. Add all files each line by its
+                              kind — an investment as a Transfer (mirrored on the matching investment
+                              account), interest / dividends / cashback as Income, fees / tax as Finance —
+                              and everything you'd have typed yourself as 🚨 Alert, to look at later.
+  settle                      what's still off becomes a 🚨 adjustment (Account Setup, so it's never
+                              counted as spending): the gap before the statement starts, and the rest at
+                              its end. Running it again replaces the previous adjustments.
 """
 
 from __future__ import annotations
@@ -31,6 +42,7 @@ import os
 import re
 import sqlite3
 import unicodedata
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
@@ -54,6 +66,7 @@ class Line:
     amount: float
     balance: float | None = None
     currency: str | None = None
+    kind: str | None = None               # KINDS — what sort of movement (from the bank's type column / text)
 
 
 @dataclass
@@ -62,6 +75,36 @@ class Parsed:
     bank: str | None = None
     skipped: int = 0                      # rows that weren't completed movements (pending, reverted…)
     notes: list[str] = field(default_factory=list)
+
+
+# What a movement is. Only card / transfer / other are things you'd log as spending; the rest are
+# filed for you by "Add" (a stock buy is a Transfer to the investment account, interest is Income…).
+KINDS = ("card", "transfer", "investment", "interest", "dividend", "cashback", "fee", "tax", "other")
+
+_KIND_WORDS = [                                      # folded words → kind, first hit wins
+    ("investment", ("savings plan", "plan de inversion", "sparplan", "round up", "roundup", "redondeo",
+                    "saveback", "compra de valores", "venta de valores", "buy trade", "sell trade", " operar ",
+                    " comercio ", "orden de compra", "orden de venta", "execution", "ejecucion", " etf ")),
+    ("dividend", ("dividend", "dividendo", "distribucion", "ausschuttung")),
+    ("interest", ("interest", "interes", "intereses", "zinsen", "rentabilidad")),
+    ("cashback", ("cashback", "bonificacion", "reembolso promocional", " reward")),
+    ("tax", ("impuesto", "retencion", "withholding", " tax ", "hacienda", "steuer")),
+    ("fee", ("comision", " fee ", "commission")),
+    ("card", (" card", "tarjeta", "pago con tarjeta", " compra ")),
+    ("transfer", ("transfer", "bizum", "topup", "top up", "ingreso", "deposit", "exchange",
+                  "traspaso", "recibo", "adeudo")),
+]
+
+
+def kind_of(*texts: object) -> str | None:
+    """Best guess at a movement's kind from the bank's type column and / or its description."""
+    blob = " " + re.sub(r"[^a-z0-9]+", " ", " ".join(_fold(t) for t in texts if t)) + " "
+    if not blob.strip():
+        return None
+    for kind, words in _KIND_WORDS:
+        if any(w in blob for w in words):
+            return kind
+    return None
 
 
 # ── text helpers ──────────────────────────────────────────────────────────────
@@ -248,6 +291,7 @@ _COLS = {
     "fee": ["fee", "comision", "comisiones"],
     "state": ["state", "estado", "status"],
     "currency": ["currency", "divisa", "moneda"],
+    "type": ["tipo", "type", "transaction type", "tipo de transaccion", "tipo de movimiento", "categoria"],
 }
 
 
@@ -273,7 +317,7 @@ def _find_header(rows: list[list[object]]) -> tuple[int, dict[str, int | list[in
             continue
         used.add(d)
         cols["date"] = d
-        for key in ("amount", "debit", "credit", "balance", "fee", "state", "currency"):
+        for key in ("amount", "debit", "credit", "balance", "fee", "state", "currency", "type"):
             i = _match_col(header, _COLS[key], used)
             if i is not None:
                 cols[key] = i
@@ -341,7 +385,9 @@ def parse_rows(rows: list[list[object]], filename: str | None = None) -> Parsed:
                                         if str(_cell(row, i) or "").strip())) or "(no description)"
         bal = parse_amount(_cell(row, cols.get("balance")))
         cur = str(_cell(row, cols.get("currency")) or "").strip().upper() or None
-        out.append(Line(date=d, description=desc[:300], amount=round(amt, 2), balance=bal, currency=cur))
+        typ = str(_cell(row, cols.get("type")) or "").strip()
+        out.append(Line(date=d, description=desc[:300], amount=round(amt, 2), balance=bal, currency=cur,
+                        kind=kind_of(typ, desc) or ("card" if typ else None)))
     if not out:
         raise StatementError("Found the columns but no movements under them")
     return Parsed(lines=_chronological(out), bank=_guess_bank(rows, filename), skipped=skipped)
@@ -379,6 +425,8 @@ def _chronological(lines: list[Line]) -> list[Line]:
 # ── PDF: let Claude read it ───────────────────────────────────────────────────
 
 STATEMENT_MODEL = os.getenv("STATEMENT_MODEL", "claude-opus-5-5")
+PDF_CHUNK_CHARS = 14_000          # text per request — a long statement is read in parts, side by side
+PDF_WORKERS = 4
 _PDF_SCHEMA = {
     "type": "object",
     "properties": {
@@ -392,8 +440,9 @@ _PDF_SCHEMA = {
                     "description": {"type": "string"},
                     "amount": {"type": "number"},
                     "balance": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+                    "kind": {"type": "string", "enum": list(KINDS)},
                 },
-                "required": ["date", "description", "amount", "balance"],
+                "required": ["date", "description", "amount", "balance", "kind"],
                 "additionalProperties": False,
             },
         },
@@ -402,32 +451,108 @@ _PDF_SCHEMA = {
     "additionalProperties": False,
 }
 
+_PDF_PROMPT = """This is the text of part of a bank or broker account statement (probably Spanish; Trade Republic, \
+BBVA, Revolut…). {part}List every money movement in it, in the order printed:
+- date as YYYY-MM-DD (the operation date when two are given)
+- description: the merchant / counterparty / security, as printed (add the bank's type word in front when it helps, \
+e.g. "Saveback · iShares Core MSCI World")
+- amount signed from the account's point of view: negative = money out of the cash account, positive = money in. \
+When the statement has separate in / out columns ("Entrada de dinero" / "Salida de dinero"), use them for the sign.
+- balance: the running balance after it if printed, else null
+- kind: card (card payment or refund), transfer (bank transfer, Bizum, top-up, direct debit), investment (buying or \
+selling shares / ETFs / crypto, savings plan executions, round-ups, saveback), interest, dividend, cashback (cashback, \
+bonuses, rewards), fee, tax (withholding), other.
+Skip headers, page footers, totals, summaries, the portfolio / holdings overview and the opening / closing balance rows. \
+If this part has no movements, return an empty list.
 
-def _parse_pdf(raw: bytes) -> Parsed:
+"""
+
+
+def _pdf_pages(raw: bytes) -> list[str]:
     import fitz  # pymupdf
-    doc = fitz.open(stream=raw, filetype="pdf")
-    text = "\n".join(p.get_text() for p in doc)
-    if len(text.strip()) < 40:
-        raise StatementError("That PDF has no text in it (a scan?) — export a CSV or Excel instead")
-    import anthropic
-    client = anthropic.Anthropic()
+    try:
+        doc = fitz.open(stream=raw, filetype="pdf")
+    except Exception as e:
+        raise StatementError(f"That PDF couldn't be opened ({type(e).__name__})")
+    if doc.needs_pass:
+        raise StatementError("That PDF is password-protected — export it again without a password")
+    return [p.get_text() for p in doc]
+
+
+def _pdf_chunks(pages: list[str]) -> list[str]:
+    chunks, cur = [], ""
+    for p in pages:
+        if cur and len(cur) + len(p) > PDF_CHUNK_CHARS:
+            chunks.append(cur)
+            cur = ""
+        cur += p + "\n"
+    if cur.strip():
+        chunks.append(cur)
+    # a single huge page still goes in pieces (split on lines)
+    out = []
+    for c in chunks:
+        while len(c) > PDF_CHUNK_CHARS * 1.5:
+            cut = c.rfind("\n", 0, PDF_CHUNK_CHARS)
+            cut = cut if cut > 0 else PDF_CHUNK_CHARS
+            out.append(c[:cut])
+            c = c[cut:]
+        out.append(c)
+    return out
+
+
+def _read_chunk(client, text: str, i: int, n: int, depth: int = 0) -> dict:
+    part = f"This is part {i + 1} of {n}. " if n > 1 else ""
     msg = client.messages.create(
         model=STATEMENT_MODEL,
-        max_tokens=16000,
+        max_tokens=32000,
         output_config={"format": {"type": "json_schema", "schema": _PDF_SCHEMA}},
-        messages=[{"role": "user", "content": (
-            "This is the text of a bank account statement (probably Spanish). List every movement, oldest first, "
-            "exactly as printed: date as YYYY-MM-DD (the operation date when two are given), the description, the "
-            "amount signed (negative = money out of the account), and the balance after it if the statement prints "
-            "one (else null). Skip headers, totals and the opening/closing balance rows.\n\n" + text[:150_000])}],
+        messages=[{"role": "user", "content": _PDF_PROMPT.format(part=part) + text}],
     )
-    data = json.loads(next(b.text for b in msg.content if b.type == "text"))
-    lines = [Line(date=d, description=str(l["description"])[:300], amount=round(float(l["amount"]), 2),
-                  balance=l.get("balance"))
-             for l in data["lines"] if (d := parse_date(l["date"]))]
+    if msg.stop_reason == "max_tokens":            # too many movements for one answer → halves
+        if depth >= 3 or len(text) < 2000:
+            raise StatementError("That PDF has more movements on one page than can be read at once — export a CSV instead")
+        mid = text.rfind("\n", 0, len(text) // 2) or len(text) // 2
+        a, b = _read_chunk(client, text[:mid], i, n, depth + 1), _read_chunk(client, text[mid:], i, n, depth + 1)
+        return {"bank": a.get("bank") or b.get("bank"), "lines": a["lines"] + b["lines"]}
+    if msg.stop_reason == "refusal":
+        raise StatementError("Claude wouldn't read that PDF — export a CSV or Excel instead")
+    return json.loads(next(b.text for b in msg.content if b.type == "text"))
+
+
+def _parse_pdf(raw: bytes) -> Parsed:
+    pages = _pdf_pages(raw)
+    if len("".join(pages).strip()) < 40:
+        raise StatementError("That PDF has no text in it (a scan?) — export a CSV or Excel instead")
+    import anthropic
+    from concurrent.futures import ThreadPoolExecutor
+    client = anthropic.Anthropic()
+    chunks = _pdf_chunks(pages)
+    try:
+        with ThreadPoolExecutor(PDF_WORKERS) as ex:
+            parts = list(ex.map(lambda ic: _read_chunk(client, ic[1], ic[0], len(chunks)), enumerate(chunks)))
+    except anthropic.APIError as e:
+        log.exception("statement PDF: Claude call failed")
+        raise StatementError(f"Claude couldn't read it just now ({type(e).__name__}) — try again in a minute")
+    except (json.JSONDecodeError, StopIteration):
+        log.exception("statement PDF: unreadable answer")
+        raise StatementError("Claude's reading of that PDF came back broken — try again, or export a CSV")
+    lines = []
+    for data in parts:
+        for l in data["lines"]:
+            d = parse_date(l["date"])
+            if not d:
+                continue
+            kind = l.get("kind") if l.get("kind") in KINDS else kind_of(l["description"])
+            lines.append(Line(date=d, description=str(l["description"])[:300], amount=round(float(l["amount"]), 2),
+                              balance=l.get("balance"), kind=kind))
     if not lines:
         raise StatementError("Couldn't find any movements in that PDF")
-    return Parsed(lines=_chronological(lines), bank=data.get("bank"), notes=["Read from a PDF by Claude — check the totals"])
+    bank = next((p.get("bank") for p in parts if p.get("bank")), None)
+    notes = ["Read from a PDF by Claude — check the totals"]
+    inv = sum(1 for l in lines if l.kind == "investment")
+    if inv:
+        notes.append(f"{inv} investment movement{'s' if inv != 1 else ''} (buys, savings plan, round-ups, saveback)")
+    return Parsed(lines=_chronological(lines), bank=bank, notes=notes)
 
 
 def parse(raw: bytes, filename: str | None = None) -> Parsed:
@@ -468,14 +593,15 @@ def store(conn: sqlite3.Connection, account: str, parsed: Parsed, filename: str 
         seen[k] = seen.get(k, 0) + 1
         c = conn.execute(
             """INSERT OR IGNORE INTO statement_lines
-                 (import_id, account, date, seq, description, amount, balance, currency, fingerprint)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
-            (import_id, account, l.date, seq, l.description, l.amount, l.balance, l.currency, _fingerprint(l, seen[k])),
+                 (import_id, account, date, seq, description, amount, balance, currency, fingerprint, kind)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (import_id, account, l.date, seq, l.description, l.amount, l.balance, l.currency, _fingerprint(l, seen[k]),
+             l.kind or kind_of(l.description)),
         )
         new += c.rowcount
-        if not c.rowcount and l.balance is not None:      # a re-export can carry a balance the first one lacked
-            conn.execute("UPDATE statement_lines SET balance = COALESCE(balance, ?) WHERE account=? AND fingerprint=?",
-                         (l.balance, account, _fingerprint(l, seen[k])))
+        if not c.rowcount:                    # a re-export can carry a balance / kind the first one lacked
+            conn.execute("UPDATE statement_lines SET balance = COALESCE(balance, ?), kind = COALESCE(?, kind) "
+                         "WHERE account=? AND fingerprint=?", (l.balance, l.kind, account, _fingerprint(l, seen[k])))
     conn.execute("UPDATE statement_imports SET lines_new=? WHERE id=?", (new, import_id))
     conn.commit()
     return {"import_id": import_id, "account": account, "bank": parsed.bank, "period_start": lines[0].date,
@@ -571,7 +697,7 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
     matched, differs, missing, ignored = [], [], [], []
     for l in lines:
         row = {"id": l["id"], "date": l["date"], "description": l["description"], "amount": l["amount"],
-               "balance": l["balance"], "currency": l["currency"]}
+               "balance": l["balance"], "currency": l["currency"], "kind": l["kind"]}
         if l["id"] in match:
             tid, how = match[l["id"]]
             t = _txn(txns[tid])
@@ -580,7 +706,8 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
         elif l["ignored"]:
             ignored.append(row)
         else:
-            row["suggest"] = suggest(conn, l["description"], l["amount"])
+            row["suggest"] = suggest(conn, l["description"], l["amount"], l["kind"])
+            row["elsewhere"] = elsewhere(conn, account, l)
             row["candidates"] = [_txn(t) for t in sorted(
                 (t for t in txns.values() if t["id"] not in taken and (t["amount"] < 0) == (l["amount"] < 0)
                  and abs((_d(t["date"]) - _d(l["date"])).days) <= 7),
@@ -615,11 +742,26 @@ def reconcile(conn: sqlite3.Connection, account: str, start: str | None = None, 
                    "bank_out": round(sum(l["amount"] for l in lines if l["amount"] < 0), 2),
                    "bank_in": round(sum(l["amount"] for l in lines if l["amount"] > 0), 2)},
         "balance": bal,
+        "mirror_account": investment_account_for(conn, account),
+        "adjustments": [dict(r) for r in conn.execute(
+            "SELECT id, date, name, amount FROM transactions WHERE source_id LIKE ? AND deleted_at IS NULL ORDER BY date",
+            (f"bankcheck:{account}:%",))],
         "missing": missing, "differs": differs, "only_daybook": only_daybook, "matched": matched, "ignored": ignored,
     }
 
 
-def suggest(conn: sqlite3.Connection, description: str, amount: float) -> dict:
+KIND_FILING = {                     # kind → (category, subcategory) when Daybook has nothing like it yet
+    "investment": ("Transfer", None),
+    "interest": ("Income", "Interest"),
+    "dividend": ("Income", "Dividends"),
+    "cashback": ("Income", "Cashback"),
+    "fee": ("Finance", "Fees"),
+    "tax": ("Finance", "Taxes"),
+}
+ALERT = "Alert"
+
+
+def suggest(conn: sqlite3.Connection, description: str, amount: float, kind: str | None = None) -> dict:
     """A name and category for 'Add to Daybook': the past entry whose name looks most like the bank's text."""
     key = name_key(description)
     best, best_sim = None, 0.0
@@ -638,6 +780,9 @@ def suggest(conn: sqlite3.Connection, description: str, amount: float) -> dict:
         return {"name": best["name"], "category": best["category"], "subcategory": best["subcategory"]}
     words = [w for w in re.findall(r"[A-Za-zÀ-ÿ]+", description) if _fold(w) not in _NOISE and len(w) > 2]
     pretty = " ".join(words[:3]).title() or description[:40]
+    if kind in KIND_FILING:
+        cat, sub = KIND_FILING[kind]
+        return {"name": pretty, "category": cat, "subcategory": sub}
     return {"name": pretty, "category": None if amount < 0 else "Income", "subcategory": None}
 
 
@@ -651,4 +796,136 @@ def status(conn: sqlite3.Connection) -> list[dict]:
                     "closing_gap": r["balance"]["closing_gap"] if r["balance"] else None,
                     "last_import": conn.execute("SELECT MAX(imported_at) FROM statement_imports WHERE account=?",
                                                 (account,)).fetchone()[0]})
+    return out
+
+
+# ── closing the gap ───────────────────────────────────────────────────────────
+
+def _now() -> str:
+    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def elsewhere(conn: sqlite3.Connection, account: str, line: dict) -> list[dict]:
+    """Entries logged on another account that look like this bank line: same amount within
+    DATE_WINDOW days, not paired with any statement line, and not on that account's own statement."""
+    rows = conn.execute(
+        """SELECT t.id, t.date, t.name, t.amount, t.category, t.subcategory, t.account FROM transactions t
+           WHERE t.account IS NOT NULL AND t.account != ? AND t.deleted_at IS NULL
+             AND COALESCE(t.transaction_type,'') != 'Account Setup'
+             AND ABS(t.amount - ?) < 0.005 AND t.date BETWEEN ? AND ?
+             AND NOT EXISTS (SELECT 1 FROM statement_lines s WHERE s.txn_id = t.id)
+             AND NOT EXISTS (SELECT 1 FROM statement_lines s WHERE s.account = t.account
+                             AND ABS(s.amount - t.amount) < 0.005
+                             AND s.date BETWEEN date(t.date, ?) AND date(t.date, ?))
+           ORDER BY ABS(julianday(t.date) - julianday(?)) LIMIT 2""",
+        (account, line["amount"], _shift(line["date"], -DATE_WINDOW), _shift(line["date"], DATE_WINDOW),
+         f"-{DATE_WINDOW} day", f"+{DATE_WINDOW} day", line["date"])).fetchall()
+    return [_txn(r) | {"account": r["account"]} for r in rows]
+
+
+def move_here(conn: sqlite3.Connection, line_id: int, txn_id: str) -> None:
+    """The bank line is that entry, logged on the wrong account: move it to the statement's account and pair them."""
+    l = conn.execute("SELECT account FROM statement_lines WHERE id=?", (line_id,)).fetchone()
+    conn.execute("UPDATE transactions SET account=?, source='local', updated_at=? WHERE id=?", (l["account"], _now(), txn_id))
+    conn.execute("UPDATE statement_lines SET txn_id=NULL WHERE txn_id=?", (txn_id,))
+    conn.execute("UPDATE statement_lines SET txn_id=?, ignored=0 WHERE id=?", (txn_id, line_id))
+    conn.commit()
+
+
+def investment_account_for(conn: sqlite3.Connection, account: str) -> str | None:
+    """The investment account a cash account's buys go to: same first word ("Trade Republic Cash" →
+    "Trade Republic Wealth"), else none."""
+    from domains.money.money_config import INVESTMENT_ACCOUNTS, INVESTMENT_TYPES
+    names = set(INVESTMENT_ACCOUNTS)
+    try:
+        names |= {r[0] for r in conn.execute("SELECT name FROM accounts WHERE account_type IN (%s)" %
+                                             ",".join("?" * len(INVESTMENT_TYPES)), tuple(INVESTMENT_TYPES))}
+    except sqlite3.OperationalError:
+        pass
+    head = _fold(account).split()[:2]
+    best = [n for n in sorted(names) if n != account and _fold(n).split()[:len(head)] == head]
+    if not best and head:
+        best = [n for n in sorted(names) if n != account and _fold(n).split()[:1] == head[:1]]
+    return best[0] if best else None
+
+
+def add_line(conn: sqlite3.Connection, line_id: int, name: str, category: str, subcategory: str | None = None,
+             notes: str | None = None, vehicle_id: int | None = None, mirror_account: str | None = None) -> str:
+    """Create the Daybook entry from a bank line (and, for a buy / sell, its mirror on the investment account)."""
+    from domains.money.money_config import classify
+    l = conn.execute("SELECT * FROM statement_lines WHERE id=?", (line_id,)).fetchone()
+    txn_id = "local-" + str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO transactions (id, source, date, name, amount, account, category, subcategory,
+                                     transaction_type, notes, vehicle_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (txn_id, "local", l["date"], (name or "").strip() or l["description"][:60], l["amount"], l["account"],
+         category, (subcategory or "").strip() or None, classify(category), notes or None, vehicle_id))
+    if mirror_account and classify(category) == "Transfer":
+        conn.execute(
+            """INSERT INTO transactions (id, source, date, name, amount, account, category, transaction_type, notes)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            ("local-" + str(uuid.uuid4()), "local", l["date"], (name or "").strip() or l["description"][:60],
+             -l["amount"], mirror_account, "Transfer", "Transfer", f"Mirror of {l['account']} (bank statement)"))
+    conn.execute("UPDATE statement_lines SET txn_id=?, ignored=0 WHERE id=?", (txn_id, line_id))
+    conn.commit()
+    return txn_id
+
+
+def add_all(conn: sqlite3.Connection, account: str, start: str | None = None, end: str | None = None) -> dict:
+    """Every line only in the bank → Daybook. Investments, interest, dividends, cashback, fees and tax by
+    their kind; the rest as 🚨 Alert (named like a past entry when there is one). Lines that look logged
+    on another account are left for you to move."""
+    rep = reconcile(conn, account, start, end)
+    added = {"alert": 0, "filed": 0, "left": 0}
+    mirror = rep.get("mirror_account")
+    for l in rep.get("missing") or []:
+        if l.get("elsewhere"):
+            added["left"] += 1
+            continue
+        sug = l["suggest"]
+        if l.get("kind") in KIND_FILING:
+            cat, sub = KIND_FILING[l["kind"]]
+            if sug.get("category") and sug["category"] != ALERT and _fold(sug["category"]) != "transfer" \
+                    and l["kind"] != "investment":
+                cat, sub = sug["category"], sug.get("subcategory")
+            add_line(conn, l["id"], sug["name"], cat, sub, f"From the bank statement: {l['description']}",
+                     mirror_account=mirror if l["kind"] == "investment" else None)
+            added["filed"] += 1
+        else:
+            guess = f" (looks like {sug['category']})" if sug.get("category") else ""
+            add_line(conn, l["id"], sug["name"], ALERT, None,
+                     f"🚨 Only in the bank statement — check what it was{guess}: {l['description']}")
+            added["alert"] += 1
+    return added
+
+
+def settle(conn: sqlite3.Connection, account: str, start: str | None = None, end: str | None = None) -> list[dict]:
+    """Book what's still off as 🚨 adjustments that never count as spending (Account Setup): the gap
+    already there before the statement starts, then the rest at its end. Replaces earlier ones."""
+    conn.execute("DELETE FROM transactions WHERE source_id LIKE ?", (f"bankcheck:{account}:%",))   # ours, recomputed
+    conn.commit()
+    rep = reconcile(conn, account, start, end)
+    b = rep.get("balance")
+    if not b:
+        raise StatementError("This statement has no running balance, so there's no gap to settle")
+    out = []
+
+    def book(day: str, amount: float, name: str, note: str, tag: str):
+        if abs(amount) < 0.005:
+            return
+        tid = "local-" + str(uuid.uuid4())
+        conn.execute(
+            """INSERT INTO transactions (id, source, date, name, amount, account, category, transaction_type, notes, source_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (tid, "local", day, name, round(amount, 2), account, ALERT, "Account Setup", note,
+             f"bankcheck:{account}:{tag}:{day}"))
+        out.append({"id": tid, "date": day, "name": name, "amount": round(amount, 2)})
+
+    book(b["opening_date"], -b["opening_gap"], "🚨 Bank check · off before this statement",
+         f"Daybook was {b['opening_gap']:+.2f} off the bank on {b['opening_date']}. Not spending — an adjustment.", "open")
+    book(b["closing_date"], -(b["closing_gap"] - b["opening_gap"]), "🚨 Bank check · unexplained difference",
+         "What the statement period still disagreed on after the lines were sorted. Not spending — an adjustment; "
+         "fix the real entries and press Settle again to recompute it.", "close")
+    conn.commit()
     return out

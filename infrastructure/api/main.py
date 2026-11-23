@@ -298,6 +298,10 @@ def _run_migrations() -> None:
     # money.db: all CREATE ... IF NOT EXISTS (receipts tables etc.) — idempotent
     from domains.money.money_db import init_money_db as _init_money_db
     _init_money_db()
+    # vehicle routes: days not read yet by the current reader (routes.READER) — off the request path
+    import threading as _threading
+    from domains.vehicles.routes import refresh_in_background as _vehicle_refresh
+    _threading.Thread(target=_vehicle_refresh, daemon=True, name="vehicle-routes").start()
 
 
 class ThemeIn(BaseModel):

@@ -121,6 +121,85 @@ class Reconcile(unittest.TestCase):
         self.c.commit()
         self.assertEqual(st.reconcile(self.c, "BBVA")["counts"]["ignored"], 1)
 
+    def test_logged_on_another_account_moves_here(self):
+        self.c.execute("INSERT INTO transactions (id, source, date, name, amount, account, category, transaction_type) "
+                       "VALUES ('merc','local','2026-11-05','Mercadona',-23.4,'Revolut','Groceries','Expense')")
+        self.c.commit()
+        r = st.reconcile(self.c, "BBVA")
+        self.assertEqual([t["id"] for t in r["missing"][0]["elsewhere"]], ["merc"])
+        st.move_here(self.c, r["missing"][0]["id"], "merc")
+        r = st.reconcile(self.c, "BBVA")
+        self.assertEqual(r["counts"]["missing"], 0)
+        self.assertEqual(self.c.execute("SELECT account FROM transactions WHERE id='merc'").fetchone()[0], "BBVA")
+
+    def test_add_all_as_alerts_then_settle(self):
+        out = st.add_all(self.c, "BBVA")
+        self.assertEqual(out, {"alert": 1, "filed": 0, "left": 0})
+        t = self.c.execute("SELECT category, amount, notes FROM transactions WHERE category='Alert'").fetchone()
+        self.assertEqual((t[0], t[1]), ("Alert", -23.4))
+        self.assertIn("MERCADONA", t[2])
+        r = st.reconcile(self.c, "BBVA")
+        self.assertEqual(r["counts"]["missing"], 0)
+        self.assertNotEqual(r["balance"]["closing_gap"], 0)          # the ghost cinema and the tip still differ
+        added = st.settle(self.c, "BBVA")
+        self.assertEqual(len(added), 1)                              # no gap before the statement → one adjustment
+        self.assertAlmostEqual(st.reconcile(self.c, "BBVA")["balance"]["closing_gap"], 0, places=2)
+        again = st.settle(self.c, "BBVA")                            # idempotent: replaces, never piles up
+        self.assertEqual(len(again), 1)
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM transactions WHERE source_id LIKE 'bankcheck:%'").fetchone()[0], 1)
+        # an adjustment is never spending, and never "only in Daybook"
+        self.assertEqual(self.c.execute("SELECT transaction_type FROM transactions WHERE source_id LIKE 'bankcheck:%'").fetchone()[0],
+                         "Account Setup")
+        self.assertEqual([t["id"] for t in st.reconcile(self.c, "BBVA")["only_daybook"]], ["ghost"])
+
+
+class Kinds(unittest.TestCase):
+    def test_kind_words(self):
+        self.assertEqual(st.kind_of("Saveback", "iShares Core MSCI World"), "investment")
+        self.assertEqual(st.kind_of("Transferencia", "Ingreso a Trade Republic"), "transfer")
+        self.assertEqual(st.kind_of("Taxi Palma"), None)
+        self.assertEqual(st.kind_of("Abono nómina"), None)
+        self.assertEqual(st.kind_of("Pago de intereses"), "interest")
+        self.assertEqual(st.kind_of("Transacción con tarjeta", "Mercadona"), "card")
+        self.assertEqual(st.kind_of("CARD_PAYMENT"), "card")
+
+    def test_trade_republic_pdf_in_parts(self):
+        from unittest import mock
+        import json as _json
+        pages = [f"page {i}\n" + "x" * 9000 for i in range(4)]
+        calls = []
+
+        class Msg:
+            def __init__(self, text, stop="end_turn"):
+                self.stop_reason = stop
+                self.content = [type("B", (), {"type": "text", "text": text})()]
+
+        def create(**kw):
+            text = kw["messages"][0]["content"]
+            calls.append(text)
+            i = len(calls)
+            return Msg(_json.dumps({"bank": "Trade Republic", "lines": [
+                {"date": f"2026-10-0{i}", "description": f"Saveback · ETF {i}", "amount": -1.5, "balance": None, "kind": "investment"},
+                {"date": f"2026-10-0{i}", "description": "Mercadona", "amount": -10.0, "balance": None, "kind": "card"}]}))
+
+        client = mock.Mock()
+        client.messages.create.side_effect = create
+        import sys, types
+        fake = types.SimpleNamespace(Anthropic=lambda: client, APIError=type("APIError", (Exception,), {}))
+        with mock.patch.object(st, "_pdf_pages", return_value=pages), mock.patch.dict(sys.modules, {"anthropic": fake}):
+            p = st.parse(b"%PDF-1.7 fake", "tr.pdf")
+        self.assertGreater(len(calls), 1)                            # read in parts
+        self.assertEqual(p.bank, "Trade Republic")
+        self.assertEqual({l.kind for l in p.lines}, {"investment", "card"})
+        self.assertTrue(any("investment" in n for n in p.notes))
+
+    def test_investment_account_and_filing(self):
+        path = tmpdir() / "money.db"
+        init_money_db(path)
+        c = get_money_connection(path)
+        self.assertEqual(st.investment_account_for(c, "Trade Republic Cash"), "Trade Republic Wealth")
+        self.assertEqual(st.suggest(c, "Pago de intereses", 3.2, "interest")["category"], "Income")
+
 
 if __name__ == "__main__":
     unittest.main()

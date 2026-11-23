@@ -221,6 +221,7 @@ CREATE TABLE IF NOT EXISTS statement_lines (
     fingerprint    TEXT NOT NULL,
     txn_id         TEXT,                      -- a link you made by hand (or by "Add to Daybook")
     ignored        INTEGER NOT NULL DEFAULT 0,-- "not an expense to track" (internal move, hold…)
+    kind           TEXT,                      -- statements.KINDS: card, transfer, investment, interest…
     UNIQUE (account, fingerprint)
 );
 CREATE INDEX IF NOT EXISTS idx_stmt_lines_acct_date ON statement_lines(account, date);
@@ -288,6 +289,7 @@ CREATE TABLE IF NOT EXISTS vehicle_leg_picks (
 CREATE TABLE IF NOT EXISTS vehicle_scan (
     date           TEXT PRIMARY KEY,
     legs           INTEGER NOT NULL DEFAULT 0,
+    reader         INTEGER NOT NULL DEFAULT 0,   -- routes.READER that read it; an older one is read again
     scanned_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 

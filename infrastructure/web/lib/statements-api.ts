@@ -25,6 +25,14 @@ export type StmtLine = {
   txn?: StmtTxn; how?: "exact" | "near" | "manual"; days_off?: number;
   suggest?: { name: string; category: string | null; subcategory: string | null };
   candidates?: StmtTxn[];
+  kind?: StmtKind | null;
+  elsewhere?: (StmtTxn & { account: string })[];      // the same thing, logged on another account
+};
+
+export type StmtKind = "card" | "transfer" | "investment" | "interest" | "dividend" | "cashback" | "fee" | "tax" | "other";
+export const STMT_KIND_LABEL: Record<StmtKind, string> = {
+  card: "Card", transfer: "Transfer", investment: "Investment", interest: "Interest", dividend: "Dividend",
+  cashback: "Cashback", fee: "Fee", tax: "Tax", other: "Other",
 };
 
 export type Reconcile = {
@@ -37,6 +45,8 @@ export type Reconcile = {
     opening_date: string; bank_opening: number; daybook_opening: number; opening_gap: number;
     closing_date: string; bank_closing: number; daybook_closing: number; closing_gap: number; chain_breaks: number;
   } | null;
+  mirror_account?: string | null;                     // where a buy / sell lands (Trade Republic Cash → … Wealth)
+  adjustments?: { id: string; date: string; name: string; amount: number }[];
   missing?: StmtLine[]; differs?: StmtLine[]; only_daybook?: StmtTxn[]; matched?: StmtLine[]; ignored?: StmtLine[];
 };
 
@@ -72,13 +82,20 @@ export const statementsApi = {
     if (end) q.set("end", end);
     return call<Reconcile>(`/money/statements/reconcile?${q}`);
   },
-  add: (lineId: number, body: { name: string; category: string; subcategory?: string; vehicle_id?: number }) =>
+  add: (lineId: number, body: { name: string; category: string; subcategory?: string; vehicle_id?: number; mirror_account?: string }) =>
     call<{ txn_id: string }>(`/money/statements/lines/${lineId}/add`, { method: "POST", json: body }),
   link: (lineId: number, txnId: string) =>
     call<unknown>(`/money/statements/lines/${lineId}/link`, { method: "POST", json: { txn_id: txnId } }),
   unlink: (lineId: number) => call<unknown>(`/money/statements/lines/${lineId}/unlink`, { method: "POST", json: {} }),
   ignore: (lineId: number, ignored = true) =>
     call<unknown>(`/money/statements/lines/${lineId}/ignore`, { method: "POST", json: { ignored } }),
+  move: (lineId: number, txnId: string) =>
+    call<unknown>(`/money/statements/lines/${lineId}/move`, { method: "POST", json: { txn_id: txnId } }),
+  addAll: (account: string, start?: string, end?: string) =>
+    call<{ alert: number; filed: number; left: number }>("/money/statements/add-all", { method: "POST", json: { account, start, end } }),
+  settle: (account: string, start?: string, end?: string) =>
+    call<{ added: { id: string; date: string; name: string; amount: number }[] }>("/money/statements/settle",
+      { method: "POST", json: { account, start, end } }),
   useBankAmount: (lineId: number, txnId: string) =>
     call<unknown>(`/money/statements/lines/${lineId}/use-bank-amount`, { method: "POST", json: { txn_id: txnId } }),
 };

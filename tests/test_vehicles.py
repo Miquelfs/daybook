@@ -80,6 +80,18 @@ class Legs(unittest.TestCase):
         self.assertAlmostEqual(legs[0]["km"], 17.2, delta=0.5)
 
 
+    def test_drive_as_one_point_segments(self):
+        # how Overland stores a drive: every moving ping is its own one-point segment
+        segs = [self.seg("2026-11-21T10:00:00Z", "2026-11-21T10:20:00Z", [[2.600, 39.57], [2.6001, 39.57]], motion="stationary")]
+        for i in range(1, 9):                                     # ~0.86 km a minute → ~50 km/h
+            t = f"2026-11-21T10:2{i}:00Z" if i < 10 else ""
+            segs.append(self.seg(t, t, [[2.600 + i * 0.01, 39.57]]))
+        segs.append(self.seg("2026-11-21T10:30:00Z", "2026-11-21T11:30:00Z", [[2.69, 39.57], [2.6901, 39.57]], motion="stationary"))
+        legs = routes.legs_from_segments(segs)
+        self.assertEqual(len(legs), 1)
+        self.assertAlmostEqual(legs[0]["km"], 7.7, delta=0.3)
+        self.assertEqual(legs[0]["start"], "2026-11-21T10:20:00Z")
+
     def test_mixed_timestamp_formats_join(self):
         line = [[2.60 + i * 0.01, 39.57] for i in range(11)]
         segs = [self.seg("2026-11-01T10:00:00Z", "2026-11-01T10:10:00Z", line),

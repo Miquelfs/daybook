@@ -147,6 +147,13 @@ Revolut fee/state), stores lines per account in `statement_lines` (fingerprint-d
 fine) and `reconcile()` matches them to `transactions` **on every read** (same amount ±4 days, then a near amount on a
 similar name) → only in bank / amount differs / only in Daybook + the balance gap at both ends. Only hand links
 (`txn_id`) and ignores are stored. Page `/money/reconcile` (proxy `app/api/money/statements/[[...path]]`).
+Lines carry a `kind` (card, transfer, investment, interest, dividend, cashback, fee, tax — the bank's type column, or Claude for
+PDFs, which are read in page chunks in parallel). Closing the gap: a line logged on another account → *move it here*; *Add all*
+files by kind (investment = Transfer mirrored on the matching investment account, e.g. Trade Republic Cash → Wealth) and the
+rest as category `Alert`; *Settle* books what's still off as `Alert` adjustments with transaction_type `Account Setup`
+(never spending), `source_id` `bankcheck:<account>:…`, recomputed on every press.
+Vehicle GPS legs are built from consecutive points (Overland stores a drive as one-point segments); bump `routes.READER`
+when the leg builder changes so every day is re-read (also on API startup).
 Vehicles (`domains/vehicles/`, `/vehicles/*`, `/explore/vehicles` — an Explore sub-tab next to Movement): costs are ordinary Transportation expenses —
 `transactions.vehicle_id`, or for history the vehicle's `subcategories`. Routes: GPS legs at vehicle speed
 (`vehicle_legs`, read for every tagged day + every day of the last 45) are assigned by your pick

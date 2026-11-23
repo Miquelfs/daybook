@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
-import { Upload, Check, Link2, EyeOff, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Upload, Check, Link2, EyeOff, Plus, RotateCcw, Trash2, ArrowRightLeft, Scale } from "lucide-react";
 import { moneyApi, fmtAmount } from "@/lib/money-api";
-import { statementsApi, type StmtLine, type StmtTxn } from "@/lib/statements-api";
-import { Block, Empty, Hero, Panel, Pill, Skeleton, Stat, Stats } from "@/components/ui/kit";
+import { statementsApi, STMT_KIND_LABEL, type StmtLine, type StmtTxn } from "@/lib/statements-api";
+import { ActionButton, Block, Empty, Hero, Panel, Pill, Skeleton, Stat, Stats } from "@/components/ui/kit";
 
 const signed = (n: number) => `${n < 0 ? "−" : n > 0 ? "+" : ""}${fmtAmount(n)}`;
 const day = (d: string) => format(parseISO(d), "d MMM");
@@ -27,11 +27,14 @@ const input = "bg-[#18181B] border border-[#27272A] rounded-lg px-3 py-1.5 text-
 
 // A bank line Daybook doesn't have: add it (prefilled from a past entry that looks like it),
 // pair it with an entry that's there under another name / amount, or ignore it.
-function MissingRow({ line, categories, onDone }: { line: StmtLine; categories: string[]; onDone: () => void }) {
+function MissingRow({ line, categories, mirror, onDone }: {
+  line: StmtLine; categories: string[]; mirror?: string | null; onDone: () => void;
+}) {
   const [mode, setMode] = useState<null | "add" | "pair">(null);
   const [name, setName] = useState(line.suggest?.name ?? "");
   const [category, setCategory] = useState(line.suggest?.category ?? (line.amount > 0 ? "Income" : categories[0] ?? "Other"));
   const [sub, setSub] = useState(line.suggest?.subcategory ?? "");
+  const [mirrorOn, setMirrorOn] = useState(line.kind === "investment");
   const act = useMutation({
     mutationFn: (fn: () => Promise<unknown>) => fn(),
     onSuccess: onDone,
@@ -41,8 +44,20 @@ function MissingRow({ line, categories, onDone }: { line: StmtLine; categories: 
       <div className="flex items-center gap-3">
         <DayLink d={line.date} />
         <p className="text-sm flex-1 min-w-0 truncate" title={line.description}>{line.description}</p>
+        {line.kind && line.kind !== "card" && line.kind !== "other" && (
+          <span className="text-[10px] uppercase tracking-widest text-[#71717A] shrink-0">{STMT_KIND_LABEL[line.kind]}</span>
+        )}
         <Amount n={line.amount} />
       </div>
+      {line.elsewhere?.map((t) => (
+        <button key={t.id} disabled={act.isPending} onClick={() => act.mutate(() => statementsApi.move(line.id, t.id))}
+                className="mt-2 ml-[3.75rem] w-[calc(100%-3.75rem)] flex items-center gap-2 text-left bg-[#F59E0B]/5 border border-[#F59E0B]/20 hover:bg-[#F59E0B]/10 rounded-lg px-3 py-1.5">
+          <ArrowRightLeft size={12} className="text-[#F59E0B] shrink-0" />
+          <span className="text-xs flex-1 min-w-0 truncate">
+            Logged on <span className="text-[#FAFAFA]">{t.account}</span> as “{t.name}” ({day(t.date)}) — move it here
+          </span>
+        </button>
+      ))}
       <div className="flex flex-wrap gap-1.5 mt-2 pl-[3.75rem]">
         <button className={btn} onClick={() => setMode(mode === "add" ? null : "add")}><Plus size={12} />Add to Daybook</button>
         {(line.candidates?.length ?? 0) > 0 && (
@@ -53,7 +68,13 @@ function MissingRow({ line, categories, onDone }: { line: StmtLine; categories: 
       </div>
       {mode === "add" && (
         <form className="mt-2 flex flex-wrap gap-2 items-center"
-              onSubmit={(e) => { e.preventDefault(); act.mutate(() => statementsApi.add(line.id, { name, category, subcategory: sub || undefined })); }}>
+              onSubmit={(e) => {
+                e.preventDefault();
+                act.mutate(() => statementsApi.add(line.id, {
+                  name, category, subcategory: sub || undefined,
+                  mirror_account: category === "Transfer" && mirror && mirrorOn ? mirror : undefined,
+                }));
+              }}>
           <input className={`${input} flex-1 basis-40`} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
           <select className={input} value={category} onChange={(e) => setCategory(e.target.value)}>
             {[...new Set([category, ...categories])].map((c) => <option key={c}>{c}</option>)}
@@ -63,6 +84,12 @@ function MissingRow({ line, categories, onDone }: { line: StmtLine; categories: 
                   className="inline-flex items-center gap-1 text-xs bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#F59E0B] hover:bg-[#F59E0B]/20 rounded-lg px-3 py-1.5 disabled:opacity-50">
             <Check size={12} />Save
           </button>
+          {category === "Transfer" && mirror && (
+            <label className="w-full flex items-center gap-2 text-xs text-[#71717A]">
+              <input type="checkbox" checked={mirrorOn} onChange={(e) => setMirrorOn(e.target.checked)} />
+              Also {signed(-line.amount)} on {mirror}
+            </label>
+          )}
         </form>
       )}
       {mode === "pair" && (
@@ -160,6 +187,8 @@ function ReconcileInner() {
   });
   const delImport = useMutation({ mutationFn: (id: number) => statementsApi.deleteImport(id), onSuccess: refresh });
   const restore = useMutation({ mutationFn: (id: number) => statementsApi.ignore(id, false), onSuccess: refresh });
+  const addAll = useMutation({ mutationFn: () => statementsApi.addAll(account, range.start, range.end), onSuccess: refresh });
+  const settle = useMutation({ mutationFn: () => statementsApi.settle(account, range.start, range.end), onSuccess: refresh });
 
   const categories = (meta?.categories ?? []).map((c) => c.key);
   const accounts = [...new Set([...(meta?.accounts ?? []), ...status.map((s) => s.account)])];
@@ -233,6 +262,20 @@ function ReconcileInner() {
                 import an older one, or fix the account&apos;s opening balance.
               </p>
             )}
+            {b && (Math.abs(b.closing_gap) >= 0.01 || (rep.adjustments?.length ?? 0) > 0) && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button className={btn} disabled={settle.isPending}
+                        onClick={() => {
+                          if (confirm("Book what's still off as 🚨 adjustments (never counted as spending)? Do it after adding / moving what you can; pressing it again recomputes them.")) settle.mutate();
+                        }}>
+                  <Scale size={12} />{(rep.adjustments?.length ?? 0) > 0 ? "Settle again" : "Settle the gap"}
+                </button>
+                {rep.adjustments?.map((a) => (
+                  <span key={a.id} className="text-xs text-[#71717A]">{day(a.date)} {signed(a.amount)}</span>
+                ))}
+                {settle.error && <span className="text-xs text-rose-400">{(settle.error as Error).message}</span>}
+              </div>
+            )}
             {b && b.chain_breaks > 0 && (
               <p className="text-xs text-[#71717A] mt-2">
                 The bank&apos;s running balance skips in {b.chain_breaks} place{b.chain_breaks === 1 ? "" : "s"} — lines may be missing from the export.
@@ -257,9 +300,19 @@ function ReconcileInner() {
           </div>
 
           {rep.missing!.length > 0 && (
-            <Block title="Only in the bank" note="On the statement, not in Daybook. Add it, pair it with what you logged, or ignore it (a move between your own accounts, a hold…).">
+            <Block title="Only in the bank"
+                   note="On the statement, not in Daybook. Add it, pair it with what you logged, move it from the account you logged it on, or ignore it. Add all files investments, interest, cashback and fees by their kind and the rest as 🚨 Alert."
+                   action={<ActionButton icon={Plus} onClick={() => {
+                     if (!addAll.isPending && confirm(`Add the ${rep.missing!.length} lines to Daybook? Spending goes in as 🚨 Alert to look at later; lines logged on another account are left for you to move.`)) addAll.mutate();
+                   }}>{addAll.isPending ? "Adding…" : "Add all"}</ActionButton>}>
+              {addAll.data && (
+                <p className="text-xs text-[#A1A1AA] mb-2">
+                  {addAll.data.alert} as 🚨 Alert · {addAll.data.filed} filed by kind
+                  {addAll.data.left > 0 && ` · ${addAll.data.left} left to move from another account`}
+                </p>
+              )}
               <Panel className="divide-y divide-[#18181B]">
-                {rep.missing!.map((l) => <MissingRow key={l.id} line={l} categories={categories} onDone={refresh} />)}
+                {rep.missing!.map((l) => <MissingRow key={l.id} line={l} categories={categories} mirror={rep.mirror_account} onDone={refresh} />)}
               </Panel>
             </Block>
           )}

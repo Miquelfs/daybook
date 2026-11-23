@@ -11,23 +11,29 @@ Bank statements → reconciliation (domains/money/statements.py).
   POST   /money/statements/lines/{id}/unlink
   POST   /money/statements/lines/{id}/ignore   {ignored}
   POST   /money/statements/lines/{id}/use-bank-amount   set the paired entry to the bank's amount
+  POST   /money/statements/lines/{id}/move     {txn_id} — logged on another account: move it here and pair
+  POST   /money/statements/add-all             {account, start?, end?} — every line only in the bank → Daybook
+                                               (by kind; the rest as 🚨 Alert)
+  POST   /money/statements/settle              {account, start?, end?} — what's still off → 🚨 adjustments
+                                               (Account Setup, never spending); replaces earlier ones
 """
 
 from __future__ import annotations
 
+import logging
 import sqlite3
-import uuid
 from datetime import datetime
 from typing import Annotated, Optional
 
+from fastapi.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from domains.money import statements
-from domains.money.money_config import classify
 from infrastructure.api.db_money import get_money_db
 
 router = APIRouter(prefix="/money/statements", tags=["money"])
+log = logging.getLogger(__name__)
 DB = Annotated[sqlite3.Connection, Depends(get_money_db)]
 MAX_BYTES = 10 * 1024 * 1024
 
@@ -48,11 +54,12 @@ async def upload(conn: DB, file: UploadFile = File(...), account: str = Form(...
     if len(raw) > MAX_BYTES:
         raise HTTPException(413, "That file is over 10 MB")
     try:
-        parsed = statements.parse(raw, file.filename)
+        parsed = await run_in_threadpool(statements.parse, raw, file.filename)   # a PDF takes Claude a while
     except statements.StatementError as e:
         raise HTTPException(422, str(e))
     except Exception as e:                                # a corrupt workbook, a PDF the model couldn't read
-        raise HTTPException(422, f"Couldn't read that file ({type(e).__name__})")
+        log.exception("statement upload failed: %s", file.filename)
+        raise HTTPException(422, f"Couldn't read that file ({type(e).__name__}: {str(e)[:160]})")
     return statements.store(conn, account, parsed, file.filename)
 
 
@@ -88,6 +95,7 @@ class AddBody(BaseModel):
     subcategory: Optional[str] = None
     notes: Optional[str] = None
     vehicle_id: Optional[int] = None
+    mirror_account: Optional[str] = None     # a buy / sell: the same amount, opposite sign, on the investment account
 
 
 @router.post("/lines/{line_id}/add")
@@ -95,18 +103,41 @@ def add_from_line(line_id: int, body: AddBody, conn: DB):
     l = _line(conn, line_id)
     if l["txn_id"] and conn.execute("SELECT 1 FROM transactions WHERE id=? AND deleted_at IS NULL", (l["txn_id"],)).fetchone():
         raise HTTPException(409, "That line is already paired")
-    txn_id = "local-" + str(uuid.uuid4())
-    conn.execute(
-        """INSERT INTO transactions (id, source, date, name, amount, account, category, subcategory,
-                                     transaction_type, notes, vehicle_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (txn_id, "local", l["date"], body.name.strip() or l["description"][:60], l["amount"], l["account"],
-         body.category, (body.subcategory or "").strip() or None, classify(body.category),
-         body.notes or None, body.vehicle_id),
-    )
-    conn.execute("UPDATE statement_lines SET txn_id=?, ignored=0 WHERE id=?", (txn_id, line_id))
-    conn.commit()
+    txn_id = statements.add_line(conn, line_id, body.name, body.category, body.subcategory, body.notes,
+                                 body.vehicle_id, body.mirror_account)
     return {"txn_id": txn_id}
+
+
+class MoveBody(BaseModel):
+    txn_id: str
+
+
+@router.post("/lines/{line_id}/move")
+def move_here(line_id: int, body: MoveBody, conn: DB):
+    _line(conn, line_id)
+    if not conn.execute("SELECT 1 FROM transactions WHERE id=? AND deleted_at IS NULL", (body.txn_id,)).fetchone():
+        raise HTTPException(404, "Transaction not found")
+    statements.move_here(conn, line_id, body.txn_id)
+    return {"status": "moved"}
+
+
+class RangeBody(BaseModel):
+    account: str
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+
+@router.post("/add-all")
+def add_all(body: RangeBody, conn: DB):
+    return statements.add_all(conn, body.account, body.start, body.end)
+
+
+@router.post("/settle")
+def settle(body: RangeBody, conn: DB):
+    try:
+        return {"added": statements.settle(conn, body.account, body.start, body.end)}
+    except statements.StatementError as e:
+        raise HTTPException(422, str(e))
 
 
 class LinkBody(BaseModel):

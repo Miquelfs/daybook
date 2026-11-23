@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { TracksGeoJSON } from "@/lib/api";
 import { SPORT_COLORS, sportOf } from "@/lib/sport";
@@ -219,6 +220,7 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
   // Your vehicles + who drove each of the day's drives (Explore → Vehicles). A drive assigned to
   // one colours its legs by that vehicle's kind, unless a leg has its own manual mode.
   const vehiclesRef = useRef<VehiclesOnDay | null>(null);
+  const qc = useQueryClient();
   useEffect(() => {
     vehiclesRef.current = null;
     if (!date) return;
@@ -239,6 +241,10 @@ export const LocationMap = forwardRef<LocationMapHandle, Props>(function Locatio
       // the vehicle now says what this was; a hand-set mode on the leg would hide it
       if (vid && overridesRef.current.has(legKey)) await saveOverride(legKey, null);
       setOverridesVersion((v) => v + 1);
+      // the pick also tags the day (Scooter ride / Car drive)
+      qc.invalidateQueries({ queryKey: ["day-tags", date] });
+      qc.invalidateQueries({ queryKey: ["day", date] });
+      qc.invalidateQueries({ queryKey: ["vehicles"] });
     } catch { /* leave the map as it was */ }
   };
 
