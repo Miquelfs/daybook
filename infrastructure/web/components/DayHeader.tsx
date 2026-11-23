@@ -46,9 +46,9 @@ interface Props {
 }
 
 // One compact line: kicker + date on the left, day navigation inline on the
-// right — no separate nav row eating vertical space on the phone. The year stays in
-// the title, in grey; when "September 30 2026" doesn't fit next to the buttons the
-// title shrinks to fit (FitTitle) instead of being cut or wrapped.
+// right — no separate nav row eating vertical space on the phone. When
+// "September 30, 2026" doesn't fit next to the buttons, the whole title shrinks to
+// fit (FitTitle) instead of being cut or wrapped.
 export function DayHeader({ date }: Props) {
   const d = parseISO(date);
   const prev = format(subDays(d, 1), "yyyy-MM-dd");
@@ -63,7 +63,7 @@ export function DayHeader({ date }: Props) {
             {isToday(d) ? "Today" : format(d, "EEEE")}
           </p>
           <FitTitle>
-            {format(d, "MMMM d")} <span className="text-[#71717A] font-normal">{format(d, "yyyy")}</span>
+            {format(d, "MMMM d, yyyy")}
           </FitTitle>
         </div>
 
