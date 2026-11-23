@@ -39,6 +39,10 @@ POST_DUTY_BUFFER_MIN = 60
 STANDBY_WINDOW_MIN = 90
 HARD_MIN_WINDOW = 75     # a key session needs at least this much room
 DEFAULT_BASE = "PMI"
+# Days with no duty — a whole day to ride. Vacation is one (it used to fall through to "Ground duty"
+# with a 60-min window, which cut long rides to 1 h and dropped key sessions for whole holidays).
+REST_DUTIES = {"day_off", "vacation", "OFF", "VAC", "LVO"}
+SICK_DUTIES = {"SICK", "sick"}
 
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
@@ -203,9 +207,13 @@ class DayContextReader:
         report = _mins(ctx["report_time"])
         end = _mins(ctx["end_time"])
 
-        if duty in (None, "day_off", "unknown") and not (duty == "unknown" and report):
+        if duty in SICK_DUTIES:
+            ctx["label"] = "Sick — rest"
+            return ctx
+        if (duty is None or duty in REST_DUTIES or duty == "unknown") and not (duty == "unknown" and report):
             window = FULL_DAY_MIN - (start - _mins(DAY_START))
-            ctx["label"] = "Day off" if duty == "day_off" else "No roster — assumed free"
+            ctx["label"] = ("Vacation" if duty in ("vacation", "VAC", "LVO") else
+                            "Day off" if duty in REST_DUTIES else "No roster — assumed free")
         elif duty == "standby":
             window = STANDBY_WINDOW_MIN
             ctx["label"] = "Standby — trainer or a short loop near base"
@@ -260,14 +268,14 @@ def today_advice(ctx: dict, session: dict) -> dict:
         notes.append("You're away today — rest, or a short hotel-gym spin. The week re-plans around it.")
         return {"notes": notes, "duration_min": None, "zone": None}
 
-    if ctx.get("label") and ctx.get("duty") not in (None, "day_off"):
+    if ctx.get("label") and (ctx.get("duty") or "day_off") not in REST_DUTIES:
         notes.append(ctx["label"])
 
     window = ctx.get("window_min") or 0
-    if ctx.get("duty") not in (None, "day_off") and window and dur > window:
+    if (ctx.get("duty") or "day_off") not in REST_DUTIES and window and dur > window:
         new_dur = max(30, window)
         notes.append(f"Only ~{window} min before duty — shorten to {new_dur} min.")
-    elif ctx.get("duty") not in (None, "day_off") and window == 0:
+    elif (ctx.get("duty") or "day_off") not in REST_DUTIES and window == 0:
         notes.append("No ride window around today's duty — skip; keep tomorrow's session.")
 
     if ctx.get("prev_end_late"):

@@ -517,6 +517,8 @@ function FullSchedule({ goal, onSelectSession, onClose }: {
                 {wkSessions.map((s) => {
                   const isCompleted = s.status === "completed";
                   const isSkipped = s.status === "skipped";
+                  // set aside by the re-plan (a tour, no free slot) — still listed, with why, so it can come back
+                  const isAside = s.status === "displaced";
                   const isMissed = s.status === "pending" && s.session_date < today;
                   // Everything except a skipped session is tappable: future to
                   // plan/complete, completed to log RPE / see the linked activity,
@@ -532,7 +534,7 @@ function FullSchedule({ goal, onSelectSession, onClose }: {
                           ? "bg-[#052E16] border-[#14532D] opacity-70 hover:opacity-100"
                           : isSkipped
                           ? "bg-[#18181B] border-[#27272A] opacity-30 cursor-default"
-                          : isMissed
+                          : isMissed || isAside
                           ? "bg-[#18181B] border-[#27272A] opacity-50 hover:opacity-100 hover:border-[#3F3F46]"
                           : "bg-[#0D0D0F] border-[#27272A] hover:border-[#3F3F46]"
                       }`}
@@ -548,6 +550,7 @@ function FullSchedule({ goal, onSelectSession, onClose }: {
                         {isCompleted && <span className="text-xs text-[#4ADE80]">✓</span>}
                         {isSkipped && <span className="text-xs text-[#52525B]">–</span>}
                         {isMissed && <span className="text-xs text-[#F87171]">✗</span>}
+                        {isAside && <span className="text-[10px] uppercase tracking-widest text-[#71717A]">set aside</span>}
                         <span
                           className="text-[10px] font-mono px-1.5 py-0.5 rounded"
                           style={{ background: ZONE_BG[s.intensity_zone], color: ZONE_COLOUR[s.intensity_zone] }}

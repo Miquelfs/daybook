@@ -44,7 +44,7 @@ import sqlite3
 import sys
 from datetime import date, timedelta
 
-from domains.training.day_context import DayContextReader
+from domains.training.day_context import REST_DUTIES, DayContextReader
 from domains.training.plan_templates.mallorca_312 import BOOST_TYPE   # the weekly VO2 boost
 
 ROLE_ORDER = {"long": 0, "long2": 1, "key": 2, "easy": 3, "gym": 4, "run": 5}
@@ -288,7 +288,7 @@ def _reflow_week(conn, monday, sessions, reader, today, race, vf) -> list[dict]:
                 pen += 4
             if ctx[d]["prev_end_late"]:
                 pen += 2
-            if ctx[d]["duty"] not in (None, "day_off", "unknown"):
+            if ctx[d]["duty"] not in (None, "unknown") and ctx[d]["duty"] not in REST_DUTIES:
                 pen += 1.5        # a full day off beats a squeezed pre-duty / standby slot
             if cap[d] < need:
                 pen += 3 + (need - cap[d]) / 15

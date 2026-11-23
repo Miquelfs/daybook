@@ -75,6 +75,43 @@ class DayContextTest(unittest.TestCase):
         self.assertTrue(any("5.4h" in n for n in adv["notes"]))
 
 
+class VacationTest(unittest.TestCase):
+    """VAC on the roster is a free day — it used to fall through to "Ground duty" with a 60-min window."""
+
+    def test_vacation_is_a_whole_free_day(self):
+        c = plan_db()
+        c.execute("INSERT INTO roster VALUES('2026-12-14','vacation',NULL,NULL,'VAC')")
+        ctx = DayContextReader(c).context("2026-12-14")
+        self.assertEqual((ctx["label"], ctx["window_min"], ctx["intense_ok"]), ("Vacation", 600, True))
+        self.assertEqual(_normalise_duty("VAC"), "vacation")
+
+    def test_vacation_fortnight_keeps_the_long_ride_and_the_key_work(self):
+        _d = rf.date
+        rf.date = fake_date(2026, 12, 7)
+        try:
+            c = plan_db()
+            for i in range(14):
+                c.execute("INSERT INTO roster VALUES(date('2026-12-07', ?),'vacation',NULL,NULL,'VAC')", (f"+{i} day",))
+            c.execute("INSERT INTO race_goals(name, race_type, race_date, plan_start_date, available_days) "
+                      "VALUES('M312','mallorca_312','2027-04-24','2026-12-07',?)", (",".join(ALL_DAYS),))
+            rf._ensure_columns(c)
+            rows = [("2026-12-09", "Cycling - Puig Major Climb Sim", 70, "Z3", "key", "displaced",
+                     "No free slot this week (roster / travel) — key work missed, the next weeks adapt"),
+                    ("2026-12-12", "Cycling - Long Ride", 180, "Z2", "long", "pending", None)]
+            for d, t, m, z, r, st, note in rows:
+                c.execute("""INSERT INTO plan_sessions(goal_id, session_date, original_date, week_number, session_type,
+                               discipline, duration_min, intensity_zone, is_optional, effective_duration_min, role,
+                               status, schedule_note) VALUES(1,?,?,1,?,'cycling',?,?,0,?,?,?,?)""",
+                          (d, d, t, m, z, 60 if r == "long" else 42, r, st, note))
+            rf.reflow_goal(c, 1)
+            got = {r[0]: tuple(r[1:]) for r in c.execute(
+                "SELECT role, status, effective_duration_min FROM plan_sessions")}
+            self.assertEqual(got["long"], ("pending", 180))
+            self.assertEqual(got["key"], ("pending", 70))            # the Puig Major climb is back
+        finally:
+            rf.date = _d
+
+
 class ReflowTest(unittest.TestCase):
     def setUp(self):
         self._date = rf.date
