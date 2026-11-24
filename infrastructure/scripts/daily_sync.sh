@@ -100,10 +100,9 @@ fi
 log "Syncing Garmin (auto catch-up, with streams)..."
 step garmin_sync python -m domains.health.garmin.garmin_sync --streams
 
-# GPS, once a night (the first run from 03:00 on your clock): raw Overland points of finished
-# days → tracks (thinning, passing, geocoding, flight cleanup), then trips and vehicle drives.
-# Today stays raw — the day map draws it as a plain line until tonight. Doing this every hour
-# (and on every Overland upload) kept the Pi's one CPU busy all day.
+# GPS, once a night (the first run from 03:00 on your clock): what's left of finished days →
+# tracks, then trips and vehicle drives (the heavy part). Doing all of it every hour, and on
+# every Overland upload, kept the Pi's one CPU busy all day.
 GPS_STAMP="$LOG_DIR/.gps_nightly_$DATE"
 if [[ "$HOUR" -ge 3 && ! -f "$GPS_STAMP" ]]; then
   log "Processing GPS (nightly)..."
@@ -115,9 +114,11 @@ if [[ "$HOUR" -ge 3 && ! -f "$GPS_STAMP" ]]; then
   step planned_trips python -m domains.plans.planned_trips
   touch "$GPS_STAMP"
   find "$LOG_DIR" -name '.gps_nightly_*' ! -name ".gps_nightly_$DATE" -delete 2>/dev/null || true
-else
-  log "GPS already processed today (nightly) — skipping"
 fi
+# Today, every hour: only the points that came in since the last run → stops, places (named once,
+# only new ones), passing. Small and cheap; the latest stretch not processed yet still shows as a
+# plain line on the day map.
+step overland_process:today python -m domains.locations.overland_process "$DATE"
 step vehicle_reminders python -m domains.vehicles.reminders
 
 # Warm the expensive explore caches so the page is never cold (6h TTL,
