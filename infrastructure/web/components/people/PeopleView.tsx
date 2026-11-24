@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import { ArrowLeft, Cake, Check, ChevronRight, Earth, Plane, Search, Target } from "lucide-react";
@@ -294,7 +295,8 @@ export function PeopleView({ onMakeGoal, onEditGoal }: {
   onEditGoal: (g: Goal) => void;
 }) {
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState<number | null>(null);
+  const person = Number(useSearchParams().get("person")) || null;   // /plan?tab=people&person=ID opens them
+  const [open, setOpen] = useState<number | null>(person);
   const [editing, setEditing] = useState(false);
   const year = new Date().getFullYear();
   const { data: people = [], isLoading } = useQuery({ queryKey: ["people"], queryFn: () => plansApi.people() });

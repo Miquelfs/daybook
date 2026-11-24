@@ -13,7 +13,8 @@ import { dueLabel } from "./format";
 import { area } from "./areas";
 
 /**
- * The Tasks lane of Today, kept calm: a birthday line when it's someone's day, one card
+ * The Tasks lane of Today, kept calm: a birthday line when it's someone's day (the week's
+ * coming ones sit in "Next 7 days"), one card
  * with what's due (overdue, today, notes resurfacing) + quick add, then a quiet
  * "next" list. Goals stay on the Plan page — Today only mentions them on
  * Mondays (a one-line weekly check) or when a deadline is within a week.
@@ -61,8 +62,13 @@ function Ahead({ date }: { date: string }) {
   const due = [...a.overdue, ...a.today, ...a.notes];
   const bdayToday = a.birthdays.filter((b) => b.days_until === 0);
   const next: { key: string; on: string; icon: React.ReactNode; label: string; when: string; warn?: boolean; onClick?: () => void; href?: string }[] = [
-    // Next 7 days for trips and tasks (tasks also once their heads-up starts).
-    // Birthdays only on the day itself — the line at the top of the card.
+    // Next 7 days for trips, tasks (also once their heads-up starts) and birthdays — time to
+    // call or get a present. On the day itself a birthday is the line at the top of the card.
+    ...a.birthdays.filter((b) => b.days_until > 0 && b.days_until <= 7).map((b) => ({
+      key: `b${b.contact_id}`, on: b.date, icon: <Cake size={14} />,
+      label: b.turning != null ? `${b.name} turns ${b.turning}` : `${b.name}'s birthday`,
+      when: dueLabel(b.date, date), warn: b.days_until <= 2, href: `/plan?tab=people&person=${b.contact_id}`,
+    })),
     ...a.trips.filter((t) => t.ongoing || t.days_until <= 7).map((t) => ({
       key: `p${t.id}`, on: t.start_date, icon: <Plane size={14} />,
       label: t.checklist_total ? `${t.name} · ✓ ${t.checklist_done}/${t.checklist_total}` : t.name,
@@ -88,7 +94,7 @@ function Ahead({ date }: { date: string }) {
 
       <div className="flex flex-col gap-3">
         {bdayToday.map((b) => (
-          <div key={b.contact_id} className="flex items-center gap-3 px-1">
+          <Link key={b.contact_id} href={`/plan?tab=people&person=${b.contact_id}`} className="flex items-center gap-3 px-1 hover:opacity-80">
             <Cake size={16} className="text-[#F59E0B] shrink-0" />
             <p className="text-sm text-[#FAFAFA]">
               {b.name}{b.turning != null ? ` turns ${b.turning}` : "'s birthday"} today
@@ -99,7 +105,7 @@ function Ahead({ date }: { date: string }) {
                   : `last together ${b.days_since_seen}d ago`}
               </span>
             </p>
-          </div>
+          </Link>
         ))}
 
         <div className="bg-[#0D0D0F] border border-[#27272A] rounded-2xl px-4 py-1.5">
