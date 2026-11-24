@@ -24,6 +24,23 @@ log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
 }
 
+# One run at a time. The cron fires hourly; on the Pi's single CPU a slow run used to
+# overlap the next one, and the pile-up held the databases busy (the app lagged, saves 500'd)
+# and never reached the morning brief. A run that finds the previous one still going leaves.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$LOG_DIR/.daily_sync.lock"
+  if ! flock -n 9; then
+    log "previous daily_sync still running — skipping this hour"
+    exit 0
+  fi
+fi
+
+# No single job may hold the run up: each step is stopped after STEP_LIMIT (exit 124 →
+# recorded as a failure, so /status names it).
+STEP_LIMIT="${STEP_LIMIT:-15m}"
+TIMEOUT=""
+if command -v timeout >/dev/null 2>&1; then TIMEOUT="timeout $STEP_LIMIT"; fi
+
 # step <job-name> <command...> — run one job, never abort the whole sync on its
 # failure (set -e would otherwise stop every later job silently), and record the
 # outcome in daybook.db → job_runs so the app's System status can show it.
@@ -31,7 +48,8 @@ step() {
   local name="$1"; shift
   local start rc
   start=$(date +%s)
-  if "$@" >> "$LOG_FILE" 2>&1; then rc=0; else rc=$?; fi
+  if $TIMEOUT "$@" >> "$LOG_FILE" 2>&1; then rc=0; else rc=$?; fi
+  if [[ $rc -eq 124 ]]; then echo "$name: stopped after $STEP_LIMIT (exit 124)" >> "$LOG_FILE"; fi
   python3 "$ROOT/infrastructure/scripts/job_status.py" record "$name" "$rc" "$(( $(date +%s) - start ))" \
     "$(tail -n 4 "$LOG_FILE" | tr '\n' ' ' | cut -c1-400)" >/dev/null 2>&1 || true
   if [[ $rc -ne 0 ]]; then log "WARN: $name failed (exit $rc)"; fi
@@ -135,6 +153,21 @@ if [[ "$HOUR" -lt 8 ]]; then
   step intraday_hr_sync:finalize python -m domains.health.garmin.intraday_hr_sync --date "$YESTERDAY" --force
 fi
 
+# AI: morning brief (requires Ollama at OLLAMA_HOST; skips gracefully otherwise).
+# Right after Garmin + weather + wellness — everything it reads — so the slower jobs below
+# can't push it past its window.
+# The cron runs hourly — attempt across the 05–11h window so the brief lands
+# once around 6am and can be regenerated once Garmin uploads last night's sleep
+# (often after 6am). The brief itself is self-gating: it skips cheaply when
+# today's brief already includes sleep, and only re-calls the LLM when sleep has
+# just landed for a brief that was written without it.
+if [[ "$HOUR" -ge 5 && "$HOUR" -le 11 ]]; then
+  log "Generating AI morning brief..."
+  step morning_brief python -m domains.ai.morning_brief --date "$DATE"
+else
+  log "Skipping morning brief (outside 05-11h window)"
+fi
+
 # Flight physio + stress-by-context: snapshot yesterday & today so the takeoff/
 # landing spikes and "what stresses you" roll up across all of life.
 log "Snapshotting flight physio + stress contexts..."
@@ -213,18 +246,5 @@ step plan_executor python -m domains.money.plan_executor
 # Grocery tickets: generic names for products not labelled yet (store comparison).
 # Only calls Claude when there's something new — usually a no-op.
 step grocery_labels python -m domains.money.grocery_labels
-
-# AI: morning brief (requires Ollama at OLLAMA_HOST; skips gracefully otherwise).
-# The cron runs hourly — attempt across the 05–11h window so the brief lands
-# once around 6am and can be regenerated once Garmin uploads last night's sleep
-# (often after 6am). The brief itself is self-gating: it skips cheaply when
-# today's brief already includes sleep, and only re-calls the LLM when sleep has
-# just landed for a brief that was written without it.
-if [[ "$HOUR" -ge 5 && "$HOUR" -le 11 ]]; then
-  log "Generating AI morning brief..."
-  step morning_brief python -m domains.ai.morning_brief --date "$DATE"
-else
-  log "Skipping morning brief (outside 05-11h window)"
-fi
 
 log "=== daily_sync done ==="

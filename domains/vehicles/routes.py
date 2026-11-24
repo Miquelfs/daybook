@@ -302,6 +302,7 @@ def refresh(conn: sqlite3.Connection, everything: bool = False) -> int:
     for d in sorted(wanted):
         if everything or d not in done or d >= recent:
             scan_day(conn, d)
+            conn.commit()                       # one day per write: the API's money.db writes never wait long
             n += 1
     assign(conn)
     conn.commit()

@@ -144,9 +144,10 @@ def system_status():
                 jobs.sort(key=lambda j: (-LEVELS[j["level"]], j["label"]))
                 for j in jobs:
                     if j["level"] != "ok" and JOB_MAX_AGE_H.get(j["job"]):
-                        add(f"job:{j['job']}", j["label"], j["level"],
-                            f"failing {j['consecutive_failures']}× in a row · last OK {_ago(_age_h(j['last_ok']))}",
-                            "jobs")
+                        detail = (f"failing {j['consecutive_failures']}× in a row · last OK {_ago(_age_h(j['last_ok']))}"
+                                  if j["consecutive_failures"] else
+                                  f"hasn't run since {_ago(_age_h(j['last_run']))} — the sync didn't reach it")
+                        add(f"job:{j['job']}", j["label"], j["level"], detail, "jobs")
             else:
                 add("jobs", "Nightly jobs", "warn", "no job history yet (first sync after deploy fills it)", "jobs")
 
