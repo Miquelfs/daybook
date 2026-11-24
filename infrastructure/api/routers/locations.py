@@ -201,7 +201,47 @@ def get_tracks(date_str: str):
         else:
             geometry = {"type": "Point", "coordinates": coords[0]}
         features.append({"type": "Feature", "geometry": geometry, "properties": props})
+    raw = raw_line(date_str)
+    if raw:
+        features.append(raw)
     return {"type": "FeatureCollection", "features": features}
+
+
+RAW_STEP_M = 40      # today's unprocessed pings: a point every ~40 m is plenty to draw the way
+
+
+def raw_line(date_str: str) -> dict | None:
+    """Points Overland sent that tonight's processing hasn't turned into tracks yet, as one plain
+    line (no places, no markers) — so today's route shows during the day."""
+    import math
+    db = Path(__file__).parents[3] / "infrastructure" / "db" / "locations.db"
+    if not db.exists():
+        return None
+    con = sqlite3.connect(db, timeout=10)
+    try:
+        rows = con.execute("SELECT recorded_at, lat, lng FROM overland_locations WHERE date=? AND processed=0 "
+                           "ORDER BY recorded_at", (date_str,)).fetchall()
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        con.close()
+    coords, last = [], None
+    for _, lat, lng in rows:
+        if last is not None:
+            dy = (lat - last[1]) * 111_320
+            dx = (lng - last[0]) * 111_320 * math.cos(math.radians(lat))
+            if math.hypot(dx, dy) < RAW_STEP_M:
+                continue
+        last = (lng, lat)
+        coords.append([lng, lat])
+    if rows and (not coords or coords[-1] != [rows[-1][2], rows[-1][1]]):
+        coords.append([rows[-1][2], rows[-1][1]])
+    if len(coords) < 2:
+        return None
+    return {"type": "Feature", "geometry": {"type": "LineString", "coordinates": coords},
+            "properties": {"segment_start": rows[0][0], "segment_end": rows[-1][0], "place_name": None,
+                           "semantic_type": None, "city": None, "country": None, "activity_type": None,
+                           "motion": None, "passing": True, "raw": True}}
 
 
 @router.get("/tracks-range")
@@ -1014,23 +1054,6 @@ def _overland_token() -> str | None:
     return os.environ.get("OVERLAND_TOKEN") or None
 
 
-def _run_processor(dates: set[str]) -> None:
-    """Called in a background task after each ingest batch."""
-    from domains.locations.overland_process import process
-    for date in sorted(dates):
-        try:
-            process(date_filter=date, geocode=True)
-        except Exception as e:
-            print(f"[overland_process] error for {date}: {e}")
-        # Scrub any en-route points/tracks for this date that slipped past the
-        # ingest guard but fall inside a logged flight window (e.g. low-altitude
-        # short hops, or a flight logged after these points were captured).
-        try:
-            cleanup_flight_points(date=date, verbose=False)
-        except Exception as e:
-            print(f"[flight_filter] error for {date}: {e}")
-
-
 @router.post("/manual-visit")
 async def add_manual_visit(request: Request):
     """
@@ -1115,7 +1138,7 @@ async def add_manual_visit(request: Request):
 async def ingest_overland(request: Request, background: BackgroundTasks):
     """
     Receives location batches from the Overland iOS app.
-    Saves raw points, then processes them into tracks in the background.
+    Saves raw points; they become tracks in the nightly sync (overland_process).
     Returns {"result":"ok"} immediately so Overland doesn't retry.
     """
     expected = _overland_token()
@@ -1199,9 +1222,9 @@ async def ingest_overland(request: Request, background: BackgroundTasks):
     con.commit()
     con.close()
 
-    # Process new points into tracks after responding to Overland
-    if affected_dates:
-        background.add_task(_run_processor, affected_dates)
+    # Stored raw only. Turning points into tracks (segments, passing, geocoding, flight cleanup)
+    # runs once a night (daily_sync → overland_process --before today): doing it on every batch
+    # kept the Pi's one CPU busy all day. Until then the day map draws the raw points (raw_line).
 
     return {"result": "ok", "saved": saved, "skipped": skipped}
 

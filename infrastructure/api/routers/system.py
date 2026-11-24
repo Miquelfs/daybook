@@ -32,7 +32,7 @@ LEVELS = {"ok": 0, "warn": 1, "fail": 2}
 # Others are listed but never alert (weekly / optional / time-windowed jobs).
 RETIRED_JOBS = {"strava_sync"}   # removed from daily_sync.sh
 JOB_MAX_AGE_H = {
-    "garmin_sync": 26, "overland_process": 26, "trip_detection": 26, "weather_sync": 26,
+    "garmin_sync": 26, "overland_process": 30, "trip_detection": 30, "weather_sync": 26,
     "wellness_sync": 26, "intraday_hr_sync": 26, "compute_load_index": 26, "reflow": 26,
     "garmin_activity_detail_sync": 26, "compute_activity_metrics": 26, "compute_training_load": 26,
     "price_sync": 50, "morning_brief": 30, "garmin_workout_push": 26, "mywhoosh_workout_push": 26,

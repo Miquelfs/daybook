@@ -317,7 +317,7 @@ def _geocode_day(con: sqlite3.Connection, date: str) -> None:
 
 # ── Main processing ───────────────────────────────────────────────────────────
 
-def process(date_filter: str | None = None, geocode: bool = True) -> int:
+def process(date_filter: str | None = None, geocode: bool = True, before: str | None = None) -> int:
     """
     Process unprocessed Overland points into tracks.
     Returns number of new track segments created.
@@ -335,6 +335,9 @@ def process(date_filter: str | None = None, geocode: bool = True) -> int:
     if date_filter:
         q += " AND date = ?"
         params = (date_filter,)
+    elif before:                                 # nightly: finished days only, today stays raw
+        q += " AND date < ?"
+        params = (before,)
     q += " ORDER BY recorded_at"
 
     rows = con.execute(q, params).fetchall()
@@ -399,6 +402,13 @@ def process(date_filter: str | None = None, geocode: bool = True) -> int:
         # Recompute location_days summary for this date
         _upsert_location_day(con, date)
 
+        # Scrub en-route points/tracks inside a logged flight (short low hops, flights logged later)
+        try:
+            from domains.locations.flight_filter import cleanup_flight_points
+            cleanup_flight_points(date=date, verbose=False)
+        except Exception as e:
+            print(f"    flight cleanup {date}: {e}")
+
     print(f"Done: {created} track segments created.")
     return created
 
@@ -407,8 +417,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Process Overland GPS into tracks")
     parser.add_argument("date", nargs="?", help="Process only this date (YYYY-MM-DD)")
     parser.add_argument("--no-geocode", action="store_true")
+    parser.add_argument("--before", help="Only days before this one (YYYY-MM-DD) — the nightly run leaves today raw")
     args = parser.parse_args()
-    process(date_filter=args.date, geocode=not args.no_geocode)
+    process(date_filter=args.date, geocode=not args.no_geocode, before=args.before)
 
 
 if __name__ == "__main__":
