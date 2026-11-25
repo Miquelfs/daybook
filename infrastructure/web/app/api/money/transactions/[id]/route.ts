@@ -1,31 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { forward } from "@/lib/passthrough";
 
-const API =
-  process.env.API_INTERNAL_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  "http://localhost:8000";
+type Ctx = { params: Promise<{ id: string }> };
+const to = async ({ params }: Ctx) => `/money/transactions/${encodeURIComponent((await params).id)}`;
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const body = await req.json();
-  const upstream = await fetch(`${API}/money/transactions/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
-  const data = await upstream.json();
-  return NextResponse.json(data, { status: upstream.status });
-}
-
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const upstream = await fetch(`${API}/money/transactions/${id}`, {
-    method: "DELETE",
-    cache: "no-store",
-  });
-  if (upstream.status === 204 || upstream.status === 200) {
-    return new NextResponse(null, { status: 204 });
-  }
-  return NextResponse.json({ error: "Delete failed" }, { status: upstream.status });
-}
+export const PATCH = async (req: NextRequest, ctx: Ctx) => forward(req, await to(ctx));
+export const DELETE = async (req: NextRequest, ctx: Ctx) => forward(req, await to(ctx));
