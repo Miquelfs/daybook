@@ -243,9 +243,15 @@ step compute_correlations python -m domains.insights.compute_correlations --both
 # Weekly life review: Sunday, once — patterns + actions for the coming week.
 step life_review python -m domains.insights.life_review --auto
 
-# Portfolio price sync: fetch yesterday's closes for all active holdings via yfinance.
-log "Syncing portfolio prices..."
-step price_sync python -m domains.money.price_sync
+# Portfolio prices: yesterday's closes (yfinance), once a night — the first run from 03:00 on
+# your clock, when every market's close is in. A close doesn't change, so the other hours skip it.
+PRICE_STAMP="$LOG_DIR/.prices_nightly_$DATE"
+if [[ "$HOUR" -ge 3 && ! -f "$PRICE_STAMP" ]]; then
+  log "Syncing portfolio prices (nightly)..."
+  step price_sync python -m domains.money.price_sync
+  touch "$PRICE_STAMP"
+  find "$LOG_DIR" -name '.prices_nightly_*' ! -name ".prices_nightly_$DATE" -delete 2>/dev/null || true
+fi
 
 # Recurring investment plans (DCA): execute any plans whose next date has arrived.
 # Uses today's cached price. Idempotent — safe to run repeatedly.

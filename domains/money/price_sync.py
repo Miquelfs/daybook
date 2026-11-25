@@ -149,9 +149,20 @@ def sync_prices_for_date(conn: sqlite3.Connection, target_date: date) -> tuple[i
     upserted = 0
     skipped = 0
     fx_cache: dict[str, float] = {"EUR": 1.0}
+    # A close doesn't change once it's in: the hourly runs only fetch what's missing.
+    # (fetched after that day ended — an intraday price saved when a holding was added still gets its close)
+    have = {r[0] for r in conn.execute(
+        "SELECT ticker FROM price_history WHERE date=? AND fetched_at >= date(?, '+1 day')",
+        (target_date.isoformat(), target_date.isoformat()))}
+    # Every price is fetched first (network, seconds each) and written after in one short
+    # transaction — writing as we went held money.db locked for the whole fetch, and the app's
+    # saves failed with "database is locked".
+    rows: list[tuple] = []
 
     for row in tickers:
         ticker = row["ticker"]
+        if ticker in have:
+            continue
         native_currency_hint = row["currency"]
 
         result = _fetch_close(ticker, target_date)
@@ -169,20 +180,21 @@ def sync_prices_for_date(conn: sqlite3.Connection, target_date: date) -> tuple[i
         fx_rate = fx_cache[currency]
         close_eur = close_native * fx_rate
 
-        conn.execute(
-            """INSERT INTO price_history (ticker, date, close_price, close_price_eur, currency, fx_rate, source)
-               VALUES (?, ?, ?, ?, ?, ?, 'yfinance')
-               ON CONFLICT(ticker, date) DO UPDATE SET
-                   close_price = excluded.close_price,
-                   close_price_eur = excluded.close_price_eur,
-                   currency = excluded.currency,
-                   fx_rate = excluded.fx_rate,
-                   fetched_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
-            (ticker, target_date.isoformat(), close_native, close_eur, currency, fx_rate),
-        )
+        rows.append((ticker, target_date.isoformat(), close_native, close_eur, currency, fx_rate))
         upserted += 1
         print(f"  [{ticker}] {target_date.isoformat()} {close_native:.4f} {currency} → €{close_eur:.4f}")
 
+    conn.executemany(
+        """INSERT INTO price_history (ticker, date, close_price, close_price_eur, currency, fx_rate, source)
+           VALUES (?, ?, ?, ?, ?, ?, 'yfinance')
+           ON CONFLICT(ticker, date) DO UPDATE SET
+               close_price = excluded.close_price,
+               close_price_eur = excluded.close_price_eur,
+               currency = excluded.currency,
+               fx_rate = excluded.fx_rate,
+               fetched_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
+        rows,
+    )
     conn.commit()
     return upserted, skipped
 
