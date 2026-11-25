@@ -29,6 +29,9 @@ from infrastructure.db.money_connection import get_money_connection
 CADENCES = ("weekly", "biweekly", "monthly", "quarterly", "yearly")
 
 
+MAX_RUNS = 1000                  # a year of daily catch-up for a few plans; never a runaway loop
+
+
 def _clamp_day(y: int, m: int, day: int) -> int:
     """Clamp target day to the last day of the given month."""
     last = calendar.monthrange(y, m)[1]
@@ -118,9 +121,13 @@ def execute_plan(conn: sqlite3.Connection, plan_row: sqlite3.Row, as_of: date, d
         (holding_id,),
     ).fetchone()
     if not holding:
-        _log_execution(conn, plan_id, exec_date, amount, 0.0, 0.0, None,
-                       "skipped", "holding inactive or missing")
-        return {"plan_id": plan_id, "status": "skipped", "reason": "holding gone"}
+        # Not advanced (it carries on if the holding comes back), but logged and committed — an open
+        # write here held money.db locked while run_due() picked the same plan again forever.
+        if not dry_run:
+            _log_execution(conn, plan_id, exec_date, amount, 0.0, 0.0, None,
+                           "skipped", "holding inactive or missing")
+            conn.commit()
+        return {"plan_id": plan_id, "status": "skipped", "reason": "holding gone", "holding_id": holding_id}
 
     price = _price_on_or_before(conn, holding["ticker"], exec_date)
     if price is None or price <= 0:
@@ -204,22 +211,24 @@ def run_due(as_of: Optional[date] = None, dry_run: bool = False) -> list[dict]:
     conn = get_money_connection()
     on = as_of or date.today()
     results: list[dict] = []
+    stuck: set[int] = set()        # plans that didn't advance this run (no price, holding gone): not again
 
-    while True:
+    for _ in range(MAX_RUNS):
+        q = ",".join("?" * len(stuck))
         plan = conn.execute(
-            """SELECT * FROM investment_plans
+            f"""SELECT * FROM investment_plans
                  WHERE is_active = 1 AND next_execution_date <= ?
+                 {f"AND id NOT IN ({q})" if stuck else ""}
                  ORDER BY next_execution_date, id
                  LIMIT 1""",
-            (on.isoformat(),),
+            (on.isoformat(), *stuck),
         ).fetchone()
         if not plan:
             break
         res = execute_plan(conn, plan, on, dry_run=dry_run)
         results.append(res)
-        # If no_price we don't advance — break to avoid infinite loop; try again next sync
-        if res["status"] == "no_price":
-            break
+        if res["status"] != "success":
+            stuck.add(plan["id"])      # the others still run; this one is tried again next sync
         if dry_run:
             break  # don't loop in dry-run
 
